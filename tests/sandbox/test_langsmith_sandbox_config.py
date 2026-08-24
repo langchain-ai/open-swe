@@ -22,6 +22,7 @@ from agent.integrations.langsmith import (
     _merge_sandbox_create_extra_fields,
     _reuse_existing_sandbox,
     create_langsmith_sandbox,
+    create_langsmith_sandbox_from_params,
 )
 from agent.utils.sandbox import SandboxGoneError
 
@@ -241,6 +242,47 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
     assert "name" not in client.last_kwargs
+
+
+@pytest.mark.asyncio
+async def test_create_from_params_forwards_public_and_hidden_options() -> None:
+    sandbox = MagicMock(name="sandbox-new")
+    sandbox.name = "sandbox-new"
+    sandbox.to_sync.return_value = MagicMock(id="sandbox-new")
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.create_sandbox = AsyncMock(return_value=sandbox)
+    client.wait_for_sandbox = AsyncMock(return_value=sandbox)
+
+    with (
+        patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client),
+        patch("agent.integrations.langsmith._install_create_extra_fields") as install,
+        patch(
+            "agent.integrations.langsmith._get_sandbox_create_extra_fields",
+            return_value={},
+        ),
+    ):
+        await create_langsmith_sandbox_from_params(
+            {
+                "snapshot_name": "python:latest",
+                "wait_for_ready": False,
+                "timeout": 240,
+                "cpu_millicores": 500,
+                "_internal_runtime": "v2",
+            }
+        )
+
+    client.create_sandbox.assert_awaited_once_with(
+        snapshot_name="python:latest",
+        wait_for_ready=False,
+        timeout=240,
+    )
+    client.wait_for_sandbox.assert_awaited_once_with("sandbox-new", timeout=240)
+    install.assert_called_once_with(
+        client,
+        {"cpu_millicores": 500, "_internal_runtime": "v2"},
+    )
 
 
 def test_extra_fields_unset_is_empty() -> None:

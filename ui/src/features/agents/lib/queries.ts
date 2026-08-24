@@ -8,11 +8,10 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
-import type { InfiniteData, QueryClient } from "@tanstack/react-query"
+import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
-  ThreadTurnDiffOptions,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -37,15 +36,12 @@ export const agentThreadKeys = {
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
+  pullRequestStatus: (threadId: string) =>
+    ["agent-threads", threadId, "pull-request-status"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
     ["agent-threads", threadId, "working-tree-diff"] as const,
-  runDiff: (
-    threadId: string,
-    turnKey: string,
-    options: ThreadTurnDiffOptions = {}
-  ) => ["agent-threads", threadId, "run-diff", turnKey, options] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
@@ -93,6 +89,122 @@ export function setAgentThreadStatus(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
+}
+
+function updateThreadPageResolved(
+  page: ThreadsPage,
+  params: ThreadsPageParams,
+  threadId: string,
+  resolved: boolean
+): ThreadsPage {
+  const thread = page.items.find((item) => item.id === threadId)
+  if (!thread) return page
+  if (params.resolved != null && params.resolved !== resolved) {
+    return {
+      ...page,
+      items: page.items.filter((item) => item.id !== threadId),
+      ...(page.total != null ? { total: Math.max(0, page.total - 1) } : {}),
+    }
+  }
+  return {
+    ...page,
+    items: page.items.map((item) =>
+      item.id === threadId ? { ...item, resolved } : item
+    ),
+  }
+}
+
+type AgentThreadQuerySnapshot = [QueryKey, unknown, boolean]
+
+function snapshotAgentThreadQueries(
+  queryClient: QueryClient,
+  threadId: string
+): Array<AgentThreadQuerySnapshot> {
+  const directKeys = [
+    agentThreadKeys.detail(threadId),
+    agentThreadKeys.sidebarActive(threadId),
+  ]
+  const direct = directKeys.map((key): AgentThreadQuerySnapshot => {
+    const state = queryClient.getQueryState(key)
+    return [key, state?.data, Boolean(state)]
+  })
+  const lists = [
+    ...queryClient.getQueriesData({
+      queryKey: ["agent-threads", "lists", "infinite-pages"],
+    }),
+    ...queryClient.getQueriesData({
+      queryKey: ["agent-threads", "lists", "page"],
+    }),
+  ].map(([key, data]): AgentThreadQuerySnapshot => [key, data, true])
+  return [...direct, ...lists]
+}
+
+function restoreAgentThreadQueries(
+  queryClient: QueryClient,
+  snapshots: Array<AgentThreadQuerySnapshot>,
+  optimistic: Map<QueryKey, number | undefined>
+): void {
+  for (const [key, data, existed] of snapshots) {
+    if (queryClient.getQueryState(key)?.dataUpdatedAt !== optimistic.get(key)) {
+      continue
+    }
+    if (existed) queryClient.setQueryData(key, data)
+    else queryClient.removeQueries({ queryKey: key, exact: true })
+  }
+}
+
+function setAgentThreadResolved(
+  queryClient: QueryClient,
+  threadId: string,
+  resolved: boolean
+): void {
+  const update = (thread: AgentThread) =>
+    thread.id === threadId ? { ...thread, resolved } : thread
+  const detail = queryClient.getQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId)
+  )
+  const sidebarActive = queryClient.getQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(threadId)
+  )
+  let cachedThread = detail ?? sidebarActive
+
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId),
+    (prev) => (prev ? update(prev) : prev)
+  )
+  for (const [key, data] of queryClient.getQueriesData<
+    InfiniteData<ThreadsPage>
+  >({ queryKey: ["agent-threads", "lists", "infinite-pages"] })) {
+    const params = key[3] as Omit<ThreadsPageParams, "offset">
+    cachedThread ??= data?.pages
+      .flatMap((page) => page.items)
+      .find((thread) => thread.id === threadId)
+    queryClient.setQueryData<InfiniteData<ThreadsPage>>(key, (prev) =>
+      prev
+        ? {
+            ...prev,
+            pages: prev.pages.map((page) =>
+              updateThreadPageResolved(page, params, threadId, resolved)
+            ),
+          }
+        : prev
+    )
+  }
+  for (const [key, data] of queryClient.getQueriesData<ThreadsPage>({
+    queryKey: ["agent-threads", "lists", "page"],
+  })) {
+    const params = key[3] as ThreadsPageParams
+    cachedThread ??= data?.items.find((thread) => thread.id === threadId)
+    queryClient.setQueryData<ThreadsPage>(key, (prev) =>
+      prev ? updateThreadPageResolved(prev, params, threadId, resolved) : prev
+    )
+  }
+  if (cachedThread) {
+    queryClient.setQueryData(
+      agentThreadKeys.sidebarActive(threadId),
+      update(cachedThread)
+    )
+  }
 }
 
 export function seedAgentThreadLists(
@@ -195,7 +307,6 @@ export function useAgentSkills(options: { enabled?: boolean } = {}) {
   const personal = usePersonalAgentSkills(enabled)
   const organization = useOrganizationAgentSkills(enabled)
   return {
-    ...personal,
     personal: personal.data ?? [],
     organization: organization.data ?? [],
     refetch: async () => {
@@ -313,11 +424,11 @@ export function useSidebarThreads({
 }) {
   const scope = includeAutomations ? "all" : "interactive"
   const activeQuery = useInfiniteThreadsPages(
-    { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope },
+    { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope, sortBy: "created_at" },
     { enabled, pollWhileRunning: true }
   )
   const resolvedQuery = useInfiniteThreadsPages(
-    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope },
+    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope, sortBy: "created_at" },
     { enabled: enabled && includeResolved, pollWhileRunning: true }
   )
   const loadedActive = infinitePageThreads(activeQuery.data)
@@ -381,10 +492,10 @@ export function useAgentThread(threadId: string) {
 
   return useQuery({
     queryKey,
-    queryFn: async () => {
+    queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
       const queuedMessages =
-        queryClient.getQueryData<AgentThread>(queryKey)?.queuedMessages
+        queryClient.getQueryData<AgentThread>(key)?.queuedMessages
       return thread.status === "running" && queuedMessages?.length
         ? { ...thread, queuedMessages }
         : thread
@@ -399,6 +510,21 @@ export function useAgentThread(threadId: string) {
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and bounce the route back to /agents.
     staleTime: 30_000,
+  })
+}
+
+export function useAgentThreadPullRequestStatus(
+  threadId: string,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.pullRequestStatus(threadId),
+    queryFn: () => agentsApi.getThreadPullRequestStatus(threadId),
+    enabled: enabled && Boolean(threadId),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: "always",
+    retry: false,
   })
 }
 
@@ -443,21 +569,6 @@ export function useAgentThreadWorkingTreeDiff(
   }, [enabled, pollWhileRunning, refetch])
 
   return query
-}
-
-export function useAgentThreadRunDiff(
-  threadId: string,
-  turnKey: string,
-  enabled: boolean,
-  options: ThreadTurnDiffOptions = {}
-) {
-  return useQuery({
-    queryKey: agentThreadKeys.runDiff(threadId, turnKey, options),
-    queryFn: () => agentsApi.getThreadRunDiff(threadId, turnKey, options),
-    enabled: enabled && Boolean(threadId),
-    staleTime: 30_000,
-    retry: false,
-  })
 }
 
 export function useWorkflowApprovals(
@@ -664,10 +775,50 @@ export function useResolveAgentThread() {
   return useMutation({
     mutationFn: (vars: { threadId: string; resolved: boolean }) =>
       agentsApi.resolveThread(vars.threadId, vars.resolved),
+    onMutate: async (vars) => {
+      await Promise.all([
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.detail(vars.threadId),
+          exact: true,
+        }),
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.sidebarActive(vars.threadId),
+          exact: true,
+        }),
+        queryClient.cancelQueries({
+          queryKey: ["agent-threads", "lists", "infinite-pages"],
+        }),
+        queryClient.cancelQueries({
+          queryKey: ["agent-threads", "lists", "page"],
+        }),
+      ])
+      const previous = snapshotAgentThreadQueries(queryClient, vars.threadId)
+      setAgentThreadResolved(queryClient, vars.threadId, vars.resolved)
+      const optimistic = new Map<QueryKey, number | undefined>(
+        previous.map(([key]) => [
+          key,
+          queryClient.getQueryState(key)?.dataUpdatedAt,
+        ])
+      )
+      return { previous, optimistic }
+    },
+    onError: (_error, _vars, context) => {
+      if (context) {
+        restoreAgentThreadQueries(
+          queryClient,
+          context.previous,
+          context.optimistic
+        )
+      }
+    },
     onSuccess: (thread, vars) => {
       queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
-      invalidateAgentThreadLists(queryClient)
+      queryClient.setQueryData(
+        agentThreadKeys.sidebarActive(vars.threadId),
+        thread
+      )
     },
+    onSettled: () => invalidateAgentThreadLists(queryClient),
   })
 }
 
@@ -714,7 +865,7 @@ export function useInfiniteThreadsPages(
         )
       )
       queryClient.setQueryData<InfiniteData<ThreadsPage>>(
-        queryKey,
+        agentThreadKeys.infinitePages(params),
         (current) => {
           if (!current) return current
           const refreshedByOffset = new Map(

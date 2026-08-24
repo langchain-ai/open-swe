@@ -10,7 +10,6 @@ import {
   selectCollapsedTurnItems,
   splitWorkAndReply,
 } from "../renderItems"
-import { TurnChangedFilesCard } from "../TurnChangedFilesCard"
 import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
@@ -100,8 +99,6 @@ export function AgentTurn({
   isStreaming,
   isMarkdownLive,
   projectPath,
-  threadId,
-  isLatestTurn,
   activityLabel,
   ...callbacks
 }: {
@@ -109,9 +106,6 @@ export function AgentTurn({
   isStreaming?: boolean
   isMarkdownLive?: boolean
   projectPath?: string
-  /** Cloud threads only; enables the git-sourced changed-files card. */
-  threadId?: string
-  isLatestTurn?: boolean
   activityLabel?: string
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
@@ -302,15 +296,6 @@ export function AgentTurn({
       )}
       {visibleItems.map((item, index) =>
         renderItem(item, index, visibleItems.length)
-      )}
-
-      {threadId && message.turnKey && !isStreaming && (
-        <TurnChangedFilesCard
-          threadId={threadId}
-          turnKey={message.turnKey}
-          isLatestTurn={!!isLatestTurn}
-          onOpenFile={callbacks.onOpenFile}
-        />
       )}
 
       <div className="mt-1 flex items-center gap-1">

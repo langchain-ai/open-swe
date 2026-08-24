@@ -270,6 +270,28 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_sandbox_reset_only_in_admin_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.tools import sandbox_reset
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert sandbox_reset not in tools
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable["admin_thread"] = True
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert sandbox_reset in tools
+
+
+@pytest.mark.asyncio
 async def test_agent_includes_sandbox_file_download_url_tools() -> None:
     from agent.tools import create_sandbox_file_download_url, output_iframe
 
@@ -358,6 +380,25 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
         "slack_start_new_thread",
         "slack_thread_reply",
     } <= tool_names
+
+
+@pytest.mark.asyncio
+async def test_agent_excludes_deepagents_grep_tool() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    middleware = captured["middleware"]
+    subagents = captured["subagents"]
+    assert isinstance(middleware, list)
+    assert isinstance(subagents, list)
+
+    exclusion = next(item for item in middleware if type(item).__name__ == "ExcludeToolsMiddleware")
+    assert exclusion._excluded == frozenset({"grep"})
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_exclusion = next(
+        item
+        for item in general_purpose["middleware"]
+        if type(item).__name__ == "ExcludeToolsMiddleware"
+    )
+    assert subagent_exclusion._excluded == frozenset({"grep"})
 
 
 @pytest.mark.asyncio

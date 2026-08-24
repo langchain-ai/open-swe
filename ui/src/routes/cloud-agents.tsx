@@ -42,9 +42,9 @@ function CloudAgentsPage() {
   const save = useSaveProfile()
 
   const [modelId, setModelId] = useState("")
-  const [effort, setEffort] = useState("")
+  const [effortChoice, setEffort] = useState("")
   const [subagentModelId, setSubagentModelId] = useState("")
-  const [subagentEffort, setSubagentEffort] = useState("")
+  const [subagentEffortChoice, setSubagentEffort] = useState("")
   const [defaultRepo, setDefaultRepo] = useState("")
   const [baseBranch, setBaseBranch] = useState("")
   const [branchPrefix, setBranchPrefix] = useState("")
@@ -66,12 +66,22 @@ function CloudAgentsPage() {
     options.data?.models.find((m) => m.id === modelId) ?? firstModel
   const currentSubagentModel: ModelOption | undefined =
     options.data?.models.find((m) => m.id === subagentModelId) ?? firstModel
+  const effort =
+    currentModel && !currentModel.efforts.includes(effortChoice)
+      ? currentModel.default_effort
+      : effortChoice
+  const subagentEffort =
+    currentSubagentModel &&
+    !currentSubagentModel.efforts.includes(subagentEffortChoice)
+      ? currentSubagentModel.default_effort
+      : subagentEffortChoice
 
   useEffect(() => {
     if (!profile.data || initialized.current) return
     const hasModel = !!profile.data.default_model || !!defaultAgentModel
     if (!hasModel) return
     initialized.current = true
+    // oxlint-disable-next-line react/set-state-in-effect
     setModelId(profile.data.default_model ?? defaultAgentModel)
     setEffort(profile.data.reasoning_effort ?? defaultAgentEffort)
     setSubagentModelId(
@@ -94,21 +104,6 @@ function CloudAgentsPage() {
     defaultSubagentModel,
     defaultSubagentEffort,
   ])
-
-  useEffect(() => {
-    if (currentModel && !currentModel.efforts.includes(effort)) {
-      setEffort(currentModel.default_effort)
-    }
-  }, [currentModel, effort])
-
-  useEffect(() => {
-    if (
-      currentSubagentModel &&
-      !currentSubagentModel.efforts.includes(subagentEffort)
-    ) {
-      setSubagentEffort(currentSubagentModel.default_effort)
-    }
-  }, [currentSubagentModel, subagentEffort])
 
   if (session.isLoading) {
     return (

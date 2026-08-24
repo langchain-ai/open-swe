@@ -46,6 +46,7 @@ PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
+PROXY_MODEL_KEY_PLACEHOLDER = "proxy-injected"
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -214,6 +215,32 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
                 }
             ],
         },
+    ]
+
+
+def _stagehand_proxy_rules() -> list[dict[str, Any]]:
+    model = os.getenv("STAGEHAND_MODEL", "anthropic/claude-sonnet-4-5")
+    provider = model.split("/", 1)[0].split(":", 1)[0]
+    key = (
+        os.getenv("STAGEHAND_MODEL_API_KEY")
+        or os.getenv("MODEL_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+    )
+    if not key:
+        return []
+    if provider == "anthropic":
+        host, header, value = "api.anthropic.com", "x-api-key", key
+    elif provider == "openai":
+        host, header, value = "api.openai.com", "Authorization", f"Bearer {key}"
+    else:
+        return []
+    return [
+        {
+            "name": "stagehand-model",
+            "match_hosts": [host],
+            "headers": [{"name": header, "type": "opaque", "value": value}],
+            "env_vars": {"MODEL_API_KEY": PROXY_MODEL_KEY_PLACEHOLDER},
+        }
     ]
 
 
@@ -407,6 +434,7 @@ async def _configure_github_proxy(
     proxy_config["rules"] = [
         *(custom_rules if isinstance(custom_rules, list) else []),
         *_github_proxy_rules(github_token),
+        *_stagehand_proxy_rules(),
     ]
     payload = {"proxy_config": proxy_config}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
@@ -439,6 +467,42 @@ async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandbox
     except Exception:
         await client.aclose()
         raise
+
+
+async def create_langsmith_sandbox_from_params(
+    create_params: dict[str, Any],
+) -> SandboxBackendProtocol:
+    """Create a ready LangSmith sandbox from an unfiltered create-body object."""
+    params = _merge_sandbox_create_extra_fields(create_params)
+    sdk_keys = {
+        "snapshot_id",
+        "snapshot_name",
+        "name",
+        "timeout",
+        "wait_for_ready",
+        "idle_ttl_seconds",
+        "delete_after_stop_seconds",
+        "vcpus",
+        "mem_bytes",
+        "fs_capacity_bytes",
+        "mount_config",
+        "proxy_config",
+    }
+    sdk_params = {key: value for key, value in params.items() if key in sdk_keys}
+    extra_params = {key: value for key, value in params.items() if key not in sdk_keys}
+    wait_for_ready = sdk_params.get("wait_for_ready", True)
+    timeout = sdk_params.get("timeout", 180)
+    if not isinstance(timeout, int):
+        raise ValueError("timeout must be an integer")
+
+    async with AsyncSandboxClient(
+        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
+    ) as client:
+        _install_create_extra_fields(client, extra_params)
+        sandbox = await client.create_sandbox(**sdk_params)
+        if wait_for_ready is False:
+            sandbox = await client.wait_for_sandbox(sandbox.name, timeout=timeout)
+        return TimeoutLangSmithSandbox(sandbox.to_sync())
 
 
 async def create_langsmith_sandbox(

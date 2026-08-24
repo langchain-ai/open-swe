@@ -116,7 +116,9 @@ export function ModelPicker({
   // Read through a ref so `setOpen` stays referentially stable for the
   // click-outside listener while still resolving updater functions correctly.
   const openRef = useRef(open)
-  openRef.current = open
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
   const setOpen = useCallback(
     (next: boolean | ((value: boolean) => boolean)) => {
       const value = typeof next === "function" ? next(openRef.current) : next
@@ -162,6 +164,7 @@ export function ModelPicker({
 
   useEffect(() => {
     if (!open) return
+    // oxlint-disable-next-line react/set-state-in-effect
     setPane("main")
     setQuery("")
     setFocusedModelId(null)

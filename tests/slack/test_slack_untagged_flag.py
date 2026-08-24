@@ -127,6 +127,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
+    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", AsyncMock(return_value=1))
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     # The two-party gate would admit these messages on its own.
@@ -171,6 +172,7 @@ async def test_message_update_queues_only_the_new_text() -> None:
     event_data = background_tasks.tasks[0][1][0]
     assert event_data["message_update"] is True
     assert event_data["event_ts"] == "1786573400.000000"
+    assert "thread_version" not in event_data
     assert event_data["original_message_ts"] == "1786573369.551099"
     assert event_data["thread_ts"] == "1786573300.000000"
     assert event_data["text"] == "new corrected text"
@@ -180,6 +182,34 @@ async def test_message_update_queues_only_the_new_text() -> None:
 async def _run_message_update_task(background_tasks: _FakeBackgroundTasks) -> None:
     func, args = background_tasks.tasks[0]
     await func(*args)
+
+
+async def test_message_update_increments_version_with_edit_event_timestamp() -> None:
+    process = AsyncMock()
+    increment = cast(AsyncMock, webhook_common.increment_slack_thread_version)
+    increment.return_value = 2
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(slack_service, "process_slack_mention", process)
+        await _run_message_update_task(background_tasks)
+
+    assert response["status"] == "accepted"
+    increment.assert_awaited_once()
+    assert increment.await_args is not None
+    assert increment.await_args.args[1:] == (
+        "C1",
+        "1786573300.000000",
+        "1786573400.000000",
+    )
+    process_call = process.await_args
+    assert process_call is not None
+    event_data = process_call.args[0]
+    assert event_data["thread_version"] == 2
 
 
 async def test_root_message_update_uses_original_message_as_thread() -> None:

@@ -205,6 +205,7 @@ function automationThreads(): Array<ThreadSeed> {
         trigger_kind: "schedule",
         schedule_id: SCHEDULE_IDS.daily,
         schedule_name: "E2E Daily Health",
+        automation_action_posted_at: "2026-08-21T12:00:00+00:00",
         latest_run_id: "e2e-run-daily-scheduled",
         latest_run_status: "success",
       }),
@@ -712,7 +713,7 @@ test.describe("threads workspace", () => {
     await expect(progress.locator("> button > span").last()).toHaveText("1");
     await expect(ready).toContainText(TITLES.ready);
     await expect(ready.locator("> button > span").last()).toHaveText("1");
-    await expect(done).toContainText("E2E Workspace Resolved overflow 01");
+    await expect(done).toContainText("E2E Workspace Resolved overflow 21");
     await expect(done.locator("> button > span").last()).toHaveText("10+");
     const loadMore = sidebar.getByRole("button", {
       name: "Load more resolved threads",
@@ -1008,8 +1009,10 @@ test.describe("automation run history", () => {
     });
     await expect(scheduledRun).toContainText("Finished");
     await expect(scheduledRun).toContainText("Scheduled run");
+    await expect(scheduledRun).toContainText("Posted to Slack");
     await expect(scheduledRun).toContainText("acme/alpha");
     await expect(testRun).toContainText("Error");
+    await expect(testRun).not.toContainText("Posted to Slack");
     await expect(testRun).toContainText("Test run");
     await expect(weekly).toContainText("Running");
     await expect(automations).not.toContainText(TITLES.attention);

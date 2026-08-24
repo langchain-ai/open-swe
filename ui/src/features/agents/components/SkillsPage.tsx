@@ -36,6 +36,7 @@ export function SkillsPage() {
 
   useEffect(() => {
     if (selected) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setDraft({
         description: selected.description,
         instructions: selected.instructions,

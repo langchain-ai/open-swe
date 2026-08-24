@@ -1,27 +1,25 @@
 import json
-import os
 from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
-from langgraph_sdk import get_client
 
 from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.slack import (
     convert_mentions_to_slack_format,
     get_active_slack_thread,
+    get_slack_thread_version,
     post_slack_thread_reply_with_ts,
+    slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+from ..utils.thread_ops import langgraph_client as get_langgraph_client
 
 
 async def slack_thread_reply(
     message: str,
+    thread_version: int,
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
@@ -29,9 +27,11 @@ async def slack_thread_reply(
     """Post a message to the current Slack thread and the Web UI.
 
     Use this for clarifying questions, essential progress updates, and the final
-    answer or outcome. For Slack-triggered information-only requests, put the
-    complete answer in `message`, not merely a summary, and do not repeat it in
-    the final assistant response. Make `message` as concise as possible: default
+    answer or outcome. Pass the current `thread_version` from Slack context or
+    `slack_read_thread_messages`; if a newer message arrived, the post fails and
+    you must re-read the thread before retrying. For Slack-triggered information-only
+    requests, put the complete answer in `message`, not merely a summary, and do not
+    repeat it in the final assistant response. Make `message` as concise as possible: default
     to one sentence with only the outcome/status and link, or one blocking
     question. Omit greetings, preambles, headings, recaps, implementation
     details, and redundant context; use bullets only when multiple items are
@@ -58,9 +58,9 @@ async def slack_thread_reply(
     run_id = _current_run_id(config)
     slack_thread = configurable.get("slack_thread", {})
     thread_id = configurable.get("thread_id")
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = get_langgraph_client()
     active = await get_active_slack_thread(
-        langgraph_client,
+        client,
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )
@@ -77,20 +77,31 @@ async def slack_thread_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    message = convert_mentions_to_slack_format(message)
-    slack_blocks = blocks or _build_option_blocks(message, options)
-    usage = summarize_run_usage(state)
-    message_ts, slack_error = await _post_and_store_mapping(
-        channel_id,
-        thread_ts,
-        message,
-        blocks=slack_blocks,
-        usage=usage,
-        agent_thread_id=thread_id if isinstance(thread_id, str) else None,
-        langgraph_client=langgraph_client,
-        run_id=run_id,
-        triggering_user_id=_triggering_user_id(configurable),
-    )
+    async with slack_thread_mutation_lock(client, channel_id, thread_ts):
+        current_version = await get_slack_thread_version(client, channel_id, thread_ts)
+        if thread_version != current_version:
+            return {
+                "success": False,
+                "error": "Slack thread version mismatch",
+                "expected_thread_version": current_version,
+                "provided_thread_version": thread_version,
+                "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
+            }
+
+        message = convert_mentions_to_slack_format(message)
+        slack_blocks = blocks or _build_option_blocks(message, options)
+        usage = summarize_run_usage(state)
+        message_ts, slack_error = await _post_and_store_mapping(
+            channel_id,
+            thread_ts,
+            message,
+            blocks=slack_blocks,
+            usage=usage,
+            agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+            langgraph_client=client,
+            run_id=run_id,
+            triggering_user_id=_triggering_user_id(configurable),
+        )
     if message_ts is None:
         return {
             "success": False,
@@ -99,7 +110,7 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    return {"success": True}
+    return {"success": True, "thread_version": current_version}
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
@@ -225,7 +236,7 @@ async def _post_and_store_mapping(
         agent_thread_id=agent_thread_id,
     )
     if message_ts:
-        resolved_client = langgraph_client or get_client(url=LANGGRAPH_URL)
+        resolved_client = langgraph_client or get_langgraph_client()
         await store_slack_message_run_mapping(
             resolved_client,
             channel_id,

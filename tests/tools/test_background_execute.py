@@ -7,8 +7,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from agent.background_tasks import monitor_background_tasks
 from agent.tools.background_execute import TASK_ROOT, _control_script, _launch_command
+
+# _launch_command refuses to run without setsid, which macOS does not ship; the
+# sandbox these tasks run in is always Linux.
+requires_setsid = pytest.mark.skipif(
+    shutil.which("setsid") is None, reason="setsid is unavailable on this host"
+)
 
 
 def _run_control(action: str, task_id: str) -> dict:
@@ -21,6 +29,7 @@ def _run_control(action: str, task_id: str) -> dict:
     return json.loads(result.stdout)
 
 
+@requires_setsid
 def test_background_command_returns_while_running_then_caps_output() -> None:
     task_id = f"test-{uuid.uuid4().hex}"
     task_dir = Path(TASK_ROOT, task_id)
@@ -51,6 +60,7 @@ def test_background_command_returns_while_running_then_caps_output() -> None:
         shutil.rmtree(task_dir, ignore_errors=True)
 
 
+@requires_setsid
 def test_background_command_active_limit() -> None:
     task_ids = [f"test-{uuid.uuid4().hex}" for _ in range(4)]
     try:
@@ -71,6 +81,7 @@ def test_background_command_active_limit() -> None:
             shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
 
 
+@requires_setsid
 def test_background_command_timeout_and_stop() -> None:
     for timeout, stop, expected in ((1, False, "timed_out"), (10, True, "stopped")):
         task_id = f"test-{uuid.uuid4().hex}"

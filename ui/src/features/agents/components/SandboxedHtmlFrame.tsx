@@ -4,7 +4,8 @@ import type { CSSProperties } from "react"
 import { cn } from "@/lib/utils"
 
 type SandboxedHtmlFrameProps = (
-  { html: string; src?: never } | { src: string; html?: never }
+  | { html: string; src?: never }
+  | { src: string; html?: never }
 ) & {
   title: string
   sandbox?: string

@@ -24,6 +24,7 @@ export function RecentAgentThreads({
   const visibleThreadIds = addRecentThread(recentThreadIds, activeThreadId)
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setRecentThreadIds((current) => addRecentThread(current, activeThreadId))
   }, [activeThreadId])
 

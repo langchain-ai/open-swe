@@ -20,6 +20,7 @@ from ..dashboard.agent_overrides import (
     resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
+from ..dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from ..dashboard.enabled_repos import is_review_repo_enabled
 from ..dashboard.oauth import build_settings_url
 from ..dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
@@ -108,8 +109,10 @@ from ..utils.slack import (
     get_slack_channel_description,
     get_slack_channel_info,
     get_slack_permalink,
+    get_slack_thread_version,  # noqa: F401
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
+    increment_slack_thread_version,  # noqa: F401
     is_slack_channel_named,
     lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
@@ -270,6 +273,7 @@ __all__ = [
     "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
+    "update_agent_pr_usage_from_webhook",
     "update_agent_thread_pr_state",
     "update_slack_message",
     "upsert_agent_thread_owner_metadata",
@@ -1117,13 +1121,14 @@ _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
         "converted_to_draft",
         "closed",
         "reopened",
+        "synchronize",
     ]
 )
 _GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 # PR lifecycle actions that should refresh the agent thread's tracked pr_state.
 _GH_PR_AGENT_STATE_ACTIONS = frozenset(
-    ["closed", "reopened", "converted_to_draft", "ready_for_review"]
+    ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),

@@ -47,3 +47,38 @@ async def test_injects_each_dynamic_context_hash_at_most_once() -> None:
     forwarded = handler.await_args.args[0]
     hashes = [dynamic_context_hash(message.content) for message in forwarded.messages]
     assert len([value for value in hashes if value is not None]) == 1
+
+
+async def test_restored_context_lands_in_front_of_the_trailing_human_turn() -> None:
+    """The head would shift every cached byte; the tail would displace the task."""
+    context = _context_message()
+    earlier = AIMessage(content="working on it")
+    latest = HumanMessage(content="latest")
+    request = ModelRequest(
+        model=AsyncMock(),
+        messages=[earlier, latest],
+        state={"messages": [context, earlier, latest]},
+    )
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="ok")]))
+
+    await DynamicContextMiddleware().awrap_model_call(request, handler)
+
+    assert handler.await_args is not None
+    assert handler.await_args.args[0].messages == [earlier, context, latest]
+
+
+async def test_restored_context_appends_when_the_request_ends_mid_turn() -> None:
+    """Nothing may come between a tool result and the call it answers."""
+    context = _context_message()
+    pending = AIMessage(content="thinking")
+    request = ModelRequest(
+        model=AsyncMock(),
+        messages=[HumanMessage(content="task"), pending],
+        state={"messages": [context, HumanMessage(content="task"), pending]},
+    )
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="ok")]))
+
+    await DynamicContextMiddleware().awrap_model_call(request, handler)
+
+    assert handler.await_args is not None
+    assert handler.await_args.args[0].messages[-1] is context

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 
 export type Theme = "light" | "dark" | "system"
 export type ResolvedTheme = "light" | "dark"
@@ -90,20 +96,19 @@ function readDomResolvedTheme(): ResolvedTheme {
 }
 
 /** Reactive resolved theme that tracks the root `.dark` class set by `useTheme`. */
+function subscribeToDomTheme(onChange: () => void): () => void {
+  const observer = new MutationObserver(onChange)
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  })
+  return () => observer.disconnect()
+}
+
 export function useResolvedTheme(): ResolvedTheme {
-  const [resolved, setResolved] = useState<ResolvedTheme>(readDomResolvedTheme)
-
-  useEffect(() => {
-    setResolved(readDomResolvedTheme())
-    const observer = new MutationObserver(() =>
-      setResolved(readDomResolvedTheme())
-    )
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    })
-    return () => observer.disconnect()
-  }, [])
-
-  return resolved
+  return useSyncExternalStore(
+    subscribeToDomTheme,
+    readDomResolvedTheme,
+    (): ResolvedTheme => "light"
+  )
 }

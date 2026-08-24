@@ -160,9 +160,10 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
       // `stream.stop()` only cancels server-side when this client dispatched the
       // run, so cancel by thread first: a run started from Slack/Linear/GitHub
       // (or joined after a reload) has no client-side run id to cancel.
+      let cancelledThread
       if (threadId) {
         try {
-          await cancelThread.mutateAsync()
+          cancelledThread = await cancelThread.mutateAsync()
         } catch {
           // Cancellation failed (transient 5xx, or a non-owner viewer). Leave
           // the stream and the thread's status polling untouched: presenting a
@@ -171,7 +172,7 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
         }
       }
       await stream.disconnect()
-      if (threadId) {
+      if (threadId && cancelledThread?.status !== "running") {
         queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
           prev ? { ...prev, status: "interrupted" as const } : prev
         )

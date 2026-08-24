@@ -32,6 +32,7 @@ export function useLiveMarkdownMessageId(
       // A new user prompt at the tail means the prior agent turn is done — keep it
       // static so Streamdown does not re-animate it while waiting for the reply.
       if (!lastMessage || lastMessage.author === "user") {
+        // oxlint-disable-next-line react/set-state-in-effect
         setLiveMessageId(null)
         return
       }

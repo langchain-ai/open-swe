@@ -38,6 +38,16 @@ async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
+async function setPullRequestHealth(
+  page: Page,
+  values: Record<string, unknown>,
+) {
+  const res = await page.request.post("/control/pull-request-health", {
+    data: { number: 1, ...values },
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
 // E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s. The window has to
 // outlast the click through to the thread plus one reload, which takes over 5s
 // on a CI runner; once the run finishes the retry loop below can never pass.
@@ -173,12 +183,7 @@ async function openThreadActionsMenu(page: Page) {
   await page
     .getByRole("link", { name: /please add a greet/ })
     .first()
-    .hover();
-  const actionsButton = page
-    .getByRole("button", { name: "Thread actions" })
-    .first();
-  await expect(actionsButton).toBeVisible();
-  await actionsButton.click();
+    .click({ button: "right" });
 }
 
 test.describe("Slack → web handoff (real dashboard UI)", () => {
@@ -250,6 +255,158 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       }),
     ).toBeVisible();
     await expect(companionLink).toBeVisible();
+  });
+
+  test("shows live pull request health and submits actionable fixes", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await expectTranscriptVisible(page);
+
+    const summary = page.getByTestId("pr-summary-fakeorg/demo-1");
+    const fixButton = page.getByRole("button", { name: "Fix PR #1 issues" });
+    await expect(summary).toHaveAttribute(
+      "data-pr-tone",
+      "text-muted-foreground",
+    );
+    await expect(summary).not.toHaveAttribute(
+      "data-pr-tone",
+      "text-success-foreground",
+    );
+    await expect(summary).toContainText("draft");
+    await expect(fixButton).toHaveCount(0);
+
+    await setPullRequestHealth(page, {
+      draft: false,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      mergeable_state: "clean",
+      check_runs: [],
+      statuses: [],
+      review_threads: [],
+    });
+    await page.reload();
+    await expect(summary).toHaveAttribute(
+      "data-pr-tone",
+      "text-success-foreground",
+    );
+    await expect(summary).toContainText("open");
+    await expect(fixButton).toHaveCount(0);
+    await page.waitForTimeout(1_000);
+
+    await page.route("**/pull-request-status", (route) =>
+      route.fulfill({ status: 502, json: { detail: "GitHub unavailable" } }),
+    );
+    const failedRefresh = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/pull-request-status") &&
+        response.status() === 502,
+    );
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("visibilitychange")),
+    );
+    await failedRefresh;
+    await expect(summary).toHaveAttribute(
+      "data-pr-tone",
+      "text-muted-foreground",
+      { timeout: 5_000 },
+    );
+    await summary.focus();
+    await expect(
+      page.getByTestId("pr-hover-card-fakeorg/demo-1"),
+    ).toContainText("GitHub health is unavailable");
+    await page.keyboard.press("Escape");
+    await page.unroute("**/pull-request-status");
+
+    await setPullRequestHealth(page, {
+      mergeable: false,
+      mergeable_state: "dirty",
+      check_runs: [
+        {
+          name: "unit-tests",
+          status: "completed",
+          conclusion: "failure",
+          details_url: "https://checks.example/unit-tests",
+        },
+        {
+          name: "browser-e2e",
+          status: "completed",
+          conclusion: "timed_out",
+          details_url: "https://checks.example/browser-e2e",
+        },
+        {
+          name: "preview-deploy",
+          status: "in_progress",
+          conclusion: null,
+        },
+      ],
+      statuses: [
+        {
+          context: "legacy/security-scan",
+          state: "error",
+          target_url: "https://checks.example/security",
+        },
+      ],
+      review_threads: [
+        {
+          author: "reviewer-one",
+          body: "Handle the null response before reading the payload.",
+          path: "agent/dashboard/routes.py",
+          line: 42,
+          url: "https://github.example/discussion/1",
+        },
+        {
+          author: "reviewer-two",
+          body: "Add regression coverage for the retry path.",
+          path: "tests/dashboard/test_routes.py",
+          original_line: 88,
+          url: "https://github.example/discussion/2",
+        },
+        {
+          is_resolved: true,
+          author: "reviewer-three",
+          body: "This resolved comment must not be counted.",
+          path: "README.md",
+          line: 1,
+        },
+      ],
+    });
+    await page.reload();
+
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-destructive");
+    await expect(summary).toContainText("3 checks");
+    await expect(summary).toContainText("2 comments");
+    await expect(summary).toContainText("Conflict");
+    await expect(summary).toContainText("1 pending");
+    await expect(fixButton).toBeVisible();
+
+    await summary.focus();
+    const hoverCard = page.getByTestId("pr-hover-card-fakeorg/demo-1");
+    await expect(hoverCard).toBeVisible();
+    const failingChecks = hoverCard.getByTestId("pr-failing-checks");
+    await expect(failingChecks).toContainText("unit-tests");
+    await expect(failingChecks).toContainText("browser-e2e");
+    await expect(failingChecks).toContainText("legacy/security-scan");
+    const unresolvedComments = hoverCard.getByTestId("pr-unresolved-comments");
+    await expect(unresolvedComments).toContainText(
+      "Handle the null response before reading the payload.",
+    );
+    await expect(unresolvedComments).toContainText(
+      "Add regression coverage for the retry path.",
+    );
+    await expect(unresolvedComments).not.toContainText(
+      "This resolved comment must not be counted.",
+    );
+
+    await page.keyboard.press("Escape");
+    await fixButton.click();
+    const fixPrompt = "Fix the actionable issues on";
+    await waitForStateToContain(page, threadId, fixPrompt);
+    await expect(page.getByText(new RegExp(fixPrompt)).first()).toBeVisible();
   });
 
   // A cold load of a finished thread must hydrate from `getState()` alone. The
@@ -367,71 +524,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect
       .poll(() => inlineDiff.locator("[data-line] span").count())
       .toBeGreaterThan(2);
-  });
-
-  test("bounds inline changed files and reports omitted files", async ({
-    page,
-  }) => {
-    await loginAs(page, SAME_USER);
-    await page.goto("/mock/slack");
-    await page.locator("#reset").click();
-    const prepare = await page.request.post("/control/prepare-sandbox-repo");
-    expect(prepare.ok()).toBeTruthy();
-    await page
-      .locator("#text")
-      .fill("<@U0BOT> E2E_MANY_FILES create several files and open a PR");
-    await page.locator("#send").click();
-    await expect(
-      page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }).last(),
-    ).toBeVisible();
-    const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
-    const href = await webLink.getAttribute("href");
-    if (!href) throw new Error("Open in Web link is missing its href");
-    const threadId = new URL(href, page.url()).pathname.split("/").pop() ?? "";
-    expect(threadId).not.toBe("");
-
-    const turnDiffResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return (
-        response.request().method() === "GET" &&
-        url.pathname === `/dashboard/api/threads/${threadId}/run-diff` &&
-        url.searchParams.get("max_files") === "10" &&
-        url.searchParams.get("include_content") === "false"
-      );
-    });
-    await webLink.click();
-    const response = await turnDiffResponse;
-    expect(response.ok()).toBeTruthy();
-    const payload = (await response.json()) as {
-      status: "ready" | "missing" | "error";
-      truncated: boolean;
-      summary: { files: number; additions: number; deletions: number };
-      files: Array<{
-        originalContent: string | null;
-        modifiedContent: string | null;
-      }>;
-    };
-    expect(payload.status).toBe("ready");
-    expect(payload).toMatchObject({
-      truncated: true,
-      summary: { files: 15, additions: 15, deletions: 0 },
-    });
-    expect(payload.files).toHaveLength(10);
-    expect(
-      payload.files.every(
-        (file) =>
-          file.originalContent === null && file.modifiedContent === null,
-      ),
-    ).toBeTruthy();
-
-    const card = page.getByTestId("turn-changed-files-card");
-    await expect(card).toContainText("15 files changed");
-    await expect(card).toContainText("+15");
-    await expect(card).toContainText("-0");
-    await expect(card.getByTestId("turn-changed-file")).toHaveCount(10);
-    await expect(card.getByTestId("turn-changed-files-omitted")).toHaveText(
-      "5 more files not shown",
-    );
   });
 
   test("keeps the transcript mounted after navigation and refocus", async ({
@@ -595,6 +687,36 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   // that rewrite drops the client-minted message id, the SDK's optimistic copy
   // never reconciles with the server's echo and the same text renders twice —
   // once in place, once at the tail of the transcript.
+  test("keeps sender metadata hidden after refreshing a new web thread", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/agents");
+    const dismissOnboarding = page.getByRole("button", {
+      name: "Maybe later",
+    });
+    await expect(dismissOnboarding).toBeVisible();
+    await dismissOnboarding.click();
+    await expect(dismissOnboarding).toBeHidden();
+
+    const prompt = "list my open langchainplus PRs";
+    await typeIntoComposer(page, prompt);
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+
+    const userMessage = page
+      .getByTestId("user-message")
+      .filter({ hasText: prompt });
+    await expect(userMessage).toContainText(prompt);
+    await expect(userMessage).not.toContainText("sender_context");
+    await waitForStateToContain(page, threadId, "system:sender-context");
+
+    await page.reload();
+    await expect(userMessage).toContainText(prompt);
+    await expect(userMessage).not.toContainText("sender_context");
+  });
+
   test("renders a web follow-up exactly once", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);

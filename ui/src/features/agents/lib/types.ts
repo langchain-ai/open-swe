@@ -13,13 +13,26 @@ export type ChunkKind =
 export type TodoStatus = "pending" | "in_progress" | "completed"
 
 export type AgentStatus =
-  "idle" | "running" | "finished" | "interrupted" | "error"
+  | "idle"
+  | "running"
+  | "finished"
+  | "interrupted"
+  | "error"
 
 export type AgentSource =
-  "dashboard" | "github" | "slack" | "linear" | "schedule"
+  | "dashboard"
+  | "github"
+  | "slack"
+  | "linear"
+  | "schedule"
 
 export type AgentThreadCategory =
-  "interactive" | "issue" | "pull_request" | "automation" | "review" | "system"
+  | "interactive"
+  | "issue"
+  | "pull_request"
+  | "automation"
+  | "review"
+  | "system"
 
 export type AgentTriggerKind =
   | "user"
@@ -266,6 +279,37 @@ export interface AgentPullRequest extends AgentPullRequestSummary {
   }
 }
 
+export interface AgentPullRequestHealth {
+  repoFullName: string | null
+  number: number | null
+  url: string | null
+  statusAvailable: boolean
+  state: "open" | "merged" | "closed" | null
+  isDraft: boolean | null
+  mergeConflictState: "mergeable" | "conflicting" | "unknown" | null
+  checksAvailable: boolean
+  failingChecks: Array<{
+    name: string
+    conclusion: string | null
+    url: string | null
+  }>
+  pendingCheckCount: number | null
+  inconclusiveCheckCount: number | null
+  commentsAvailable: boolean
+  unresolvedReviewThreadCount: number | null
+  unresolvedReviewThreads: Array<{
+    author: string | null
+    body: string
+    path: string
+    line: number | null
+    url: string | null
+  }>
+}
+
+export interface AgentPullRequestStatusResponse {
+  pullRequests: Array<AgentPullRequestHealth>
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -283,6 +327,7 @@ export interface AgentThread {
   triggerKind?: AgentTriggerKind | string
   automationId?: string | null
   automationName?: string | null
+  automationActionPosted?: boolean
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null

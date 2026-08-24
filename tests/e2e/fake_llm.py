@@ -17,6 +17,7 @@ from typing import Any
 
 from e2e_env import (
     BASE_BRANCH,
+    DEMO_CHANNEL,
     FAKE_GITHUB_API,
     FEATURE_BRANCH,
     FEATURE_FILE,
@@ -38,6 +39,19 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
+
+_THREAD_VERSION_RE = re.compile(r'(?:Thread version: |"thread_version"\s*:\s*)(\d+)')
+
+
+def _thread_version_args(messages: list[BaseMessage]) -> dict[str, int]:
+    matches = _THREAD_VERSION_RE.findall("\n".join(_text(message.content) for message in messages))
+    return {"thread_version": int(matches[-1]) if matches else 0}
+
+
+def _slack_thread_ts(messages: list[BaseMessage]) -> str:
+    matches = re.findall(r"Thread TS: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
+    return matches[-1] if matches else ""
+
 
 _SETUP_SCRIPT = f"""
 set -e
@@ -169,6 +183,8 @@ _THREAD_TOOLS_RE = re.compile(
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 )
 _THREAD_TOOLS_TARGET_TITLE = "E2E Thread Tools Target"
+DELEGATE_MARKER = "E2E_DELEGATE"
+SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -215,15 +231,25 @@ def _dynamic_step(factory: StepFactory) -> StepSpec:
 
 
 def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
-    if step.factory is not None:
-        return step.factory(messages)
-    return AIMessage(
-        content=step.content,
-        tool_calls=[
-            {"name": call.name, "args": dict(call.args), "id": call.call_id}
-            for call in step.tool_calls
-        ],
+    message = (
+        step.factory(messages)
+        if step.factory is not None
+        else AIMessage(
+            content=step.content,
+            tool_calls=[
+                {"name": call.name, "args": dict(call.args), "id": call.call_id}
+                for call in step.tool_calls
+            ],
+        )
     )
+    for call in message.tool_calls:
+        if call["name"] == "slack_thread_reply":
+            call["args"].update(_thread_version_args(messages))
+        elif call["name"] == "slack_read_thread_messages":
+            call["args"].update(
+                {"channel_id": DEMO_CHANNEL, "message_ts": _slack_thread_ts(messages)}
+            )
+    return message
 
 
 def _text(content: Any) -> str:
@@ -237,12 +263,20 @@ def _text(content: Any) -> str:
 
 
 _FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
+_METADATA_SENDER_IDS = ("system:sender-context",)
 
 
 def _is_framing_block(header: str) -> bool:
     """A system envelope that describes where the next turn came from."""
     return 'kind="system"' in header and any(
         f'sender="{sender}"' in header for sender in _FRAMING_SENDER_IDS
+    )
+
+
+def _is_metadata_block(header: str) -> bool:
+    """A system envelope that annotates the turn instead of being one."""
+    return 'kind="system"' in header and any(
+        f'sender="{sender}"' in header for sender in _METADATA_SENDER_IDS
     )
 
 
@@ -265,6 +299,8 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
             continue
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
+            if _is_metadata_block(header):
+                continue
             if _is_framing_block(header):
                 slack_request_pending = 'surface="slack"' in header
                 continue
@@ -600,6 +636,51 @@ def _resolve_thread_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    # Parent turn: delegate to two general-purpose subagents in one step so the
+    # transcript renders a subagent card grid. The subagents run this same fake
+    # model; their task description carries the marker that selects the
+    # ``subagent_task`` script below.
+    "delegate": (
+        StepSpec(
+            content="Delegating the investigation to two subagents.",
+            tool_calls=(
+                _tool_call(
+                    "task",
+                    {
+                        "description": f"{SUBAGENT_TASK_MARKER} inspect the repository layout",
+                        "subagent_type": "general-purpose",
+                    },
+                    "call-subagent-layout",
+                ),
+                _tool_call(
+                    "task",
+                    {
+                        "description": f"{SUBAGENT_TASK_MARKER} list the top-level files",
+                        "subagent_type": "general-purpose",
+                    },
+                    "call-subagent-files",
+                ),
+            ),
+        ),
+        StepSpec(content="Both subagents finished their investigation."),
+    ),
+    # Subagent turn: a slow shell step first so a spec that opens the thread
+    # right after the run starts can watch the nested activity live.
+    "subagent_task": (
+        _tool_step(
+            "Looking around the workspace.",
+            "execute",
+            {"command": "sleep 12 && ls"},
+            "call-subagent-ls",
+        ),
+        _tool_step(
+            "Confirming the listing.",
+            "execute",
+            {"command": "echo subagent-done"},
+            "call-subagent-echo",
+        ),
+        StepSpec(content="Subagent finished: listed the workspace."),
+    ),
     "thread_tools": (
         _dynamic_step(_list_threads_step),
         _dynamic_step(_get_thread_step),
@@ -823,6 +904,50 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
+    "optimistic_lock": (
+        _tool_step(
+            "Acknowledging before testing the optimistic lock.",
+            "slack_thread_reply",
+            {"message": "Optimistic lock flow started."},
+            "call-lock-ack",
+        ),
+        _tool_step(
+            "Waiting for a reaction that must not invalidate the thread version.",
+            "execute",
+            {"command": "sleep 3"},
+            "call-lock-reaction-wait",
+        ),
+        _tool_step(
+            "Confirming a reaction did not invalidate the thread version.",
+            "slack_thread_reply",
+            {"message": "A reaction did not invalidate the thread version."},
+            "call-lock-reaction-reply",
+        ),
+        _tool_step(
+            "Waiting for a newer Slack message.",
+            "execute",
+            {"command": "sleep 5"},
+            "call-lock-wait",
+        ),
+        _tool_step(
+            "Trying to post with the version from the triggering context.",
+            "slack_thread_reply",
+            {"message": "This stale reply must not be posted."},
+            "call-lock-stale",
+        ),
+        _tool_step(
+            "Re-reading the Slack thread after the version mismatch.",
+            "slack_read_thread_messages",
+            {},
+            "call-lock-read",
+        ),
+        _tool_step(
+            "Retrying with the refreshed Slack thread version.",
+            "slack_thread_reply",
+            {"message": "Re-read the thread and posted with the updated version."},
+            "call-lock-retry",
+        ),
+    ),
     "followup": (_dynamic_step(_followup_step),),
 }
 
@@ -870,8 +995,17 @@ def _is_revision(text: str) -> bool:
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
+        "subagent_task",
+        lambda ctx: ctx.human_count <= 1 and SUBAGENT_TASK_MARKER in ctx.first_text,
+    ),
+    ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
+    ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
+    ),
+    ScriptRule(
+        "optimistic_lock",
+        lambda ctx: ctx.human_count <= 1 and "E2E_OPTIMISTIC_LOCK" in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(

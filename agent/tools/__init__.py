@@ -40,8 +40,11 @@ _TOOL_MODULES = {
     "request_pr_review": ".request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
+    "delete_organization_skill": ".organization_skills",
     "save_environment": ".environments",
+    "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
+    "sandbox_reset": ".sandbox_reset",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
@@ -95,7 +98,10 @@ __all__ = [
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "save_environment",
+    "save_organization_skill",
+    "delete_organization_skill",
     "save_plan",
+    "sandbox_reset",
     "save_user_instructions",
     "save_user_skill",
     "delete_user_skill",
@@ -138,6 +144,7 @@ if TYPE_CHECKING:
     from .manage_baby_sit import manage_baby_sit
     from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
+    from .organization_skills import delete_organization_skill, save_organization_skill
     from .output_iframe import output_iframe
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
@@ -147,6 +154,7 @@ if TYPE_CHECKING:
     from .report_platform_issue import report_platform_issue
     from .request_pr_review import request_pr_review
     from .resolve_finding_thread import resolve_finding_thread
+    from .sandbox_reset import sandbox_reset
     from .save_plan import save_plan
     from .save_user_instructions import save_user_instructions
     from .schedule_thread_wakeup import schedule_thread_wakeup

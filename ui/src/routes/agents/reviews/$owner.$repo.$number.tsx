@@ -39,7 +39,9 @@ function ReviewDetailPage() {
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
   const sidebarRef = useRef(sidebar)
-  sidebarRef.current = sidebar
+  useEffect(() => {
+    sidebarRef.current = sidebar
+  }, [sidebar])
   useEffect(() => {
     const controls = sidebarRef.current
     if (!controls || controls.collapsed) return

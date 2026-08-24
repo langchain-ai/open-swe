@@ -124,6 +124,18 @@ async def control_repo_private(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "private": value})
 
 
+@app.post("/control/pull-request-health")
+async def control_pull_request_health(request: Request) -> JSONResponse:
+    body = await request.json()
+    number = body.get("number")
+    if not isinstance(number, int) or isinstance(number, bool):
+        raise HTTPException(400, "A pull request number is required")
+    pull = fakes.update_pull_health(number, body)
+    if pull is None:
+        raise HTTPException(404, "Pull request not found")
+    return JSONResponse({"ok": True, "pull_request": fakes.pull_health_json(pull)})
+
+
 @app.get("/control/queued")
 async def control_queued(thread_id: str = "") -> JSONResponse:
     """Count the follow-ups parked on a busy thread's message queue.
@@ -267,6 +279,31 @@ async def slack_send(request: Request) -> JSONResponse:
     }
     LAST_SLACK_EVENT["payload"] = payload
     return await _slack_send_result(payload, await _deliver_slack_event(payload))
+
+
+@app.post("/mock/slack/reaction")
+async def slack_reaction(request: Request) -> JSONResponse:
+    body = await request.json()
+    channel_id = str(CURRENT_THREAD.get("channel") or "")
+    thread_ts = str(body.get("thread_ts") or CURRENT_THREAD.get("thread_ts") or "")
+    message_ts = str(body.get("message_ts") or thread_ts)
+    user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
+    reaction = str(body.get("reaction") or "eyes")
+    payload = {
+        "type": "event_callback",
+        "event_id": f"Ev{EVENT_ID_SALT}{fakes.next_slack_ts()}",
+        "authorizations": [{"user_id": BOT_USER_ID}],
+        "event": {
+            "type": "reaction_added",
+            "user": user_id,
+            "reaction": reaction,
+            "item": {"type": "message", "channel": channel_id, "ts": message_ts},
+            "item_user": BOT_USER_ID,
+            "event_ts": fakes.next_slack_ts(),
+        },
+    }
+    response = await _deliver_slack_event(payload)
+    return JSONResponse(response.json(), status_code=response.status_code)
 
 
 @app.post("/mock/slack/action")
@@ -635,13 +672,15 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "state": pr["state"],
         "draft": pr["draft"],
         "merged": pr["merged"],
+        "mergeable": pr["mergeable"],
+        "mergeable_state": pr["mergeable_state"],
         "title": pr["title"],
         "body": pr["body"],
         "user": {
             "login": pr["author"],
             "avatar_url": f"{BASE_URL}/logo-mark.png",
         },
-        "head": {"ref": pr["head"]},
+        "head": {"ref": pr["head"], "sha": pr["head_sha"]},
         "base": {"ref": pr["base"], "repo": {"private": fakes.repo_private()}},
         "additions": pr["additions"],
         "deletions": pr["deletions"],
@@ -683,11 +722,58 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_get_pull(owner: str, repo: str, number: int) -> JSONResponse:  # noqa: ARG001
-    pr = fakes.find_pull(number)
+async def gh_get_pull(owner: str, repo: str, number: int) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     return JSONResponse(_gh_pr_json(pr))
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/check-runs")
+async def gh_get_check_runs(owner: str, repo: str, sha: str) -> JSONResponse:
+    pr = fakes.find_pull_by_sha(owner, repo, sha)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse({"total_count": len(pr["check_runs"]), "check_runs": pr["check_runs"]})
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/status")
+async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
+    pr = fakes.find_pull_by_sha(owner, repo, sha)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse({"state": "pending", "sha": sha, "statuses": pr["statuses"]})
+
+
+@app.post("/fake-gh/graphql")
+async def gh_graphql(request: Request) -> JSONResponse:
+    body = await request.json()
+    variables = body.get("variables", {})
+    owner = variables.get("owner")
+    repo = variables.get("repo")
+    number = variables.get("number")
+    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+        return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    return JSONResponse(
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                fakes.review_thread_graphql(thread)
+                                for thread in pr["review_threads"]
+                            ],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+        }
+    )
 
 
 # --- fake Slack API (real slack code hits this) ----------------------------

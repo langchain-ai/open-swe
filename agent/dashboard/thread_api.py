@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..dispatch import dispatch_agent_run
 from ..input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -58,6 +59,7 @@ from .options import (
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
+from .pull_request_status import get_pull_request_statuses
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
@@ -511,7 +513,11 @@ async def _thread_summary(
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
+    if not isinstance(created_at, (int, float)):
+        created_at = _thread_timestamp_ms(thread, "created_at")
     updated_at = metadata.get("updated_at_ms")
+    if not isinstance(updated_at, (int, float)):
+        updated_at = _thread_timestamp_ms(thread, "updated_at")
     raw_title = metadata.get("title")
     title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
@@ -559,6 +565,10 @@ async def _thread_summary(
         "triggerKind": trigger_kind,
         "automationId": _metadata_string(metadata, "schedule_id"),
         "automationName": _metadata_string(metadata, "schedule_name"),
+        "automationActionPosted": (
+            thread_category == "automation"
+            and _metadata_string(metadata, "automation_action_posted_at") is not None
+        ),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (
@@ -677,9 +687,10 @@ async def _refresh_latest_run_metadata(
 
 _THREADS_SEARCH_PAGE = 500
 _THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
+_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_ThreadSortBy = Literal["created_at", "updated_at"]
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -720,32 +731,41 @@ def _search_metadata_filter(
 
 
 async def _search_threads_batch(
-    client: Any, metadata: JsonObject, *, limit: int, offset: int
+    client: Any,
+    metadata: JsonObject,
+    *,
+    limit: int,
+    offset: int,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     batch = await client.threads.search(
         metadata=metadata,
         limit=limit,
         offset=offset,
-        sort_by="updated_at",
+        sort_by=sort_by,
         sort_order="desc",
         select=_THREAD_LIST_SELECT,
     )
     return [thread for thread in batch or [] if isinstance(thread, Mapping)]
 
 
-def _thread_updated_ms(thread: ThreadLike) -> int:
+def _thread_timestamp_ms(thread: ThreadLike, field: _ThreadSortBy) -> int:
     metadata = _thread_metadata(thread)
-    value = metadata.get("updated_at_ms")
+    value = metadata.get(f"{field}_ms")
     if isinstance(value, (int, float)):
         return int(value)
-    updated_at = thread.get("updated_at")
-    if isinstance(updated_at, str) and updated_at:
+    timestamp = thread.get(field)
+    if isinstance(timestamp, str) and timestamp:
         try:
-            parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except ValueError:
             return 0
         return int(parsed.timestamp() * 1000)
     return 0
+
+
+def _thread_updated_ms(thread: ThreadLike) -> int:
+    return _thread_timestamp_ms(thread, "updated_at")
 
 
 def _metadata_matches_filters(
@@ -877,6 +897,7 @@ async def _collect_thread_candidates(
     automation_id: str | None = None,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
@@ -894,6 +915,7 @@ async def _collect_thread_candidates(
                 metadata_filter,
                 limit=_THREADS_SEARCH_PAGE,
                 offset=offset,
+                sort_by=sort_by,
             )
             if not batch:
                 break
@@ -922,7 +944,9 @@ async def _collect_thread_candidates(
             if target_per_search is not None and matched_for_search >= target_per_search:
                 break
             offset += _THREADS_SEARCH_PAGE
-    return sorted(seen.values(), key=_thread_updated_ms, reverse=True)
+    return sorted(
+        seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
+    )
 
 
 async def list_dashboard_threads(
@@ -1126,6 +1150,7 @@ async def list_dashboard_threads_page(
     automation_id: str | None = None,
     filter_owner_login: str | None = None,
     surfaced_only: bool = False,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_owner_login or login
@@ -1149,6 +1174,7 @@ async def list_dashboard_threads_page(
         automation_id=automation_id,
         target_per_search=target,
         surfaced_only=surfaced_only,
+        sort_by=sort_by,
     )
 
     if summary_filters:
@@ -1170,7 +1196,8 @@ async def list_dashboard_threads_page(
                 query=query,
             )
         ]
-        filtered.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
+        summary_sort_field = "createdAt" if sort_by == "created_at" else "updatedAt"
+        filtered.sort(key=lambda item: item.get(summary_sort_field, 0), reverse=True)
         items = filtered[safe_offset : safe_offset + safe_limit]
         has_more = len(filtered) > safe_offset + safe_limit
     else:
@@ -1576,6 +1603,8 @@ async def _enrich_run_start_command(
     command_images = _dashboard_images_from_content(content)
     prepare_run_id = str(uuid.uuid4())
     overrides: dict[str, Any] = {"prepare_run_id": prepare_run_id}
+    run_model: str | None = None
+    run_effort: str | None = None
 
     if creating:
         # First ``run.start`` for a client-minted thread id: stamp the full
@@ -1602,12 +1631,13 @@ async def _enrich_run_start_command(
             ),
         )
         metadata = thread_metadata(thread)
-        if command_images:
-            resolved_model = metadata.get("resolved_model")
-            resolved_effort = metadata.get("resolved_effort")
-            if isinstance(resolved_model, str) and isinstance(resolved_effort, str):
-                overrides["agent_model_id"] = resolved_model
-                overrides["agent_effort"] = resolved_effort
+        run_model = _metadata_model_id(metadata)
+        resolved_effort = metadata.get("resolved_effort")
+        if isinstance(resolved_effort, str):
+            run_effort = resolved_effort
+        if command_images and run_model and run_effort:
+            overrides["agent_model_id"] = run_model
+            overrides["agent_effort"] = run_effort
         elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
@@ -1623,11 +1653,13 @@ async def _enrich_run_start_command(
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
-        if content is None:
-            content = ""
-        sender_id = f"github:{login}"
-        injected = injected_dynamic_context_hashes_from_metadata(metadata)
-        persisted_message_ids: set[str] = set()
+
+    if content is None:
+        content = ""
+    sender_id = f"github:{login}"
+    injected = injected_dynamic_context_hashes_from_metadata(metadata)
+    persisted_message_ids: set[str] = set()
+    if not creating:
         try:
             prior_state = await client.threads.get_state(thread_id)
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
@@ -1643,79 +1675,75 @@ async def _enrich_run_start_command(
                     }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-        person: PersonIdentity = {
-            "id": sender_id,
-            "platform": "github",
-            "github_login": login,
-        }
-        if email:
-            person["email"] = email
-        structured = build_input_messages(
-            content,
-            {"sender_id": sender_id, "surface": "web", "kind": "human"},
-            people=[person],
-            systems=(
-                [
-                    {
-                        "id": "system:dashboard-handoff",
-                        "display_name": "Dashboard handoff",
-                        "platform": "open-swe",
-                    }
-                ]
-                if metadata.get("source") == "slack"
-                else None
-            ),
-            injected_dynamic_context_hashes=injected,
+    person: PersonIdentity = {
+        "id": sender_id,
+        "platform": "github",
+        "github_login": login,
+    }
+    if email:
+        person["email"] = email
+    structured = build_input_messages(
+        content,
+        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        people=[person],
+        systems=(
+            [
+                {
+                    "id": "system:dashboard-handoff",
+                    "display_name": "Dashboard handoff",
+                    "platform": "open-swe",
+                }
+            ]
+            if metadata.get("source") == "slack"
+            else None
+        ),
+        injected_dynamic_context_hashes=injected,
+    )
+    if metadata.get("source") == "slack":
+        structured.insert(
+            -1,
+            build_input_messages(
+                DASHBOARD_HANDOFF_BODY,
+                {
+                    "sender_id": "system:dashboard-handoff",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                injected_dynamic_context_hashes={"system:dashboard-handoff"},
+            )[0],
         )
-        if metadata.get("source") == "slack":
-            structured.insert(
-                -1,
-                build_input_messages(
-                    DASHBOARD_HANDOFF_BODY,
-                    {
-                        "sender_id": "system:dashboard-handoff",
-                        "surface": "automation",
-                        "kind": "system",
-                    },
-                    injected_dynamic_context_hashes={"system:dashboard-handoff"},
-                )[0],
-            )
-        # Keep the id the SDK minted for the submitted message: it reconciles
-        # the optimistic bubble with the server's echo, and a fresh id leaves
-        # both rendered.
-        client_message_id = _command_message_id(params)
-        if client_message_id and client_message_id not in persisted_message_ids:
-            structured[-1]["id"] = client_message_id
-        run_input = params.get("input")
-        if isinstance(run_input, dict):
-            run_input["messages"] = structured
-        metadata_update: dict[str, Any] = {
-            "source": _DASHBOARD_SOURCE,
-            "plan_mode": plan_mode_requested,
-            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
-                metadata.get(PARTICIPANT_LOGINS_KEY), login
-            ),
-            "injected_dynamic_context_hashes": sorted(injected),
-        }
-        if command_images and run_model and run_effort:
-            overrides["agent_model_id"] = run_model
-            overrides["agent_effort"] = run_effort
-            metadata_update["model"] = run_model
-            metadata_update["effort"] = run_effort
-            metadata_update["resolved_model"] = run_model
-            metadata_update["resolved_effort"] = run_effort
-        elif chosen_model and chosen_effort:
-            overrides["agent_model_id"] = chosen_model
-            overrides["agent_effort"] = chosen_effort
-            metadata_update["model"] = chosen_model
-            metadata_update["effort"] = chosen_effort
-        if _is_thread_resolved(metadata):
-            metadata_update["resolved"] = False
-            metadata_update["resolved_at_ms"] = None
-        if metadata_update:
-            metadata_update["updated_at_ms"] = _now_ms()
-            metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata)
+    client_message_id = _command_message_id(params)
+    if client_message_id and client_message_id not in persisted_message_ids:
+        structured[-1]["id"] = client_message_id
+    run_input = params.get("input")
+    if isinstance(run_input, dict):
+        run_input["messages"] = structured
+    metadata_update: dict[str, Any] = {
+        "source": _DASHBOARD_SOURCE,
+        "plan_mode": plan_mode_requested,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
+        "injected_dynamic_context_hashes": sorted(injected),
+    }
+    if command_images and run_model and run_effort:
+        overrides["agent_model_id"] = run_model
+        overrides["agent_effort"] = run_effort
+        metadata_update["model"] = run_model
+        metadata_update["effort"] = run_effort
+        metadata_update["resolved_model"] = run_model
+        metadata_update["resolved_effort"] = run_effort
+    elif chosen_model and chosen_effort:
+        overrides["agent_model_id"] = chosen_model
+        overrides["agent_effort"] = chosen_effort
+        metadata_update["model"] = chosen_model
+        metadata_update["effort"] = chosen_effort
+    if _is_thread_resolved(metadata):
+        metadata_update["resolved"] = False
+        metadata_update["resolved_at_ms"] = None
+    metadata_update["updated_at_ms"] = _now_ms()
+    metadata = {**metadata, **metadata_update}
+    await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
@@ -1897,10 +1925,32 @@ async def cancel_dashboard_thread(
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
 
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
-    )
+    metadata_update: dict[str, Any] = {
+        "latest_run_status": "interrupted",
+        "updated_at_ms": _now_ms(),
+    }
+    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
+    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
+    if queued_messages:
+        try:
+            configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+            run = await dispatch_agent_run(
+                thread_id,
+                None,
+                configurable,
+                source=_DASHBOARD_SOURCE,
+                input={"messages": []},
+                client=client,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
+            raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
+        run_id = run.get("run_id") if isinstance(run, dict) else None
+        metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
+
+    if queued_messages:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
 
@@ -1972,6 +2022,29 @@ async def _authorized_thread_metadata(
     thread = await _authorized_thread(thread_id, login, email=email)
     metadata = thread_metadata(thread)
     return metadata
+
+
+async def get_dashboard_thread_pull_request_status(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    """Return live GitHub health for every pull request tracked by the thread."""
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    records = metadata.get("pull_requests")
+    tracked = list(records) if isinstance(records, list) else []
+    if not tracked:
+        pr_url = metadata.get("pr_url")
+        pr_ref = parse_github_pr_url(pr_url) if isinstance(pr_url, str) else None
+        if pr_ref:
+            tracked = [
+                {
+                    "repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
+                    "number": pr_ref.number,
+                }
+            ]
+    if not tracked:
+        return {"pullRequests": []}
+    token = await _github_token_for_login(login)
+    return {"pullRequests": await get_pull_request_statuses(tracked, token)}
 
 
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
@@ -2306,10 +2379,6 @@ def _missing_diff() -> dict[str, Any]:
     }
 
 
-def _ready_empty_diff() -> dict[str, Any]:
-    return {**_missing_diff(), "status": "ready"}
-
-
 async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
@@ -2329,86 +2398,9 @@ async def get_dashboard_thread_working_tree_diff(
         )
         return _missing_diff()
     work_dir = await aresolve_sandbox_work_dir(sandbox)
-    checkpoints = metadata.get("turn_checkpoints")
-    repo_path = next(
-        (
-            entry["repo_path"]
-            for entry in reversed(checkpoints if isinstance(checkpoints, list) else [])
-            if isinstance(entry, Mapping) and isinstance(entry.get("repo_path"), str)
-        ),
-        None,
-    )
-    if repo_path is None:
-        _, repo_name, _ = _metadata_repo(metadata)
-        repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
+    _, repo_name, _ = _metadata_repo(metadata)
+    repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)
-
-
-async def get_dashboard_thread_run_diff(
-    thread_id: str,
-    login: str,
-    *,
-    turn_key: str,
-    max_files: int = 200,
-    include_content: bool = True,
-    email: str | None = None,
-) -> dict[str, Any]:
-    """Return a persisted diff for one completed run, with checkpoint fallback."""
-    from ..utils.turn_checkpoint import read_turn_diff
-    from .run_diffs import get_run_diff, project_run_diff
-
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
-    stored = await get_run_diff(thread_id, turn_key)
-    if stored is not None:
-        return project_run_diff(stored, max_files=max_files, include_content=include_content)
-
-    raw_checkpoints = metadata.get("turn_checkpoints")
-    checkpoints = [
-        entry
-        for entry in (raw_checkpoints if isinstance(raw_checkpoints, list) else [])
-        if isinstance(entry, Mapping) and isinstance(entry.get("ref"), str)
-    ]
-    index = next((i for i, entry in enumerate(checkpoints) if entry.get("key") == turn_key), -1)
-    sandbox_id = metadata.get("sandbox_id")
-    if index < 0 or not isinstance(sandbox_id, str) or not sandbox_id:
-        return _missing_diff()
-
-    checkpoint = checkpoints[index]
-    plan_ref = checkpoint.get("plan_ref")
-    if checkpoint.get("plan_mode") is True and (
-        not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref")
-    ):
-        return _ready_empty_diff()
-
-    head = plan_ref if isinstance(plan_ref, str) else None
-    if head is None and index + 1 < len(checkpoints):
-        next_checkpoint = checkpoints[index + 1]
-        repo_path = checkpoint.get("repo_path")
-        next_repo_path = next_checkpoint.get("repo_path")
-        if (
-            isinstance(repo_path, str)
-            and isinstance(next_repo_path, str)
-            and repo_path != next_repo_path
-        ):
-            return _missing_diff()
-        head = next_checkpoint["ref"]
-
-    try:
-        sandbox = await create_sandbox(sandbox_id)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not connect to sandbox %s for run diff", sandbox_id, exc_info=True)
-        return _missing_diff()
-
-    repo_path = checkpoint.get("repo_path")
-    return await read_turn_diff(
-        sandbox,
-        None,
-        str(checkpoint["ref"]),
-        head,
-        max_files=max_files,
-        include_content=include_content,
-        repo_path=repo_path if isinstance(repo_path, str) else None,
-    )
 
 
 _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}

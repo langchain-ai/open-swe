@@ -53,6 +53,10 @@ async def github_webhook(
             }
         if action in common._GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
+            try:
+                await common.update_agent_pr_usage_from_webhook(payload)
+            except Exception:  # noqa: BLE001
+                common.logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action in common._GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
@@ -68,6 +72,8 @@ async def github_webhook(
             common.logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
             background_tasks.add_task(service.process_github_pr_ready, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for auto-review"}
+        if action in common._GH_PR_AGENT_STATE_ACTIONS:
+            return {"status": "accepted", "message": f"Processing PR {action} state"}
         common.logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
         return {
             "status": "ignored",

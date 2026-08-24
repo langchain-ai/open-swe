@@ -1,11 +1,5 @@
-import {
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import type { ReactNode, RefObject } from "react"
 
 import { useResizableWidth } from "@/lib/useResizableWidth"
 import { cn } from "@/lib/utils"

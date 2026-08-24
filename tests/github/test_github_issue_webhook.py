@@ -30,7 +30,15 @@ def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     async def resolve(*args: object, **kwargs: object) -> str:
         return "mapped-slack-thread"
 
+    async def lookup(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def increment_version(*args: object, **kwargs: object) -> int:
+        return 1
+
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
+    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", increment_version)
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:

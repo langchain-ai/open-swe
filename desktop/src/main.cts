@@ -26,7 +26,6 @@ const {
   readDiff,
   repoRoot,
   repositoryMetadata,
-  staleRefs,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -93,6 +92,7 @@ let setupWindow = null;
 let loginFlow = null;
 let quitting = false;
 let localThreadStore = null;
+let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
 
@@ -193,7 +193,9 @@ async function syncThreadBranch(thread) {
 /** A running thread owns the checkout, so its branch can still be changing. */
 async function diffThread(threadId) {
   const thread = localThreadStore.get(threadId);
-  return thread?.status === "running" ? syncThreadBranch(thread) : thread;
+  if (!thread) return thread;
+  const activity = await backendSupervisor.threadActivity();
+  return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
 }
 
 function configureDesktopIpc() {
@@ -327,10 +329,20 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return localThreadStore.list();
   });
+  ipcMain.handle("desktop:local-activity", async (event) => {
+    requireTrustedDesktopIpc(event);
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity) throw new Error("Could not read local agent activity");
+    for (const [threadId, status] of Object.entries(lastActivity)) {
+      if (status === "running" && activity[threadId] !== "running")
+        localThreadStore.update(threadId, { viewed: false });
+    }
+    lastActivity = activity;
+    return activity;
+  });
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     const updated = localThreadStore.update(input?.threadId, {
-      status: input?.status,
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
       ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
@@ -341,7 +353,8 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     const thread = localThreadStore.get(threadId);
     if (!thread) return false;
-    if (thread.status === "running" || thread.status === "starting")
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity || activity[threadId] === "running")
       throw new Error("Stop the local agent before deleting it");
     await closeThreadTerminals(threadId);
     try {
@@ -849,10 +862,10 @@ function createWindow() {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const protocol = new URL(url).protocol;
+    const scheme = new URL(url).protocol;
     if (isAppLoginUrl(url)) {
       void startExternalLogin();
-    } else if (["http:", "https:", "mailto:"].includes(protocol)) {
+    } else if (["http:", "https:", "mailto:"].includes(scheme)) {
       void shell.openExternal(url);
     }
     return { action: "deny" };

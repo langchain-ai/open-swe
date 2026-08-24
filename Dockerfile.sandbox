@@ -6,6 +6,7 @@ ARG UV_VERSION=0.9.26
 ARG YARN_VERSION=4.12.0
 ARG GH_VERSION=2.83.1
 ARG SFW_VERSION=2.0.6
+ARG STAGEHAND_VERSION=3.22.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 # Skip sfw's daily background update check at runtime. The check hits
@@ -78,11 +79,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && sfw --version \
     && test -e "$(npm root -g)/sfw/.sfw-cache/latest"
 
-# Chromium for Stagehand LOCAL browser mode (STAGEHAND_ENV=LOCAL). Skipped at
-# runtime when STAGEHAND_ENV=BROWSERBASE (browser runs on Browserbase cloud).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system --no-cache "stagehand==${STAGEHAND_VERSION}"
+COPY agent/resources/stagehand_runtime.py /opt/open-swe/stagehand_runtime.py
 ENV STAGEHAND_LOCAL_CHROME_PATH=/usr/bin/chromium
 
 ENV GO_VERSION=1.23.5

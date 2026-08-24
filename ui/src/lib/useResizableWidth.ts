@@ -1,9 +1,5 @@
-import {
-  type PointerEvent as ReactPointerEvent,
-  useCallback,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useRef, useState } from "react"
+import type { PointerEvent as ReactPointerEvent } from "react"
 
 function readStoredWidth(storageKey: string): number | null {
   if (typeof window === "undefined") return null

@@ -1,5 +1,5 @@
-import type { IconType } from "react-icons"
 import { IoCloudOutline, IoLaptopOutline } from "react-icons/io5"
+import type { IconType } from "react-icons"
 
 import type { DesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { cn } from "@/lib/utils"
