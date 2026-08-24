@@ -2,7 +2,7 @@ import type { AgentSource, AgentStatus, AgentThread } from "./types"
 
 export type ThreadsLayout = "board" | "list"
 export type ThreadGrouping =
-  "focus" | "status" | "repo" | "source" | "pr" | "none"
+  "focus" | "project" | "status" | "repo" | "source" | "pr" | "none"
 
 export interface ThreadViewGroup {
   key: string
@@ -15,6 +15,7 @@ export const THREAD_GROUPING_OPTIONS: Array<{
   label: string
 }> = [
   { value: "focus", label: "Focus" },
+  { value: "project", label: "Project" },
   { value: "status", label: "Status" },
   { value: "repo", label: "Repository" },
   { value: "source", label: "Source" },
@@ -68,6 +69,16 @@ const PR_GROUPS = [
   { key: "merged", label: "Merged" },
   { key: "closed", label: "Closed" },
 ]
+
+const NO_PROJECT_KEY = "project:none"
+
+function projectKey(project?: string | null): string {
+  if (!project) return NO_PROJECT_KEY
+  const bytes = new TextEncoder().encode(project)
+  let binary = ""
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return `project:${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}`
+}
 
 function focusKey(thread: AgentThread): string {
   if (thread.resolved) return "done"
@@ -139,6 +150,25 @@ export function groupThreadsForView(
       (thread) => thread.pr?.state ?? "none"
     )
   }
+  if (grouping === "project") {
+    const projects = [
+      ...new Set(
+        threads
+          .map((thread) => thread.project)
+          .filter((project): project is string => Boolean(project))
+      ),
+    ].sort((left, right) => left.localeCompare(right))
+    const definitions = projects.map((project) => ({
+      key: projectKey(project),
+      label: project,
+    }))
+    if (threads.some((thread) => !thread.project)) {
+      definitions.push({ key: NO_PROJECT_KEY, label: "No project" })
+    }
+    return buildGroups(definitions, threads, (thread) =>
+      projectKey(thread.project)
+    )
+  }
   const labels = new Set(
     threads.map((thread) => thread.repoFullName || "No repository")
   )
@@ -152,8 +182,22 @@ export function groupThreadsForView(
   )
 }
 
+export function serializeColumnOrder(order: Array<string>): string {
+  return JSON.stringify(order)
+}
+
 export function parseColumnOrder(value?: string): Array<string> {
-  return value?.split("|").filter(Boolean) ?? []
+  if (!value) return []
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (key): key is string => typeof key === "string" && Boolean(key)
+        )
+      : []
+  } catch {
+    return value.split("|").filter(Boolean)
+  }
 }
 
 export function reconcileColumnOrder(

@@ -8,6 +8,7 @@ import {
   CheckCircleIcon,
   CircleNotchIcon,
   DotsSixVerticalIcon,
+  FolderSimpleIcon,
   KanbanIcon,
   ListBulletsIcon,
 } from "@phosphor-icons/react"
@@ -25,8 +26,10 @@ import type {
 } from "@/features/agents/lib/threadViews"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
 import {
   useResolveAgentThread,
+  useSetAgentThreadProject,
   useThreadsPage,
 } from "@/features/agents/lib/queries"
 import {
@@ -36,6 +39,7 @@ import {
   moveColumnBefore,
   parseColumnOrder,
   reconcileColumnOrder,
+  serializeColumnOrder,
 } from "@/features/agents/lib/threadViews"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
@@ -145,6 +149,7 @@ export function AgentsThreadsPage({
     () => groupThreadsForView(items, filters.group),
     [filters.group, items]
   )
+  const projects = data?.projects ?? []
   const defaultKeys = groups.map((group) => group.key)
   const columnOrder = reconcileColumnOrder(
     defaultKeys,
@@ -169,7 +174,7 @@ export function AgentsThreadsPage({
   }
 
   const setColumnOrder = (next: Array<string>) => {
-    const value = next.join("|")
+    const value = serializeColumnOrder(next)
     setPersonalOrder(value)
     if (typeof window !== "undefined") {
       window.localStorage.setItem(
@@ -294,10 +299,11 @@ export function AgentsThreadsPage({
             <ThreadsBoard
               groups={orderedGroups}
               order={columnOrder}
+              projects={projects}
               onOrderChange={setColumnOrder}
             />
           ) : (
-            <ThreadsList groups={orderedGroups} />
+            <ThreadsList groups={orderedGroups} projects={projects} />
           )}
         </div>
 
@@ -338,10 +344,12 @@ export function AgentsThreadsPage({
 function ThreadsBoard({
   groups,
   order,
+  projects,
   onOrderChange,
 }: {
   groups: Array<ThreadViewGroup>
   order: Array<string>
+  projects: Array<string>
   onOrderChange: (order: Array<string>) => void
 }) {
   const [draggedKey, setDraggedKey] = useState<string | null>(null)
@@ -403,7 +411,7 @@ function ThreadsBoard({
           </div>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
             {group.threads.map((thread) => (
-              <ThreadCard key={thread.id} thread={thread} />
+              <ThreadCard key={thread.id} thread={thread} projects={projects} />
             ))}
           </div>
         </section>
@@ -412,7 +420,13 @@ function ThreadsBoard({
   )
 }
 
-function ThreadsList({ groups }: { groups: Array<ThreadViewGroup> }) {
+function ThreadsList({
+  groups,
+  projects,
+}: {
+  groups: Array<ThreadViewGroup>
+  projects: Array<string>
+}) {
   return (
     <div className="h-full overflow-y-auto">
       {groups.map((group) => (
@@ -423,7 +437,11 @@ function ThreadsList({ groups }: { groups: Array<ThreadViewGroup> }) {
           </div>
           <div className="space-y-1">
             {group.threads.map((thread) => (
-              <ThreadListItem key={thread.id} thread={thread} />
+              <ThreadListItem
+                key={thread.id}
+                thread={thread}
+                projects={projects}
+              />
             ))}
           </div>
         </section>
@@ -432,7 +450,13 @@ function ThreadsList({ groups }: { groups: Array<ThreadViewGroup> }) {
   )
 }
 
-function ThreadCard({ thread }: { thread: AgentThread }) {
+function ThreadCard({
+  thread,
+  projects,
+}: {
+  thread: AgentThread
+  projects: Array<string>
+}) {
   const resolveThread = useResolveAgentThread()
   const isResolved = thread.resolved === true
   const isResolving =
@@ -484,23 +508,29 @@ function ThreadCard({ thread }: { thread: AgentThread }) {
         <span className="text-[10px] text-muted-foreground/70">
           {formatRelativeTime(thread.updatedAt)}
         </span>
-        <button
-          type="button"
-          aria-label={isResolved ? "Reopen thread" : "Resolve thread"}
-          title={isResolved ? "Reopen thread" : "Resolve thread"}
-          disabled={isResolving}
-          onClick={() =>
-            resolveThread.mutate({ threadId: thread.id, resolved: !isResolved })
-          }
-          className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-        >
-          {isResolved ? (
-            <ArrowCounterClockwiseIcon className="size-3" />
-          ) : (
-            <CheckCircleIcon className="size-3" />
-          )}
-          {isResolved ? "Reopen" : "Resolve"}
-        </button>
+        <div className="flex items-center gap-1">
+          <ProjectPicker thread={thread} projects={projects} />
+          <button
+            type="button"
+            aria-label={isResolved ? "Reopen thread" : "Resolve thread"}
+            title={isResolved ? "Reopen thread" : "Resolve thread"}
+            disabled={isResolving}
+            onClick={() =>
+              resolveThread.mutate({
+                threadId: thread.id,
+                resolved: !isResolved,
+              })
+            }
+            className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+          >
+            {isResolved ? (
+              <ArrowCounterClockwiseIcon className="size-3" />
+            ) : (
+              <CheckCircleIcon className="size-3" />
+            )}
+            {isResolved ? "Reopen" : "Resolve"}
+          </button>
+        </div>
       </div>
     </article>
   )
@@ -530,7 +560,13 @@ function StatusMark({ thread }: { thread: AgentThread }) {
   )
 }
 
-function ThreadListItem({ thread }: { thread: AgentThread }) {
+function ThreadListItem({
+  thread,
+  projects,
+}: {
+  thread: AgentThread
+  projects: Array<string>
+}) {
   const resolveThread = useResolveAgentThread()
   const isResolved = thread.resolved === true
 
@@ -548,6 +584,7 @@ function ThreadListItem({ thread }: { thread: AgentThread }) {
           {formatRelativeTime(thread.updatedAt)}
         </p>
       </Link>
+      <ProjectPicker thread={thread} projects={projects} />
       <button
         type="button"
         aria-label={isResolved ? "Reopen thread" : "Resolve thread"}
@@ -565,6 +602,88 @@ function ThreadListItem({ thread }: { thread: AgentThread }) {
         )}
       </button>
     </div>
+  )
+}
+
+function ProjectPicker({
+  thread,
+  projects,
+}: {
+  thread: AgentThread
+  projects: Array<string>
+}) {
+  const setProject = useSetAgentThreadProject()
+  const [name, setName] = useState("")
+  const isSaving =
+    setProject.isPending && setProject.variables.threadId === thread.id
+  const assign = (project: string | null) => {
+    setProject.mutate({ threadId: thread.id, project })
+    setName("")
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label={`Project: ${thread.project || "None"}`}
+        title={`Project: ${thread.project || "None"}`}
+        disabled={isSaving || thread.isOwner === false}
+        className={cn(
+          "flex h-6 max-w-32 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40",
+          thread.project && "bg-primary/10 text-primary"
+        )}
+      >
+        <FolderSimpleIcon className="size-3" />
+        <span className="truncate">{thread.project || "Project"}</span>
+      </PopoverTrigger>
+      <PopoverPopup align="end" className="w-60 p-2">
+        <p className="px-1 pb-1.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Move to project
+        </p>
+        <div className="max-h-40 space-y-0.5 overflow-y-auto">
+          <button
+            type="button"
+            onClick={() => assign(null)}
+            className="flex w-full rounded px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            No project
+          </button>
+          {projects.map((project) => (
+            <button
+              key={project}
+              type="button"
+              onClick={() => assign(project)}
+              className={cn(
+                "flex w-full rounded px-2 py-1.5 text-left text-xs hover:bg-accent",
+                project === thread.project
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground"
+              )}
+            >
+              {project}
+            </button>
+          ))}
+        </div>
+        <form
+          className="mt-2 flex gap-1 border-t border-border pt-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const project = name.trim()
+            if (project) assign(project)
+          }}
+        >
+          <Input
+            value={name}
+            maxLength={80}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="New project"
+            className="h-7 text-xs"
+          />
+          <Button type="submit" size="sm" disabled={!name.trim()}>
+            Add
+          </Button>
+        </form>
+      </PopoverPopup>
+    </Popover>
   )
 }
 

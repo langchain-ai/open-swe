@@ -1647,6 +1647,60 @@ async def test_resolve_dashboard_thread_enforces_ownership(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
+async def test_set_dashboard_thread_project_persists_trimmed_name(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    summary = await thread_api.set_dashboard_thread_project(
+        "tid", "octocat", project="  Launch week  "
+    )
+
+    assert updates == [{"board_project": "Launch week"}]
+    assert summary["project"] == "Launch week"
+
+
+async def test_set_dashboard_thread_project_clears_empty_name(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "board_project": "Launch week",
+                },
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    summary = await thread_api.set_dashboard_thread_project("tid", "octocat", project=" ")
+
+    assert updates == [{"board_project": None}]
+    assert summary["project"] is None
+
+
 async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
     updates: list[dict[str, object]] = []
 
@@ -1811,6 +1865,40 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert all(item["resolved"] is False for item in result["items"])
     assert page_size in offsets
     assert run_list_calls == 0
+
+
+async def test_list_dashboard_threads_page_returns_projects_beyond_current_page(
+    monkeypatch,
+) -> None:
+    threads = _make_threads(3, resolved_before=1)
+    projects = ["Launch", "Quality", "No project"]
+    for thread, project in zip(threads, projects, strict=True):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata.update({"latest_run_status": "success", "board_project": project})
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, limit=1, offset=0, resolved=False
+    )
+
+    assert [item["id"] for item in result["items"]] == ["t1"]
+    assert result["projects"] == ["Launch", "No project", "Quality"]
 
 
 async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -> None:

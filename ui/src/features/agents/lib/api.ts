@@ -133,6 +133,7 @@ export interface ThreadsPageParams {
 
 export interface ThreadsPage {
   items: Array<AgentThread>
+  projects?: Array<string>
   total?: number
   limit: number
   offset: number
@@ -278,6 +279,14 @@ export const agentsApi = {
       {
         method: "POST",
         body: JSON.stringify({ resolved }),
+      }
+    ),
+  setThreadProject: (threadId: string, project: string | null) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/project`,
+      {
+        method: "POST",
+        body: JSON.stringify({ project }),
       }
     ),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),

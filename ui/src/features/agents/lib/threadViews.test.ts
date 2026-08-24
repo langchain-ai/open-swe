@@ -6,6 +6,7 @@ import {
   moveColumnBefore,
   parseColumnOrder,
   reconcileColumnOrder,
+  serializeColumnOrder,
 } from "./threadViews"
 import type { AgentThread } from "./types"
 
@@ -89,6 +90,26 @@ describe("groupThreadsForView", () => {
       "z/repo",
     ])
   })
+
+  it("keeps project labels separate from stable grouping keys", () => {
+    const groups = groupThreadsForView(
+      [
+        thread({ id: "named-none", project: "No project" }),
+        thread({ id: "none" }),
+        thread({ id: "pipe", project: "Launch | Quality 🚀" }),
+      ],
+      "project"
+    )
+
+    expect(groups.map((group) => group.label)).toEqual([
+      "Launch | Quality 🚀",
+      "No project",
+      "No project",
+    ])
+    expect(new Set(groups.map((group) => group.key))).toHaveLength(3)
+    expect(groups.at(-1)?.threads[0]?.id).toBe("none")
+    expect(groups.at(-2)?.threads[0]?.id).toBe("named-none")
+  })
 })
 
 describe("column ordering", () => {
@@ -105,6 +126,11 @@ describe("column ordering", () => {
         parseColumnOrder("ready|attention|stale|ready")
       )
     ).toEqual(["ready", "attention", "progress", "done"])
+
+    const projectOrder = ["project:bm8", "project:bGF1bmNofHF1YWxpdHk"]
+    expect(parseColumnOrder(serializeColumnOrder(projectOrder))).toEqual(
+      projectOrder
+    )
   })
 
   it("moves columns with buttons or drag targets", () => {
