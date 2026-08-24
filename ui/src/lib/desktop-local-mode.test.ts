@@ -20,17 +20,17 @@ beforeEach(() => {
       setItem: (key: string, value: string) => values.set(key, value),
     },
   })
-  window.openSweDesktop = undefined
+  window.__OPEN_SWE_LOCAL__ = undefined
 })
 
 describe("desktop local mode", () => {
-  it("is unavailable outside the desktop app", () => {
+  it("is unavailable on a hosted deployment", () => {
     window.localStorage.setItem(DESKTOP_LOCAL_MODE_STORAGE_KEY, "true")
     expect(isDesktopLocalModeEnabled()).toBe(false)
   })
 
   it("persists local-only mode and selects This Mac", () => {
-    window.openSweDesktop = { isDesktop: true } as Window["openSweDesktop"]
+    window.__OPEN_SWE_LOCAL__ = true
 
     enableDesktopLocalMode()
 

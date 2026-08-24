@@ -696,7 +696,6 @@ if (!hasSingleInstanceLock) {
     void Promise.all([
       closeAllTerminals(),
       applicationSupervisor?.close(),
-      backendSupervisor?.close(),
       openAiOAuth?.close(),
     ]).finally(() => {
       app.quit();
