@@ -9,13 +9,15 @@ import os
 import re
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.errors import ConflictError
 
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -45,6 +47,11 @@ SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
 SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
 SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
 SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
+_SLACK_THREAD_VERSION_NAMESPACE = "slack_thread_versions"
+_SLACK_THREAD_VERSION_PAGE_SIZE = 100
+_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES = 1
+_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.05
+_SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -1029,6 +1036,82 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
+
+
+def _slack_thread_version_namespace(channel_id: str, thread_ts: str) -> tuple[str, str, str]:
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    return (_SLACK_THREAD_VERSION_NAMESPACE, channel, timestamp.replace(".", "_"))
+
+
+@asynccontextmanager
+async def slack_thread_mutation_lock(
+    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
+) -> AsyncIterator[None]:
+    """Serialize inbound version updates with version-checked Slack posts."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    lock_id = str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-thread-lock:{channel}:{timestamp}")
+    )
+    deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
+    while True:
+        try:
+            await langgraph_client.threads.create(
+                thread_id=lock_id,
+                if_exists="raise",
+                ttl=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES,
+            )
+            break
+        except ConflictError:
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError("Timed out waiting for the Slack thread mutation lock") from None
+            await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
+    try:
+        yield
+    finally:
+        try:
+            await langgraph_client.threads.delete(lock_id)
+        except Exception:
+            logger.warning(
+                "Failed to release Slack thread mutation lock for %s/%s",
+                channel,
+                timestamp,
+                exc_info=True,
+            )
+
+
+async def get_slack_thread_version(
+    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
+) -> int:
+    """Return the number of distinct inbound messages recorded for a Slack thread."""
+    namespace = _slack_thread_version_namespace(channel_id, thread_ts)
+    offset = 0
+    version = 0
+    while True:
+        response = await langgraph_client.store.search_items(
+            namespace, limit=_SLACK_THREAD_VERSION_PAGE_SIZE, offset=offset
+        )
+        items = response.get("items") if isinstance(response, Mapping) else None
+        page = items if isinstance(items, list) else []
+        version += len(page)
+        if len(page) < _SLACK_THREAD_VERSION_PAGE_SIZE:
+            return version
+        offset += len(page)
+
+
+async def increment_slack_thread_version(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+) -> int:
+    """Record one inbound Slack event and return the resulting thread version."""
+    message_key = message_ts.strip()
+    if not _SLACK_MESSAGE_TS_RE.fullmatch(message_key):
+        raise ValueError("A valid Slack message timestamp is required")
+    async with slack_thread_mutation_lock(langgraph_client, channel_id, thread_ts):
+        namespace = _slack_thread_version_namespace(channel_id, thread_ts)
+        await langgraph_client.store.put_item(namespace, message_key, {"message_ts": message_key})
+        return await get_slack_thread_version(langgraph_client, channel_id, thread_ts)
 
 
 async def fetch_slack_thread_message_by_ts(

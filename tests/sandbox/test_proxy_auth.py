@@ -10,7 +10,12 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.integrations.langsmith import PROXY_GH_TOKEN_PLACEHOLDER, _configure_github_proxy
+from agent.integrations.langsmith import (
+    PROXY_GH_TOKEN_PLACEHOLDER,
+    PROXY_MODEL_KEY_PLACEHOLDER,
+    _configure_github_proxy,
+    _stagehand_proxy_rules,
+)
 from agent.utils.sandbox_state import SandboxBackendProxy
 
 
@@ -68,6 +73,19 @@ class TestSandboxFactoryLoading:
             fs_capacity_bytes=128,
             create_params={"_internal_runtime": "v2"},
         )
+
+
+def test_stagehand_proxy_rule_keeps_model_key_opaque() -> None:
+    with patch.dict(
+        "os.environ",
+        {"STAGEHAND_MODEL": "anthropic/claude-sonnet-4-5", "STAGEHAND_MODEL_API_KEY": "secret"},
+        clear=True,
+    ):
+        rule = _stagehand_proxy_rules()[0]
+
+    assert rule["headers"] == [{"name": "x-api-key", "type": "opaque", "value": "secret"}]
+    assert rule["env_vars"] == {"MODEL_API_KEY": PROXY_MODEL_KEY_PLACEHOLDER}
+    assert "secret" not in rule["env_vars"].values()
 
 
 class TestConfigureGithubProxy:

@@ -2505,9 +2505,14 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))
 
+    class FakeStore:
+        async def get_item(self, namespace: tuple[str, str], key: str) -> None:
+            return None
+
     class FakeClient:
         threads = FakeThreads()
         runs = FakeRuns()
+        store = FakeStore()
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 

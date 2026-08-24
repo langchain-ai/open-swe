@@ -82,7 +82,11 @@ from .input_messages import (
     build_input_messages,
     dynamic_context_hashes_from_messages,
 )
-from .integrations.corridor_mcp import load_corridor_tools
+from .integrations.corridor_mcp import (
+    CORRIDOR_TOOL_NAMES,
+    corridor_configured,
+    load_corridor_tools,
+)
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import (
@@ -97,6 +101,7 @@ from .middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
     ExcludeToolsMiddleware,
+    IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
@@ -948,7 +953,7 @@ def _general_purpose_subagent(
 
 
 BROWSER_SUBAGENT_DESCRIPTION = (
-    "Drives a real browser (Stagehand, running locally or on Browserbase) to "
+    "Drives sandbox-local Chromium with Stagehand to "
     "accomplish tasks that require interacting with live web pages: logging "
     "into dashboards, clicking through flows, filling forms, reading "
     "JS-rendered content, reproducing UI bugs, and extracting structured data. "
@@ -1673,19 +1678,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = configurable.get("stop_summary") is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
     observability_tools: list[Any] = []
-    corridor_tools: list[Any] = []
     browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
-        observability_tools, corridor_tools, (currents_tools, notion_tools) = await asyncio.gather(
+        observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.observability_tools",
                 lambda: _observability_tools_for(config, profile_login),
             ),
-            _phase_result(thread_id, "factory.corridor_tools", _load_corridor_mcp_tools),
             _phase_result(
                 thread_id,
                 "factory.integration_tools",
@@ -1750,7 +1753,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         **{
             group: ToolGroup.from_tools(tools, summary)
             for group, tools, summary in (
-                ("Corridor", corridor_tools, "security analysis of a plan before writing code"),
                 (
                     "Observability",
                     observability_tools,
@@ -1762,6 +1764,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             if tools
         },
     }
+    # Corridor's catalog is a static allowlist, so the MCP handshake that used to
+    # run before every first model call waits until the agent asks for it.
+    if not stop_summary_mode and not local_run and corridor_configured():
+        tool_groups["Corridor"] = ToolGroup(
+            tool_names=CORRIDOR_TOOL_NAMES,
+            load=_load_corridor_mcp_tools,
+            summary="security analysis of a plan before writing code",
+        )
     tool_search_middleware = ToolSearchMiddleware(tool_groups, always_visible=DEEP_AGENT_TOOL_NAMES)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
@@ -1839,7 +1849,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
-                    corridor_enabled=bool(corridor_tools),
+                    corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
                 ),
                 tool_search_middleware,

@@ -1,5 +1,6 @@
 import importlib
 import json
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +8,19 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 slack_reply_tool = importlib.import_module("agent.tools.slack_thread_reply")
+
+
+@pytest.fixture(autouse=True)
+def _current_thread_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def current_version(*_args: Any) -> int:
+        return 1
+
+    @asynccontextmanager
+    async def mutation_lock(*_args: Any):
+        yield
+
+    monkeypatch.setattr(slack_reply_tool, "get_slack_thread_version", current_version)
+    monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
 
 
 def _config() -> dict[str, Any]:
@@ -18,6 +32,55 @@ def _config() -> dict[str, Any]:
             }
         }
     }
+
+
+async def test_slack_thread_reply_rejects_stale_thread_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_if_posted(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
+        pytest.fail("stale reply must not be posted")
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fail_if_posted)
+
+    result = await slack_reply_tool.slack_thread_reply("hello", 0)
+
+    assert result == {
+        "success": False,
+        "error": "Slack thread version mismatch",
+        "expected_thread_version": 1,
+        "provided_thread_version": 0,
+        "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
+    }
+
+
+async def test_slack_thread_reply_holds_mutation_lock_while_posting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock_held = False
+
+    @asynccontextmanager
+    async def mutation_lock(*_args: Any):
+        nonlocal lock_held
+        lock_held = True
+        try:
+            yield
+        finally:
+            lock_held = False
+
+    async def post(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
+        assert lock_held is True
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_thread_reply("hello", 1) == {
+        "success": True,
+        "thread_version": 1,
+    }
+    assert lock_held is False
 
 
 async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
@@ -36,7 +99,7 @@ async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello", 1)
 
     assert result == {
         "success": False,
@@ -65,7 +128,7 @@ async def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello", 1)
 
     assert result["success"] is False
     assert result["error"] == slack_error
@@ -91,7 +154,7 @@ async def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello", 1)
 
     assert result["success"] is False
     assert result["error"] == "rate_limited: 30"
@@ -116,7 +179,7 @@ async def test_slack_thread_reply_rate_limited_hint_without_retry_after(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello", 1)
 
     assert result["success"] is False
     assert result["slack_error"] == "rate_limited"
@@ -139,7 +202,7 @@ async def test_slack_thread_reply_uses_post_failed_without_slack_error(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello", 1)
 
     assert result["success"] is False
     assert result["error"] == "post failed"
@@ -167,9 +230,9 @@ async def test_slack_thread_reply_passes_executing_run_id(
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello", 1)
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     assert captured["run_id"] == "12345678-1234-5678-1234-567812345678"
     assert captured["triggering_user_id"] == "active-user"
 
@@ -194,10 +257,10 @@ async def test_slack_thread_reply_posts_plain_text_without_options(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
     result = await slack_reply_tool.slack_thread_reply(
-        "Plan ready: review it and reply to approve or request changes."
+        "Plan ready: review it and reply to approve or request changes.", 1
     )
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     assert captured["blocks"] is None
 
 
@@ -220,9 +283,9 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_thread_reply("Pick one", options=["A", "B"])
+    result = await slack_reply_tool.slack_thread_reply("Pick one", 1, options=["A", "B"])
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     assert captured["channel_id"] == "C1"
     assert captured["thread_ts"] == "1.0"
     assert captured["message"] == "Pick one"
@@ -274,7 +337,10 @@ async def test_slack_thread_reply_passes_live_run_id(
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    assert await slack_reply_tool.slack_thread_reply("Done") == {"success": True}
+    assert await slack_reply_tool.slack_thread_reply("Done", 1) == {
+        "success": True,
+        "thread_version": 1,
+    }
     assert captured["run_id"] == str(run_id)
 
 
@@ -305,9 +371,9 @@ async def test_slack_thread_reply_passes_model_reported_usage(
         ]
     }
 
-    result = await slack_reply_tool.slack_thread_reply("Done", state=state)
+    result = await slack_reply_tool.slack_thread_reply("Done", 1, state=state)
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     usage = captured["usage"]
     assert usage.models == ("model-a",)
     assert usage.main_agent_tokens == 110

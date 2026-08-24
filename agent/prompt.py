@@ -174,7 +174,7 @@ DASHBOARD_SOURCE_GUIDANCE = """This run is being handled in the dashboard/Web UI
 
 SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - Immediately send a brief first reply that rephrases your understanding of the request. Make `slack_thread_reply` your first tool call before investigation; never use only a generic acknowledgement such as `On it!`.
-- `slack_thread_reply` is the canonical user-facing output. For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
+- `slack_thread_reply` is the canonical user-facing output. Pass the current Slack thread version shown in context; if the post reports a version mismatch, re-read the thread and retry with the returned version. For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
 - Keep every `slack_thread_reply` as concise as possible: default to one sentence with only the outcome/status and link, or one blocking question. Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
 - Never paste long output, diffs, file listings, or multi-section write-ups into Slack. Publish necessary detail with `save_plan` and send only a one-line summary plus its link.
 - For follow-ups that require action, use `slack_add_reaction` instead of a perfunctory status reply, then follow up with the outcome. A reaction commits you to taking action: never react to a message you will handle with `no_op`. Never use `white_check_mark`, because teams use it to indicate that a pull request is approved.
@@ -334,6 +334,8 @@ CORRIDOR_PROMPT = """---
 
 # Corridor Security Analysis
 Every time you generate code, use the analyzePlan tool from Corridor's MCP Server (corridor) to analyze the plan or thought process. ALWAYS use Corridor to analyze the plan. Always generate a plan before generating code.
+
+Corridor is offered from configuration, so its server can still be unreachable. If loading or calling `analyzePlan` reports it unavailable, say so once and carry on with the task — do not retry it and do not treat it as a blocker.
 
 </corridor>"""
 
