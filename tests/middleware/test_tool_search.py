@@ -244,3 +244,22 @@ async def test_an_empty_query_never_triggers_a_remote_load(query: str) -> None:
 
     assert await middleware._search(query, 5) == []
     assert builds == 0
+
+
+async def test_a_result_states_the_description_once() -> None:
+    """Pydantic repeats the docstring in the schema; it was 44% of a result."""
+
+    async def run(message: str) -> str:
+        """Post a message to the current Slack thread."""
+        return message
+
+    middleware = ToolSearchMiddleware(
+        {"Slack": [StructuredTool.from_function(coroutine=run, name="slack_thread_reply")]}
+    )
+    search = cast(Any, middleware.tools[0]).coroutine
+
+    command = await search(query="slack thread", limit=5, tool_call_id="s1")
+    body = cast(dict[str, Any], command.update)["messages"][0].content
+
+    assert body.count("Post a message to the current Slack thread") == 1
+    assert '"title"' not in body

@@ -100,11 +100,21 @@ class _Resolved:
 
 
 def _schema_of(tool: BaseTool) -> dict[str, Any]:
+    """The tool's parameters, without what the rendered description already says.
+
+    Pydantic repeats the whole docstring in `description` and titles every field
+    after itself; both are pure duplication once the description is rendered
+    above the schema, and they were 44% of a search result.
+    """
     try:
         schema = cast(Any, tool.tool_call_schema).model_json_schema()
     except Exception:  # noqa: BLE001
         return {}
-    schema.pop("title", None)
+    for key in ("title", "description"):
+        schema.pop(key, None)
+    for prop in (schema.get("properties") or {}).values():
+        if isinstance(prop, dict):
+            prop.pop("title", None)
     return schema
 
 
