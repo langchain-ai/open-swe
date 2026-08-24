@@ -50,9 +50,7 @@ export async function createLocalThread(
 ): Promise<LocalThread> {
   const cwd = registeredProject(input.cwd)
   if (!cwd) {
-    throw new Response("Add a valid project before starting a local agent", {
-      status: 400,
-    })
+    throw new Error("Add a valid project before starting a local agent")
   }
   const store = threadStore()
   let thread = store.create({ ...input, cwd })
@@ -74,9 +72,8 @@ export async function createLocalThread(
     if (thread.checkpoint.repo && thread.checkpoint.ref) {
       deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref])
     }
-    throw new Response(
-      error instanceof Error ? error.message : "Could not start the run",
-      { status: 502 }
+    throw new Error(
+      error instanceof Error ? error.message : "Could not start the run"
     )
   }
   return thread

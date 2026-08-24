@@ -27,16 +27,14 @@ import type { LocalProject } from "../../../../server/local/project-store"
 function requireProjectsFile(): string {
   const file = projectsFile()
   if (!file) {
-    throw new Response("This server has no local project store", {
-      status: 503,
-    })
+    throw new Error("This server has no local project store")
   }
   return file
 }
 
 function asPath(value: unknown): string {
   if (typeof value !== "string" || !value) {
-    throw new Response("A path is required", { status: 400 })
+    throw new Error("A path is required")
   }
   return value
 }
@@ -47,7 +45,7 @@ function asOptionalPath(value: unknown): string | null {
 
 function asThreadId(value: unknown): string {
   if (typeof value !== "string" || !value) {
-    throw new Response("A thread id is required", { status: 400 })
+    throw new Error("A thread id is required")
   }
   return value
 }
@@ -72,9 +70,8 @@ export const addLocalProject = createServerFn({ method: "POST" })
     try {
       return addProject(requireProjectsFile(), data)
     } catch (error) {
-      throw new Response(
-        error instanceof Error ? error.message : "Could not add the project",
-        { status: 400 }
+      throw new Error(
+        error instanceof Error ? error.message : "Could not add the project"
       )
     }
   })
@@ -98,7 +95,7 @@ export const browseLocalDirectories = createServerFn()
     try {
       return listDirectories(data)
     } catch {
-      throw new Response("Could not read that directory", { status: 400 })
+      throw new Error("Could not read that directory")
     }
   })
 
@@ -128,14 +125,13 @@ export const checkoutLocalBranch = createServerFn({ method: "POST" })
     assertLocalRequest()
     const project = registeredProject(data.cwd)
     if (!project) {
-      throw new Response("Project is not registered", { status: 400 })
+      throw new Error("Project is not registered")
     }
     try {
       return { branch: await checkoutBranch(project, data.branch, data.create) }
     } catch (error) {
-      throw new Response(
-        error instanceof Error ? error.message : "Could not checkout branch",
-        { status: 400 }
+      throw new Error(
+        error instanceof Error ? error.message : "Could not checkout branch"
       )
     }
   })
@@ -166,17 +162,9 @@ export const updateLocalThread = createServerFn({ method: "POST" })
   })
   .handler(({ data }) => {
     assertLocalRequest()
-    try {
-      const thread = threadStore().update(data.id, data.patch)
-      if (!thread) throw new Response("Not found", { status: 404 })
-      return thread
-    } catch (error) {
-      if (error instanceof Response) throw error
-      throw new Response(
-        error instanceof Error ? error.message : "Invalid thread update",
-        { status: 400 }
-      )
-    }
+    const thread = threadStore().update(data.id, data.patch)
+    if (!thread) throw new Error(`No local thread ${data.id}`)
+    return thread
   })
 
 export const deleteLocalThread = createServerFn({ method: "POST" })

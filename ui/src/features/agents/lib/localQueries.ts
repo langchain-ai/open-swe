@@ -33,13 +33,14 @@ export const localProjectsQuery = () =>
   queryOptions({
     queryKey: localKeys.projects,
     queryFn: () => listLocalProjects(),
+    enabled: isLocalRuntime(),
   })
 
 export const localBrowseQuery = (path: string | null, enabled: boolean) =>
   queryOptions({
     queryKey: localKeys.browse(path),
     queryFn: () => browseLocalDirectories({ data: path }),
-    enabled,
+    enabled: enabled && isLocalRuntime(),
     staleTime: 0,
   })
 
@@ -47,7 +48,7 @@ export const localBranchesQuery = (cwd: string | null) =>
   queryOptions({
     queryKey: localKeys.branches(cwd),
     queryFn: () => listLocalBranches({ data: cwd as string }),
-    enabled: Boolean(cwd),
+    enabled: Boolean(cwd) && isLocalRuntime(),
     refetchOnWindowFocus: true,
   })
 
@@ -55,7 +56,7 @@ export const localThreadsQuery = (enabled?: boolean) =>
   queryOptions({
     queryKey: localKeys.threads,
     queryFn: () => listLocalThreads(),
-    enabled,
+    enabled: enabled !== false && isLocalRuntime(),
     refetchInterval: enabled === false ? false : 1000,
   })
 
@@ -63,6 +64,7 @@ export const localThreadQuery = (id: string) =>
   queryOptions({
     queryKey: localKeys.thread(id),
     queryFn: () => getLocalThread({ data: id }),
+    enabled: isLocalRuntime(),
   })
 
 export const localActivityQuery = () =>
@@ -81,7 +83,7 @@ export const localDiffQuery = (
   queryOptions({
     queryKey: localKeys.diff(id),
     queryFn: () => localThreadDiff({ data: id }),
-    enabled,
+    enabled: enabled && isLocalRuntime(),
     refetchInterval: isRunning ? 5000 : false,
   })
 
@@ -98,6 +100,6 @@ export const localBranchDiffQuery = (
   queryOptions({
     queryKey: localKeys.branchDiff(id),
     queryFn: () => localThreadBranchDiff({ data: id }),
-    enabled,
+    enabled: enabled && isLocalRuntime(),
     refetchInterval: isRunning ? 5000 : false,
   })

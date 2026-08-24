@@ -34,7 +34,7 @@ export function isSameOriginRequest(
 
 export function assertLocalRequest(): void {
   if (!localModeEnabled()) {
-    throw new Response("Not found", { status: 404 })
+    throw new Error("This server does not serve local endpoints")
   }
   const headers = getRequestHeaders()
   if (
@@ -44,6 +44,6 @@ export function assertLocalRequest(): void {
       getRequestUrl().origin
     )
   ) {
-    throw new Response("Forbidden", { status: 403 })
+    throw new Error("Cross-origin requests may not reach local endpoints")
   }
 }
