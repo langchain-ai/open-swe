@@ -5,6 +5,7 @@ import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
+  AutomationThreadMode,
   SlackNotificationMode,
 } from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
@@ -84,6 +85,9 @@ export function AutomationEditor({
   )
   const [slackNotificationMode, setSlackNotificationMode] =
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
+  const [threadMode, setThreadMode] = useState<AutomationThreadMode>(
+    schedule?.threadMode ?? "new"
+  )
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
   // undefined = untouched (derive from the schedule / default as models load).
@@ -102,6 +106,7 @@ export function AutomationEditor({
     repo !== (schedule?.repo ?? null) ||
     slackChannelId !== (schedule?.slackChannelId ?? "") ||
     slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
+    threadMode !== (schedule?.threadMode ?? "new") ||
     enabled !== (schedule?.enabled ?? true) ||
     adminThread !== (schedule?.adminThread ?? false) ||
     activeSelection?.modelId !== initialSelection?.modelId ||
@@ -140,6 +145,7 @@ export function AutomationEditor({
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          thread_mode: threadMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -164,6 +170,7 @@ export function AutomationEditor({
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          thread_mode: threadMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -288,6 +295,32 @@ export function AutomationEditor({
             onSelect={onPickTrigger}
             triggerLabel={cron ? "Change trigger" : "Add Trigger"}
           />
+        </div>
+
+        <SectionLabel>Thread history</SectionLabel>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              On each trigger
+            </span>
+            <Select
+              value={threadMode}
+              onValueChange={(value) => value && setThreadMode(value)}
+            >
+              <SelectTrigger className="w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="new">Start a new thread</SelectItem>
+                <SelectItem value="reuse">Reuse one thread</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground/70">
+            {threadMode === "reuse"
+              ? "Each trigger adds a new automation message to the same thread and keeps its sandbox and history."
+              : "Each trigger starts with a fresh thread, sandbox, and history."}
+          </p>
         </div>
 
         <SectionLabel>Slack destination</SectionLabel>

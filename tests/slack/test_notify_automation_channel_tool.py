@@ -24,6 +24,15 @@ class _FakeStore:
 class _FakeThreads:
     def __init__(self) -> None:
         self.updates: list[dict[str, Any]] = []
+        self.items: set[str] = set()
+
+    async def create(self, *, thread_id: str, **kwargs: Any) -> None:
+        if thread_id in self.items:
+            raise notification_tool.ConflictError("exists", response=None, body=None)  # type: ignore[arg-type]
+        self.items.add(thread_id)
+
+    async def delete(self, thread_id: str) -> None:
+        self.items.discard(thread_id)
 
     async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
         self.updates.append({"thread_id": thread_id, "metadata": metadata})
@@ -41,6 +50,7 @@ def _config(thread_id: str = "thread_1") -> dict[str, Any]:
             "source": "schedule",
             "schedule_id": "sched_1",
             "thread_id": thread_id,
+            "prepare_run_id": "prepare_1",
             "automation_slack_notification": {
                 "channel_id": "C0123456789",
                 "mode": "on_action",
@@ -140,7 +150,7 @@ async def test_notify_automation_channel_posts_to_trusted_destination(
     assert "Dependency check" in posted[0]["text"]
     assert "Opened a pull request" in posted[0]["text"]
     assert "https://example.com/agents/thread_1" in posted[0]["text"]
-    stored = fake_client.store.items[(("automation_notifications",), "thread_1")]
+    stored = fake_client.store.items[(("automation_notifications",), "thread_1:prepare_1")]
     assert stored["status"] == "delivered"
     assert stored["message_ts"] == "1786504009.596419"
     assert fake_client.threads.updates == [
@@ -174,6 +184,28 @@ async def test_notify_automation_channel_suppresses_duplicate_posts(
         "message_ts": "1786504009.596419",
     }
     assert post_count == 1
+
+
+async def test_notify_automation_channel_allows_one_post_per_reused_thread_run(
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    posted: list[str] = []
+    config = _config()
+
+    async def fake_post(channel_id: str, text: str, **kwargs: Any) -> tuple[str, None]:
+        posted.append(text)
+        return f"1786504009.{len(posted)}", None
+
+    monkeypatch.setattr(notification_tool, "get_config", lambda: config)
+    monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
+
+    first = await notification_tool.notify_automation_channel("First run")
+    config["configurable"]["prepare_run_id"] = "prepare_2"
+    second = await notification_tool.notify_automation_channel("Second run")
+
+    assert first["success"] is True
+    assert second["success"] is True
+    assert len(posted) == 2
 
 
 async def test_notify_automation_channel_allows_retry_after_slack_failure(

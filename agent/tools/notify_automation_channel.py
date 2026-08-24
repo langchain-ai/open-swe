@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -7,6 +8,7 @@ from weakref import WeakValueDictionary
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import ConflictError
 
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.slack import append_slack_web_link_footer, post_slack_top_level_message_with_ts
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _NOTIFICATION_NAMESPACE = ["automation_notifications"]
 _MAX_MESSAGE_CHARS = 3_000
+_NOTIFICATION_LOCK_TTL_MINUTES = 5
 _notification_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
@@ -39,6 +42,13 @@ async def _release_reservation(client: Any, thread_id: str) -> None:
         await client.store.delete_item(_NOTIFICATION_NAMESPACE, thread_id)
     except Exception:
         logger.exception("Failed to release automation notification for %s", thread_id)
+
+
+async def _release_notification_lock(client: Any, lock_id: str) -> None:
+    try:
+        await client.threads.delete(lock_id)
+    except Exception:
+        logger.exception("Failed to release automation notification lock %s", lock_id)
 
 
 async def _mark_action_posted(client: Any, thread_id: str, notified_at: str) -> None:
@@ -76,6 +86,12 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
     thread_id = configurable.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         return {"success": False, "error": "Missing scheduled thread ID"}
+    prepare_run_id = configurable.get("prepare_run_id")
+    notification_id = (
+        f"{thread_id}:{prepare_run_id}"
+        if isinstance(prepare_run_id, str) and prepare_run_id
+        else thread_id
+    )
 
     clean_message = message.strip()
     if not clean_message:
@@ -87,17 +103,45 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
         }
 
     client = get_client()
-    async with _notification_lock(thread_id):
+    async with _notification_lock(notification_id):
+        lock_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:automation-notification:{notification_id}")
+        )
         try:
-            item = await client.store.get_item(_NOTIFICATION_NAMESPACE, thread_id)
+            await client.threads.create(
+                thread_id=lock_id,
+                if_exists="raise",
+                ttl=_NOTIFICATION_LOCK_TTL_MINUTES,
+            )
+        except ConflictError:
+            try:
+                item = await client.store.get_item(_NOTIFICATION_NAMESPACE, notification_id)
+            except Exception:
+                logger.exception("Failed to check automation notification for %s", thread_id)
+                return {"success": False, "error": "Could not check the Slack notification state"}
+            existing = _stored_value(item)
+            if existing is not None:
+                return {
+                    "success": True,
+                    "already_notified": True,
+                    "message_ts": existing.get("message_ts"),
+                }
+            return {"success": False, "error": "Slack notification is already in progress"}
+        except Exception:
+            logger.exception("Failed to acquire automation notification lock for %s", thread_id)
+            return {"success": False, "error": "Could not reserve the Slack notification"}
+        try:
+            item = await client.store.get_item(_NOTIFICATION_NAMESPACE, notification_id)
         except Exception:
             logger.exception("Failed to check automation notification for %s", thread_id)
+            await _release_notification_lock(client, lock_id)
             return {"success": False, "error": "Could not check the Slack notification state"}
         existing = _stored_value(item)
         if existing is not None:
             notified_at = existing.get("notified_at")
             if existing.get("status") == "delivered" and isinstance(notified_at, str):
                 await _mark_action_posted(client, thread_id, notified_at)
+            await _release_notification_lock(client, lock_id)
             return {
                 "success": True,
                 "already_notified": True,
@@ -110,9 +154,10 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             "schedule_id": schedule_id,
         }
         try:
-            await client.store.put_item(_NOTIFICATION_NAMESPACE, thread_id, pending)
+            await client.store.put_item(_NOTIFICATION_NAMESPACE, notification_id, pending)
         except Exception:
             logger.exception("Failed to reserve automation notification for %s", thread_id)
+            await _release_notification_lock(client, lock_id)
             return {"success": False, "error": "Could not reserve the Slack notification"}
 
         schedule_name = notification.get("schedule_name")
@@ -128,10 +173,12 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             )
         except Exception:
             logger.exception("Automation Slack post raised for %s", thread_id)
-            await _release_reservation(client, thread_id)
+            await _release_reservation(client, notification_id)
+            await _release_notification_lock(client, lock_id)
             return {"success": False, "error": "Slack post failed unexpectedly"}
         if message_ts is None:
-            await _release_reservation(client, thread_id)
+            await _release_reservation(client, notification_id)
+            await _release_notification_lock(client, lock_id)
             return {
                 "success": False,
                 "error": f"Slack post failed: {slack_error or 'unknown error'}",
@@ -145,8 +192,9 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             "notified_at": datetime.now(UTC).isoformat(),
         }
         try:
-            await client.store.put_item(_NOTIFICATION_NAMESPACE, thread_id, delivered)
+            await client.store.put_item(_NOTIFICATION_NAMESPACE, notification_id, delivered)
         except Exception:
             logger.exception("Failed to finalize automation notification for %s", thread_id)
         await _mark_action_posted(client, thread_id, delivered["notified_at"])
+        await _release_notification_lock(client, lock_id)
         return {"success": True, "message_ts": message_ts}

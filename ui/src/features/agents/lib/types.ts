@@ -197,6 +197,7 @@ export interface Project {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
+export type AutomationThreadMode = "new" | "reuse"
 
 export interface AgentSchedule {
   id: string
@@ -206,6 +207,7 @@ export interface AgentSchedule {
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
+  threadMode: AutomationThreadMode
   adminThread: boolean
   model: string
   effort?: string | null

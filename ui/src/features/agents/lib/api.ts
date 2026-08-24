@@ -2,6 +2,7 @@ import type {
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
+  AutomationThreadMode,
   ImageChunk,
   Message,
   SlackNotificationMode,
@@ -13,7 +14,13 @@ import {
   dashboardForwardedHeaders,
 } from "@/lib/dashboard-fetch"
 
-export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
+export type {
+  AgentSchedule,
+  AgentThread,
+  AutomationThreadMode,
+  Message,
+  SlackNotificationMode,
+}
 
 export class AgentsApiError extends Error {
   constructor(
@@ -40,6 +47,7 @@ export interface ScheduleCreateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  thread_mode?: AutomationThreadMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -52,6 +60,7 @@ export interface ScheduleUpdateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  thread_mode?: AutomationThreadMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null

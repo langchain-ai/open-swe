@@ -3,10 +3,13 @@
 import logging
 import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException
+from langgraph_sdk.errors import ConflictError
 from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
@@ -14,6 +17,7 @@ from ..dispatch import create_durable_run
 from ..input_messages import InputMessageContext, build_run_input
 from ..utils.slack import (
     bind_slack_thread_id,
+    delete_slack_thread_associations,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
@@ -41,7 +45,14 @@ _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 SlackNotificationMode = Literal["always", "on_action"]
+ThreadMode = Literal["new", "reuse"]
 _DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
+_DEFAULT_THREAD_MODE: ThreadMode = "new"
+_AUTOMATION_LAUNCH_LOCK_TTL_MINUTES = 5
+
+
+def _thread_mode(record: dict[str, Any]) -> ThreadMode:
+    return "reuse" if record.get("thread_mode") == "reuse" else "new"
 
 
 def _normalize_slack_channel_id(value: str | None) -> str | None:
@@ -66,6 +77,7 @@ class ScheduleCreateBody(BaseModel):
     effort: str | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
+    thread_mode: ThreadMode = _DEFAULT_THREAD_MODE
     admin_thread: bool = False
 
     @field_validator("schedule")
@@ -89,6 +101,7 @@ class ScheduleUpdateBody(BaseModel):
     enabled: bool | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode | None = None
+    thread_mode: ThreadMode | None = None
     admin_thread: bool | None = None
 
     @field_validator("schedule")
@@ -186,6 +199,7 @@ def _schedule_summary(
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
+        "threadMode": _thread_mode(record),
         "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
@@ -221,6 +235,36 @@ async def _get_run_state(schedule_id: str) -> dict[str, Any] | None:
         return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     return value if isinstance(value, dict) else None
+
+
+@asynccontextmanager
+async def _automation_launch_lock(schedule_id: str) -> AsyncIterator[bool]:
+    client = _client()
+    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:automation-launch:{schedule_id}"))
+    try:
+        await client.threads.create(
+            thread_id=lock_id,
+            if_exists="raise",
+            ttl=_AUTOMATION_LAUNCH_LOCK_TTL_MINUTES,
+        )
+    except ConflictError:
+        yield False
+        return
+    except Exception:
+        logger.warning(
+            "Failed to acquire automation launch lock for %s", schedule_id, exc_info=True
+        )
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            await client.threads.delete(lock_id)
+        except Exception:
+            logger.warning(
+                "Failed to release automation launch lock for %s", schedule_id, exc_info=True
+            )
 
 
 async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
@@ -372,6 +416,7 @@ async def create_agent_schedule(
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
         "slack_notification_mode": body.slack_notification_mode,
+        "thread_mode": body.thread_mode,
         "admin_thread": body.admin_thread,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
@@ -398,6 +443,31 @@ async def create_agent_schedule(
         raise HTTPException(502, "failed to create schedule cron") from exc
     record = await _put_value({**record, "cron_id": cron_id})
     return _schedule_summary(record)
+
+
+async def _detach_reusable_slack_thread(schedule_id: str) -> None:
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:automation:{schedule_id}"))
+    try:
+        thread = await _client().threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not load reusable automation thread %s", thread_id)
+        return
+    metadata = thread.get("metadata")
+    source_context = metadata.get("source_context") if isinstance(metadata, dict) else None
+    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
+    if not (
+        isinstance(slack_thread, dict)
+        and isinstance(slack_thread.get("channel_id"), str)
+        and isinstance(slack_thread.get("thread_ts"), str)
+    ):
+        return
+    await delete_slack_thread_associations(
+        _client(),
+        slack_thread["channel_id"],
+        slack_thread["thread_ts"],
+        expected_thread_id=thread_id,
+    )
+    await _client().threads.update(thread_id=thread_id, metadata={"source_context": None})
 
 
 async def update_agent_schedule(
@@ -440,6 +510,21 @@ async def update_agent_schedule(
         patch["slack_notification_mode"] = (
             body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
         )
+    if "thread_mode" in body.model_fields_set:
+        patch["thread_mode"] = body.thread_mode or _DEFAULT_THREAD_MODE
+
+    detach_reusable_slack = existing.get("thread_mode") == "reuse" and (
+        patch.get("thread_mode", "reuse") != "reuse"
+        or patch.get("enabled") is False
+        or (
+            "slack_channel_id" in patch
+            and patch["slack_channel_id"] != existing.get("slack_channel_id")
+        )
+        or (
+            "slack_notification_mode" in patch
+            and patch["slack_notification_mode"] != existing.get("slack_notification_mode")
+        )
+    )
     if body.admin_thread is not None:
         patch["admin_thread"] = body.admin_thread
 
@@ -461,6 +546,8 @@ async def update_agent_schedule(
         updated["cron_id"] = None
 
     updated = await _put_value(updated)
+    if detach_reusable_slack:
+        await _detach_reusable_slack_thread(schedule_id)
     return _schedule_summary(updated, await _get_run_state(schedule_id))
 
 
@@ -468,6 +555,8 @@ async def delete_agent_schedule(schedule_id: str, login: str, *, email: str | No
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_owner(existing, login, email)
     assert existing is not None
+    if existing.get("thread_mode") == "reuse":
+        await _detach_reusable_slack_thread(schedule_id)
     await _delete_cron(existing.get("cron_id"))
     await _client().store.delete_item(SCHEDULES_NAMESPACE, schedule_id)
     await _client().store.delete_item(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
@@ -551,6 +640,8 @@ def _agent_run_metadata(
         metadata["repo_name"] = repo["name"]
     if slack_thread:
         metadata["source_context"] = {"slack_thread": slack_thread}
+    elif _thread_mode(record) == "reuse":
+        metadata["source_context"] = None
     if admin_thread:
         metadata["admin_thread"] = True
     return metadata
@@ -605,6 +696,21 @@ async def _agent_run_config(
 async def _launch_agent_schedule_record(
     record: dict[str, Any], *, test_run: bool = False
 ) -> dict[str, Any]:
+    if _thread_mode(record) == "reuse":
+        async with _automation_launch_lock(record["id"]) as acquired:
+            if not acquired:
+                return {
+                    "status": "busy",
+                    "schedule_id": record["id"],
+                    "error": "automation launch already in progress",
+                }
+            return await _launch_agent_schedule_record_unlocked(record, test_run=test_run)
+    return await _launch_agent_schedule_record_unlocked(record, test_run=test_run)
+
+
+async def _launch_agent_schedule_record_unlocked(
+    record: dict[str, Any], *, test_run: bool = False
+) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
@@ -644,38 +750,86 @@ async def _launch_agent_schedule_record(
             }
 
     client = _client()
-    thread_id = str(uuid.uuid4())
+    reuse_thread = _thread_mode(record) == "reuse"
+    thread_id = (
+        str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:automation:{schedule_id}"))
+        if reuse_thread
+        else str(uuid.uuid4())
+    )
+    existing_metadata: dict[str, Any] = {}
+    if reuse_thread:
+        try:
+            existing_thread = await client.threads.get(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "status_code", None) != 404:
+                error = "failed to load reusable automation thread"
+                logger.exception("Failed to load automation thread %s", thread_id)
+                await _put_run_state(
+                    record,
+                    {"last_error": error, "last_error_at": _now_iso()},
+                )
+                return {"status": "error", "schedule_id": schedule_id, "error": error}
+        else:
+            raw_metadata = existing_thread.get("metadata")
+            if isinstance(raw_metadata, dict):
+                existing_metadata = raw_metadata
+
     slack_thread: dict[str, Any] | None = None
+    source_context = existing_metadata.get("source_context")
+    existing_slack_thread = (
+        source_context.get("slack_thread") if isinstance(source_context, dict) else None
+    )
     slack_channel_id = record.get("slack_channel_id")
     if (
         _slack_notification_mode(record) == "always"
         and isinstance(slack_channel_id, str)
         and slack_channel_id
     ):
-        message_ts, slack_error = await post_slack_top_level_message_with_ts(
-            slack_channel_id,
-            _slack_root_message(record, test_run=test_run),
-            unfurl_links=False,
-            unfurl_media=False,
+        if (
+            isinstance(existing_slack_thread, dict)
+            and existing_slack_thread.get("channel_id") == slack_channel_id
+            and isinstance(existing_slack_thread.get("thread_ts"), str)
+        ):
+            slack_thread = existing_slack_thread
+        else:
+            message_ts, slack_error = await post_slack_top_level_message_with_ts(
+                slack_channel_id,
+                _slack_root_message(record, test_run=test_run),
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+            if not message_ts:
+                error = f"Slack post failed: {slack_error or 'unknown error'}"
+                await _put_run_state(
+                    record,
+                    {"last_error": error, "last_error_at": _now_iso()},
+                )
+                return {"status": "error", "schedule_id": schedule_id, "error": error}
+            slack_thread = {
+                "channel_id": slack_channel_id,
+                "thread_ts": message_ts,
+                "triggering_event_ts": message_ts,
+                "triggering_user_id": await slack_id_for_login(
+                    record.get("created_by") if isinstance(record.get("created_by"), str) else None
+                )
+                or "",
+                "triggering_user_email": record.get("user_email") or "",
+            }
+            await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
+
+    if (
+        reuse_thread
+        and isinstance(existing_slack_thread, dict)
+        and existing_slack_thread is not slack_thread
+        and isinstance(existing_slack_thread.get("channel_id"), str)
+        and isinstance(existing_slack_thread.get("thread_ts"), str)
+    ):
+        await delete_slack_thread_associations(
+            client,
+            existing_slack_thread["channel_id"],
+            existing_slack_thread["thread_ts"],
+            expected_thread_id=thread_id,
         )
-        if not message_ts:
-            error = f"Slack post failed: {slack_error or 'unknown error'}"
-            await _put_run_state(
-                record,
-                {"last_error": error, "last_error_at": _now_iso()},
-            )
-            return {"status": "error", "schedule_id": schedule_id, "error": error}
-        slack_thread = {
-            "channel_id": slack_channel_id,
-            "thread_ts": message_ts,
-            "triggering_event_ts": message_ts,
-            "triggering_user_id": await slack_id_for_login(
-                record.get("created_by") if isinstance(record.get("created_by"), str) else None
-            )
-            or "",
-            "triggering_user_email": record.get("user_email") or "",
-        }
-        await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 
     admin_thread = _admin_thread_enabled(record)
     metadata = _agent_run_metadata(
@@ -685,6 +839,8 @@ async def _launch_agent_schedule_record(
         test_run=test_run,
         admin_thread=admin_thread,
     )
+    if reuse_thread and isinstance(existing_metadata.get("created_at_ms"), (int, float)):
+        metadata["created_at_ms"] = existing_metadata["created_at_ms"]
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     input_context: InputMessageContext = {
@@ -722,6 +878,7 @@ async def _launch_agent_schedule_record(
             admin_thread=admin_thread,
         ),
         client=client,
+        multitask_strategy="enqueue" if reuse_thread else "interrupt",
         stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
