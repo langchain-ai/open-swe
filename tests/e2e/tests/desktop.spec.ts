@@ -35,7 +35,10 @@ async function typeIntoComposer(
   await editor.press("Enter");
 }
 
-test("This Mac runs and restores the TypeScript coding agent", async (_fixtures, testInfo) => {
+// Playwright parses the fixture object out of the source, so the empty pattern
+// is how a test takes `testInfo` without provisioning any fixture.
+// oxlint-disable-next-line no-empty-pattern
+test("This Mac runs and restores the TypeScript coding agent", async ({}, testInfo) => {
   const stateRoot = mkdtempSync(
     path.join(os.tmpdir(), "open-swe-desktop-e2e-"),
   );

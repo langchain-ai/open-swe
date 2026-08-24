@@ -189,12 +189,8 @@ const config = defineConfig({
               handler: "./server/backend-proxy.ts",
             }))
           : []),
-        // Deliberately outside the proxied prefixes: this one is answered by this
+        // Deliberately outside the proxied prefixes: these are answered by this
         // server, not forwarded to the backend.
-        {
-          route: "/operations/restart",
-          handler: "./server/operations-restart.ts",
-        },
         {
           route: "/health",
           handler: "./server/health.ts",
