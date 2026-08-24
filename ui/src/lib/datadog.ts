@@ -21,6 +21,13 @@ function sampleRate(env: PublicEnv, name: string, fallback: number): number {
   return Number.isFinite(value) && value >= 0 && value <= 100 ? value : fallback
 }
 
+function replaySampleRate(env: PublicEnv): number {
+  const configured = env.VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE
+  if (typeof configured !== "string") return 100
+  const value = configured.trim() ? Number(configured) : Number.NaN
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 0
+}
+
 function datadogAppOrigin(site: string): string {
   if (site === "datadoghq.com") return "https://app.datadoghq.com"
   if (site === "datadoghq.eu") return "https://app.datadoghq.eu"
@@ -111,8 +118,7 @@ export async function initializeDatadogRum(
       "production",
     ...(version ? { version } : {}),
     sessionSampleRate: sampleRate(env, "VITE_DATADOG_SESSION_SAMPLE_RATE", 100),
-    sessionReplaySampleRate: 0,
-    startSessionReplayRecordingManually: true,
+    sessionReplaySampleRate: replaySampleRate(env),
     trackUserInteractions: true,
     trackResources: true,
     trackLongTasks: true,

@@ -37,6 +37,7 @@ describe("initializeDatadogRum", () => {
         VITE_DATADOG_SERVICE: "dashboard",
         VITE_DATADOG_VERSION: "1.2.3",
         VITE_DATADOG_SESSION_SAMPLE_RATE: "25",
+        VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE: "50",
       },
       load
     )
@@ -49,8 +50,7 @@ describe("initializeDatadogRum", () => {
       env: "staging",
       version: "1.2.3",
       sessionSampleRate: 25,
-      sessionReplaySampleRate: 0,
-      startSessionReplayRecordingManually: true,
+      sessionReplaySampleRate: 50,
       trackUserInteractions: true,
       trackResources: true,
       trackLongTasks: true,
@@ -102,6 +102,22 @@ describe("initializeDatadogRum", () => {
     )
   })
 
+  it("enables replay by default", async () => {
+    const { rum, load } = rumLoader()
+
+    await initializeDatadogRum(
+      {
+        VITE_DATADOG_APPLICATION_ID: "app-id",
+        VITE_DATADOG_CLIENT_TOKEN: "client-token",
+      },
+      load
+    )
+
+    expect(rum.init).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionReplaySampleRate: 100 })
+    )
+  })
+
   it("uses safe defaults for invalid sample rates", async () => {
     const { rum, load } = rumLoader()
 
@@ -110,6 +126,7 @@ describe("initializeDatadogRum", () => {
         VITE_DATADOG_APPLICATION_ID: "app-id",
         VITE_DATADOG_CLIENT_TOKEN: "client-token",
         VITE_DATADOG_SESSION_SAMPLE_RATE: "101",
+        VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE: " ",
       },
       load
     )
