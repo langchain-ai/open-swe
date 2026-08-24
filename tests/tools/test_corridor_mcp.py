@@ -4,15 +4,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import StructuredTool
 from langgraph.runtime import Runtime
 
 from agent import server
 from agent.integrations import corridor_mcp
 
 
-class _FakeTool:
-    def __init__(self, name: str) -> None:
-        self.name = name
+def _FakeTool(name: str) -> StructuredTool:  # noqa: N802
+    """A real tool: the search middleware reads descriptions and parameters."""
+
+    async def run(value: str = "") -> str:
+        return value
+
+    return StructuredTool.from_function(coroutine=run, name=name, description=f"{name} tool")
 
 
 @pytest.fixture(autouse=True)
@@ -195,7 +200,7 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             )
             if corridor_tools:
                 assert corridor_tools[0] not in cast(list[object], captured["tools"])
-                assert "DynamicToolMiddleware" in {type(item).__name__ for item in middleware}
+                assert "ToolSearchMiddleware" in {type(item).__name__ for item in middleware}
         return bool(prompt.call_args.kwargs["corridor_enabled"])
 
     assert await run_with_corridor_tools([]) is False

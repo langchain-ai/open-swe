@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
     "DynamicContextMiddleware": ".dynamic_context",
-    "DynamicToolMiddleware": ".dynamic_tools",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
@@ -25,6 +24,8 @@ _MIDDLEWARE_MODULES = {
     "StableToolResultOrderMiddleware": ".stable_tool_order",
     "settle_review_check_on_exit": ".settle_review_check",
     "SubdirAgentsReadMiddleware": ".subdir_agents",
+    "ToolGroup": ".tool_search",
+    "ToolSearchMiddleware": ".tool_search",
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
@@ -34,7 +35,6 @@ _MIDDLEWARE_MODULES = {
 
 __all__ = [
     "DynamicContextMiddleware",
-    "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "ModelCallTimeoutMiddleware",
     "ModelFallbackMiddleware",
@@ -49,6 +49,8 @@ __all__ = [
     "SanitizeToolInputsMiddleware",
     "StableToolResultOrderMiddleware",
     "SubdirAgentsReadMiddleware",
+    "ToolGroup",
+    "ToolSearchMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
@@ -65,7 +67,6 @@ __all__ = [
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
     from .dynamic_context import DynamicContextMiddleware
-    from .dynamic_tools import DynamicToolMiddleware
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_call_timeout import ModelCallTimeoutMiddleware
@@ -87,6 +88,7 @@ if TYPE_CHECKING:
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware
     from .tool_error_handler import ToolErrorMiddleware
+    from .tool_search import ToolGroup, ToolSearchMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware
 
 

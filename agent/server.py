@@ -96,7 +96,6 @@ from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
-    DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
@@ -110,6 +109,8 @@ from .middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    ToolGroup,
+    ToolSearchMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
@@ -238,6 +239,91 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+
+# Names rather than objects: the tool list is assembled conditionally (admin,
+# local, stop-summary, Slack-enabled), so grouping happens after that settles.
+_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "Slack": (
+        "post, react, and move conversations in Slack",
+        (
+            "slack_add_reaction",
+            "slack_move_thread",
+            "slack_read_thread_messages",
+            "slack_start_new_thread",
+            "slack_thread_reply",
+        ),
+    ),
+    "Linear": (
+        "read and write Linear issues, comments, and teams",
+        (
+            "linear_comment",
+            "linear_create_issue",
+            "linear_delete_issue",
+            "linear_get_issue",
+            "linear_get_issue_comments",
+            "linear_list_teams",
+            "linear_search_issues",
+            "linear_update_issue",
+        ),
+    ),
+    "Threads": (
+        "inspect, schedule, and manage Open SWE threads",
+        (
+            "get_thread",
+            "list_threads",
+            "manage_baby_sit",
+            "manage_thread",
+            "schedule_thread_wakeup",
+        ),
+    ),
+    "Web": (
+        "fetch pages, call HTTP APIs, and search the web",
+        ("fetch_url", "http_request", "web_search"),
+    ),
+    "Planning": (
+        "write, publish, and approve a plan",
+        ("approve_plan", "enter_plan_mode", "save_plan"),
+    ),
+    "Pull requests": (
+        "open a pull request and request review",
+        ("open_pull_request", "request_pr_review"),
+    ),
+    "Sandbox": (
+        "run background work and share sandbox files",
+        (
+            "background_execute",
+            "background_task",
+            "create_sandbox_file_download_url",
+            "output_iframe",
+            "recreate_sandbox",
+        ),
+    ),
+    "Settings": (
+        "read and write user instructions, skills, and settings",
+        ("delete_user_skill", "read_user_settings", "save_user_instructions", "save_user_skill"),
+    ),
+    "Support": (
+        "notify an automation channel or report a platform issue",
+        ("notify_automation_channel", "report_platform_issue"),
+    ),
+}
+
+
+def _grouped_static_tools(tools: Sequence[Any]) -> dict[str, ToolGroup]:
+    """Partition the curated tool list into searchable groups."""
+    remaining = {_registered_tool_name(tool): tool for tool in tools}
+    grouped: dict[str, ToolGroup] = {}
+    for group, (summary, names) in _TOOL_GROUPS.items():
+        picked = [remaining.pop(name) for name in names if name in remaining]
+        if picked:
+            grouped[group] = ToolGroup.from_tools(picked, summary)
+    if remaining:
+        grouped["Workspace"] = ToolGroup.from_tools(
+            list(remaining.values()), "manage the workspace and its environments"
+        )
+    return grouped
+
+
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -832,7 +918,7 @@ def _general_purpose_subagent(
     model: BaseChatModel,
     tools: Sequence[Any],
     skills: list[str] | None = None,
-    dynamic_tools: DynamicToolMiddleware | None = None,
+    searchable_tools: ToolSearchMiddleware | None = None,
     *,
     sandbox_file_downloads: bool = False,
 ) -> SubAgent:
@@ -851,7 +937,7 @@ def _general_purpose_subagent(
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
-            *([dynamic_tools] if dynamic_tools else []),
+            *([searchable_tools] if searchable_tools else []),
             ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
             *_subagent_model_middleware(),
         ],
@@ -1657,21 +1743,26 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [http_request, fetch_url, web_search]
     elif stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
-    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(configurable):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
-    dynamic_tool_middleware: DynamicToolMiddleware | None = None
-    integration_tool_groups = {
-        "Corridor": corridor_tools,
-        "Observability": observability_tools,
-        "Currents": currents_tools,
-        "Notion": notion_tools,
+    tool_groups: dict[str, ToolGroup] = {
+        **_grouped_static_tools(static_tools),
+        **{
+            group: ToolGroup.from_tools(tools, summary)
+            for group, tools, summary in (
+                ("Corridor", corridor_tools, "security analysis of a plan before writing code"),
+                (
+                    "Observability",
+                    observability_tools,
+                    "LangSmith traces and Datadog logs, metrics, and monitors",
+                ),
+                ("Currents", currents_tools, "Currents.dev CI test runs and results"),
+                ("Notion", notion_tools, "Notion pages and databases"),
+            )
+            if tools
+        },
     }
-    if any(integration_tool_groups.values()):
-        dynamic_tool_middleware = DynamicToolMiddleware(
-            integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
-        )
+    tool_search_middleware = ToolSearchMiddleware(tool_groups, always_visible=DEEP_AGENT_TOOL_NAMES)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -1724,7 +1815,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 subagent_model,
                 tools=subagent_tools,
                 skills=skill_sources,
-                dynamic_tools=dynamic_tool_middleware,
+                searchable_tools=tool_search_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
@@ -1751,7 +1842,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     corridor_enabled=bool(corridor_tools),
                     admin_environments=admin_thread,
                 ),
-                *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                tool_search_middleware,
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
