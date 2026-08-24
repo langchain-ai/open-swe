@@ -304,7 +304,7 @@ The tools require a LangSmith sandbox and a supported model credential. The real
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `STAGEHAND_MODEL_API_KEY` | — | Model key used by Stagehand. |
+| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | Model key used by Stagehand. |
 | `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
 | `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
 

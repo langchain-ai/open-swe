@@ -221,7 +221,11 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
 def _stagehand_proxy_rules() -> list[dict[str, Any]]:
     model = os.getenv("STAGEHAND_MODEL", "anthropic/claude-sonnet-4-5")
     provider = model.split("/", 1)[0].split(":", 1)[0]
-    key = os.getenv("STAGEHAND_MODEL_API_KEY")
+    key = (
+        os.getenv("STAGEHAND_MODEL_API_KEY")
+        or os.getenv("MODEL_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+    )
     if not key:
         return []
     if provider == "anthropic":

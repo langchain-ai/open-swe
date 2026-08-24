@@ -166,6 +166,8 @@ async def _session(request: dict[str, Any]) -> Any:
 
 async def _handle(request: dict[str, Any]) -> dict[str, Any]:
     operation = request.get("operation")
+    if operation == "health":
+        return {"success": True}
     if operation == "close":
         return {"success": True, "closed": await _close()}
     if operation == "navigate":

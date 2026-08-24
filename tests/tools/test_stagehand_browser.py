@@ -37,6 +37,8 @@ async def test_browser_navigate_runs_in_thread_sandbox(monkeypatch: pytest.Monke
     request = json.loads(base64.urlsafe_b64decode(encoded).decode())
     assert result["success"] is True
     assert request["url"] == "http://localhost:3000"
+    assert "eyJvcGVyYXRpb24iOiJoZWFsdGgifQ==" in backend.command
+    assert "rm -f /tmp/open-swe-stagehand.sock" in backend.command
     assert "setsid python /opt/open-swe/stagehand_runtime.py serve" in backend.command
 
 
@@ -44,7 +46,8 @@ def test_browser_tools_require_secure_supported_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
-    monkeypatch.setenv("STAGEHAND_MODEL_API_KEY", "secret")
+    monkeypatch.delenv("STAGEHAND_MODEL_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
     monkeypatch.setenv("STAGEHAND_MODEL", "anthropic/claude-sonnet-4-5")
     assert stagehand_browser.browser_tools_enabled() is True
 

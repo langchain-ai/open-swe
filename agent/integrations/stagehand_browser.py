@@ -23,7 +23,11 @@ def _model_name() -> str:
 
 
 def _model_api_key() -> str | None:
-    return os.getenv("STAGEHAND_MODEL_API_KEY")
+    return (
+        os.getenv("STAGEHAND_MODEL_API_KEY")
+        or os.getenv("MODEL_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+    )
 
 
 def _headless() -> bool:
@@ -62,10 +66,14 @@ async def _request(operation: str, **payload: Any) -> dict[str, Any]:
     runtime = shlex.quote(_RUNTIME)
     socket = shlex.quote(_SOCKET)
     encoded = shlex.quote(request)
+    health = base64.urlsafe_b64encode(b'{"operation":"health"}').decode()
     command = (
-        f"if [ ! -S {socket} ]; then "
+        f"python {runtime} request {socket} {health} >/dev/null 2>&1 || {{ "
+        f"rm -f {socket}; "
         f"setsid python {runtime} serve {socket} >/tmp/open-swe-stagehand.log 2>&1 </dev/null & "
-        f"for i in $(seq 1 100); do [ -S {socket} ] && break; sleep .1; done; fi; "
+        f"for i in $(seq 1 100); do "
+        f"python {runtime} request {socket} {health} >/dev/null 2>&1 && break; sleep .1; "
+        f"done; }}; "
         f"python {runtime} request {socket} {encoded}"
     )
     result = await backend.aexecute(command, timeout=180)
