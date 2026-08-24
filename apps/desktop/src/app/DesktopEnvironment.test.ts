@@ -63,6 +63,12 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
       assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
+      assert.equal(environment.openSweDir, "/tmp/t3/userdata/open-swe");
+      assert.equal(environment.openSweProjectsFile, "/tmp/t3/userdata/open-swe/projects.json");
+      assert.equal(environment.openSweArtifactsDir, "/tmp/t3/userdata/open-swe/artifacts");
+      assert.equal(environment.openSwePythonPath, "/repo/.venv/bin/python");
+      assert.equal(environment.openSweConfigPath, "/repo/langgraph.desktop.json");
+      assert.equal(environment.openSweRuntimeCwd, "/tmp/t3/userdata/open-swe");
       assert.equal(environment.rootDir, "/repo");
       assert.equal(environment.appRoot, "/repo");
       assert.equal(environment.serverRoot, "/repo");
@@ -114,6 +120,22 @@ describe("DesktopEnvironment", () => {
         environment.backendEntryPath,
         "/install/resources/server.asar/apps/server/dist/bin.mjs",
       );
+    }),
+  );
+
+  it.effect("uses the packaged macOS Open SWE runtime", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({ isPackaged: true });
+
+      assert.equal(
+        environment.openSwePythonPath,
+        "/Applications/T3 Code.app/Contents/Resources/open-swe-runtime/python/bin/python3.12",
+      );
+      assert.equal(
+        environment.openSweConfigPath,
+        "/Applications/T3 Code.app/Contents/Resources/open-swe-runtime/langgraph.desktop.json",
+      );
+      assert.equal(environment.openSweRuntimeCwd, "/Users/alice/.t3/userdata/open-swe");
     }),
   );
 

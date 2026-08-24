@@ -26,6 +26,7 @@ import {
   UnsupportedDesktopBuildArchitectureError,
   isMacPasskeySigningConfigurationError,
   LinuxIconResizeError,
+  MAC_OPEN_SWE_EXTRA_RESOURCES,
   MacPasskeySigningConfigurationResolutionError,
   MissingMacPasskeyProvisioningProfileError,
   packWindowsServerAsar,
@@ -399,6 +400,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
       "!apps/desktop/prod-resources/windows-server",
       "!apps/desktop/prod-resources/windows-server/**/*",
+      "!apps/desktop/resources/open-swe-runtime",
+      "!apps/desktop/resources/open-swe-runtime/**/*",
+      "!apps/desktop/prod-resources/open-swe-runtime",
+      "!apps/desktop/prod-resources/open-swe-runtime/**/*",
     ]);
     assert.equal(WINDOWS_SERVER_RESOURCE_SOURCE_DIR, "apps/desktop/prod-resources/windows-server");
     assert.deepStrictEqual(WINDOWS_SERVER_EXTRA_RESOURCES, [
@@ -446,6 +451,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.notProperty(mac, "asarUnpack");
       assert.notProperty(linux, "asarUnpack");
       assert.notProperty(win, "asarUnpack");
+      assert.deepStrictEqual(mac.extraResources, [
+        ...DESKTOP_EXTRA_RESOURCES,
+        ...MAC_OPEN_SWE_EXTRA_RESOURCES,
+      ]);
+      assert.deepStrictEqual(linux.extraResources, DESKTOP_EXTRA_RESOURCES);
       assert.deepStrictEqual(win.extraResources, [
         {
           from: "apps/desktop/prod-resources/resource-monitor",

@@ -1,11 +1,9 @@
 /**
  * LangGraphDriver — Open SWE's LangGraph agent as a T3 Code provider.
  *
- * Attaches to a LangGraph server the user runs themselves (`make dev`
- * serves one on 127.0.0.1:2024). There is no managed child process yet:
- * `serverUrl` is configuration, so bringing the server up is the user's
- * job. Spawning it can be added behind the same settings schema without a
- * breaking change.
+ * Attaches to either an externally configured LangGraph server or the
+ * desktop-managed Open SWE runtime advertised through the process environment.
+ * The managed runtime is an in-memory override and never rewrites user settings.
  *
  * @module provider/Drivers/LangGraphDriver
  */
@@ -46,6 +44,22 @@ import {
 const decodeLangGraphSettings = Schema.decodeSync(LangGraphSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("langgraph");
+
+export function resolveLangGraphDriverConfig(input: {
+  readonly enabled: boolean;
+  readonly config: LangGraphSettings;
+  readonly environment?: NodeJS.ProcessEnv;
+}): LangGraphSettings {
+  const managedServerUrl = (input.environment ?? process.env).OPEN_SWE_MANAGED_SERVER_URL?.trim();
+  if (managedServerUrl) {
+    return {
+      ...input.config,
+      enabled: true,
+      serverUrl: managedServerUrl,
+    };
+  }
+  return { ...input.config, enabled: input.enabled };
+}
 
 // Nothing to update: the server is not a binary this app installs.
 const UPDATE = makeStaticProviderMaintenanceResolver(
@@ -102,7 +116,7 @@ export const LangGraphDriver: ProviderDriver<LangGraphSettings, LangGraphDriverE
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      const effectiveConfig = { ...config, enabled } satisfies LangGraphSettings;
+      const effectiveConfig = resolveLangGraphDriverConfig({ enabled, config });
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: "",
         env: {},
@@ -149,7 +163,7 @@ export const LangGraphDriver: ProviderDriver<LangGraphSettings, LangGraphDriverE
         continuationIdentity,
         displayName,
         accentColor,
-        enabled,
+        enabled: effectiveConfig.enabled,
         snapshot,
         adapter,
         textGeneration,

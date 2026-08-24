@@ -52,6 +52,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const DESKTOP_APP_ID = "com.t3tools.t3code";
+const OPEN_SWE_PYTHON_VERSION = "3.12.12";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -297,6 +298,17 @@ export class ResourceMonitorBuildOutputMissingError extends Schema.TaggedErrorCl
 ) {
   override get message(): string {
     return `Resource monitor build for ${this.rustTarget} did not produce ${this.binaryPath}.`;
+  }
+}
+
+export class OpenSweRuntimeBuildError extends Schema.TaggedErrorClass<OpenSweRuntimeBuildError>()(
+  "OpenSweRuntimeBuildError",
+  {
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
   }
 }
 
@@ -795,6 +807,10 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   // staging inputs out of app.asar; they are emitted once at resources/.
   "!apps/desktop/prod-resources/windows-server",
   "!apps/desktop/prod-resources/windows-server/**/*",
+  "!apps/desktop/resources/open-swe-runtime",
+  "!apps/desktop/resources/open-swe-runtime/**/*",
+  "!apps/desktop/prod-resources/open-swe-runtime",
+  "!apps/desktop/prod-resources/open-swe-runtime/**/*",
 ] as const;
 // Windows ships the server tree (bundle + node_modules) as a separate
 // resources/server.asar sidecar instead of loose files: the NSIS installer
@@ -851,6 +867,12 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
+  },
+] as const;
+export const MAC_OPEN_SWE_EXTRA_RESOURCES = [
+  {
+    from: "apps/desktop/prod-resources/open-swe-runtime",
+    to: "open-swe-runtime",
   },
 ] as const;
 
@@ -1364,7 +1386,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
   } satisfies ResolvedBuildOptions;
 });
 
-const runCommand = Effect.fn("runCommand")(function* (
+const runCommandCapture = Effect.fn("runCommandCapture")(function* (
   command: ChildProcess.Command,
   options: {
     readonly label: string;
@@ -1390,7 +1412,16 @@ const runCommand = Effect.fn("runCommand")(function* (
       ...(stderr.trim() ? { stderrTail: stderr } : {}),
     });
   }
+  return stdout;
 });
+
+const runCommand = (
+  command: ChildProcess.Command,
+  options: {
+    readonly label: string;
+    readonly verbose: boolean;
+  },
+) => runCommandCapture(command, options).pipe(Effect.asVoid);
 
 /**
  * Every `node_modules` directory that would be visible from `startDir`.
@@ -1657,6 +1688,142 @@ const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBundleIsSel
     );
   },
 );
+
+export const stageOpenSweRuntime = Effect.fn("stageOpenSweRuntime")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  if (input.platform !== "mac") return;
+  if (input.arch === "universal") {
+    return yield* new OpenSweRuntimeBuildError({
+      detail: "The bundled Open SWE runtime requires an arm64 or x64 macOS build.",
+    });
+  }
+
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const runtimeDir = path.join(input.stageResourcesDir, "open-swe-runtime");
+  const pythonDir = path.join(runtimeDir, "python");
+  const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-open-swe-runtime-" });
+  const requirementsPath = path.join(tempDir, "requirements.txt");
+  const wheelDir = path.join(tempDir, "wheel");
+
+  const pythonOutput = yield* runCommandCapture(
+    ChildProcess.make(
+      "uv",
+      ["python", "find", OPEN_SWE_PYTHON_VERSION, "--managed-python"],
+      { cwd: input.repoRoot },
+    ),
+    { label: `uv python find ${OPEN_SWE_PYTHON_VERSION}`, verbose: input.verbose },
+  );
+  const sourcePython = pythonOutput.trim();
+  if (!sourcePython) {
+    return yield* new OpenSweRuntimeBuildError({
+      detail: `uv did not return managed CPython ${OPEN_SWE_PYTHON_VERSION}.`,
+    });
+  }
+  const sourcePrefix = path.dirname(path.dirname(sourcePython));
+  const sourceArchitecture = (
+    yield* runCommandCapture(
+      ChildProcess.make(sourcePython, ["-c", "import platform; print(platform.machine())"]),
+      { label: "inspect Open SWE Python architecture", verbose: input.verbose },
+    )
+  ).trim();
+  const expectedArchitecture = input.arch === "arm64" ? "arm64" : "x86_64";
+  if (sourceArchitecture !== expectedArchitecture) {
+    return yield* new OpenSweRuntimeBuildError({
+      detail: `Managed Python architecture ${sourceArchitecture} does not match ${input.arch}. Build that artifact on a matching Mac.`,
+    });
+  }
+
+  yield* fs.remove(runtimeDir, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.makeDirectory(runtimeDir, { recursive: true });
+  yield* fs.copy(sourcePrefix, pythonDir);
+  yield* fs.copyFile(
+    path.join(input.repoRoot, "langgraph.desktop.json"),
+    path.join(runtimeDir, "langgraph.desktop.json"),
+  );
+
+  yield* runCommand(
+    ChildProcess.make(
+      "uv",
+      [
+        "export",
+        "--frozen",
+        "--no-dev",
+        "--no-emit-project",
+        "--format",
+        "requirements-txt",
+        "--output-file",
+        requirementsPath,
+      ],
+      { cwd: input.repoRoot },
+    ),
+    { label: "uv export Open SWE runtime requirements", verbose: input.verbose },
+  );
+  yield* runCommand(
+    ChildProcess.make("uv", ["build", "--wheel", "--out-dir", wheelDir], {
+      cwd: input.repoRoot,
+    }),
+    { label: "uv build Open SWE agent wheel", verbose: input.verbose },
+  );
+  const wheelName = (yield* fs.readDirectory(wheelDir)).find((entry) => entry.endsWith(".whl"));
+  if (!wheelName) {
+    return yield* new OpenSweRuntimeBuildError({
+      detail: "Building Open SWE did not produce a wheel.",
+    });
+  }
+
+  const bundledPython = path.join(pythonDir, "bin", "python3.12");
+  yield* runCommand(
+    ChildProcess.make(
+      "uv",
+      [
+        "pip",
+        "install",
+        "--python",
+        bundledPython,
+        "--system",
+        "--break-system-packages",
+        "--requirements",
+        requirementsPath,
+      ],
+      { cwd: input.repoRoot },
+    ),
+    { label: "uv install Open SWE runtime requirements", verbose: input.verbose },
+  );
+  yield* runCommand(
+    ChildProcess.make(
+      "uv",
+      [
+        "pip",
+        "install",
+        "--python",
+        bundledPython,
+        "--system",
+        "--break-system-packages",
+        "--no-deps",
+        path.join(wheelDir, wheelName),
+      ],
+      { cwd: input.repoRoot },
+    ),
+    { label: "uv install Open SWE agent wheel", verbose: input.verbose },
+  );
+  yield* runCommand(
+    ChildProcess.make(
+      bundledPython,
+      [
+        "-c",
+        "from langgraph_cli.config import validate_config_file; import agent.server; validate_config_file('langgraph.desktop.json')",
+      ],
+      { cwd: runtimeDir },
+    ),
+    { label: "validate bundled Open SWE runtime", verbose: input.verbose },
+  );
+});
 
 export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* (input: {
   readonly repoRoot: string;
@@ -2071,6 +2238,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // hand-packed server.asar sidecar (see WINDOWS_SERVER_ASAR_RESOURCE).
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
+      ...(platform === "mac" ? MAC_OPEN_SWE_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
     ],
   };
@@ -2847,6 +3015,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
   }
   yield* stageResourceMonitor({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageOpenSweRuntime({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,

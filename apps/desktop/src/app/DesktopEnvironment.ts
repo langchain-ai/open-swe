@@ -50,6 +50,12 @@ export class DesktopEnvironment extends Context.Service<
     readonly serverSettingsPath: string;
     readonly logDir: string;
     readonly browserArtifactsDir: string;
+    readonly openSweDir: string;
+    readonly openSweProjectsFile: string;
+    readonly openSweArtifactsDir: string;
+    readonly openSwePythonPath: string;
+    readonly openSweConfigPath: string;
+    readonly openSweRuntimeCwd: string;
     readonly rootDir: string;
     readonly appRoot: string;
     // Root of the tree containing apps/server/dist and node_modules for the
@@ -185,6 +191,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
     "applications",
   );
   const resourcesPath = input.resourcesPath;
+  const openSweDir = path.join(stateDir, "open-swe");
+  const packagedOpenSweRuntimeDir = path.join(resourcesPath, "open-swe-runtime");
 
   return DesktopEnvironment.of({
     path,
@@ -206,6 +214,16 @@ const make = Effect.fn("desktop.environment.make")(function* (
     serverSettingsPath: path.join(stateDir, "settings.json"),
     logDir: path.join(stateDir, "logs"),
     browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
+    openSweDir,
+    openSweProjectsFile: path.join(openSweDir, "projects.json"),
+    openSweArtifactsDir: path.join(openSweDir, "artifacts"),
+    openSwePythonPath: input.isPackaged
+      ? path.join(packagedOpenSweRuntimeDir, "python", "bin", "python3.12")
+      : path.join(rootDir, ".venv", "bin", "python"),
+    openSweConfigPath: input.isPackaged
+      ? path.join(packagedOpenSweRuntimeDir, "langgraph.desktop.json")
+      : path.join(rootDir, "langgraph.desktop.json"),
+    openSweRuntimeCwd: openSweDir,
     rootDir,
     appRoot,
     serverRoot,

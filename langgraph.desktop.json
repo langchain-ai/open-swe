@@ -8,7 +8,6 @@
   "dependencies": [
     "."
   ],
-  "env": ".env",
   "auth": {
     "path": "agent.local_auth:auth",
     "disable_studio_auth": true

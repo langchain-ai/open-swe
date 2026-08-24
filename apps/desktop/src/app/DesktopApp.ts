@@ -16,6 +16,7 @@ import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as DesktopManagedOpenSWE from "../backend/DesktopManagedOpenSWE.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopLinuxUrlHandler from "./DesktopLinuxUrlHandler.ts";
@@ -201,6 +202,8 @@ const bootstrap = Effect.gen(function* () {
   yield* logBootstrapInfo("bootstrap ipc handlers registered");
 
   if (!(yield* Ref.get(state.quitting))) {
+    const managedOpenSWE = yield* DesktopManagedOpenSWE.DesktopManagedOpenSWE;
+    yield* managedOpenSWE.start;
     // In wsl-only mode the renderer is served by the WSL backend, which can be
     // slow to cold-boot — show a "Connecting to WSL" splash immediately so the
     // app feels responsive instead of presenting no window until WSL is ready.
