@@ -61,8 +61,8 @@ jobs:
       - name: Run unit tests
         run: make test
 
-  format:
-    name: Format check
+  js-format:
+    name: JS format check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -70,8 +70,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      # The root package too, for Turborepo — but not desktop, whose Electron
-      # download this job has no use for.
+      # oxfmt reads the files straight off disk, so only the root package's own
+      # devDependencies are needed here.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
       - name: Run format check
