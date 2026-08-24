@@ -326,3 +326,56 @@ async def test_observability_authorized_accepts_admin_login(
 
     config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
     assert await server._observability_authorized(config, "dev") is True
+
+
+@pytest.mark.asyncio
+async def test_org_membership_lookup_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
+    membership = AsyncMock(return_value=True)
+    monkeypatch.setattr(server, "is_user_active_org_member", membership)
+
+    config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
+    assert await server._cached_allowed_org_member(config, "dev") is True
+    assert await server._cached_allowed_org_member(config, "dev") is True
+    assert membership.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_observability_tools_reuse_the_credential_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
+    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+    langsmith = AsyncMock(return_value=["ls"])
+    monkeypatch.setattr(server, "load_langsmith_tools", langsmith)
+    monkeypatch.setattr(server, "load_datadog_tools", AsyncMock(return_value=["dd"]))
+
+    config = cast(RunnableConfig, {"configurable": {"user_email": "admin@example.com"}})
+    assert await server._observability_tools_for(config, "alice") == ["dd", "ls"]
+    assert await server._observability_tools_for(config, "alice") == ["dd", "ls"]
+    assert langsmith.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_observability_authorization_is_rechecked_per_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached tool list must never carry team access into an unauthorized run."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
+    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "is_user_active_org_member", AsyncMock(return_value=False))
+    monkeypatch.setattr(server, "load_datadog_tools", AsyncMock(return_value=["dd"]))
+    monkeypatch.setattr(
+        server,
+        "load_langsmith_tools",
+        AsyncMock(side_effect=lambda _login, allow_team=True: ["team"] if allow_team else []),
+    )
+
+    admin = cast(RunnableConfig, {"configurable": {"user_email": "admin@example.com"}})
+    attacker = cast(RunnableConfig, {"configurable": {"user_email": "attacker@example.com"}})
+
+    assert await server._observability_tools_for(admin, "alice") == ["dd", "team"]
+    assert await server._observability_tools_for(attacker, "alice") == []

@@ -936,10 +936,25 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     )
 
 
-async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
+async def _cached_allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
+    login = _org_member_login(config, profile_login)
+    if not login:
+        return False
+    return await ttl_cache.cached(
+        f"org-member:{login}",
+        300,
+        lambda: _allowed_org_member(config, profile_login),
+    )
+
+
+def _org_member_login(config: RunnableConfig, profile_login: str | None) -> str | None:
     configurable = (config or {}).get("configurable") or {}
     config_login = configurable.get("github_login")
-    login = profile_login or (config_login if isinstance(config_login, str) else None)
+    return profile_login or (config_login if isinstance(config_login, str) else None)
+
+
+async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
+    login = _org_member_login(config, profile_login)
     if not login:
         return False
     orgs = dict.fromkeys(
@@ -967,15 +982,60 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
         return []
 
 
+async def _cached_langsmith_tools(profile_login: str | None, *, allow_team: bool) -> list[Any]:
+    scope = "team" if allow_team else "solo"
+    return await _cached_tool_loader(
+        f"tools:langsmith:{profile_login or '-'}:{scope}",
+        300,
+        lambda: load_langsmith_tools(profile_login, allow_team=allow_team),
+    )
+
+
 async def _load_observability_tools(authorized: bool, profile_login: str | None) -> list[Any]:
     """Load team observability tools for an authorized triggering user."""
     if not authorized:
         return []
     datadog_tools, langsmith_tools = await asyncio.gather(
         _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
-        load_langsmith_tools(profile_login),
+        _cached_langsmith_tools(profile_login, allow_team=True),
     )
     return [*datadog_tools, *langsmith_tools]
+
+
+async def _observability_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
+    """Observability tools the triggering user is allowed to see.
+
+    The authorization gate itself stays uncached — it reads per-run config — so
+    only the credential and membership lookups behind it are reused.
+    """
+    if await _observability_authorized(config, profile_login):
+        return await _load_observability_tools(True, profile_login)
+    if await _cached_allowed_org_member(config, profile_login):
+        return await _cached_langsmith_tools(profile_login, allow_team=True)
+    return await _cached_langsmith_tools(profile_login, allow_team=False)
+
+
+async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any], list[Any]]:
+    if not profile_login:
+        return [], []
+    currents_tools, notion_tools = await asyncio.gather(
+        _cached_tool_loader(
+            f"tools:currents:{profile_login}",
+            300,
+            lambda: load_currents_tools(profile_login),
+        ),
+        _cached_tool_loader(
+            f"tools:notion:{profile_login}",
+            300,
+            lambda: load_notion_tools(profile_login),
+        ),
+    )
+    return currents_tools, notion_tools
+
+
+async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
+    async with aphase(thread_id, name):
+        return await loader()
 
 
 async def _load_corridor_mcp_tools() -> list[Any]:
@@ -1486,32 +1546,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        async with aphase(thread_id, "factory.observability_tools"):
-            observability_authorized = await _observability_authorized(config, profile_login)
-            if observability_authorized:
-                observability_tools = await _load_observability_tools(True, profile_login)
-            elif await _allowed_org_member(config, profile_login):
-                observability_tools = await load_langsmith_tools(profile_login)
-            else:
-                observability_tools = await load_langsmith_tools(profile_login, allow_team=False)
-        async with aphase(thread_id, "factory.corridor_tools"):
-            corridor_tools = await _load_corridor_mcp_tools()
         browser_tools = load_browser_tools()
-
-        if profile_login:
-            async with aphase(thread_id, "factory.integration_tools"):
-                currents_tools, notion_tools = await asyncio.gather(
-                    _cached_tool_loader(
-                        f"tools:currents:{profile_login}",
-                        300,
-                        lambda: load_currents_tools(profile_login),
-                    ),
-                    _cached_tool_loader(
-                        f"tools:notion:{profile_login}",
-                        300,
-                        lambda: load_notion_tools(profile_login),
-                    ),
-                )
+        observability_tools, corridor_tools, (currents_tools, notion_tools) = await asyncio.gather(
+            _phase_result(
+                thread_id,
+                "factory.observability_tools",
+                lambda: _observability_tools_for(config, profile_login),
+            ),
+            _phase_result(thread_id, "factory.corridor_tools", _load_corridor_mcp_tools),
+            _phase_result(
+                thread_id,
+                "factory.integration_tools",
+                lambda: _load_integration_tools(profile_login),
+            ),
+        )
 
     slack_tools = [
         slack_add_reaction,
