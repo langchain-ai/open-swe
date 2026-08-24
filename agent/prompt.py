@@ -189,7 +189,12 @@ SOURCE_GUIDANCE_SECTION = """---
 
 ### Source Context
 
-{source_guidance}"""
+{source_guidance}
+
+A later `system:` message may announce that the conversation has moved to another
+surface. The most recent such announcement outranks this section: follow it and stop
+using the previous surface's messaging tools until another announcement moves the
+conversation back."""
 
 
 def _render_source_guidance(source: str, slack_context: bool) -> str:
@@ -206,15 +211,6 @@ def _render_source_guidance(source: str, slack_context: bool) -> str:
     else:
         guidance = GENERIC_SOURCE_GUIDANCE
     return f"{SOURCE_GUIDANCE_OPEN_TAG}\n{guidance}\n{SOURCE_GUIDANCE_CLOSE_TAG}"
-
-
-def replace_source_guidance(prompt: str, source: str, *, slack_context: bool = False) -> str:
-    start = prompt.find(SOURCE_GUIDANCE_OPEN_TAG)
-    end = prompt.find(SOURCE_GUIDANCE_CLOSE_TAG, start)
-    if start < 0 or end < 0:
-        return prompt
-    end += len(SOURCE_GUIDANCE_CLOSE_TAG)
-    return prompt[:start] + _render_source_guidance(source, slack_context) + prompt[end:]
 
 
 PLAN_MODE_GUIDANCE_SECTION = """---
