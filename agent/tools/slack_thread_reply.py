@@ -110,7 +110,7 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    return {"success": True}
+    return {"success": True, "thread_version": current_version}
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:

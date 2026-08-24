@@ -92,6 +92,9 @@ test("a stale Slack reply fails, re-reads the thread, and then succeeds", async 
       timeout: 60_000,
     })
     .toContain("Re-read the thread and posted with the updated version.");
+  await expect
+    .poll(() => stateText(request, opened.thread_id), { timeout: 60_000 })
+    .toContain('{"success": true, "thread_version": 2}');
 
   expect((await botTexts(request)).join("\n")).not.toContain(
     "This stale reply must not be posted.",

@@ -76,7 +76,10 @@ async def test_slack_thread_reply_holds_mutation_lock_while_posting(
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_thread_reply("hello", 1) == {"success": True}
+    assert await slack_reply_tool.slack_thread_reply("hello", 1) == {
+        "success": True,
+        "thread_version": 1,
+    }
     assert lock_held is False
 
 
@@ -229,7 +232,7 @@ async def test_slack_thread_reply_passes_executing_run_id(
 
     result = await slack_reply_tool.slack_thread_reply("hello", 1)
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     assert captured["run_id"] == "12345678-1234-5678-1234-567812345678"
     assert captured["triggering_user_id"] == "active-user"
 
@@ -257,7 +260,7 @@ async def test_slack_thread_reply_posts_plain_text_without_options(
         "Plan ready: review it and reply to approve or request changes.", 1
     )
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     assert captured["blocks"] is None
 
 
@@ -282,7 +285,7 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
 
     result = await slack_reply_tool.slack_thread_reply("Pick one", 1, options=["A", "B"])
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     assert captured["channel_id"] == "C1"
     assert captured["thread_ts"] == "1.0"
     assert captured["message"] == "Pick one"
@@ -334,7 +337,10 @@ async def test_slack_thread_reply_passes_live_run_id(
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    assert await slack_reply_tool.slack_thread_reply("Done", 1) == {"success": True}
+    assert await slack_reply_tool.slack_thread_reply("Done", 1) == {
+        "success": True,
+        "thread_version": 1,
+    }
     assert captured["run_id"] == str(run_id)
 
 
@@ -367,7 +373,7 @@ async def test_slack_thread_reply_passes_model_reported_usage(
 
     result = await slack_reply_tool.slack_thread_reply("Done", 1, state=state)
 
-    assert result == {"success": True}
+    assert result == {"success": True, "thread_version": 1}
     usage = captured["usage"]
     assert usage.models == ("model-a",)
     assert usage.main_agent_tokens == 110
