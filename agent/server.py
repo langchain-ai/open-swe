@@ -668,19 +668,19 @@ async def reset_sandbox_for_thread(
         await _configure_github_proxy(new_sandbox.id, token, base_proxy_config=proxy_config)
     else:
         await _configure_github_proxy(new_sandbox.id, token)
+    await _configure_git_identity(new_sandbox)
+    sandbox_metadata: dict[str, Any] = {
+        "sandbox_id": new_sandbox.id,
+        _SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config,
+    }
+    await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
+    set_sandbox_backend(thread_id, new_sandbox)
     record_proxy_token_expiry(
         thread_id,
         expires_at,
         permissions=permissions,
         base_proxy_config=proxy_config,
     )
-
-    await _configure_git_identity(new_sandbox)
-    sandbox_metadata: dict[str, Any] = {"sandbox_id": new_sandbox.id}
-    if proxy_config is not None:
-        sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = proxy_config
-    await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
-    set_sandbox_backend(thread_id, new_sandbox)
     logger.info(
         "Reset thread %s from sandbox %s to sandbox %s",
         thread_id,

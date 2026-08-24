@@ -75,6 +75,85 @@ async def test_reset_sandbox_hands_off_after_metadata_persists() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reset_sandbox_clears_stale_proxy_metadata() -> None:
+    thread_id = "thread-reset-default-proxy"
+    SANDBOX_BACKENDS.clear()
+    old_sandbox = MagicMock(id="sandbox-old")
+    new_sandbox = MagicMock(id="sandbox-new")
+    set_sandbox_backend(thread_id, old_sandbox)
+
+    with (
+        patch(
+            "agent.server.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            return_value="sandbox-old",
+        ),
+        patch(
+            "agent.server.create_langsmith_sandbox_from_params",
+            new_callable=AsyncMock,
+            return_value=new_sandbox,
+        ),
+        patch(
+            "agent.server._resolve_proxy_token",
+            new_callable=AsyncMock,
+            return_value=("ghs_install", "expiry", None),
+        ),
+        patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
+        patch("agent.server.record_proxy_token_expiry"),
+        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.server.client.threads.update", new_callable=AsyncMock) as update,
+    ):
+        await reset_sandbox_for_thread(thread_id, {})
+
+    update.assert_awaited_once_with(
+        thread_id=thread_id,
+        metadata={"sandbox_id": "sandbox-new", "sandbox_base_proxy_config": None},
+    )
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_reset_sandbox_does_not_record_proxy_before_metadata_persists() -> None:
+    thread_id = "thread-reset-failure"
+    SANDBOX_BACKENDS.clear()
+    old_sandbox = MagicMock(id="sandbox-old")
+    new_sandbox = MagicMock(id="sandbox-new")
+    proxy = set_sandbox_backend(thread_id, old_sandbox)
+
+    with (
+        patch(
+            "agent.server.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            return_value="sandbox-old",
+        ),
+        patch(
+            "agent.server.create_langsmith_sandbox_from_params",
+            new_callable=AsyncMock,
+            return_value=new_sandbox,
+        ),
+        patch(
+            "agent.server._resolve_proxy_token",
+            new_callable=AsyncMock,
+            return_value=("ghs_install", "expiry", None),
+        ),
+        patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
+        patch("agent.server.record_proxy_token_expiry") as record_proxy,
+        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.server.client.threads.update",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("metadata unavailable"),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="metadata unavailable"):
+            await reset_sandbox_for_thread(thread_id, {"proxy_config": {"rules": []}})
+
+    record_proxy.assert_not_called()
+    assert proxy.current is old_sandbox
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
 async def test_reset_sandbox_rejects_other_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_TYPE", "modal")
 
