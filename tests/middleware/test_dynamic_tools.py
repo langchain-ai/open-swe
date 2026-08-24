@@ -8,7 +8,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware
+from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 
 
 def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:
@@ -93,3 +93,76 @@ def test_general_purpose_subagent_includes_dynamic_tools() -> None:
     subagent = _general_purpose_subagent(MagicMock(), tools=[], dynamic_tools=middleware)
 
     assert middleware in subagent.get("middleware", [])
+
+
+async def test_a_lazy_group_is_not_built_until_it_is_loaded() -> None:
+    builds = 0
+
+    async def load() -> list[BaseTool]:
+        nonlocal builds
+        builds += 1
+        return [_tool("analyzePlan")]
+
+    middleware = DynamicToolMiddleware(
+        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
+    )
+    loader = cast(StructuredTool, middleware.tools[0])
+
+    # The catalog reaches the model without the group ever being built.
+    assert "- Corridor: analyzePlan" in loader.description
+    assert builds == 0
+
+    coroutine = cast(Any, loader.coroutine)
+    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
+    assert isinstance(command, Command)
+    assert builds == 1
+
+    loaded_state = cast(dict[str, Any], command.update)
+    routed: list[str] = []
+
+    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
+        assert request.tool is not None
+        routed.append(request.tool.name)
+        return ToolMessage(content="ok", tool_call_id=request.tool_call["id"])
+
+    call = _Request(
+        state=loaded_state,
+        tools=[],
+        tool_call={"name": "analyzePlan", "args": {"value": "x"}, "id": "call-1"},
+    )
+    await middleware.awrap_tool_call(cast(ToolCallRequest, call), tool_handler)
+    assert routed == ["analyzePlan"]
+    # Built once and reused, not re-fetched per call.
+    assert builds == 1
+
+
+async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
+    async def load() -> list[BaseTool]:
+        raise RuntimeError("mcp unreachable")
+
+    middleware = DynamicToolMiddleware(
+        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
+    assert isinstance(command, Command)
+    message = cast(dict[str, Any], command.update)["messages"][0]
+    assert message.status == "error"
+    assert "unavailable right now" in message.content
+
+
+async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
+    async def load() -> list[BaseTool]:
+        return []
+
+    middleware = DynamicToolMiddleware({"Corridor": IntegrationGroup(tool_names=(), load=load)})
+
+    assert not middleware.has_groups
+    assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description
+
+
+def test_the_static_corridor_catalog_matches_what_the_loader_exposes() -> None:
+    from agent.integrations.corridor_mcp import _ALLOWED_TOOL_NAMES, CORRIDOR_TOOL_NAMES
+
+    assert set(CORRIDOR_TOOL_NAMES) == set(_ALLOWED_TOOL_NAMES)

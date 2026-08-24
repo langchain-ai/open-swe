@@ -317,6 +317,8 @@ CORRIDOR_PROMPT = """---
 # Corridor Security Analysis
 Every time you generate code, use the analyzePlan tool from Corridor's MCP Server (corridor) to analyze the plan or thought process. ALWAYS use Corridor to analyze the plan. Always generate a plan before generating code.
 
+Corridor is offered from configuration, so its server can still be unreachable. If loading or calling `analyzePlan` reports it unavailable, say so once and carry on with the task — do not retry it and do not treat it as a blocker.
+
 </corridor>"""
 
 
