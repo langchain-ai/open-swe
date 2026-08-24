@@ -28,6 +28,7 @@ from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
+from ..utils.thread_ops import langgraph_client as get_langgraph_client
 from ..utils.user_messages import warning
 from . import common
 
@@ -196,7 +197,7 @@ async def _slack_user_can_reply_to_ready_plan(
 
     try:
         thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            get_langgraph_client(), channel_id, thread_ts
         )
     except Exception:  # noqa: BLE001
         return False
@@ -468,7 +469,7 @@ async def _notify_slack_processing_error(
     if not isinstance(thread_id, str) or not thread_id:
         try:
             thread_id = await common.lookup_slack_thread_id(
-                common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+                get_langgraph_client(), channel_id, thread_ts
             )
         except Exception:  # noqa: BLE001
             thread_id = None
@@ -499,7 +500,7 @@ async def _notify_slack_processing_error(
         )
 
     try:
-        await common.get_client(url=common.LANGGRAPH_URL).threads.update(
+        await get_langgraph_client().threads.update(
             thread_id=thread_id,
             metadata={
                 "latest_run_status": "error",
@@ -556,7 +557,7 @@ async def _process_slack_mention_impl(
         )
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = get_langgraph_client()
     thread_id = event_data.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
@@ -816,7 +817,7 @@ async def _process_slack_mention_impl(
         configurable["plan_mode"] = thread_plan_mode
 
     is_first_mention = not await common._thread_exists(thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = get_langgraph_client()
     await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without

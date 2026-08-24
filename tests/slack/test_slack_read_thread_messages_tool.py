@@ -20,7 +20,7 @@ async def test_read_thread_returns_current_version(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(slack_read_tool, "fetch_slack_thread_messages", fetch)
     monkeypatch.setattr(slack_read_tool, "get_slack_user_names", names)
     monkeypatch.setattr(slack_read_tool, "get_slack_thread_version", version)
-    monkeypatch.setattr(slack_read_tool, "get_client", lambda **_kwargs: object())
+    monkeypatch.setattr(slack_read_tool, "langgraph_client", object)
 
     result = await slack_read_tool.slack_read_thread_messages("C1", "1.0")
 

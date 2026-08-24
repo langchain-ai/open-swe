@@ -908,7 +908,9 @@ def _setup_slack_mention_fakes(
         webhook_common, "increment_slack_thread_version", fake_increment_slack_thread_version
     )
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", fake_resolve_slack_thread_id)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClientForProcess())
+    client = _FakeLangGraphClientForProcess()
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_webhooks, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
     monkeypatch.setattr(webhook_common, "refresh_user_mapping_cache", fake_refresh_cache)

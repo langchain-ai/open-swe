@@ -1,7 +1,4 @@
-import os
 from typing import Any
-
-from langgraph_sdk import get_client
 
 from ..utils.slack import (
     SLACK_THREAD_MAX_MESSAGES,
@@ -10,10 +7,7 @@ from ..utils.slack import (
     get_slack_thread_version,
     get_slack_user_names,
 )
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+from ..utils.thread_ops import langgraph_client
 
 
 async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
@@ -71,6 +65,6 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
         }
 
     result["thread_version"] = await get_slack_thread_version(
-        get_client(url=LANGGRAPH_URL), clean_channel_id, clean_message_ts
+        langgraph_client(), clean_channel_id, clean_message_ts
     )
     return result
