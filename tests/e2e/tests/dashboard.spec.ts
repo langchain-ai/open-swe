@@ -687,6 +687,36 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   // that rewrite drops the client-minted message id, the SDK's optimistic copy
   // never reconciles with the server's echo and the same text renders twice —
   // once in place, once at the tail of the transcript.
+  test("keeps sender metadata hidden after refreshing a new web thread", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/agents");
+    const dismissOnboarding = page.getByRole("button", {
+      name: "Maybe later",
+    });
+    await expect(dismissOnboarding).toBeVisible();
+    await dismissOnboarding.click();
+    await expect(dismissOnboarding).toBeHidden();
+
+    const prompt = "list my open langchainplus PRs";
+    await typeIntoComposer(page, prompt);
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+
+    const userMessage = page
+      .getByTestId("user-message")
+      .filter({ hasText: prompt });
+    await expect(userMessage).toContainText(prompt);
+    await expect(userMessage).not.toContainText("sender_context");
+    await waitForStateToContain(page, threadId, "sender_context");
+
+    await page.reload();
+    await expect(userMessage).toContainText(prompt);
+    await expect(userMessage).not.toContainText("sender_context");
+  });
+
   test("renders a web follow-up exactly once", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
