@@ -63,26 +63,12 @@ import {
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { Kbd } from "@/components/ui/kbd"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  useAppCommand,
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
-import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-
-function SidebarShortcut({ commandId }: { commandId: string }) {
-  const shortcut = useAppCommand(commandId)?.shortcuts?.[0] ?? ""
-  const label = useShortcutLabel(shortcut)
-  if (!shortcut) return null
-  return (
-    <Kbd className="ml-auto h-4 min-w-4 bg-transparent px-0 text-[10px]">
-      {label}
-    </Kbd>
-  )
-}
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -323,7 +309,6 @@ export function AgentsSidebar({
         >
           <PlusIcon className="size-4" />
           New Thread
-          <SidebarShortcut commandId="new-thread" />
         </Link>
       </div>
 
