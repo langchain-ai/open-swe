@@ -1,5 +1,6 @@
 import importlib
 import json
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
@@ -14,7 +15,12 @@ def _current_thread_version(monkeypatch: pytest.MonkeyPatch) -> None:
     async def current_version(*_args: Any) -> int:
         return 1
 
+    @asynccontextmanager
+    async def mutation_lock(*_args: Any):
+        yield
+
     monkeypatch.setattr(slack_reply_tool, "get_slack_thread_version", current_version)
+    monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
 
 
 def _config() -> dict[str, Any]:
@@ -46,6 +52,32 @@ async def test_slack_thread_reply_rejects_stale_thread_version(
         "provided_thread_version": 0,
         "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
     }
+
+
+async def test_slack_thread_reply_holds_mutation_lock_while_posting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock_held = False
+
+    @asynccontextmanager
+    async def mutation_lock(*_args: Any):
+        nonlocal lock_held
+        lock_held = True
+        try:
+            yield
+        finally:
+            lock_held = False
+
+    async def post(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
+        assert lock_held is True
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_thread_reply("hello", 1) == {"success": True}
+    assert lock_held is False
 
 
 async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(

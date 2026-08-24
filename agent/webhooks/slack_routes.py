@@ -68,6 +68,9 @@ async def _process_slack_message_update(
         )
         return
     event_data["thread_id"] = thread_id
+    event_data["thread_version"] = await common.increment_slack_thread_version(
+        langgraph_client, channel_id, thread_ts, str(event_data.get("event_ts") or "")
+    )
     channel_context = await common._get_slack_channel_context(channel_id)
     event_data["channel_context"] = channel_context
     repo_config = await common.get_slack_repo_config(

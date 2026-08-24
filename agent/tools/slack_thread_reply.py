@@ -11,6 +11,7 @@ from ..utils.slack import (
     get_active_slack_thread,
     get_slack_thread_version,
     post_slack_thread_reply_with_ts,
+    slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
 from ..utils.thread_ops import langgraph_client as get_langgraph_client
@@ -76,30 +77,31 @@ async def slack_thread_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    current_version = await get_slack_thread_version(client, channel_id, thread_ts)
-    if thread_version != current_version:
-        return {
-            "success": False,
-            "error": "Slack thread version mismatch",
-            "expected_thread_version": current_version,
-            "provided_thread_version": thread_version,
-            "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
-        }
+    async with slack_thread_mutation_lock(client, channel_id, thread_ts):
+        current_version = await get_slack_thread_version(client, channel_id, thread_ts)
+        if thread_version != current_version:
+            return {
+                "success": False,
+                "error": "Slack thread version mismatch",
+                "expected_thread_version": current_version,
+                "provided_thread_version": thread_version,
+                "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
+            }
 
-    message = convert_mentions_to_slack_format(message)
-    slack_blocks = blocks or _build_option_blocks(message, options)
-    usage = summarize_run_usage(state)
-    message_ts, slack_error = await _post_and_store_mapping(
-        channel_id,
-        thread_ts,
-        message,
-        blocks=slack_blocks,
-        usage=usage,
-        agent_thread_id=thread_id if isinstance(thread_id, str) else None,
-        langgraph_client=client,
-        run_id=run_id,
-        triggering_user_id=_triggering_user_id(configurable),
-    )
+        message = convert_mentions_to_slack_format(message)
+        slack_blocks = blocks or _build_option_blocks(message, options)
+        usage = summarize_run_usage(state)
+        message_ts, slack_error = await _post_and_store_mapping(
+            channel_id,
+            thread_ts,
+            message,
+            blocks=slack_blocks,
+            usage=usage,
+            agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+            langgraph_client=client,
+            run_id=run_id,
+            triggering_user_id=_triggering_user_id(configurable),
+        )
     if message_ts is None:
         return {
             "success": False,

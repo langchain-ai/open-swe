@@ -902,6 +902,18 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-lock-ack",
         ),
         _tool_step(
+            "Waiting for a reaction that must not invalidate the thread version.",
+            "execute",
+            {"command": "sleep 3"},
+            "call-lock-reaction-wait",
+        ),
+        _tool_step(
+            "Confirming a reaction did not invalidate the thread version.",
+            "slack_thread_reply",
+            {"message": "A reaction did not invalidate the thread version."},
+            "call-lock-reaction-reply",
+        ),
+        _tool_step(
             "Waiting for a newer Slack message.",
             "execute",
             {"command": "sleep 5"},

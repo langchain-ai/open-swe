@@ -20,7 +20,9 @@ async function botTexts(request: APIRequestContext): Promise<string[]> {
     text: string;
     is_bot: boolean;
   }>;
-  return messages.filter((message) => message.is_bot).map((message) => message.text);
+  return messages
+    .filter((message) => message.is_bot)
+    .map((message) => message.text);
 }
 
 async function stateText(
@@ -55,6 +57,19 @@ test("a stale Slack reply fails, re-reads the thread, and then succeeds", async 
       timeout: 30_000,
     })
     .toContain("Optimistic lock flow started.");
+
+  const reaction = await request.post("/mock/slack/reaction", {
+    data: { thread_ts: opened.thread_ts, reaction: "eyes" },
+  });
+  expect(await reaction.json()).toEqual({
+    status: "ignored",
+    reason: "Reaction not tracked for feedback",
+  });
+  await expect
+    .poll(async () => (await botTexts(request)).join("\n"), {
+      timeout: 30_000,
+    })
+    .toContain("A reaction did not invalidate the thread version.");
 
   const intervening = await send(request, {
     text: "<@U_BOB> adding new context while Open SWE is working",

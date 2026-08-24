@@ -1,6 +1,9 @@
+import asyncio
 from typing import Any
 
+import httpx
 import pytest
+from langgraph_sdk.errors import ConflictError
 
 from agent.utils.slack import (
     SlackThreadMappingError,
@@ -11,6 +14,7 @@ from agent.utils.slack import (
     lookup_slack_run_message_mapping,
     lookup_slack_thread_id,
     resolve_slack_thread_id,
+    slack_thread_mutation_lock,
     store_slack_message_run_mapping,
     store_slack_run_mapping,
 )
@@ -53,6 +57,16 @@ class _Store:
 class _Threads:
     def __init__(self, matches: list[dict[str, Any]] | None = None) -> None:
         self.matches = matches or []
+        self.lock_ids: set[str] = set()
+
+    async def create(self, *, thread_id: str, **_kwargs: Any) -> None:
+        if thread_id in self.lock_ids:
+            response = httpx.Response(409, request=httpx.Request("POST", "http://test/threads"))
+            raise ConflictError("already exists", response=response, body=None)
+        self.lock_ids.add(thread_id)
+
+    async def delete(self, thread_id: str) -> None:
+        self.lock_ids.discard(thread_id)
 
     async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self.matches
@@ -84,6 +98,33 @@ async def test_thread_version_counts_distinct_inbound_messages() -> None:
     assert await increment_slack_thread_version(client, "C1", "1.0", "1.2") == 2
     assert await get_slack_thread_version(client, "C1", "1.0") == 2
     assert await get_slack_thread_version(client, "C1", "2.0") == 0
+
+
+@pytest.mark.asyncio
+async def test_thread_mutation_lock_serializes_same_thread() -> None:
+    client: Any = _Client()
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    second_entered = asyncio.Event()
+
+    async def first() -> None:
+        async with slack_thread_mutation_lock(client, "C1", "1.0"):
+            first_entered.set()
+            await release_first.wait()
+
+    async def second() -> None:
+        await first_entered.wait()
+        async with slack_thread_mutation_lock(client, "C1", "1.0"):
+            second_entered.set()
+
+    first_task = asyncio.create_task(first())
+    second_task = asyncio.create_task(second())
+    await first_entered.wait()
+    await asyncio.sleep(0.01)
+    assert second_entered.is_set() is False
+    release_first.set()
+    await asyncio.gather(first_task, second_task)
+    assert second_entered.is_set() is True
 
 
 @pytest.mark.asyncio

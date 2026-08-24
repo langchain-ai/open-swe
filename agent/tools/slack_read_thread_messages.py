@@ -56,6 +56,9 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
 
     clean_channel_id = channel_id.strip()
     clean_message_ts = message_ts.strip()
+    thread_version = await get_slack_thread_version(
+        langgraph_client(), clean_channel_id, clean_message_ts
+    )
     result = await _fetch_and_format(clean_channel_id, clean_message_ts)
     if not result.get("success"):
         return {
@@ -64,7 +67,5 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
             "that channel, or the message may have been deleted.",
         }
 
-    result["thread_version"] = await get_slack_thread_version(
-        langgraph_client(), clean_channel_id, clean_message_ts
-    )
+    result["thread_version"] = thread_version
     return result
