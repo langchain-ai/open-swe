@@ -1,8 +1,6 @@
 import { graphRequest } from "./graph"
 import { projectsFile, readProjects } from "./project-store"
 import {
-  
-  
   captureCheckpoint,
   checkpointRef,
   currentBranch,
@@ -10,10 +8,10 @@ import {
   readBranchDiff,
   readDiff,
   repoRoot,
-  repositoryMetadata
+  repositoryMetadata,
 } from "./git-diff"
 import { threadStore } from "./thread-store"
-import type {Diff, RepositoryMetadata} from "./git-diff";
+import type { Diff, RepositoryMetadata } from "./git-diff"
 import type { LocalThread } from "./thread-store"
 
 export interface LocalDiff extends Diff {

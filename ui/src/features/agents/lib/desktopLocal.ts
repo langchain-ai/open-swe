@@ -2,15 +2,14 @@ import { useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type { DesktopLocalActivity } from "@/desktop"
-import type {LocalThread} from "@/features/agents/lib/localQueries";
+import type { LocalThread } from "@/features/agents/lib/localQueries"
 import {
-  
   localActivityQuery,
   localBranchDiffQuery,
   localDiffQuery,
   localKeys,
   localThreadQuery,
-  localThreadsQuery
+  localThreadsQuery,
 } from "@/features/agents/lib/localQueries"
 import { getLocalThread } from "@/features/agents/lib/localFunctions"
 import { isLocalRuntime } from "@/lib/desktop-local-mode"

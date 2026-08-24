@@ -1,14 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import type {LocalProject} from "@/features/agents/lib/localQueries";
+import type { LocalProject } from "@/features/agents/lib/localQueries"
 import {
   addLocalProject,
   removeLocalProject,
 } from "@/features/agents/lib/localFunctions"
 import {
-  
   localKeys,
-  localProjectsQuery
+  localProjectsQuery,
 } from "@/features/agents/lib/localQueries"
 
 const NO_PROJECTS: Array<LocalProject> = []
