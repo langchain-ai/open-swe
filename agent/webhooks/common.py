@@ -109,8 +109,10 @@ from ..utils.slack import (
     get_slack_channel_description,
     get_slack_channel_info,
     get_slack_permalink,
+    get_slack_thread_version,  # noqa: F401
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
+    increment_slack_thread_version,  # noqa: F401
     is_slack_channel_named,
     lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401

@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
 
+from ..utils.thread_ops import langgraph_client as get_langgraph_client
 from . import common
 from . import slack as service
 
@@ -51,7 +52,7 @@ async def _process_slack_message_update(
     message_ts: str,
     user_id: str,
 ) -> None:
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = get_langgraph_client()
     thread_id, delivered_message = await _lookup_delivered_message_update(
         langgraph_client,
         channel_id,
@@ -67,6 +68,9 @@ async def _process_slack_message_update(
         )
         return
     event_data["thread_id"] = thread_id
+    event_data["thread_version"] = await common.increment_slack_thread_version(
+        langgraph_client, channel_id, thread_ts, str(event_data.get("event_ts") or "")
+    )
     channel_context = await common._get_slack_channel_context(channel_id)
     event_data["channel_context"] = channel_context
     repo_config = await common.get_slack_repo_config(
@@ -239,6 +243,21 @@ async def slack_webhook(
             )
         )
         if not should_handle_message:
+            langgraph_client = get_langgraph_client()
+            mapped_thread_id = await common.lookup_slack_thread_id(
+                langgraph_client, channel_id, thread_ts
+            )
+            if (
+                mapped_thread_id
+                and user_id != bot_user_id
+                and event.get("subtype") != "bot_message"
+                and not event.get("bot_id")
+                and updated_message.get("subtype") != "bot_message"
+                and not updated_message.get("bot_id")
+            ):
+                await common.increment_slack_thread_version(
+                    langgraph_client, channel_id, thread_ts, original_message_ts
+                )
             return {"status": "ignored", "reason": "Not an app mention, DM, or plan reply"}
 
     if (
@@ -276,7 +295,7 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Slack update queued"}
         return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = get_langgraph_client()
     thread_id: str | None = None
     channel_context = await common._get_slack_channel_context(channel_id)
 
@@ -326,6 +345,9 @@ async def slack_webhook(
             thread_id=thread_id,
         )
         if await common.claim_slack_event(event_id, channel_id, event_ts):
+            event_data["thread_version"] = await common.increment_slack_thread_version(
+                langgraph_client, channel_id, thread_ts, original_message_ts
+            )
             background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
             return {"status": "accepted", "message": "Slack mention queued"}
 
@@ -382,7 +404,7 @@ async def slack_interactivity(
             return {"status": "ignored", "reason": "Missing workflow approval context"}
 
         thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            get_langgraph_client(), channel_id, thread_ts
         )
         if not thread_id:
             return {"status": "ignored", "reason": "Slack thread is not associated"}
@@ -472,7 +494,7 @@ async def slack_interactivity(
             return {"status": "ignored", "reason": "Missing Slack action context"}
 
         thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            get_langgraph_client(), channel_id, thread_ts
         )
         if not thread_id:
             return {"status": "ignored", "reason": "Slack thread is not associated"}
@@ -542,9 +564,7 @@ async def slack_interactivity(
     if not channel_id or not thread_ts or not event_ts or not user_id:
         return {"status": "ignored", "reason": "Missing Slack action context"}
 
-    thread_id = await common.lookup_slack_thread_id(
-        common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
-    )
+    thread_id = await common.lookup_slack_thread_id(get_langgraph_client(), channel_id, thread_ts)
     if not thread_id:
         return {"status": "ignored", "reason": "Slack thread is not associated"}
     channel_context = await common._get_slack_channel_context(channel_id)
