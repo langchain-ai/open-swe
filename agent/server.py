@@ -101,6 +101,7 @@ from .middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
+    StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
@@ -1688,6 +1689,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
+                StableToolResultOrderMiddleware(),
                 # Innermost, so the deadline covers the provider call itself and a
                 # timeout escalates outward to the fallback model.
                 ModelCallTimeoutMiddleware(),
