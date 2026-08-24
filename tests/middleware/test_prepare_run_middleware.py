@@ -102,7 +102,7 @@ async def test_prepare_prompt_injection():
     assert message.findtext("content") == "prepared prompt"
 
 
-def test_sender_context_updates_only_latest_human_message():
+def test_sender_context_arrives_as_its_own_message():
     first = HumanMessage("first", id="first")
     latest = HumanMessage(
         content=[{"type": "text", "text": "second"}],
@@ -110,37 +110,50 @@ def test_sender_context_updates_only_latest_human_message():
         name="participant",
     )
 
-    updated = PrepareAgentRunMiddleware._sender_context_message(
+    messages = PrepareAgentRunMiddleware._sender_context_messages(
         cast(PrepareRunState, {"messages": [first, latest]}),
         "sender",
     )
 
-    assert updated is not None
-    assert updated.id == latest.id
-    assert updated.name == latest.name
     assert first.content == "first"
-    assert updated.content == [
-        {"type": "text", "text": "second"},
-        {"type": "text", "text": "<sender_context>\nsender\n</sender_context>"},
-    ]
+    assert latest.content == [{"type": "text", "text": "second"}]
+    assert messages
+    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
+    assert envelope.attrib["sender"] == "system:sender-context"
+    assert envelope.attrib["kind"] == "system"
+    assert envelope.findtext("content") == "sender"
 
 
-def test_sender_context_goes_inside_the_envelope():
-    envelope = human_input(
-        "ship it <now> & fast",
-        {"sender_id": "slack:U1", "surface": "slack", "kind": "human"},
+def test_sender_context_escapes_untrusted_identity_text():
+    message = HumanMessage(
+        content=cast(
+            str,
+            human_input(
+                "ship it <now> & fast",
+                {"sender_id": "slack:U1", "surface": "slack", "kind": "human"},
+            )["content"],
+        ),
+        id="turn",
     )
-    message = HumanMessage(content=cast(str, envelope["content"]), id="turn")
+    original = message.content
 
-    updated = PrepareAgentRunMiddleware._sender_context_message(
+    messages = PrepareAgentRunMiddleware._sender_context_messages(
         cast(PrepareRunState, {"messages": [message]}),
         "identity: 'ramon' & <team>",
     )
 
-    assert updated is not None
-    root = ElementTree.fromstring(cast(str, updated.content))
-    assert root.findtext("content") == "ship it <now> & fast"
-    assert root.findtext("sender_context") == "identity: 'ramon' & <team>"
+    assert message.content == original
+    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
+    assert envelope.findtext("content") == "identity: 'ramon' & <team>"
+
+
+def test_sender_context_skipped_without_a_human_message():
+    assert (
+        PrepareAgentRunMiddleware._sender_context_messages(
+            cast(PrepareRunState, {"messages": []}), "sender"
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio

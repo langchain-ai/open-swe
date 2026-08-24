@@ -29,7 +29,7 @@ async def test_restores_dynamic_context_after_compaction() -> None:
 
     assert handler.await_args is not None
     forwarded = handler.await_args.args[0]
-    assert forwarded.messages == [context, summary]
+    assert forwarded.messages == [summary, context]
 
 
 async def test_injects_each_dynamic_context_hash_at_most_once() -> None:
@@ -47,3 +47,20 @@ async def test_injects_each_dynamic_context_hash_at_most_once() -> None:
     forwarded = handler.await_args.args[0]
     hashes = [dynamic_context_hash(message.content) for message in forwarded.messages]
     assert len([value for value in hashes if value is not None]) == 1
+
+
+async def test_restored_context_is_appended_not_prepended() -> None:
+    """A block at the head shifts every cached byte after it; the tail costs only itself."""
+    context = _context_message()
+    latest = HumanMessage(content="latest")
+    request = ModelRequest(
+        model=AsyncMock(),
+        messages=[latest],
+        state={"messages": [context, HumanMessage(content="old"), latest]},
+    )
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="ok")]))
+
+    await DynamicContextMiddleware().awrap_model_call(request, handler)
+
+    assert handler.await_args is not None
+    assert handler.await_args.args[0].messages == [latest, context]

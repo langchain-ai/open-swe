@@ -25,5 +25,8 @@ class DynamicContextMiddleware(AgentMiddleware):
             effective_hashes.add(context_hash)
             restored.append(message)
         if restored:
-            request = request.override(messages=[*restored, *request.messages])
+            # Appended, never prepended: a context block introduced at the head
+            # shifts every byte after it and costs the whole cached prefix, while
+            # the same block at the tail costs only itself.
+            request = request.override(messages=[*request.messages, *restored])
         return await handler(request)
