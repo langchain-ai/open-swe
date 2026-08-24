@@ -239,6 +239,11 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["agent_effort"] == "medium"
     assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
     assert configurable["prepare_run_id"]
+    messages = enriched["params"]["input"]["messages"]
+    assert messages[-1]["content"].startswith(
+        '<input-message sender="github:octocat" surface="web" kind="human">'
+    )
+    assert "<content>Fix the flaky test</content>" in messages[-1]["content"]
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"

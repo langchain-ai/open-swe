@@ -1602,6 +1602,8 @@ async def _enrich_run_start_command(
     command_images = _dashboard_images_from_content(content)
     prepare_run_id = str(uuid.uuid4())
     overrides: dict[str, Any] = {"prepare_run_id": prepare_run_id}
+    run_model: str | None = None
+    run_effort: str | None = None
 
     if creating:
         # First ``run.start`` for a client-minted thread id: stamp the full
@@ -1628,12 +1630,13 @@ async def _enrich_run_start_command(
             ),
         )
         metadata = thread_metadata(thread)
-        if command_images:
-            resolved_model = metadata.get("resolved_model")
-            resolved_effort = metadata.get("resolved_effort")
-            if isinstance(resolved_model, str) and isinstance(resolved_effort, str):
-                overrides["agent_model_id"] = resolved_model
-                overrides["agent_effort"] = resolved_effort
+        run_model = _metadata_model_id(metadata)
+        resolved_effort = metadata.get("resolved_effort")
+        if isinstance(resolved_effort, str):
+            run_effort = resolved_effort
+        if command_images and run_model and run_effort:
+            overrides["agent_model_id"] = run_model
+            overrides["agent_effort"] = run_effort
         elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
@@ -1649,11 +1652,13 @@ async def _enrich_run_start_command(
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
-        if content is None:
-            content = ""
-        sender_id = f"github:{login}"
-        injected = injected_dynamic_context_hashes_from_metadata(metadata)
-        persisted_message_ids: set[str] = set()
+
+    if content is None:
+        content = ""
+    sender_id = f"github:{login}"
+    injected = injected_dynamic_context_hashes_from_metadata(metadata)
+    persisted_message_ids: set[str] = set()
+    if not creating:
         try:
             prior_state = await client.threads.get_state(thread_id)
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
@@ -1669,79 +1674,75 @@ async def _enrich_run_start_command(
                     }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-        person: PersonIdentity = {
-            "id": sender_id,
-            "platform": "github",
-            "github_login": login,
-        }
-        if email:
-            person["email"] = email
-        structured = build_input_messages(
-            content,
-            {"sender_id": sender_id, "surface": "web", "kind": "human"},
-            people=[person],
-            systems=(
-                [
-                    {
-                        "id": "system:dashboard-handoff",
-                        "display_name": "Dashboard handoff",
-                        "platform": "open-swe",
-                    }
-                ]
-                if metadata.get("source") == "slack"
-                else None
-            ),
-            injected_dynamic_context_hashes=injected,
+    person: PersonIdentity = {
+        "id": sender_id,
+        "platform": "github",
+        "github_login": login,
+    }
+    if email:
+        person["email"] = email
+    structured = build_input_messages(
+        content,
+        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        people=[person],
+        systems=(
+            [
+                {
+                    "id": "system:dashboard-handoff",
+                    "display_name": "Dashboard handoff",
+                    "platform": "open-swe",
+                }
+            ]
+            if metadata.get("source") == "slack"
+            else None
+        ),
+        injected_dynamic_context_hashes=injected,
+    )
+    if metadata.get("source") == "slack":
+        structured.insert(
+            -1,
+            build_input_messages(
+                DASHBOARD_HANDOFF_BODY,
+                {
+                    "sender_id": "system:dashboard-handoff",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                injected_dynamic_context_hashes={"system:dashboard-handoff"},
+            )[0],
         )
-        if metadata.get("source") == "slack":
-            structured.insert(
-                -1,
-                build_input_messages(
-                    DASHBOARD_HANDOFF_BODY,
-                    {
-                        "sender_id": "system:dashboard-handoff",
-                        "surface": "automation",
-                        "kind": "system",
-                    },
-                    injected_dynamic_context_hashes={"system:dashboard-handoff"},
-                )[0],
-            )
-        # Keep the id the SDK minted for the submitted message: it reconciles
-        # the optimistic bubble with the server's echo, and a fresh id leaves
-        # both rendered.
-        client_message_id = _command_message_id(params)
-        if client_message_id and client_message_id not in persisted_message_ids:
-            structured[-1]["id"] = client_message_id
-        run_input = params.get("input")
-        if isinstance(run_input, dict):
-            run_input["messages"] = structured
-        metadata_update: dict[str, Any] = {
-            "source": _DASHBOARD_SOURCE,
-            "plan_mode": plan_mode_requested,
-            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
-                metadata.get(PARTICIPANT_LOGINS_KEY), login
-            ),
-            "injected_dynamic_context_hashes": sorted(injected),
-        }
-        if command_images and run_model and run_effort:
-            overrides["agent_model_id"] = run_model
-            overrides["agent_effort"] = run_effort
-            metadata_update["model"] = run_model
-            metadata_update["effort"] = run_effort
-            metadata_update["resolved_model"] = run_model
-            metadata_update["resolved_effort"] = run_effort
-        elif chosen_model and chosen_effort:
-            overrides["agent_model_id"] = chosen_model
-            overrides["agent_effort"] = chosen_effort
-            metadata_update["model"] = chosen_model
-            metadata_update["effort"] = chosen_effort
-        if _is_thread_resolved(metadata):
-            metadata_update["resolved"] = False
-            metadata_update["resolved_at_ms"] = None
-        if metadata_update:
-            metadata_update["updated_at_ms"] = _now_ms()
-            metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata)
+    client_message_id = _command_message_id(params)
+    if client_message_id and client_message_id not in persisted_message_ids:
+        structured[-1]["id"] = client_message_id
+    run_input = params.get("input")
+    if isinstance(run_input, dict):
+        run_input["messages"] = structured
+    metadata_update: dict[str, Any] = {
+        "source": _DASHBOARD_SOURCE,
+        "plan_mode": plan_mode_requested,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
+        "injected_dynamic_context_hashes": sorted(injected),
+    }
+    if command_images and run_model and run_effort:
+        overrides["agent_model_id"] = run_model
+        overrides["agent_effort"] = run_effort
+        metadata_update["model"] = run_model
+        metadata_update["effort"] = run_effort
+        metadata_update["resolved_model"] = run_model
+        metadata_update["resolved_effort"] = run_effort
+    elif chosen_model and chosen_effort:
+        overrides["agent_model_id"] = chosen_model
+        overrides["agent_effort"] = chosen_effort
+        metadata_update["model"] = chosen_model
+        metadata_update["effort"] = chosen_effort
+    if _is_thread_resolved(metadata):
+        metadata_update["resolved"] = False
+        metadata_update["resolved_at_ms"] = None
+    metadata_update["updated_at_ms"] = _now_ms()
+    metadata = {**metadata, **metadata_update}
+    await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
