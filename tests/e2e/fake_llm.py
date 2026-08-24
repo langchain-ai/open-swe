@@ -39,6 +39,14 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+_THREAD_VERSION_RE = re.compile(r"Thread version: (\d+)")
+
+
+def _thread_version_args(messages: list[BaseMessage]) -> dict[str, int]:
+    match = _THREAD_VERSION_RE.search("\n".join(_text(message.content) for message in messages))
+    return {"thread_version": int(match.group(1)) if match else 0}
+
+
 _SETUP_SCRIPT = f"""
 set -e
 rm -rf repo
@@ -217,15 +225,21 @@ def _dynamic_step(factory: StepFactory) -> StepSpec:
 
 
 def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
-    if step.factory is not None:
-        return step.factory(messages)
-    return AIMessage(
-        content=step.content,
-        tool_calls=[
-            {"name": call.name, "args": dict(call.args), "id": call.call_id}
-            for call in step.tool_calls
-        ],
+    message = (
+        step.factory(messages)
+        if step.factory is not None
+        else AIMessage(
+            content=step.content,
+            tool_calls=[
+                {"name": call.name, "args": dict(call.args), "id": call.call_id}
+                for call in step.tool_calls
+            ],
+        )
     )
+    for call in message.tool_calls:
+        if call["name"] == "slack_thread_reply":
+            call["args"].update(_thread_version_args(messages))
+    return message
 
 
 def _text(content: Any) -> str:

@@ -40,6 +40,7 @@ def _new_slack_context(
     return {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
+        "thread_version": 0,
         "triggering_user_id": current.get("triggering_user_id", ""),
         "triggering_user_name": current.get("triggering_user_name", ""),
         "triggering_user_email": current.get("triggering_user_email", ""),

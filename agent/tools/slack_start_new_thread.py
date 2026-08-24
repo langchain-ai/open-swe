@@ -139,7 +139,8 @@ async def _run_prompt(
         "Use this repository unless the instructions below clearly identify a different repository.\n\n"
         "## Source Slack Thread\n"
         f"- Channel: {channel_id}\n"
-        f"- Thread TS: {thread_ts}\n\n"
+        f"- Thread TS: {thread_ts}\n"
+        "- Thread version: 0\n\n"
         f"{await _run_links_section(thread_id)}\n\n"
         "## Breakout Instructions\n"
         f"{instructions}"
@@ -155,6 +156,7 @@ def _new_slack_thread_context(
     return {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
+        "thread_version": 0,
         "triggering_user_id": original.get("triggering_user_id", ""),
         "triggering_user_name": original.get("triggering_user_name", ""),
         "triggering_user_email": original.get("triggering_user_email", ""),

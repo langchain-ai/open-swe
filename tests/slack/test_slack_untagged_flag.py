@@ -127,6 +127,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
+    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", AsyncMock(return_value=1))
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     # The two-party gate would admit these messages on its own.

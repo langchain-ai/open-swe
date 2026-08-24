@@ -45,6 +45,8 @@ SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
 SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
 SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
 SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
+_SLACK_THREAD_VERSION_NAMESPACE = "slack_thread_versions"
+_SLACK_THREAD_VERSION_PAGE_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -1029,6 +1031,45 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
+
+
+def _slack_thread_version_namespace(channel_id: str, thread_ts: str) -> tuple[str, str, str]:
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    return (_SLACK_THREAD_VERSION_NAMESPACE, channel, timestamp.replace(".", "_"))
+
+
+async def get_slack_thread_version(
+    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
+) -> int:
+    """Return the number of distinct inbound messages recorded for a Slack thread."""
+    namespace = _slack_thread_version_namespace(channel_id, thread_ts)
+    offset = 0
+    version = 0
+    while True:
+        response = await langgraph_client.store.search_items(
+            namespace, limit=_SLACK_THREAD_VERSION_PAGE_SIZE, offset=offset
+        )
+        items = response.get("items") if isinstance(response, Mapping) else None
+        page = items if isinstance(items, list) else []
+        version += len(page)
+        if len(page) < _SLACK_THREAD_VERSION_PAGE_SIZE:
+            return version
+        offset += len(page)
+
+
+async def increment_slack_thread_version(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+) -> int:
+    """Record one inbound Slack message and return the resulting thread version."""
+    message_key = message_ts.strip()
+    if not _SLACK_MESSAGE_TS_RE.fullmatch(message_key):
+        raise ValueError("A valid Slack message timestamp is required")
+    namespace = _slack_thread_version_namespace(channel_id, thread_ts)
+    await langgraph_client.store.put_item(namespace, message_key, {"message_ts": message_key})
+    return await get_slack_thread_version(langgraph_client, channel_id, thread_ts)
 
 
 async def fetch_slack_thread_message_by_ts(
