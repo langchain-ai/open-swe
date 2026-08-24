@@ -1,7 +1,8 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import {
+  IoCopyOutline,
   IoDesktopOutline,
   IoLogOutOutline,
   IoMoonOutline,
@@ -13,6 +14,11 @@ import type { SessionUser } from "@/lib/api"
 import type { Theme } from "@/lib/theme"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { api } from "@/lib/api"
+import {
+  getDatadogSessionLink,
+  isDatadogRumInitialized,
+  subscribeToDatadogInitialization,
+} from "@/lib/datadog"
 import { clearCachedRepos } from "@/lib/repoCache"
 import { useTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
@@ -40,6 +46,14 @@ export function SidebarUserMenu({
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
   const [open, setOpen] = useState(false)
+  const [datadogCopyStatus, setDatadogCopyStatus] = useState<
+    "idle" | "copied" | "error"
+  >("idle")
+  const datadogInitialized = useSyncExternalStore(
+    subscribeToDatadogInitialization,
+    isDatadogRumInitialized,
+    () => false
+  )
   const ref = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -64,6 +78,21 @@ export function SidebarUserMenu({
     clearCachedRepos()
     qc.setQueryData(["session"], null)
     navigate({ to: "/login" })
+  }
+
+  const copyDatadogSessionLink = async () => {
+    const currentLink = getDatadogSessionLink()
+    if (!currentLink || !navigator.clipboard) {
+      setDatadogCopyStatus("error")
+    } else {
+      try {
+        await navigator.clipboard.writeText(currentLink)
+        setDatadogCopyStatus("copied")
+      } catch {
+        setDatadogCopyStatus("error")
+      }
+    }
+    window.setTimeout(() => setDatadogCopyStatus("idle"), 1500)
   }
 
   const initials = (user.login || "?").slice(0, 2).toUpperCase()
@@ -126,6 +155,21 @@ export function SidebarUserMenu({
             </div>
           </div>
           <div className="my-1 h-px bg-border" />
+          {datadogInitialized && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void copyDatadogSessionLink()}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+            >
+              <IoCopyOutline className="size-3.5" />
+              {datadogCopyStatus === "copied"
+                ? "Copied Datadog link"
+                : datadogCopyStatus === "error"
+                  ? "Couldn't copy Datadog link"
+                  : "Copy Datadog link"}
+            </button>
+          )}
           {showSettingsLink && (
             <Link
               to="/my-settings"

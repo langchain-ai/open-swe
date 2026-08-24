@@ -68,6 +68,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.4.1
         version: 1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@datadog/browser-rum':
+        specifier: 7.9.0
+        version: 7.9.0
       '@fontsource-variable/ibm-plex-sans':
         specifier: ^5.3.0
         version: 5.3.0
@@ -457,6 +460,23 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@datadog/browser-core@7.9.0':
+    resolution: {integrity: sha512-pGgMbVVtoWJeQ6xiH5r266Fk256e0ihdCIZEF402rQTjyn0t2zBc0TYn5CqgDtF9En66HepzW5oNjPbCXDazSw==}
+
+  '@datadog/browser-rum-core@7.9.0':
+    resolution: {integrity: sha512-h60o6/MLIiNGYXtt55/mcIsFKmBqRWReN3A9aR+gLuXUi9EsdABnnUxA/h9NuL0JG/YCu9NYJVHxsLmPk28C8Q==}
+
+  '@datadog/browser-rum@7.9.0':
+    resolution: {integrity: sha512-mgieKqTr5TP/5Z1sTPDtxZ08sdufTPtNCbu2lj9saNH25/+1Q/ZTjSRhKeUKtWMP8/P6OE8kfyC7BM3z47RlKw==}
+    peerDependencies:
+      '@datadog/browser-logs': 7.9.0
+    peerDependenciesMeta:
+      '@datadog/browser-logs':
+        optional: true
+
+  '@datadog/js-core@0.0.10':
+    resolution: {integrity: sha512-QZfHnRgdcr68mKrtoAIqSSAID5g6fbSh7sh5xmolUhlbUIUDV/OSrTEQm0IpSFfgUzLWz29Tf1kzprxVEA2XdA==}
 
   '@dotenvx/dotenvx@1.75.1':
     resolution: {integrity: sha512-/BITOC9dmS/edY2zQwZNicQ059O6RKabtQfyEafV0nGtfYRNHYy1DIPiYVcov40+tob9hfmBnbR963dS+EQ1DQ==}
@@ -6310,6 +6330,23 @@ snapshots:
       css-tree: 3.2.1
 
   '@csstools/css-tokenizer@4.0.0': {}
+
+  '@datadog/browser-core@7.9.0':
+    dependencies:
+      '@datadog/js-core': 0.0.10
+
+  '@datadog/browser-rum-core@7.9.0':
+    dependencies:
+      '@datadog/browser-core': 7.9.0
+      '@datadog/js-core': 0.0.10
+
+  '@datadog/browser-rum@7.9.0':
+    dependencies:
+      '@datadog/browser-core': 7.9.0
+      '@datadog/browser-rum-core': 7.9.0
+      '@datadog/js-core': 0.0.10
+
+  '@datadog/js-core@0.0.10': {}
 
   '@dotenvx/dotenvx@1.75.1':
     dependencies:
