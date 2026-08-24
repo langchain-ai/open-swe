@@ -1,6 +1,9 @@
 """Load optional integration tool schemas only when requested."""
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware.types import (
@@ -16,13 +19,34 @@ from langgraph.prebuilt import InjectedState
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
 
+logger = logging.getLogger(__name__)
+
 
 def _merge_tool_names(current: list[str], update: list[str]) -> list[str]:
     return sorted(set(current) | set(update))
 
 
+@dataclass(frozen=True)
+class IntegrationGroup:
+    """A connected integration, described by name and built on request.
+
+    Only the names reach the model up front. Building the tools is what costs —
+    an MCP handshake, a credential round trip — so it waits until the agent asks
+    for the group rather than running before the run's first model call.
+    """
+
+    tool_names: Sequence[str]
+    load: Callable[[], Awaitable[Sequence[BaseTool]]]
+
+
 class DynamicToolState(AgentState):
     loaded_integration_tools: NotRequired[Annotated[list[str], _merge_tool_names]]
+
+
+@dataclass
+class _Resolved:
+    tools: dict[str, BaseTool] = field(default_factory=dict)
+    done: bool = False
 
 
 class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
@@ -32,28 +56,35 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
 
     def __init__(
         self,
-        groups: Mapping[str, Sequence[BaseTool]],
+        groups: Mapping[str, IntegrationGroup | Sequence[BaseTool]],
         reserved_names: Collection[str] = (),
     ) -> None:
-        self._tools_by_name: dict[str, BaseTool] = {}
         reserved = {"load_integration_tools", *reserved_names}
+        self._groups: dict[str, IntegrationGroup] = {}
+        self._group_of: dict[str, str] = {}
+        self._resolved: dict[str, _Resolved] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
         catalog: list[str] = []
-        for group, tools in groups.items():
+
+        for group, spec in groups.items():
+            entry = spec if isinstance(spec, IntegrationGroup) else _eager_group(spec)
             names: list[str] = []
-            for tool in tools:
-                if tool.name in reserved or tool.name in self._tools_by_name:
-                    raise ValueError(f"Duplicate integration tool name: {tool.name}")
-                self._tools_by_name[tool.name] = tool
-                names.append(tool.name)
-            if names:
-                catalog.append(f"- {group}: {', '.join(sorted(names))}")
+            for name in entry.tool_names:
+                if name in reserved or name in self._group_of:
+                    raise ValueError(f"Duplicate integration tool name: {name}")
+                self._group_of[name] = group
+                names.append(name)
+            if not names:
+                continue
+            self._groups[group] = entry
+            catalog.append(f"- {group}: {', '.join(sorted(names))}")
 
         async def load_integration_tools(
             tool_names: list[str],
             state: Annotated[DynamicToolState | None, InjectedState] = None,
             tool_call_id: Annotated[str, InjectedToolCallId] = "",
         ) -> Command:
-            unknown = sorted(set(tool_names) - self._tools_by_name.keys())
+            unknown = sorted(set(tool_names) - self._group_of.keys())
             if unknown:
                 return Command(
                     update={
@@ -66,12 +97,27 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
                         ]
                     }
                 )
+            missing = await self._build(tool_names)
+            if missing:
+                return Command(
+                    update={
+                        "messages": [
+                            ToolMessage(
+                                content=(
+                                    "These integration tools are unavailable right now: "
+                                    f"{', '.join(missing)}. Continue without them."
+                                ),
+                                tool_call_id=tool_call_id,
+                                status="error",
+                            )
+                        ]
+                    }
+                )
             loaded = set(state.get("loaded_integration_tools", [])) if state else set()
             loaded.update(tool_names)
-            names = sorted(loaded)
             return Command(
                 update={
-                    "loaded_integration_tools": names,
+                    "loaded_integration_tools": sorted(loaded),
                     "messages": [
                         ToolMessage(
                             content=(
@@ -97,6 +143,39 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
             )
         ]
 
+    @property
+    def has_groups(self) -> bool:
+        return bool(self._groups)
+
+    async def _resolve(self, group: str) -> dict[str, BaseTool]:
+        resolved = self._resolved.setdefault(group, _Resolved())
+        if resolved.done:
+            return resolved.tools
+        lock = self._locks.setdefault(group, asyncio.Lock())
+        async with lock:
+            if resolved.done:
+                return resolved.tools
+            try:
+                tools = await self._groups[group].load()
+            except Exception:
+                logger.warning("Failed to load %s integration tools", group, exc_info=True)
+                tools = []
+            resolved.tools = {tool.name: tool for tool in tools}
+            resolved.done = True
+        return resolved.tools
+
+    async def _build(self, names: Sequence[str]) -> list[str]:
+        """Build the groups behind ``names``; return the names that did not appear."""
+        wanted = {self._group_of[name] for name in names if name in self._group_of}
+        await asyncio.gather(*(self._resolve(group) for group in sorted(wanted)))
+        return sorted(name for name in names if self._tool(name) is None)
+
+    def _tool(self, name: str) -> BaseTool | None:
+        group = self._group_of.get(name)
+        if group is None:
+            return None
+        return self._resolved.get(group, _Resolved()).tools.get(name)
+
     async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         return {"loaded_integration_tools": Overwrite([])}
 
@@ -106,7 +185,9 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         loaded = self._loaded_names(request.state)
-        tools = [self._tools_by_name[name] for name in loaded if name in self._tools_by_name]
+        if loaded:
+            await self._build(loaded)
+        tools = [tool for name in loaded if (tool := self._tool(name)) is not None]
         return await handler(request.override(tools=[*request.tools, *tools]))
 
     async def awrap_tool_call(
@@ -115,12 +196,19 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
         name = request.tool_call["name"]
-        tool = self._tools_by_name.get(name)
-        if tool is None:
+        if name not in self._group_of:
             return await handler(request)
         if name not in self._loaded_names(request.state):
             return ToolMessage(
                 content=f"Load {name} with load_integration_tools before calling it.",
+                tool_call_id=request.tool_call["id"],
+                status="error",
+            )
+        await self._build([name])
+        tool = self._tool(name)
+        if tool is None:
+            return ToolMessage(
+                content=f"{name} is unavailable right now. Continue without it.",
                 tool_call_id=request.tool_call["id"],
                 status="error",
             )
@@ -130,3 +218,12 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
     def _loaded_names(state: Mapping[str, Any]) -> list[str]:
         loaded = state.get("loaded_integration_tools", [])
         return loaded if isinstance(loaded, list) else []
+
+
+def _eager_group(tools: Sequence[BaseTool]) -> IntegrationGroup:
+    """Wrap tools that are already built, so both forms share one code path."""
+
+    async def load() -> Sequence[BaseTool]:
+        return tools
+
+    return IntegrationGroup(tool_names=[tool.name for tool in tools], load=load)

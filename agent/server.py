@@ -82,7 +82,11 @@ from .input_messages import (
     build_input_messages,
     dynamic_context_hashes_from_messages,
 )
-from .integrations.corridor_mcp import load_corridor_tools
+from .integrations.corridor_mcp import (
+    CORRIDOR_TOOL_NAMES,
+    corridor_configured,
+    load_corridor_tools,
+)
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import (
@@ -98,6 +102,7 @@ from .middleware import (
     DynamicContextMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
+    IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
@@ -1587,19 +1592,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = configurable.get("stop_summary") is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
     observability_tools: list[Any] = []
-    corridor_tools: list[Any] = []
     browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
-        observability_tools, corridor_tools, (currents_tools, notion_tools) = await asyncio.gather(
+        observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.observability_tools",
                 lambda: _observability_tools_for(config, profile_login),
             ),
-            _phase_result(thread_id, "factory.corridor_tools", _load_corridor_mcp_tools),
             _phase_result(
                 thread_id,
                 "factory.integration_tools",
@@ -1661,17 +1664,25 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if not _slack_tools_enabled(configurable):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
-    integration_tool_groups = {
-        "Corridor": corridor_tools,
+    integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Observability": observability_tools,
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
-    if any(integration_tool_groups.values()):
-        dynamic_tool_middleware = DynamicToolMiddleware(
+    # Corridor's catalog is a static allowlist, so the MCP handshake that used to
+    # run before every first model call now waits until the agent asks for it.
+    if not stop_summary_mode and not local_run and corridor_configured():
+        integration_tool_groups["Corridor"] = IntegrationGroup(
+            tool_names=CORRIDOR_TOOL_NAMES,
+            load=_load_corridor_mcp_tools,
+        )
+    if integration_tool_groups:
+        candidate = DynamicToolMiddleware(
             integration_tool_groups,
             reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
         )
+        if candidate.has_groups:
+            dynamic_tool_middleware = candidate
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -1748,7 +1759,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
-                    corridor_enabled=bool(corridor_tools),
+                    corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
