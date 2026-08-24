@@ -15,7 +15,7 @@ from agent.utils.sandbox_state import get_or_create_sandbox_backend_proxy
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failing_step", ["_configure_git_identity", "client.threads.update"])
+@pytest.mark.parametrize("failing_step", ["_create_sandbox_with_proxy", "client.threads.update"])
 async def test_initialization_failure_publishes_nothing(failing_step: str) -> None:
     thread_id = "thread-init-fails"
     SANDBOX_BACKENDS.clear()
@@ -24,7 +24,7 @@ async def test_initialization_failure_publishes_nothing(failing_step: str) -> No
     created.id = "sandbox-new"
 
     steps = {
-        "_configure_git_identity": AsyncMock(),
+        "_create_sandbox_with_proxy": AsyncMock(return_value=created),
         "client.threads.update": AsyncMock(),
     }
     steps[failing_step].side_effect = RuntimeError("initialization failed")
@@ -35,12 +35,7 @@ async def test_initialization_failure_publishes_nothing(failing_step: str) -> No
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch(
-            "agent.server._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=created,
-        ),
-        patch("agent.server._configure_git_identity", steps["_configure_git_identity"]),
+        patch("agent.server._create_sandbox_with_proxy", steps["_create_sandbox_with_proxy"]),
         patch("agent.server.client.threads.update", steps["client.threads.update"]),
         pytest.raises(RuntimeError, match="initialization failed"),
     ):

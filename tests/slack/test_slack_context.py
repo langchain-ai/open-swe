@@ -900,9 +900,17 @@ def _setup_slack_mention_fakes(
     async def fake_resolve_slack_thread_id(client, channel_id, thread_ts):
         return "mapped-thread"
 
+    async def fake_increment_slack_thread_version(*_args) -> int:
+        return 1
+
     monkeypatch.setattr(webhook_common, "post_slack_trace_reply", fake_post_slack_trace_reply)
+    monkeypatch.setattr(
+        webhook_common, "increment_slack_thread_version", fake_increment_slack_thread_version
+    )
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", fake_resolve_slack_thread_id)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClientForProcess())
+    client = _FakeLangGraphClientForProcess()
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_webhooks, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
     monkeypatch.setattr(webhook_common, "refresh_user_mapping_cache", fake_refresh_cache)
@@ -1012,6 +1020,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert kwargs["durability"] == "sync"
     slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
     assert slack_thread_context["thread_ts"] == thread_ts
+    assert slack_thread_context["thread_version"] == 1
     assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
     messages = kwargs["input"]["messages"]
     entities = [
@@ -1040,6 +1049,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     )
     assert prompt.count("## Slack Thread") == 1
     assert f"Thread TS: {thread_ts}" in prompt
+    assert "Thread version: 1" in prompt
     assert "## Open SWE Links" in prompt
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt
     assert "- Trace: https://smith/x" in prompt

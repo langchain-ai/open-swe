@@ -12,6 +12,7 @@ import logging
 import os
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -81,7 +82,11 @@ from .input_messages import (
     build_input_messages,
     dynamic_context_hashes_from_messages,
 )
-from .integrations.corridor_mcp import load_corridor_tools
+from .integrations.corridor_mcp import (
+    CORRIDOR_TOOL_NAMES,
+    corridor_configured,
+    load_corridor_tools,
+)
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import (
@@ -97,6 +102,7 @@ from .middleware import (
     DynamicContextMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
+    IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
@@ -374,31 +380,37 @@ async def _create_sandbox_with_proxy(
         else:
             sandbox_backend = await create_sandbox(snapshot_id=snapshot_id, **resources)
 
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
-    if sandbox_type == "langsmith":
-        async with aphase(thread_id, "sandbox.proxy_token"):
-            token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-        if not token:
-            msg = "Cannot configure proxy: GitHub App installation token is unavailable"
-            logger.error(msg)
-            raise ValueError(msg)
-        proxy_config = _get_sandbox_proxy_config(create_params)
-        async with aphase(thread_id, "sandbox.proxy_configure"):
-            if proxy_config is not None:
-                await _configure_github_proxy(
-                    sandbox_backend.id,
-                    token,
-                    base_proxy_config=proxy_config,
-                )
-            else:
-                await _configure_github_proxy(sandbox_backend.id, token)
-        record_proxy_token_expiry(
-            thread_id,
-            expires_at,
-            repositories=github_proxy_repositories,
-            permissions=permissions,
-            base_proxy_config=proxy_config,
-        )
+    identity = _start_git_identity(thread_id, sandbox_backend)
+    failed = True
+    try:
+        sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+        if sandbox_type == "langsmith":
+            async with aphase(thread_id, "sandbox.proxy_token"):
+                token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+            if not token:
+                msg = "Cannot configure proxy: GitHub App installation token is unavailable"
+                logger.error(msg)
+                raise ValueError(msg)
+            proxy_config = _get_sandbox_proxy_config(create_params)
+            async with aphase(thread_id, "sandbox.proxy_configure"):
+                if proxy_config is not None:
+                    await _configure_github_proxy(
+                        sandbox_backend.id,
+                        token,
+                        base_proxy_config=proxy_config,
+                    )
+                else:
+                    await _configure_github_proxy(sandbox_backend.id, token)
+            record_proxy_token_expiry(
+                thread_id,
+                expires_at,
+                repositories=github_proxy_repositories,
+                permissions=permissions,
+                base_proxy_config=proxy_config,
+            )
+        failed = False
+    finally:
+        await _settle_git_identity(identity, failed=failed)
 
     return sandbox_backend
 
@@ -477,6 +489,33 @@ async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> No
     )
 
 
+def _start_git_identity(
+    thread_id: str | None, sandbox_backend: SandboxBackendProtocol
+) -> asyncio.Task[None]:
+    """Write the bot identity while the proxy is being configured.
+
+    The identity needs the box, not the proxy, and the cost is the round trip
+    rather than the two `git config` calls — on a cold sandbox that round trip
+    is over a second of the critical path before the first model call.
+    """
+
+    async def run() -> None:
+        async with aphase(thread_id, "sandbox.git_identity"):
+            await _configure_git_identity(sandbox_backend)
+
+    return asyncio.create_task(run())
+
+
+async def _settle_git_identity(task: asyncio.Task[None], *, failed: bool) -> None:
+    """Join the identity write, or drop it when its sandbox is already lost."""
+    if failed:
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+        return
+    await task
+
+
 async def _connect_existing_sandbox(
     thread_id: str,
     *,
@@ -505,13 +544,20 @@ async def _connect_existing_sandbox(
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-    return await _refresh_github_proxy_or_fail(
-        sandbox_backend,
-        thread_id,
-        github_proxy_token,
-        github_proxy_repositories,
-        base_proxy_config,
-    )
+    identity = _start_git_identity(thread_id, sandbox_backend)
+    failed = True
+    try:
+        refreshed = await _refresh_github_proxy_or_fail(
+            sandbox_backend,
+            thread_id,
+            github_proxy_token,
+            github_proxy_repositories,
+            base_proxy_config,
+        )
+        failed = False
+    finally:
+        await _settle_git_identity(identity, failed=failed)
+    return refreshed
 
 
 async def ensure_sandbox_for_thread(
@@ -622,9 +668,6 @@ async def ensure_sandbox_for_thread(
                     thread_id, sandbox_id, str(create_exc)
                 ) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
-
-    async with aphase(thread_id, "sandbox.git_identity"):
-        await _configure_git_identity(sandbox_backend)
 
     # Bind the thread only once the sandbox is created and initialized: a run
     # that dies earlier leaves no id to reconnect to, so the next run creates
@@ -1549,19 +1592,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = configurable.get("stop_summary") is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
     observability_tools: list[Any] = []
-    corridor_tools: list[Any] = []
     browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
-        observability_tools, corridor_tools, (currents_tools, notion_tools) = await asyncio.gather(
+        observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.observability_tools",
                 lambda: _observability_tools_for(config, profile_login),
             ),
-            _phase_result(thread_id, "factory.corridor_tools", _load_corridor_mcp_tools),
             _phase_result(
                 thread_id,
                 "factory.integration_tools",
@@ -1623,17 +1664,25 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if not _slack_tools_enabled(configurable):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
-    integration_tool_groups = {
-        "Corridor": corridor_tools,
+    integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Observability": observability_tools,
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
-    if any(integration_tool_groups.values()):
-        dynamic_tool_middleware = DynamicToolMiddleware(
+    # Corridor's catalog is a static allowlist, so the MCP handshake that used to
+    # run before every first model call now waits until the agent asks for it.
+    if not stop_summary_mode and not local_run and corridor_configured():
+        integration_tool_groups["Corridor"] = IntegrationGroup(
+            tool_names=CORRIDOR_TOOL_NAMES,
+            load=_load_corridor_mcp_tools,
+        )
+    if integration_tool_groups:
+        candidate = DynamicToolMiddleware(
             integration_tool_groups,
             reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
         )
+        if candidate.has_groups:
+            dynamic_tool_middleware = candidate
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -1710,7 +1759,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
-                    corridor_enabled=bool(corridor_tools),
+                    corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
