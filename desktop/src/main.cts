@@ -519,13 +519,18 @@ async function proxyBackendRequest(request) {
   const body = ["GET", "HEAD"].includes(request.method)
     ? undefined
     : request.body;
-  const upstream = await fetch(targetUrl, {
-    method: request.method,
-    headers,
-    body,
-    redirect: "manual",
-    ...(body ? { duplex: "half" } : {}),
-  });
+  let upstream;
+  try {
+    upstream = await fetch(targetUrl, {
+      method: request.method,
+      headers,
+      body,
+      redirect: "manual",
+      ...(body ? { duplex: "half" } : {}),
+    });
+  } catch {
+    return new Response("Backend is unavailable", { status: 502 });
+  }
   await storeResponseCookies(targetUrl, upstream);
 
   const location = upstream.headers.get("location");
