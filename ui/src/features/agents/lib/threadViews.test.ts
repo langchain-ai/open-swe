@@ -51,28 +51,6 @@ describe("groupThreadsForView", () => {
     ).toEqual(threads.map((item) => item.id).sort())
   })
 
-  it("uses the canonical status order without treating resolved as a status", () => {
-    const groups = groupThreadsForView(
-      [
-        thread({ status: "idle", resolved: true }),
-        thread({ status: "error" }),
-        thread({ status: "interrupted" }),
-        thread({ status: "finished" }),
-        thread({ status: "running" }),
-      ],
-      "status"
-    )
-
-    expect(groups.map((group) => group.key)).toEqual([
-      "running",
-      "finished",
-      "interrupted",
-      "error",
-      "idle",
-    ])
-    expect(groups.at(-1)?.threads[0]?.resolved).toBe(true)
-  })
-
   it("groups dynamic repositories alphabetically with an empty fallback", () => {
     const groups = groupThreadsForView(
       [

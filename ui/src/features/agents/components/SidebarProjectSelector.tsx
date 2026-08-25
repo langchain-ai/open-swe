@@ -26,11 +26,11 @@ export function SidebarProjectSelector({
   onAddProject,
   onRemoveProject,
 }: {
-  projects: Array<DesktopProject>
+  projects: Array<Pick<DesktopProject, "cwd" | "name">>
   selectedProjectPath: string | null
   onSelectProject: (cwd: string | null) => void
-  onAddProject: () => void
-  onRemoveProject: (cwd: string) => void
+  onAddProject?: () => void
+  onRemoveProject?: (cwd: string) => void
 }) {
   const selectedProject = projects.find(
     (project) => project.cwd === selectedProjectPath
@@ -70,7 +70,7 @@ export function SidebarProjectSelector({
               </MenuItem>
             ))}
           </MenuGroup>
-          {projects.length > 0 && (
+          {projects.length > 0 && onRemoveProject && (
             <>
               <MenuSeparator />
               <MenuSub>
@@ -98,15 +98,17 @@ export function SidebarProjectSelector({
           )}
         </MenuPopup>
       </Menu>
-      <button
-        aria-label="Add project"
-        className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-        onClick={onAddProject}
-        title="Add project"
-        type="button"
-      >
-        <FolderPlusIcon className="size-4" />
-      </button>
+      {onAddProject && (
+        <button
+          aria-label="Add project"
+          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+          onClick={onAddProject}
+          title="Add project"
+          type="button"
+        >
+          <FolderPlusIcon className="size-4" />
+        </button>
+      )}
     </div>
   )
 }

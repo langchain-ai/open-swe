@@ -260,22 +260,12 @@ describe("groupThreadsByMode", () => {
       "date"
     )
     expect(sections.map((s) => s.key)).toEqual(["today", "last7", "older"])
-    expect(sections.find((s) => s.key === "last7")?.defaultCollapsed).toBe(true)
+    expect(sections.find((s) => s.key === "last7")?.defaultCollapsed).toBe(
+      false
+    )
     expect(sections.find((s) => s.key === "today")?.defaultCollapsed).toBe(
       false
     )
-  })
-
-  it("groups by status in a fixed order", () => {
-    const sections = groupThreadsByMode(
-      [
-        makeThread({ status: "idle" }),
-        makeThread({ status: "running" }),
-        makeThread({ status: "error" }),
-      ],
-      "status"
-    )
-    expect(sections.map((s) => s.key)).toEqual(["running", "error", "idle"])
   })
 
   it("groups by repo alphabetically with a fallback label", () => {
@@ -295,9 +285,9 @@ describe("groupThreadsByMode", () => {
   })
 
   it("sorts threads within a section by creation time", () => {
-    const older = makeThread({ status: "idle", createdAt: 1, updatedAt: 3 })
-    const newer = makeThread({ status: "idle", createdAt: 2, updatedAt: 2 })
-    const [section] = groupThreadsByMode([older, newer], "status")
+    const older = makeThread({ createdAt: 1, updatedAt: 3 })
+    const newer = makeThread({ createdAt: 2, updatedAt: 2 })
+    const [section] = groupThreadsByMode([older, newer], "none")
     expect(section?.threads).toEqual([newer, older])
   })
 })

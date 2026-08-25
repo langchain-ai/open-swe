@@ -2,7 +2,7 @@ import { groupThreads } from "./api"
 import { groupThreadsForView } from "./threadViews"
 import type { AgentSource, AgentStatus, AgentThread } from "./types"
 
-export type SidebarGroupMode = "none" | "focus" | "date" | "status" | "repo"
+export type SidebarGroupMode = "none" | "focus" | "date" | "repo"
 
 export type SidebarOwnership = "all" | "mine" | "shared"
 
@@ -37,7 +37,6 @@ export const GROUP_MODE_OPTIONS: Array<{
   { value: "focus", label: "Focus" },
   { value: "repo", label: "Project" },
   { value: "date", label: "Date" },
-  { value: "status", label: "Status" },
   { value: "none", label: "None" },
 ]
 
@@ -173,22 +172,6 @@ export function reconcilePinnedAttentionThread(
   return activeAttentionThread
 }
 
-const STATUS_GROUP_ORDER: Array<AgentStatus> = [
-  "running",
-  "finished",
-  "interrupted",
-  "error",
-  "idle",
-]
-
-const STATUS_GROUP_LABEL: Record<AgentStatus, string> = {
-  running: "Running",
-  finished: "Finished",
-  interrupted: "Interrupted",
-  error: "Error",
-  idle: "Idle",
-}
-
 function sortedByCreation(threads: Array<AgentThread>): Array<AgentThread> {
   return [...threads].sort((a, b) => b.createdAt - a.createdAt)
 }
@@ -247,7 +230,7 @@ export function groupThreadsByMode(
           key: "last7",
           label: "Last 7 days",
           threads: groups.last7,
-          collapsed: true,
+          collapsed: false,
         },
         {
           key: "last30",
@@ -270,23 +253,6 @@ export function groupThreadsByMode(
         threads: section.threads,
         defaultCollapsed: section.collapsed,
       }))
-  }
-
-  if (mode === "status") {
-    const byStatus = new Map<AgentStatus, Array<AgentThread>>()
-    for (const thread of threads) {
-      const list = byStatus.get(thread.status) ?? []
-      list.push(thread)
-      byStatus.set(thread.status, list)
-    }
-    return STATUS_GROUP_ORDER.filter((status) => byStatus.has(status)).map(
-      (status) => ({
-        key: status,
-        label: STATUS_GROUP_LABEL[status],
-        threads: sortedByCreation(byStatus.get(status) ?? []),
-        defaultCollapsed: false,
-      })
-    )
   }
 
   const byRepo = new Map<string, Array<AgentThread>>()

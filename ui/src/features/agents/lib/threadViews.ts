@@ -1,13 +1,7 @@
-import type { AgentSource, AgentStatus, AgentThread } from "./types"
+import type { AgentSource, AgentThread } from "./types"
 
 export type ThreadsLayout = "board" | "list"
-export type ThreadGrouping =
-  | "focus"
-  | "status"
-  | "repo"
-  | "source"
-  | "pr"
-  | "none"
+export type ThreadGrouping = "focus" | "repo" | "source" | "pr" | "none"
 
 export interface ThreadViewGroup {
   key: string
@@ -20,7 +14,6 @@ export const THREAD_GROUPING_OPTIONS: Array<{
   label: string
 }> = [
   { value: "focus", label: "Focus" },
-  { value: "status", label: "Status" },
   { value: "repo", label: "Repository" },
   { value: "source", label: "Source" },
   { value: "pr", label: "Pull request" },
@@ -33,22 +26,6 @@ const FOCUS_GROUPS = [
   { key: "ready", label: "Ready" },
   { key: "done", label: "Done" },
 ]
-
-const STATUS_ORDER: Array<AgentStatus> = [
-  "running",
-  "finished",
-  "interrupted",
-  "error",
-  "idle",
-]
-
-const STATUS_LABELS: Record<AgentStatus, string> = {
-  running: "Running",
-  finished: "Finished",
-  interrupted: "Interrupted",
-  error: "Error",
-  idle: "Idle",
-}
 
 const SOURCE_ORDER: Array<AgentSource> = [
   "dashboard",
@@ -122,13 +99,6 @@ export function groupThreadsForView(
   }
   if (grouping === "focus") {
     return buildGroups(FOCUS_GROUPS, threads, focusKey)
-  }
-  if (grouping === "status") {
-    return buildGroups(
-      STATUS_ORDER.map((key) => ({ key, label: STATUS_LABELS[key] })),
-      threads,
-      (thread) => thread.status
-    )
   }
   if (grouping === "source") {
     return buildGroups(

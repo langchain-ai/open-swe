@@ -10,7 +10,6 @@ const GROUP_MODES: ReadonlyArray<SidebarGroupMode> = [
   "none",
   "focus",
   "date",
-  "status",
   "repo",
 ]
 

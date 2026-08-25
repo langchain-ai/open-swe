@@ -23,7 +23,7 @@ import {
 import { Kanban } from "lucide-react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
@@ -217,6 +217,9 @@ export function AgentsSidebar({
       (a, b) => a.localeCompare(b)
     ),
   }
+  const cloudProjects = facets.repos.map((repo) => ({ cwd: repo, name: repo }))
+  const selectedCloudProject =
+    prefs.filters.repos.length === 1 ? (prefs.filters.repos[0] ?? null) : null
   const filteredActive = filterThreads(activeThreads, prefs.filters)
   const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
   const showResolved = prefs.filters.includeResolved
@@ -269,6 +272,37 @@ export function AgentsSidebar({
     isDesktop && (localOnly || desktopThreadSource === "local")
   const showCloudThreads =
     !localOnly && (!isDesktop || desktopThreadSource === "cloud")
+  const cloudScrollRef = useRef<HTMLDivElement>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const target = loadMoreRef.current
+    const root = cloudScrollRef.current
+    if (!target || !root || (!activeHasMore && !resolvedHasMore)) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return
+        if (activeHasMore && !sidebar.activeQuery.isFetchingNextPage) {
+          void sidebar.activeQuery.fetchNextPage()
+        }
+        if (
+          showResolved &&
+          resolvedHasMore &&
+          !sidebar.resolvedQuery.isFetchingNextPage
+        ) {
+          void sidebar.resolvedQuery.fetchNextPage()
+        }
+      },
+      { root, rootMargin: "200px" }
+    )
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [
+    activeHasMore,
+    resolvedHasMore,
+    showResolved,
+    sidebar.activeQuery,
+    sidebar.resolvedQuery,
+  ])
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -400,81 +434,76 @@ export function AgentsSidebar({
           </div>
         )}
         {showCloudThreads && (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {sidebar.isPending && (
-              <ThreadListSkeleton compact={prefs.compact} />
-            )}
-            {!sidebar.isPending &&
-              (prefs.group === "none"
-                ? sections[0]?.threads.map((thread) => (
-                    <ThreadRow
-                      key={thread.id}
-                      thread={thread}
-                      isActive={thread.id === activeThreadId}
-                      onNavigate={layout.closeOnMobile}
-                      compact={prefs.compact}
-                    />
-                  ))
-                : sections.map((section) => (
-                    <ThreadGroup
-                      key={`${prefs.group}:${section.key}`}
-                      label={section.label}
-                      threads={section.threads}
-                      activeThreadId={activeThreadId}
-                      onNavigate={layout.closeOnMobile}
-                      defaultCollapsed={section.defaultCollapsed}
-                      compact={prefs.compact}
-                      hasMore={
-                        prefs.group === "focus" && section.key === "done"
-                          ? resolvedHasMore
-                          : false
-                      }
-                      count={
-                        prefs.group === "focus" && section.key === "done"
-                          ? filteredResolved.length
-                          : section.threads.length
-                      }
-                    />
-                  )))}
-            {!sidebar.isPending && activeHasMore && (
-              <LoadMoreThreadsButton
-                label="Load more threads"
-                loading={sidebar.activeQuery.isFetchingNextPage}
-                onClick={() => void sidebar.activeQuery.fetchNextPage()}
-              />
-            )}
-            {!sidebar.isPending &&
-              showResolved &&
-              prefs.group === "focus" &&
-              resolvedHasMore && (
-                <LoadMoreThreadsButton
-                  label="Load more resolved threads"
-                  loading={sidebar.resolvedQuery.isFetchingNextPage}
-                  onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <SidebarProjectSelector
+              projects={cloudProjects}
+              selectedProjectPath={selectedCloudProject}
+              onSelectProject={(repo) =>
+                setFilters({ ...prefs.filters, repos: repo ? [repo] : [] })
+              }
+            />
+            <div
+              ref={cloudScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto"
+            >
+              {sidebar.isPending && (
+                <ThreadListSkeleton compact={prefs.compact} />
+              )}
+              {!sidebar.isPending &&
+                (prefs.group === "none"
+                  ? sections[0]?.threads.map((thread) => (
+                      <ThreadRow
+                        key={thread.id}
+                        thread={thread}
+                        isActive={thread.id === activeThreadId}
+                        onNavigate={layout.closeOnMobile}
+                        compact={prefs.compact}
+                      />
+                    ))
+                  : sections.map((section) => (
+                      <ThreadGroup
+                        key={`${prefs.group}:${section.key}`}
+                        label={section.label}
+                        threads={section.threads}
+                        activeThreadId={activeThreadId}
+                        onNavigate={layout.closeOnMobile}
+                        defaultCollapsed={section.defaultCollapsed}
+                        compact={prefs.compact}
+                        hasMore={
+                          prefs.group === "focus" && section.key === "done"
+                            ? resolvedHasMore
+                            : false
+                        }
+                        count={
+                          prefs.group === "focus" && section.key === "done"
+                            ? filteredResolved.length
+                            : section.threads.length
+                        }
+                      />
+                    )))}
+
+              {showResolved && prefs.group !== "focus" && (
+                <ResolvedThreadGroup
+                  threads={filteredResolved}
+                  hasMore={resolvedHasMore}
+                  activeThreadId={activeThreadId}
+                  onNavigate={layout.closeOnMobile}
+                  compact={prefs.compact}
                 />
               )}
-            {showResolved && prefs.group !== "focus" && (
-              <ResolvedThreadGroup
-                threads={filteredResolved}
-                hasMore={resolvedHasMore}
-                activeThreadId={activeThreadId}
-                onNavigate={layout.closeOnMobile}
-                compact={prefs.compact}
-                onLoadMore={() => void sidebar.resolvedQuery.fetchNextPage()}
-                isLoadingMore={sidebar.resolvedQuery.isFetchingNextPage}
-              />
-            )}
-            {resolvedLoading && (
-              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-                <CircleNotchIcon className="size-3.5 animate-spin" />
-                Loading resolved threads…
-              </div>
-            )}
-            {isCloudEmpty && (
-              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
-                No threads match these filters.
-              </p>
-            )}
+              {resolvedLoading && (
+                <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+                  <CircleNotchIcon className="size-3.5 animate-spin" />
+                  Loading resolved threads…
+                </div>
+              )}
+              {isCloudEmpty && (
+                <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+                  No threads match these filters.
+                </p>
+              )}
+              <div ref={loadMoreRef} className="h-px" />
+            </div>
           </div>
         )}
       </div>
@@ -853,16 +882,12 @@ function ResolvedThreadGroup({
   activeThreadId,
   onNavigate,
   compact = false,
-  onLoadMore,
-  isLoadingMore,
 }: {
   threads: Array<AgentThread>
   hasMore: boolean
   activeThreadId?: string
   onNavigate?: () => void
   compact?: boolean
-  onLoadMore: () => void
-  isLoadingMore: boolean
 }) {
   const [collapsed, setCollapsed] = useState(true)
   if (threads.length === 0 && !hasMore) return null
@@ -895,38 +920,9 @@ function ResolvedThreadGroup({
               compact={compact}
             />
           ))}
-          {hasMore && (
-            <LoadMoreThreadsButton
-              label="Load more resolved threads"
-              loading={isLoadingMore}
-              onClick={onLoadMore}
-            />
-          )}
         </>
       )}
     </div>
-  )
-}
-
-function LoadMoreThreadsButton({
-  label,
-  loading,
-  onClick,
-}: {
-  label: string
-  loading: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      className="mt-0.5 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground disabled:cursor-wait disabled:opacity-60"
-    >
-      {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
-      {loading ? "Loading…" : label}
-    </button>
   )
 }
 
