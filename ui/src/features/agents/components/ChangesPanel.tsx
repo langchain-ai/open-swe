@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import {
   ChevronDownIcon,
+  GitBranchIcon,
   GitPullRequestIcon,
   RefreshCwIcon,
 } from "lucide-react"
@@ -191,12 +192,23 @@ export function ChangesPanel({
               onScopeChange={onScopeChange}
             />
             {branch && (
-              <span
-                className="min-w-0 truncate text-xs text-muted-foreground @max-[520px]:hidden"
-                title={branch}
-              >
-                {branch}
-              </span>
+              <>
+                <span
+                  className="min-w-0 truncate text-xs text-muted-foreground @max-[520px]:hidden"
+                  title={branch}
+                >
+                  {branch}
+                </span>
+                <Tooltip>
+                  <TooltipTrigger
+                    aria-label={`Branch: ${branch}`}
+                    className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent @max-[520px]:flex"
+                  >
+                    <GitBranchIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup>{branch}</TooltipPopup>
+                </Tooltip>
+              </>
             )}
           </div>
         }
