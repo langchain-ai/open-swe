@@ -141,6 +141,7 @@ def test_registry_configuration_fails_closed_outside_local_mode(
         "POSTGRES_URI",
         "OPEN_SWE_LOCAL_ONLY",
         "OPEN_SWE_REGISTRY_SQLITE_PATH",
+        "LANGSMITH_LANGGRAPH_API_VARIANT",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -151,3 +152,19 @@ def test_registry_configuration_fails_closed_outside_local_mode(
     assert isinstance(_build_registry(), PostgresRegistry)
     monkeypatch.setenv("OPEN_SWE_LOCAL_ONLY", "1")
     assert isinstance(_build_registry(), SqliteRegistry)
+
+
+def test_langgraph_dev_uses_file_backed_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "DATABASE_URL",
+        "POSTGRES_URI",
+        "OPEN_SWE_LOCAL_ONLY",
+        "OPEN_SWE_REGISTRY_SQLITE_PATH",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LANGSMITH_LANGGRAPH_API_VARIANT", "local_dev")
+
+    registry = _build_registry()
+
+    assert isinstance(registry, SqliteRegistry)
+    assert registry.path == ".langgraph_api/thread-registry.sqlite3"

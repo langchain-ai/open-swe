@@ -1454,9 +1454,13 @@ _registry_lock = asyncio.Lock()
 def _build_registry() -> ThreadRegistry:
     sqlite_path = os.environ.get("OPEN_SWE_REGISTRY_SQLITE_PATH")
     local_only = os.environ.get("OPEN_SWE_LOCAL_ONLY") == "1"
+    local_dev = os.environ.get("LANGSMITH_LANGGRAPH_API_VARIANT") == "local_dev"
     dsn = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URI")
-    if local_only or sqlite_path:
-        return SqliteRegistry(sqlite_path or ":memory:")
+    if local_only or local_dev or sqlite_path:
+        path = sqlite_path or (
+            ".langgraph_api/thread-registry.sqlite3" if local_dev else ":memory:"
+        )
+        return SqliteRegistry(path)
     if dsn:
         return PostgresRegistry(dsn)
     raise RuntimeError(
