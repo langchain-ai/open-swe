@@ -21,12 +21,7 @@ from ..utils.slack import (
 from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 from .admin import is_admin
-from .options import (
-    SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
-    gate_fable_model,
-    model_supports_effort,
-)
+from .options import gate_fable_model, normalize_model_choice
 from .profiles import get_profile, get_valid_access_token
 from .repo_access import repo_config_for_user, require_repo_access_for_user
 from .team_settings import get_team_fable_enabled
@@ -101,19 +96,6 @@ class ScheduleUpdateBody(BaseModel):
     @classmethod
     def _valid_slack_channel_id(cls, value: str | None) -> str | None:
         return _normalize_slack_channel_id(value)
-
-
-def _normalize_model_choice(
-    model_id: str | None, effort: str | None
-) -> tuple[str | None, str | None]:
-    if not isinstance(model_id, str):
-        return None, None
-    if model_id not in SUPPORTED_MODEL_IDS:
-        canonical = canonical_model_pair(model_id, effort)
-        return canonical if canonical is not None else (None, None)
-    if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
-        return None, None
-    return model_id, effort
 
 
 def _validate_cron_value(value: str, low: int, high: int) -> None:
@@ -317,7 +299,7 @@ async def create_agent_schedule(
         raise HTTPException(403, "admin only")
     await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
-    chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
+    chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     repo = await repo_config_for_user(login, body.repo)
     schedule_id = str(uuid.uuid4())
     now = now_iso()
@@ -385,7 +367,7 @@ async def update_agent_schedule(
     if body.repo is not None:
         patch["repo"] = await repo_config_for_user(login, body.repo)
     if body.model_id is not None or body.effort is not None:
-        model, effort = _normalize_model_choice(body.model_id, body.effort)
+        model, effort = normalize_model_choice(body.model_id, body.effort)
         if model and effort:
             patch["model"] = model
             patch["effort"] = effort
@@ -551,7 +533,7 @@ async def _agent_run_config(
             "schedule_id": record["id"],
             "schedule_name": record.get("name"),
         }
-    model, effort = _normalize_model_choice(record.get("model"), record.get("effort"))
+    model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
             model, effort, fable_enabled=await get_team_fable_enabled()
