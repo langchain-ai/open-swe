@@ -57,6 +57,8 @@ backend settings, login sessions, and projects are preserved.
 Install the workspace dependencies, then run the backend, desktop app, and web UI independently:
 
 ```bash
+pnpm install # from the repo root
+
 # terminal 1
 make dev
 
