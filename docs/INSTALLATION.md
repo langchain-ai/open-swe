@@ -618,7 +618,7 @@ invalidating already-stored GitHub tokens:
 Make sure ngrok is still running from step 2, then start the backend in a second terminal:
 
 ```bash
-make dev          # uv run langgraph dev --no-browser
+make dev          # uv run langgraph dev --no-browser --port 2024
 ```
 
 `langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
