@@ -453,7 +453,7 @@ export function useSidebarThreads({
   })
   const pinnedThread = activeThreadLoaded ? undefined : activeThreadQuery.data
   const activeItems =
-    pinnedThread && (!pinnedThread.resolved || !includeResolved)
+    pinnedThread && !pinnedThread.resolved
       ? [
           pinnedThread,
           ...loadedActive.filter((thread) => thread.id !== pinnedThread.id),
