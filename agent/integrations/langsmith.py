@@ -362,7 +362,9 @@ async def _patch_proxy_config(
     sandbox_name: str,
 ) -> None:
     attempt = 0
-    provisioning_waited = 0.0
+    provisioning_deadline = (
+        asyncio.get_running_loop().time() + PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS
+    )
     while True:
         try:
             response = await client.patch(
@@ -378,11 +380,8 @@ async def _patch_proxy_config(
             # it out here keeps a resume from being reported as an unreachable
             # sandbox, which ends the run.
             provisioning = _is_provisioning_proxy_config_error(exc)
-            exhausted = (
-                provisioning_waited >= PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS
-                if provisioning
-                else attempt >= PROXY_CONFIG_MAX_ATTEMPTS - 1
-            )
+            remaining = provisioning_deadline - asyncio.get_running_loop().time()
+            exhausted = remaining <= 0 if provisioning else attempt >= PROXY_CONFIG_MAX_ATTEMPTS - 1
             if exhausted or not _is_retryable_proxy_config_error(exc):
                 enriched = _with_response_body(exc)
                 if enriched is not None:
@@ -394,8 +393,10 @@ async def _patch_proxy_config(
                 else None
             )
             if provisioning:
-                delay = retry_after or PROXY_CONFIG_PROVISIONING_RETRY_DELAY_SECONDS
-                provisioning_waited += delay
+                delay = min(
+                    retry_after or PROXY_CONFIG_PROVISIONING_RETRY_DELAY_SECONDS,
+                    remaining,
+                )
                 logger.info(
                     "Sandbox %s is still provisioning; retrying GitHub proxy config in %.1fs",
                     sandbox_name,

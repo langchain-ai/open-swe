@@ -356,8 +356,17 @@ class TestConfigureGithubProxyWaitsOutProvisioning:
         with (
             patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
             patch("agent.integrations.langsmith.asyncio.sleep", new_callable=AsyncMock),
+            patch("agent.integrations.langsmith.asyncio.get_running_loop") as mock_get_loop,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
+            mock_get_loop.return_value.time.side_effect = [
+                0,
+                *range(
+                    0,
+                    int(PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS) + 1,
+                    int(PROXY_CONFIG_PROVISIONING_RETRY_DELAY_SECONDS),
+                ),
+            ]
             mock_client = MagicMock()
             provisioning = MagicMock()
             provisioning.raise_for_status.side_effect = error
@@ -373,11 +382,11 @@ class TestConfigureGithubProxyWaitsOutProvisioning:
             )
             assert mock_client.patch.call_count == expected_attempts + 1
 
-    async def test_honors_retry_after_over_the_default_poll(self) -> None:
+    async def test_caps_retry_after_at_the_provisioning_deadline(self) -> None:
         request = httpx.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
-        response = httpx.Response(409, request=request, headers={"Retry-After": "5"})
+        response = httpx.Response(409, request=request, headers={"Retry-After": "60"})
         error = httpx.HTTPStatusError("Conflict", request=request, response=response)
         with (
             patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
@@ -396,7 +405,9 @@ class TestConfigureGithubProxyWaitsOutProvisioning:
 
             await _configure_github_proxy("sandbox-abc", "token")
 
-            mock_sleep.assert_awaited_once_with(5.0)
+            assert mock_sleep.await_args.args[0] == pytest.approx(
+                PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS, abs=0.01
+            )
 
 
 class TestConfigureGithubProxyStartsStoppedSandbox:
