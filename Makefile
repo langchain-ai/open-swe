@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev desktop install-desktop install-checkout
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web desktop install-desktop install-checkout
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -8,7 +8,10 @@ all: help
 ######################
 
 dev:
-	uv run langgraph dev
+	uv run langgraph dev --no-browser --port 2024
+
+web:
+	pnpm run dev
 
 run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
@@ -75,8 +78,9 @@ typecheck:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
+	@echo 'web                          - run the dashboard web server'
 	@echo 'run                          - run webhook server'
-	@echo 'desktop                      - run the backend and Electron desktop app'
+	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
