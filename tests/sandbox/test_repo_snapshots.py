@@ -59,37 +59,32 @@ async def test_create_endpoint_returns_configuration_error() -> None:
     assert "base image missing" in exc.value.detail
 
 
+def _fake_store_client(stored: dict[str, object] | None) -> MagicMock:
+    client = MagicMock()
+    client.store.get_item = AsyncMock(return_value={"value": stored} if stored else None)
+    client.store.put_item = AsyncMock()
+    return client
+
+
 @pytest.mark.asyncio
 async def test_resolve_returns_snapshot_id_when_ready() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        return_value={"status": "ready", "snapshot_id": "snap-123"},
-    ):
-        result = await resolve_repo_snapshot_id("acme", "repo")
-    assert result == "snap-123"
+    client = _fake_store_client({"status": "ready", "snapshot_id": "snap-123"})
+    with patch("agent.store.store_client", return_value=client):
+        assert await resolve_repo_snapshot_id("acme", "repo") == "snap-123"
 
 
 @pytest.mark.asyncio
 async def test_resolve_returns_none_when_not_ready() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        return_value={"status": "building", "snapshot_id": "snap-123"},
-    ):
-        result = await resolve_repo_snapshot_id("acme", "repo")
-    assert result is None
+    client = _fake_store_client({"status": "building", "snapshot_id": "snap-123"})
+    with patch("agent.store.store_client", return_value=client):
+        assert await resolve_repo_snapshot_id("acme", "repo") is None
 
 
 @pytest.mark.asyncio
 async def test_resolve_returns_none_without_record() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        return_value=None,
-    ):
-        result = await resolve_repo_snapshot_id("acme", "repo")
-    assert result is None
+    client = _fake_store_client(None)
+    with patch("agent.store.store_client", return_value=client):
+        assert await resolve_repo_snapshot_id("acme", "repo") is None
 
 
 @pytest.mark.asyncio
@@ -100,71 +95,47 @@ async def test_resolve_returns_none_without_owner_or_name() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_swallows_errors() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("store down"),
-    ):
+    client = MagicMock()
+    client.store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
+    with patch("agent.store.store_client", return_value=client):
         assert await resolve_repo_snapshot_id("acme", "repo") is None
 
 
 @pytest.mark.asyncio
 async def test_create_repo_snapshot_puts_new_record() -> None:
-    mock_put = AsyncMock()
+    client = _fake_store_client(None)
     with (
         patch.dict("os.environ", {"REPO_SNAPSHOT_BASE_IMAGE": "ghcr.io/acme/base:1"}),
-        patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch("agent.dashboard.repo_snapshots._client") as mock_client,
+        patch("agent.store.store_client", return_value=client),
     ):
-        mock_client.return_value.store.put_item = mock_put
         record = await create_repo_snapshot("acme/repo", "octo")
     assert record["full_name"] == "acme/repo"
     assert record["status"] == "none"
     assert "FROM" in record["dockerfile"]
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["repo_snapshots"], "acme/repo", record)
 
 
 @pytest.mark.asyncio
 async def test_update_repo_snapshot_persists_fields() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
-            new_callable=AsyncMock,
-            return_value={"full_name": "acme/repo", "status": "none"},
-        ),
-        patch("agent.dashboard.repo_snapshots._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = _fake_store_client({"full_name": "acme/repo", "status": "none"})
+    with patch("agent.store.store_client", return_value=client):
         record = await update_repo_snapshot(
             "acme/repo",
             RepoSnapshotUpdate(dockerfile="FROM python:3.12-slim\n", vcpus=4),
         )
     assert record["dockerfile"] == "FROM python:3.12-slim\n"
     assert record["vcpus"] == 4
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["repo_snapshots"], "acme/repo", record)
 
 
 @pytest.mark.asyncio
 async def test_mark_building_sets_status() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
-            new_callable=AsyncMock,
-            return_value={"full_name": "acme/repo", "status": "ready"},
-        ),
-        patch("agent.dashboard.repo_snapshots._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = _fake_store_client({"full_name": "acme/repo", "status": "ready"})
+    with patch("agent.store.store_client", return_value=client):
         record = await mark_repo_snapshot_building("acme/repo")
     assert record["status"] == "building"
     assert record["build_started_at"]
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["repo_snapshots"], "acme/repo", record)
 
 
 def test_building_record_without_started_at_is_stale() -> None:

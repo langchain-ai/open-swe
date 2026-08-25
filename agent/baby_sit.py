@@ -12,6 +12,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 
 from .dispatch import dispatch_agent_run
+from .store import delete_value, get_value, now_iso, put_value, search_all_values
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_ci import (
     FAILING_CONCLUSIONS,
@@ -42,7 +43,7 @@ WATCH_LOCK_TTL_MINUTES = 5
 
 @asynccontextmanager
 async def _watch_lock(key: str) -> AsyncIterator[bool]:
-    client = _client()
+    client = get_client()
     lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:baby-sit-lock:{key}"))
     try:
         await client.threads.create(
@@ -89,10 +90,6 @@ class BabySitWatch(TypedDict):
     updated_at: str
 
 
-def _client():
-    return get_client()
-
-
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
 
@@ -101,25 +98,14 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _now_iso() -> str:
-    return _now().isoformat()
-
-
-def _value(item: object) -> BabySitWatch | None:
-    if isinstance(item, dict):
-        value = item.get("value")
-    else:
-        value = getattr(item, "value", None)
-    return cast(BabySitWatch, value) if isinstance(value, dict) else None
-
-
 async def get_watch(key: str) -> BabySitWatch | None:
-    return _value(await _client().store.get_item(WATCH_NAMESPACE, key))
+    value = await get_value(WATCH_NAMESPACE, key)
+    return cast(BabySitWatch, value) if value is not None else None
 
 
 async def _put_watch(watch: BabySitWatch) -> BabySitWatch:
-    updated: BabySitWatch = {**watch, "updated_at": _now_iso()}
-    await _client().store.put_item(WATCH_NAMESPACE, updated["key"], updated)
+    updated: BabySitWatch = {**watch, "updated_at": now_iso()}
+    await put_value(WATCH_NAMESPACE, updated["key"], updated)
     return updated
 
 
@@ -131,28 +117,12 @@ async def list_active_watches(
         filter["owner"] = owner.strip().lower()
     if repo:
         filter["repo"] = repo.strip().lower()
-
-    watches: list[BabySitWatch] = []
-    offset = 0
-    while True:
-        result = await _client().store.search_items(
-            WATCH_NAMESPACE,
-            filter=filter,
-            limit=100,
-            offset=offset,
-        )
-        items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-        if not items:
-            break
-        watches.extend(value for item in items if (value := _value(item)) is not None)
-        if len(items) < 100:
-            break
-        offset += len(items)
-    return watches
+    values = await search_all_values(WATCH_NAMESPACE, filter=filter)
+    return [cast(BabySitWatch, value) for value in values]
 
 
 async def _create_watch_cron(key: str) -> str:
-    cron = await _client().crons.create(
+    cron = await get_client().crons.create(
         "scheduler",
         schedule=WATCH_SCHEDULE,
         input={"task": "baby_sit", "watch_key": key},
@@ -167,7 +137,7 @@ async def _create_watch_cron(key: str) -> str:
 
 
 async def _ensure_watch_cron(key: str) -> str:
-    crons = await _client().crons.search(
+    crons = await get_client().crons.search(
         assistant_id="scheduler",
         metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
         limit=10,
@@ -180,7 +150,7 @@ async def _ensure_watch_cron(key: str) -> str:
     if cron_ids:
         for duplicate in cron_ids[1:]:
             try:
-                await _client().crons.delete(duplicate)
+                await get_client().crons.delete(duplicate)
             except Exception:
                 logger.warning("Failed to delete duplicate baby-sit cron %s", duplicate)
         return cron_ids[0]
@@ -202,7 +172,7 @@ async def start_watch(
     if existing and existing.get("active") and existing.get("thread_id") != thread_id:
         raise ValueError("This pull request is already monitored from another agent thread")
 
-    now = _now_iso()
+    now = now_iso()
     same_head = existing is not None and existing.get("head_sha") == head_sha
     watch: BabySitWatch = {
         "key": key,
@@ -239,10 +209,10 @@ async def start_watch(
             cron_id = watch.get("cron_id")
             if isinstance(cron_id, str) and cron_id:
                 try:
-                    await _client().crons.delete(cron_id)
+                    await get_client().crons.delete(cron_id)
                 except Exception:
                     logger.warning("Failed to roll back baby-sit cron %s", cron_id)
-            await _client().store.delete_item(WATCH_NAMESPACE, key)
+            await delete_value(WATCH_NAMESPACE, key)
         raise
 
 
@@ -253,13 +223,13 @@ async def stop_watch(key: str) -> bool:
     cron_id = watch.get("cron_id")
     if isinstance(cron_id, str) and cron_id:
         try:
-            await _client().crons.delete(cron_id)
+            await get_client().crons.delete(cron_id)
         except Exception:
             logger.warning("Failed to delete baby-sit cron %s", cron_id, exc_info=True)
             watch["active"] = False
             await _put_watch(watch)
             return True
-    await _client().store.delete_item(WATCH_NAMESPACE, key)
+    await delete_value(WATCH_NAMESPACE, key)
     return True
 
 
@@ -376,16 +346,16 @@ def _check_set_key(check_runs: list[dict[str, Any]], statuses: list[dict[str, An
 def _check_set_settled(watch: BabySitWatch, key: str) -> bool:
     if watch.get("settled_check_key") != key:
         watch["settled_check_key"] = key
-        watch["settled_check_at"] = _now_iso()
+        watch["settled_check_at"] = _now().isoformat()
         return False
     raw = watch.get("settled_check_at")
     if not isinstance(raw, str) or not raw:
-        watch["settled_check_at"] = _now_iso()
+        watch["settled_check_at"] = _now().isoformat()
         return False
     try:
         first_seen = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        watch["settled_check_at"] = _now_iso()
+        watch["settled_check_at"] = _now().isoformat()
         return False
     return _now() - first_seen >= timedelta(minutes=CHECK_SET_SETTLE_MINUTES)
 
