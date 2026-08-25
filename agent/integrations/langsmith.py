@@ -38,11 +38,11 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-PROXY_CONFIG_MAX_ATTEMPTS = 3
+PROXY_CONFIG_MAX_ATTEMPTS = 5
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
-PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
+PROXY_CONFIG_RETRY_DELAYS_SECONDS = (1.0, 2.0, 5.0, 10.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-PROXY_CONFIG_NOT_READY_STATUS = 400
+PROXY_CONFIG_NOT_READY_STATUSES = frozenset({400, 409})
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
@@ -361,6 +361,13 @@ async def _patch_proxy_config(
             response.raise_for_status()
             return
         except Exception as exc:
+            if isinstance(exc, httpx.HTTPStatusError) and (
+                exc.response.status_code in PROXY_CONFIG_NOT_READY_STATUSES
+            ):
+                enriched = _with_response_body(exc)
+                if enriched is not None:
+                    raise enriched from exc
+                raise
             if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
                 exc
             ):
@@ -398,10 +405,15 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
     """
     client = get_async_sandbox_client()
     try:
-        await client.start_sandbox(sandbox_name, timeout=SANDBOX_START_TIMEOUT_SECONDS)
-        logger.info("Started sandbox %s before retrying GitHub proxy config", sandbox_name)
-    except Exception:
-        logger.warning("Failed to start sandbox %s", sandbox_name, exc_info=True)
+        try:
+            await client.start_sandbox(sandbox_name, timeout=SANDBOX_START_TIMEOUT_SECONDS)
+            logger.info("Started sandbox %s before retrying GitHub proxy config", sandbox_name)
+        except Exception:
+            logger.warning("Failed to start sandbox %s", sandbox_name, exc_info=True)
+        try:
+            await client.wait_for_sandbox(sandbox_name, timeout=SANDBOX_START_TIMEOUT_SECONDS)
+        except Exception:
+            logger.warning("Sandbox %s did not become ready", sandbox_name, exc_info=True)
     finally:
         await client.aclose()
 
@@ -441,7 +453,7 @@ async def _configure_github_proxy(
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
+            if exc.response.status_code not in PROXY_CONFIG_NOT_READY_STATUSES:
                 raise
             logger.warning(
                 "Proxy config rejected for sandbox %s; starting it and retrying: %s",

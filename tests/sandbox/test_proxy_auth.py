@@ -351,6 +351,51 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
             sandbox_client.aclose.assert_awaited_once()
             assert mock_client.patch.call_count == 2
 
+    async def test_starts_provisioning_sandbox_after_conflict(self) -> None:
+        request = httpx.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx.Response(
+            409,
+            request=request,
+            json={
+                "detail": {
+                    "error": "Conflict",
+                    "message": (
+                        'Sandbox "sandbox-abc" status changed to "provisioning" '
+                        "while updating. Retry the update request."
+                    ),
+                }
+            },
+        )
+        conflict_error = httpx.HTTPStatusError("Conflict", request=request, response=response)
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "agent.integrations.langsmith.get_async_sandbox_client"
+            ) as mock_sandbox_client_factory,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = conflict_error
+            successful_response = MagicMock()
+            successful_response.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(side_effect=[failed_response, successful_response])
+            _mock_async_client(mock_client_cls, mock_client)
+
+            sandbox_client = MagicMock()
+            sandbox_client.start_sandbox = AsyncMock()
+            sandbox_client.wait_for_sandbox = AsyncMock()
+            sandbox_client.aclose = AsyncMock()
+            mock_sandbox_client_factory.return_value = sandbox_client
+
+            await _configure_github_proxy("sandbox-abc", "token")
+
+            sandbox_client.start_sandbox.assert_awaited_once_with("sandbox-abc", timeout=120)
+            sandbox_client.wait_for_sandbox.assert_awaited_once_with("sandbox-abc", timeout=120)
+            assert mock_client.patch.call_count == 2
+
     async def test_retries_even_when_start_fails(self) -> None:
         """A failed start is logged, not fatal: the retry reports the real state."""
         with (
