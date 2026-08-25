@@ -54,8 +54,8 @@ from .options import (
     canonical_model_pair,
     default_vision_model_pair,
     gate_fable_model,
-    model_supports_effort,
     model_supports_images,
+    normalize_model_choice,
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
@@ -167,19 +167,6 @@ class ThreadResolveBody(BaseModel):
     resolved: bool = True
 
 
-def _normalize_model_choice(
-    model_id: str | None, effort: str | None
-) -> tuple[str | None, str | None]:
-    if not isinstance(model_id, str):
-        return None, None
-    if model_id not in SUPPORTED_MODEL_IDS:
-        canonical = canonical_model_pair(model_id, effort)
-        return canonical if canonical is not None else (None, None)
-    if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
-        return None, None
-    return model_id, effort
-
-
 async def _resolve_agent_model_choice(
     profile: dict[str, Any],
     model_id: str | None,
@@ -189,7 +176,7 @@ async def _resolve_agent_model_choice(
     profile_model, profile_effort = normalize_profile_overrides(profile)
     if profile_model and profile_effort:
         resolved_model, resolved_effort = profile_model, profile_effort
-    chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
+    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     if chosen_model and chosen_effort:
         resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
@@ -1348,7 +1335,7 @@ async def _create_dashboard_thread_record(
         has_images=bool(images),
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
-    chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
+    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
     if images and not model_supports_images(str(metadata_model)):
@@ -1594,7 +1581,7 @@ async def _enrich_run_start_command(
     if not isinstance(client_configurable, dict):
         client_configurable = {}
 
-    chosen_model, chosen_effort = _normalize_model_choice(
+    chosen_model, chosen_effort = normalize_model_choice(
         client_configurable.get("agent_model_id"),
         client_configurable.get("agent_effort"),
     )
@@ -1823,7 +1810,7 @@ async def send_dashboard_message(
 
     prompt = body.content.strip()
     now_ms = _now_ms()
-    chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
+    chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
