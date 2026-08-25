@@ -8,7 +8,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from ..review.findings import list_findings
+from ..review.findings import comment_ids_for_finding, list_findings
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from .reviewer_outcomes import outcome_from_score, upsert_finding_outcome
 
@@ -172,11 +172,7 @@ async def process_github_reaction(
     thread_id = _reviewer_thread_id(owner, repo_name, pr_number)
     findings = await list_findings(thread_id)
     finding = next(
-        (
-            candidate
-            for candidate in findings
-            if candidate.get("github_review_comment_id") == comment_id
-        ),
+        (candidate for candidate in findings if comment_id in comment_ids_for_finding(candidate)),
         None,
     )
     if finding is None:
