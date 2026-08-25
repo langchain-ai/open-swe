@@ -23,7 +23,18 @@ _REFERENCES_HEADING = "## References"
 _ACCESS_FAILURE_CODE = "github_app_access_missing_or_repo_not_found"
 _BRANCH_FAILURE_CODE = "github_pr_branch_not_visible"
 _PREFLIGHT_FAILURE_CODE = "github_pr_preflight_failed"
-_PR_CREATED_FALSE = False
+_RESPONSE_BODY_LIMIT = 800
+_REPORTED_RESPONSE_HEADERS = (
+    "location",
+    "retry-after",
+    "www-authenticate",
+    "x-accepted-github-permissions",
+    "x-accepted-oauth-scopes",
+    "x-oauth-scopes",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+    "x-github-request-id",
+)
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
@@ -74,6 +85,28 @@ def _github_message(resp: httpx.Response) -> str:
     return resp.text.strip() or f"HTTP {resp.status_code}"
 
 
+def _github_response_summary(resp: httpx.Response | None) -> str:
+    """Report what GitHub actually returned so the agent can diagnose it itself."""
+    if resp is None:
+        return ""
+    # Diagnostics must never raise on an error path and mask the real failure.
+    request = getattr(resp, "request", None)
+    target = f" to {request.method} {request.url}" if request is not None else ""
+    parts = [f"GitHub responded{target} with {resp.status_code}"]
+    resp_headers = getattr(resp, "headers", None) or {}
+    headers = [
+        f"{name}: {resp_headers[name]}"
+        for name in _REPORTED_RESPONSE_HEADERS
+        if name in resp_headers
+    ]
+    if headers:
+        parts.append("response headers: " + ", ".join(headers))
+    body = (getattr(resp, "text", "") or "")[:_RESPONSE_BODY_LIMIT]
+    if body:
+        parts.append(f"response body: {body}")
+    return " " + ". ".join(parts) + "."
+
+
 def _effective_draft(draft: bool) -> bool:
     configurable = _configurable()
     preference = configurable.get("draft_prs")
@@ -109,75 +142,71 @@ def _failure_payload(
     http_status: int | None,
     reason: str,
     likely_cause: str,
-    suggested_action: str,
     branch_pushed: bool | None,
     failed_step: str,
-    repo_visible: bool | None = None,
-    base_branch_visible: bool | None = None,
-    head_branch_visible: bool | None = None,
+    response: httpx.Response | None = None,
 ) -> dict[str, Any]:
-    error = (
-        "Failed to open an attributed PR with open_pull_request. "
-        f"Reason: {reason}. Likely cause: {likely_cause}. "
-        f"Branch pushed: {owner}/{repo}:{head} "
-        f"({'unknown' if branch_pushed is None else 'yes' if branch_pushed else 'no'}). "
-        "PR created: no. "
-        f"Action: {suggested_action}"
+    pushed = "unknown" if branch_pushed is None else "yes" if branch_pushed else "no"
+    _record_open_pr_failure_telemetry(
+        code=code,
+        owner=owner,
+        repo=repo,
+        head=head,
+        base=base,
+        token_kind=token_kind,
+        http_status=http_status,
+        branch_pushed=branch_pushed,
+        failed_step=failed_step,
     )
-    payload: dict[str, Any] = {
+    return {
         "success": False,
-        "error": error,
-        "code": code,
-        "recoverable_by_agent": False,
-        "owner": owner,
-        "repo": repo,
-        "head": head,
-        "base": base,
-        "token_kind": token_kind,
-        "http_status": http_status,
-        "branch_pushed": branch_pushed,
-        "pr_created": _PR_CREATED_FALSE,
-        "failed_step": failed_step,
-        "likely_cause": likely_cause,
-        "suggested_action": suggested_action,
+        "error": (
+            "Failed to open an attributed PR with open_pull_request. "
+            f"Reason: {reason}. Likely cause: {likely_cause}. "
+            f"Branch pushed: {owner}/{repo}:{head} ({pushed}). PR created: no."
+            f"{_github_response_summary(response)}"
+        ),
     }
-    if repo_visible is not None:
-        payload["repo_visible"] = repo_visible
-    if base_branch_visible is not None:
-        payload["base_branch_visible"] = base_branch_visible
-    if head_branch_visible is not None:
-        payload["head_branch_visible"] = head_branch_visible
-    _record_open_pr_failure_telemetry(payload)
-    return payload
 
 
-def _record_open_pr_failure_telemetry(payload: dict[str, Any]) -> None:
+def _record_open_pr_failure_telemetry(
+    *,
+    code: str,
+    owner: str,
+    repo: str,
+    head: str,
+    base: str,
+    token_kind: str,
+    http_status: int | None,
+    branch_pushed: bool | None,
+    failed_step: str,
+) -> None:
     configurable = _configurable()
     logger.warning(
         "open_pull_request_failed code=%s owner=%s repo=%s head=%s base=%s "
         "http_status=%s token_kind=%s branch_pushed=%s thread_id=%s source=%s",
-        payload.get("code"),
-        payload.get("owner"),
-        payload.get("repo"),
-        payload.get("head"),
-        payload.get("base"),
-        payload.get("http_status"),
-        payload.get("token_kind"),
-        payload.get("branch_pushed"),
+        code,
+        owner,
+        repo,
+        head,
+        base,
+        http_status,
+        token_kind,
+        branch_pushed,
         configurable.get("thread_id"),
         configurable.get("source"),
         extra={
             "open_pull_request_failure": {
-                "code": payload.get("code"),
-                "owner": payload.get("owner"),
-                "repo": payload.get("repo"),
-                "head": payload.get("head"),
-                "base": payload.get("base"),
-                "http_status": payload.get("http_status"),
-                "token_kind": payload.get("token_kind"),
-                "branch_pushed": payload.get("branch_pushed"),
-                "pr_created": payload.get("pr_created"),
-                "failed_step": payload.get("failed_step"),
+                "code": code,
+                "owner": owner,
+                "repo": repo,
+                "head": head,
+                "base": base,
+                "http_status": http_status,
+                "token_kind": token_kind,
+                "branch_pushed": branch_pushed,
+                "pr_created": False,
+                "failed_step": failed_step,
                 "thread_id": configurable.get("thread_id"),
                 "source": configurable.get("source"),
             }
@@ -196,9 +225,7 @@ def _access_failure_payload(
     reason: str,
     branch_pushed: bool | None,
     failed_step: str,
-    repo_visible: bool | None = None,
-    base_branch_visible: bool | None = None,
-    head_branch_visible: bool | None = None,
+    response: httpx.Response | None = None,
 ) -> dict[str, Any]:
     return _failure_payload(
         code=_ACCESS_FAILURE_CODE,
@@ -213,16 +240,9 @@ def _access_failure_payload(
             "the Open SWE GitHub App or PR author token is not installed on, granted access "
             "to, or able to see this repository or one of the PR branches"
         ),
-        suggested_action=(
-            "install or grant the Open SWE GitHub App and the triggering user's GitHub "
-            "authorization access to this repository, verify the base/head branches exist, "
-            "then ask Open SWE to retry opening the PR"
-        ),
         branch_pushed=branch_pushed,
         failed_step=failed_step,
-        repo_visible=repo_visible,
-        base_branch_visible=base_branch_visible,
-        head_branch_visible=head_branch_visible,
+        response=response,
     )
 
 
@@ -236,6 +256,7 @@ def _branch_failure_payload(
     http_status: int,
     branch: str,
     branch_role: str,
+    response: httpx.Response | None = None,
 ) -> dict[str, Any]:
     branch_pushed = False if branch_role == "head" else None
     return _failure_payload(
@@ -251,15 +272,9 @@ def _branch_failure_payload(
             f"the {branch_role} branch does not exist on `{owner}/{repo}` or is not visible "
             "to the PR author token"
         ),
-        suggested_action=(
-            f"push or restore the {branch_role} branch `{branch}`, ensure the Open SWE "
-            "GitHub App/token can see it, then ask Open SWE to retry opening the PR"
-        ),
         branch_pushed=branch_pushed,
         failed_step=f"preflight_{branch_role}_branch",
-        repo_visible=True,
-        base_branch_visible=False if branch_role == "base" else True,
-        head_branch_visible=False if branch_role == "head" else None,
+        response=response,
     )
 
 
@@ -289,7 +304,7 @@ async def _preflight_pr_access(
             reason=f"GitHub returned {repo_resp.status_code} while checking repository access",
             branch_pushed=None,
             failed_step="preflight_repo",
-            repo_visible=False,
+            response=repo_resp,
         )
     if repo_resp.status_code != 200:
         return _failure_payload(
@@ -305,10 +320,9 @@ async def _preflight_pr_access(
                 f"{_github_message(repo_resp)}"
             ),
             likely_cause="GitHub repository access preflight failed before PR creation",
-            suggested_action="check GitHub availability and repository access, then retry",
             branch_pushed=None,
             failed_step="preflight_repo",
-            repo_visible=None,
+            response=repo_resp,
         )
 
     base_resp = await _github_get(
@@ -324,6 +338,7 @@ async def _preflight_pr_access(
             http_status=base_resp.status_code,
             branch=base,
             branch_role="base",
+            response=base_resp,
         )
     if base_resp.status_code in {401, 403}:
         return _access_failure_payload(
@@ -336,8 +351,7 @@ async def _preflight_pr_access(
             reason=f"GitHub returned {base_resp.status_code} while checking base branch access",
             branch_pushed=None,
             failed_step="preflight_base_branch",
-            repo_visible=True,
-            base_branch_visible=False,
+            response=base_resp,
         )
     if base_resp.status_code != 200:
         return _failure_payload(
@@ -353,11 +367,9 @@ async def _preflight_pr_access(
                 f"{_github_message(base_resp)}"
             ),
             likely_cause="GitHub branch access preflight failed before PR creation",
-            suggested_action="check GitHub availability and branch access, then retry",
             branch_pushed=None,
             failed_step="preflight_base_branch",
-            repo_visible=True,
-            base_branch_visible=None,
+            response=base_resp,
         )
 
     head_branch = _head_branch_for_repo(owner, head)
@@ -376,6 +388,7 @@ async def _preflight_pr_access(
             http_status=head_resp.status_code,
             branch=head_branch,
             branch_role="head",
+            response=head_resp,
         )
     if head_resp.status_code in {401, 403}:
         return _access_failure_payload(
@@ -388,9 +401,7 @@ async def _preflight_pr_access(
             reason=f"GitHub returned {head_resp.status_code} while checking head branch access",
             branch_pushed=False,
             failed_step="preflight_head_branch",
-            repo_visible=True,
-            base_branch_visible=True,
-            head_branch_visible=False,
+            response=head_resp,
         )
     if head_resp.status_code != 200:
         return _failure_payload(
@@ -406,12 +417,9 @@ async def _preflight_pr_access(
                 f"{_github_message(head_resp)}"
             ),
             likely_cause="GitHub branch access preflight failed before PR creation",
-            suggested_action="check GitHub availability and branch access, then retry",
             branch_pushed=None,
             failed_step="preflight_head_branch",
-            repo_visible=True,
-            base_branch_visible=True,
-            head_branch_visible=None,
+            response=head_resp,
         )
     return None
 
@@ -748,7 +756,6 @@ async def _open_pull_request(
             http_status=None,
             reason="No GitHub token was available to open the pull request",
             likely_cause="the triggering user is not authorized and no GitHub App token is available",
-            suggested_action="connect GitHub authorization or install/grant the Open SWE GitHub App, then retry",
             branch_pushed=None,
             failed_step="resolve_pr_author_token",
         )
@@ -834,11 +841,7 @@ async def _open_pull_request(
                 reason="GitHub returned 404 while creating the pull request",
                 branch_pushed=True,
                 failed_step="create_pull_request",
-                repo_visible=True,
-                base_branch_visible=True,
-                head_branch_visible=True
-                if _head_branch_for_repo(owner, head) is not None
-                else None,
+                response=resp,
             )
 
         return _failure_payload(
@@ -851,12 +854,9 @@ async def _open_pull_request(
             http_status=resp.status_code,
             reason=f"GitHub returned {resp.status_code} while creating the pull request: {_github_message(resp)}",
             likely_cause="GitHub rejected the pull request creation request",
-            suggested_action="inspect the GitHub error, correct the branch or repository state, then retry",
             branch_pushed=True,
             failed_step="create_pull_request",
-            repo_visible=True,
-            base_branch_visible=True,
-            head_branch_visible=True if _head_branch_for_repo(owner, head) is not None else None,
+            response=resp,
         )
 
 
@@ -893,8 +893,9 @@ async def open_pull_request(
     Returns:
         On success: {"success": True, "created": bool, "url": str, "number": int,
         "author": str}. ``created`` is False when an open PR already existed.
-        On failure: {"success": False, "error": str, "code": str,
-        "recoverable_by_agent": False, "pr_created": False, ...}.
+        On failure: {"success": False, "error": str}, where ``error`` states what
+        failed and quotes the request, status, headers, and body GitHub actually
+        returned — read it and decide what to do next.
     """
     return await _open_pull_request(
         owner=owner,
