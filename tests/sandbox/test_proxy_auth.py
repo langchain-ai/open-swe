@@ -10,10 +10,12 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.integrations.corridor_commit_scan import CORRIDOR_API_KEY_PLACEHOLDER
 from agent.integrations.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
     PROXY_MODEL_KEY_PLACEHOLDER,
     _configure_github_proxy,
+    _corridor_proxy_rules,
     _stagehand_proxy_rules,
 )
 from agent.utils.sandbox_state import SandboxBackendProxy
@@ -75,6 +77,25 @@ class TestSandboxFactoryLoading:
         )
 
 
+def test_corridor_proxy_rule_keeps_api_key_opaque() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "CORRIDOR_COMMIT_SCANNING_ENABLED": "true",
+            "CORRIDOR_API_KEY": "secret",
+        },
+        clear=True,
+    ):
+        rule = _corridor_proxy_rules()[0]
+
+    assert rule["match_hosts"] == ["app.corridor.dev"]
+    assert rule["headers"] == [
+        {"name": "Authorization", "type": "opaque", "value": "Bearer secret"}
+    ]
+    assert rule["env_vars"] == {"CORRIDOR_API_KEY": CORRIDOR_API_KEY_PLACEHOLDER}
+    assert "secret" not in rule["env_vars"].values()
+
+
 def test_stagehand_proxy_rule_keeps_model_key_opaque() -> None:
     with patch.dict(
         "os.environ",
@@ -98,7 +119,7 @@ class TestConfigureGithubProxy:
 
         with (
             patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
-            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}, clear=True),
         ):
             mock_client = MagicMock()
             mock_response = MagicMock()
@@ -143,7 +164,7 @@ class TestConfigureGithubProxy:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
         with (
             patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
-            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}, clear=True),
         ):
             mock_client = MagicMock()
             mock_response = MagicMock()

@@ -19,6 +19,11 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
+from agent.integrations.corridor_commit_scan import (
+    CORRIDOR_API_KEY_PLACEHOLDER,
+    corridor_commit_scanning_enabled,
+)
+from agent.integrations.corridor_mcp import corridor_token
 from agent.utils.sandbox import SandboxGoneError
 
 logger = logging.getLogger(__name__)
@@ -215,6 +220,28 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
                 }
             ],
         },
+    ]
+
+
+def _corridor_proxy_rules() -> list[dict[str, Any]]:
+    if not corridor_commit_scanning_enabled():
+        return []
+    token = corridor_token()
+    if not token:
+        return []
+    return [
+        {
+            "name": "corridor-api",
+            "match_hosts": ["app.corridor.dev"],
+            "headers": [
+                {
+                    "name": "Authorization",
+                    "type": "opaque",
+                    "value": f"Bearer {token}",
+                }
+            ],
+            "env_vars": {"CORRIDOR_API_KEY": CORRIDOR_API_KEY_PLACEHOLDER},
+        }
     ]
 
 
@@ -435,6 +462,7 @@ async def _configure_github_proxy(
         *(custom_rules if isinstance(custom_rules, list) else []),
         *_github_proxy_rules(github_token),
         *_stagehand_proxy_rules(),
+        *_corridor_proxy_rules(),
     ]
     payload = {"proxy_config": proxy_config}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:

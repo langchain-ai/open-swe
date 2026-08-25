@@ -18,6 +18,7 @@ class _FakeTool:
 @pytest.fixture(autouse=True)
 def clear_corridor_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
+        "CORRIDOR_API_KEY",
         "CORRIDOR_API_TOKEN",
         "CORRIDOR_MCP_TOKEN",
         "CORRIDOR_TOKEN",
@@ -32,7 +33,7 @@ def test_load_corridor_mcp_config_empty_without_token() -> None:
 
 
 def test_load_corridor_mcp_config_uses_default_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CORRIDOR_API_TOKEN", "tok")
+    monkeypatch.setenv("CORRIDOR_API_KEY", "tok")
 
     config = corridor_mcp.load_corridor_mcp_config()
 

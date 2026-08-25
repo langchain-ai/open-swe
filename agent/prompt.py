@@ -322,6 +322,13 @@ Corridor is offered from configuration, so its server can still be unreachable. 
 </corridor>"""
 
 
+CORRIDOR_COMMIT_SCAN_PROMPT = """---
+
+### Corridor Commit Scanning
+
+A deployment-managed Git pre-commit hook runs Corridor against staged changes. Never remove, replace, disable, or bypass it; never use `git commit --no-verify`. If it blocks a commit, fix the reported findings and retry the normal commit."""
+
+
 DEPENDENCY_SECTION = """---
 
 ### Dependencies
@@ -523,6 +530,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + REPO_SETUP_SECTION
     + TASK_EXECUTION_SECTION
     + "{corridor_prompt_section}"
+    + "{corridor_commit_scan_section}"
     + DEPENDENCY_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + "{commit_pr_section}"
@@ -543,6 +551,7 @@ def construct_system_prompt(
     plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
     corridor_enabled: bool = False,
+    corridor_commit_scanning: bool = False,
     environment_name: str | None = None,
     environment_instructions: str | None = None,
     admin_environments: bool = False,
@@ -578,6 +587,9 @@ def construct_system_prompt(
             _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
         ),
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
+        corridor_commit_scan_section=(
+            CORRIDOR_COMMIT_SCAN_PROMPT if corridor_commit_scanning else ""
+        ),
         commit_pr_section=COMMIT_PR_SECTION + (DESKTOP_PR_SECTION if source == "desktop" else ""),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),

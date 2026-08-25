@@ -21,6 +21,7 @@ _CORRIDOR_HOST = "app.corridor.dev"
 _CORRIDOR_PATH = "/api/mcp"
 _MCP_TIMEOUT_SECONDS = 30.0
 _TOKEN_ENV_NAMES = (
+    "CORRIDOR_API_KEY",
     "CORRIDOR_API_TOKEN",
     "CORRIDOR_MCP_TOKEN",
     "CORRIDOR_TOKEN",
@@ -70,10 +71,14 @@ def _is_corridor_mcp_url(url: str) -> bool:
     )
 
 
+def corridor_token() -> str:
+    return _first_env_value(_TOKEN_ENV_NAMES)
+
+
 def load_corridor_mcp_config() -> CorridorMCPConfig | None:
     """Return Corridor MCP config when the environment contains valid settings."""
     url = _first_env_value(_URL_ENV_NAMES) or DEFAULT_CORRIDOR_MCP_URL
-    token = _first_env_value(_TOKEN_ENV_NAMES)
+    token = corridor_token()
     query_token, url = _extract_token_from_query(url)
     if not token:
         token = query_token

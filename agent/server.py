@@ -82,6 +82,11 @@ from .input_messages import (
     build_input_messages,
     visible_dynamic_context_hashes,
 )
+from .integrations.corridor_commit_scan import (
+    corridor_commit_scanning_enabled,
+    corridor_hook_cleanup_command,
+    corridor_hook_setup_command,
+)
 from .integrations.corridor_mcp import (
     CORRIDOR_TOOL_NAMES,
     corridor_configured,
@@ -99,6 +104,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    CorridorCommitScanMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     IntegrationGroup,
@@ -482,10 +488,19 @@ async def _refresh_github_proxy_or_fail(
 
 
 async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await sandbox_backend.aexecute(
+    command = (
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
+        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
     )
+    if corridor_commit_scanning_enabled():
+        command += f" && {corridor_hook_setup_command()}"
+    else:
+        command += f" && {corridor_hook_cleanup_command()}"
+    result = await sandbox_backend.aexecute(command)
+    exit_code = getattr(result, "exit_code", None)
+    if isinstance(exit_code, int) and exit_code != 0:
+        output = getattr(result, "output", "")
+        raise RuntimeError(f"Sandbox git setup failed (exit {exit_code}): {output}")
 
 
 def _start_git_identity(
@@ -856,6 +871,7 @@ def _general_purpose_subagent(
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
+            CorridorCommitScanMiddleware(),
             ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
             *_subagent_model_middleware(),
         ],
@@ -1352,6 +1368,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
                 corridor_enabled=self._corridor_enabled,
+                corridor_commit_scanning=corridor_commit_scanning_enabled(),
                 environment_name=(environment or {}).get("name"),
                 environment_instructions=environment_prompt(environment),
                 admin_environments=self._admin_environments,
@@ -1763,6 +1780,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
+                CorridorCommitScanMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
