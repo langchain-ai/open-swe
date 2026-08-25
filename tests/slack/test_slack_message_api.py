@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from agent.utils import slack as slack_utils
@@ -214,3 +215,107 @@ async def test_post_slack_thread_reply_forwards_blocks(monkeypatch: pytest.Monke
 
     assert ok is True
     post_with_ts.assert_awaited_once_with("C1", "1.0", "Status", blocks=blocks)
+
+
+@pytest.mark.asyncio
+async def test_upload_slack_thread_file_completes_external_upload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    ticket = MagicMock(status_code=200, headers={})
+    ticket.raise_for_status.return_value = None
+    ticket.json.return_value = {
+        "ok": True,
+        "upload_url": "https://files.slack.com/upload/v1/test",
+        "file_id": "F1",
+    }
+    complete = MagicMock(status_code=200, headers={})
+    complete.raise_for_status.return_value = None
+    complete.json.return_value = {"ok": True, "files": [{"id": "F1"}]}
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(side_effect=[ticket, complete])
+    uploaded = httpx.Response(
+        200,
+        request=httpx.Request("POST", "https://files.slack.com"),
+        text="OK - 8",
+    )
+    safe_request = AsyncMock(return_value=(uploaded, None))
+    monkeypatch.setattr(slack_utils, "request_with_safe_redirects", safe_request)
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.upload_slack_thread_file(
+            "C1", "1.0", "plan.html", b"<html />", title="Plan", initial_comment="Preview"
+        )
+
+    assert result == ("F1", None)
+    assert client_cm.post.call_args_list[0].args[0].endswith("/files.getUploadURLExternal")
+    assert client_cm.post.call_args_list[0].kwargs["json"] == {
+        "filename": "plan.html",
+        "length": 8,
+    }
+    safe_request.assert_awaited_once()
+    assert safe_request.call_args.kwargs["content"] == b"<html />"
+    assert safe_request.call_args.kwargs["validate_url"] is slack_utils._validate_slack_upload_url
+    assert client_cm.post.call_args_list[1].args[0].endswith("/files.completeUploadExternal")
+    assert client_cm.post.call_args_list[1].kwargs["json"] == {
+        "files": [{"id": "F1", "title": "Plan"}],
+        "channel_id": "C1",
+        "thread_ts": "1.0",
+        "initial_comment": "Preview",
+    }
+
+
+@pytest.mark.asyncio
+async def test_upload_slack_thread_file_handles_malformed_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    ticket = MagicMock(status_code=200, headers={})
+    ticket.raise_for_status.return_value = None
+    ticket.json.side_effect = ValueError("invalid JSON")
+    client_cm = _async_client_cm(ticket)
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
+
+    assert result == (None, "invalid_slack_response")
+
+
+@pytest.mark.asyncio
+async def test_upload_slack_thread_file_rejects_unsafe_upload_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    ticket = MagicMock(status_code=200, headers={})
+    ticket.raise_for_status.return_value = None
+    ticket.json.return_value = {
+        "ok": True,
+        "upload_url": "https://attacker.example/upload",
+        "file_id": "F1",
+    }
+    client_cm = _async_client_cm(ticket)
+    blocked = {"content": "blocked"}
+    safe_request = AsyncMock(return_value=(None, blocked))
+    monkeypatch.setattr(slack_utils, "request_with_safe_redirects", safe_request)
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
+
+    assert result == (None, "unsafe_upload_url")
+    assert client_cm.post.await_count == 1
+
+
+def test_validate_slack_upload_url() -> None:
+    assert slack_utils._validate_slack_upload_url("https://files.slack.com/upload/v1/test") == (
+        True,
+        "",
+    )
+    allowed, _ = slack_utils._validate_slack_upload_url("https://files.slack.com.evil.test/x")
+    assert allowed is False
+    allowed, _ = slack_utils._validate_slack_upload_url("https://edge.slack.com/x")
+    assert allowed is False
+    allowed, _ = slack_utils._validate_slack_upload_url("http://files.slack.com/x")
+    assert allowed is False
+    allowed, _ = slack_utils._validate_slack_upload_url("https://files.slack.com:8443/x")
+    assert allowed is False

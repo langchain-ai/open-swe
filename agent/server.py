@@ -174,6 +174,7 @@ from .tools import (
     save_user_skill,
     schedule_thread_wakeup,
     slack_add_reaction,
+    slack_attach_file,
     slack_move_thread,
     slack_read_thread_messages,
     slack_start_new_thread,
@@ -1611,6 +1612,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     slack_tools = [
         slack_add_reaction,
+        slack_attach_file,
         slack_move_thread,
         slack_read_thread_messages,
         slack_start_new_thread,
@@ -1649,6 +1651,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         report_platform_issue,
         schedule_thread_wakeup,
         slack_add_reaction,
+        slack_attach_file,
         slack_move_thread,
         slack_read_thread_messages,
         slack_start_new_thread,

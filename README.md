@@ -76,6 +76,7 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `linear_search_issues` | Search Linear issues by free text |
 | `output_iframe` | Render sandboxed HTML visualizations in the dashboard |
 | `slack_add_reaction` | React to Slack messages |
+| `slack_attach_file` | Attach sandbox files to Slack threads |
 | `slack_thread_reply` | Reply in Slack threads |
 
 GitHub operations are performed with `gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `execute`, and `task` (subagent spawning). Content search uses `rg` through `execute`. Thread discovery and management tools run only on the parent agent, derive the actor from trusted run configuration plus application-generated follow-up attribution, recheck allowed-organization membership, and preserve the dashboard's owner, participant, and admin authorization checks.

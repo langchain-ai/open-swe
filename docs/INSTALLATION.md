@@ -381,6 +381,7 @@ Users can also override the team/project mapping per-comment by including `repo:
                 "channels:history",
                 "channels:read",
                 "chat:write",
+                "files:write",
                 "groups:history",
                 "groups:read",
                 "im:history",
@@ -416,7 +417,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 
 </details>
 
-3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`)
+3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Existing installations must reinstall or re-authorize the app after adding `files:write`.
 
 **Slack URL checklist:**
 
