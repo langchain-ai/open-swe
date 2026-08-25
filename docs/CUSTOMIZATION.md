@@ -17,7 +17,6 @@ return create_deep_agent(
     middleware=[
         ToolErrorMiddleware(),
         check_message_queue_before_model,
-        ensure_no_empty_msg,
         notify_step_limit_reached,
     ],
 )
@@ -506,7 +505,6 @@ Middleware hooks run around the agent loop. Open SWE includes:
 |---|---|---|
 | `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
 | `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
-| `ensure_no_empty_msg` | After model | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
 | `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
@@ -533,7 +531,6 @@ Then add it to the middleware list:
 middleware = [
     ToolErrorMiddleware(),
     check_message_queue_before_model,
-    ensure_no_empty_msg,
     notify_step_limit_reached,
     run_ci_check,  # new middleware
 ]
