@@ -43,6 +43,9 @@ PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 PROXY_CONFIG_NOT_READY_STATUS = 400
+PROXY_CONFIG_PROVISIONING_STATUS = 409
+PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS = 30.0
+PROXY_CONFIG_PROVISIONING_RETRY_DELAY_SECONDS = 2.0
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
@@ -257,6 +260,13 @@ def _retry_after_seconds(response: httpx.Response | None) -> float | None:
     return max(delay, 0.0)
 
 
+def _is_provisioning_proxy_config_error(exc: BaseException) -> bool:
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response.status_code == PROXY_CONFIG_PROVISIONING_STATUS
+    )
+
+
 def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in PROXY_CONFIG_RETRYABLE_STATUS_CODES
@@ -351,7 +361,9 @@ async def _patch_proxy_config(
     api_key: str,
     sandbox_name: str,
 ) -> None:
-    for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
+    attempt = 0
+    provisioning_waited = 0.0
+    while True:
         try:
             response = await client.patch(
                 url,
@@ -361,9 +373,17 @@ async def _patch_proxy_config(
             response.raise_for_status()
             return
         except Exception as exc:
-            if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
-                exc
-            ):
+            # A box resuming from stop answers 409 until its microvm is up, which
+            # takes seconds longer than the general retry budget allows. Waiting
+            # it out here keeps a resume from being reported as an unreachable
+            # sandbox, which ends the run.
+            provisioning = _is_provisioning_proxy_config_error(exc)
+            exhausted = (
+                provisioning_waited >= PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS
+                if provisioning
+                else attempt >= PROXY_CONFIG_MAX_ATTEMPTS - 1
+            )
+            if exhausted or not _is_retryable_proxy_config_error(exc):
                 enriched = _with_response_body(exc)
                 if enriched is not None:
                     raise enriched from exc
@@ -373,18 +393,28 @@ async def _patch_proxy_config(
                 if isinstance(exc, httpx.HTTPStatusError)
                 else None
             )
-            delay = (
-                retry_after
-                or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
-                    min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
-                ]
-            )
-            logger.warning(
-                "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
-                sandbox_name,
-                type(exc).__name__,
-                delay,
-            )
+            if provisioning:
+                delay = retry_after or PROXY_CONFIG_PROVISIONING_RETRY_DELAY_SECONDS
+                provisioning_waited += delay
+                logger.info(
+                    "Sandbox %s is still provisioning; retrying GitHub proxy config in %.1fs",
+                    sandbox_name,
+                    delay,
+                )
+            else:
+                delay = (
+                    retry_after
+                    or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
+                        min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
+                    ]
+                )
+                attempt += 1
+                logger.warning(
+                    "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
+                    sandbox_name,
+                    type(exc).__name__,
+                    delay,
+                )
             await asyncio.sleep(delay)
 
 

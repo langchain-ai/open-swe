@@ -11,6 +11,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.integrations.langsmith import (
+    PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS,
+    PROXY_CONFIG_PROVISIONING_RETRY_DELAY_SECONDS,
     PROXY_GH_TOKEN_PLACEHOLDER,
     PROXY_MODEL_KEY_PLACEHOLDER,
     _configure_github_proxy,
@@ -306,6 +308,95 @@ class TestConfigureGithubProxy:
 
             with pytest.raises(httpx.HTTPStatusError, match="another tenant"):
                 await _configure_github_proxy("sandbox-abc", "token")
+
+
+class TestConfigureGithubProxyWaitsOutProvisioning:
+    """A 409 means the box is mid-resume; wait for it instead of failing the run."""
+
+    @staticmethod
+    def _provisioning_error() -> httpx.HTTPStatusError:
+        request = httpx.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx.Response(
+            409,
+            request=request,
+            text='Sandbox "sandbox-abc" status changed to "provisioning" while updating.',
+        )
+        return httpx.HTTPStatusError("Conflict", request=request, response=response)
+
+    async def test_retries_past_the_general_attempt_budget(self) -> None:
+        """A cold resume outlasts PROXY_CONFIG_MAX_ATTEMPTS worth of 409s."""
+        error = self._provisioning_error()
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "agent.integrations.langsmith.asyncio.sleep", new_callable=AsyncMock
+            ) as mock_sleep,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            provisioning = MagicMock()
+            provisioning.raise_for_status.side_effect = error
+            ready = MagicMock()
+            ready.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(
+                side_effect=[provisioning, provisioning, provisioning, provisioning, ready]
+            )
+            _mock_async_client(mock_client_cls, mock_client)
+
+            await _configure_github_proxy("sandbox-abc", "token")
+
+            assert mock_client.patch.call_count == 5
+            assert mock_sleep.await_count == 4
+
+    async def test_gives_up_once_the_provisioning_budget_is_spent(self) -> None:
+        """A box that never leaves provisioning still surfaces the failure."""
+        error = self._provisioning_error()
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.integrations.langsmith.asyncio.sleep", new_callable=AsyncMock),
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            provisioning = MagicMock()
+            provisioning.raise_for_status.side_effect = error
+            mock_client.patch = AsyncMock(return_value=provisioning)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            with pytest.raises(httpx.HTTPStatusError, match="provisioning"):
+                await _configure_github_proxy("sandbox-abc", "token")
+
+            expected_attempts = int(
+                PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS
+                / PROXY_CONFIG_PROVISIONING_RETRY_DELAY_SECONDS
+            )
+            assert mock_client.patch.call_count == expected_attempts + 1
+
+    async def test_honors_retry_after_over_the_default_poll(self) -> None:
+        request = httpx.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx.Response(409, request=request, headers={"Retry-After": "5"})
+        error = httpx.HTTPStatusError("Conflict", request=request, response=response)
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "agent.integrations.langsmith.asyncio.sleep", new_callable=AsyncMock
+            ) as mock_sleep,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            provisioning = MagicMock()
+            provisioning.raise_for_status.side_effect = error
+            ready = MagicMock()
+            ready.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(side_effect=[provisioning, ready])
+            _mock_async_client(mock_client_cls, mock_client)
+
+            await _configure_github_proxy("sandbox-abc", "token")
+
+            mock_sleep.assert_awaited_once_with(5.0)
 
 
 class TestConfigureGithubProxyStartsStoppedSandbox:
