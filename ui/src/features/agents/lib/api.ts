@@ -114,9 +114,10 @@ export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
   limit?: number
-  offset?: number
+  cursor?: string
   all?: boolean
   resolved?: boolean
+  environment?: "cloud" | "local"
   viewed?: boolean
   source?: string
   status?: string
@@ -128,9 +129,9 @@ export interface ThreadsPageParams {
 
 export interface ThreadsPage {
   items: Array<AgentThread>
-  total?: number
+  ids: Array<string>
   limit: number
-  offset: number
+  cursor?: string | null
   hasMore?: boolean
 }
 
@@ -217,9 +218,10 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
   if (params.limit != null) search.set("limit", String(params.limit))
-  if (params.offset != null) search.set("offset", String(params.offset))
+  if (params.cursor) search.set("cursor", params.cursor)
   if (params.all != null) search.set("all", String(params.all))
   if (params.resolved != null) search.set("resolved", String(params.resolved))
+  if (params.environment) search.set("environment", params.environment)
   if (params.viewed != null) search.set("viewed", String(params.viewed))
   if (params.source) search.set("source", params.source)
   if (params.status) search.set("status", params.status)
@@ -267,6 +269,62 @@ export const agentsApi = {
     ),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  createThread: (body: {
+    id?: string
+    title?: string
+    repo?: string | null
+    branch?: string | null
+    environment: "cloud" | "local"
+    device_id?: string | null
+    device_name?: string | null
+    model?: string | null
+    effort?: string | null
+  }) =>
+    agentsRequest<AgentThread>("/threads", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  patchThread: (
+    threadId: string,
+    body: Partial<{
+      title: string
+      resolved: boolean
+      viewed_run_id: string | null
+      model: string
+      effort: string
+    }>
+  ) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  getThreadMessages: (threadId: string, afterSeq = 0) =>
+    agentsRequest<{
+      items: Array<{
+        seq: number
+        run_id: string | null
+        author: string
+        payload: Message
+        created_at: string
+      }>
+      lastSeq: number
+    }>(
+      `/threads/${encodeURIComponent(threadId)}/messages?after_seq=${afterSeq}`
+    ),
+  handoffThread: (
+    threadId: string,
+    body: {
+      target: "cloud" | "local"
+      device_id?: string
+      device_name?: string
+      git_checkpoint?: Record<string, unknown>
+    }
+  ) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/handoff`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  eventsUrl: dashboardApiUrl("/threads/events"),
   resolveThread: (threadId: string, resolved: boolean) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/resolve`,

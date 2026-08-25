@@ -16,6 +16,8 @@ import logging
 import os
 from typing import Any
 
+from .dashboard.thread_registry import get_thread_registry
+from .dashboard.thread_transcript import messages_to_ui
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
 from .session_cost import schedule_session_cost_refresh
@@ -283,6 +285,31 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    registry_status = {
+        "success": "finished",
+        "interrupted": "interrupted",
+        "error": "error",
+        "timeout": "error",
+    }.get(status)
+    if registry_status and run_id:
+        try:
+            registry = await get_thread_registry()
+            await registry.transition(
+                thread_id,
+                run_id,
+                registry_status,  # type: ignore[arg-type]
+                environment="cloud",
+                error=str(payload.get("error") or status) if registry_status == "error" else None,
+            )
+            if status == "success":
+                state = await langgraph_client().threads.get_state(thread_id)
+                values = state.get("values") if isinstance(state, dict) else None
+                messages = values.get("messages") if isinstance(values, dict) else None
+                await registry.append_messages(thread_id, run_id, messages_to_ui(messages))
+        except (KeyError, ValueError):
+            logger.debug("Completion did not match the active registry run for %s", thread_id)
+        except Exception:
+            logger.exception("run-complete: registry update failed for %s", thread_id)
     if status == "success":
         return await _schedule_success_cost_refresh(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")

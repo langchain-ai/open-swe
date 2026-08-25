@@ -13,6 +13,7 @@
     "disable_studio_auth": true
   },
   "http": {
+    "app": "agent.webapp:app",
     "disable_ui": true
   }
 }

@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { SidebarThreads } from "@/features/agents/lib/api"
 import { AgentsApiError } from "@/features/agents/lib/api"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 
@@ -45,17 +44,6 @@ function setup() {
     messages: [],
   } as unknown as AgentThread
   client.setQueryData(agentThreadKeys.detail(THREAD_ID), thread)
-  client.setQueryData<SidebarThreads>(
-    agentThreadKeys.sidebar({
-      activeLimit: 50,
-      resolvedLimit: 20,
-      includeAutomations: false,
-    }),
-    {
-      active: { items: [thread], limit: 50, hasMore: false },
-      resolved: { items: [], limit: 20, hasMore: false },
-    }
-  )
   const queuedCounts: Array<number> = []
   client.getQueryCache().subscribe(() => {
     const current = client.getQueryData<AgentThread>(
@@ -76,12 +64,6 @@ function queuedMessages(client: QueryClient) {
     ?.queuedMessages
 }
 
-function sidebarStatus(client: QueryClient) {
-  return client.getQueriesData<SidebarThreads>({
-    queryKey: ["agent-threads", "lists", "sidebar"],
-  })[0]?.[1]?.active.items[0]?.status
-}
-
 beforeEach(() => {
   stream.isLoading = false
   stream.submit.mockClear()
@@ -97,7 +79,10 @@ describe("useSubmitAgentMessage", () => {
     await result.current.mutateAsync({ content: "hi", images: [] })
 
     await waitFor(() => expect(stream.submit).toHaveBeenCalled())
-    expect(sidebarStatus(client)).toBe("running")
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(THREAD_ID))
+        ?.status
+    ).toBe("idle")
     expect(queuedCounts.every((count) => count === 0)).toBe(true)
   })
 

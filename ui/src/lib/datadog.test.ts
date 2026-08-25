@@ -79,7 +79,6 @@ describe("initializeDatadogRum", () => {
       },
       routes: [
         { url: "/agents/thread-id/plan" },
-        { url: "/agents/local/session-id" },
         { url: "/agents/automations/schedule-id" },
         { url: "/review/repositories/langchain-ai" },
         { url: "/agents/environments" },
@@ -115,7 +114,6 @@ describe("initializeDatadogRum", () => {
       },
       routes: [
         { url: "/agents/:threadId/plan" },
-        { url: "/agents/local/:sessionId" },
         { url: "/agents/automations/:scheduleId" },
         { url: "/review/repositories/:owner" },
         { url: "/agents/environments" },

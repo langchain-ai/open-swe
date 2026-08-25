@@ -216,28 +216,37 @@ from .team_settings import (
     upsert_team_settings,
 )
 from .thread_api import (
+    LocalReportBody,
+    ThreadCreateBody,
+    ThreadHandoffBody,
     ThreadMessageBody,
+    ThreadPatchBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    create_dashboard_registry_thread,
     delete_dashboard_thread,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
+    get_dashboard_thread_messages,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     get_dashboard_thread_working_tree_diff,
-    list_dashboard_threads,
+    handoff_dashboard_thread,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
+    patch_dashboard_registry_thread,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
+    report_local_run,
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
+    stream_thread_registry_events,
 )
 from .user_credentials import (
     CurrentsCredentialsUpdate,
@@ -1918,12 +1927,42 @@ async def api_delete_schedule(
 
 @router.get("/threads")
 async def api_list_threads(
+    resolved: bool | None = None,
+    environment: str | None = None,
+    source: str | None = None,
+    status: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
+    return await list_dashboard_threads_page(
+        session["sub"],
+        email=session.get("email"),
+        resolved=resolved,
+        environment=environment,
+        source=source,
+        status=status,
+        scope=scope,
+        automation_id=automation_id,
+        query=q,
+        limit=limit,
+        cursor=cursor,
+        include_all=all,
+    )
+
+
+@router.post("/threads", status_code=201)
+async def api_create_thread(
+    body: ThreadCreateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await create_dashboard_registry_thread(session["sub"], body, email=session.get("email"))
 
 
 @router.get("/threads/sidebar")
@@ -1960,10 +1999,11 @@ async def api_list_threads_sidebar(
 @router.get("/threads/page")
 async def api_list_threads_page(
     limit: int = 25,
-    offset: int = 0,
+    cursor: str | None = None,
     all: bool = False,
     resolved: bool | None = None,
     viewed: bool | None = None,
+    environment: str | None = None,
     source: str | None = None,
     status: str | None = None,
     q: str | None = None,
@@ -1978,16 +2018,43 @@ async def api_list_threads_page(
         session["sub"],
         email=session.get("email"),
         limit=limit,
-        offset=offset,
+        cursor=cursor,
         include_all=all,
         resolved=resolved,
         viewed=viewed,
+        environment=environment,
         source=source,
         status=status,
         query=q,
         scope=scope,
         automation_id=automation_id,
         sort_by=sort_by,
+    )
+
+
+@router.get("/threads/events")
+async def api_thread_events(
+    request: Request,
+    cursor: int = 0,
+    all: bool = False,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> StreamingResponse:
+    if all and not _session_is_admin(session):
+        raise HTTPException(403, "admin only")
+    last_event = request.headers.get("last-event-id")
+    if last_event:
+        try:
+            cursor = max(cursor, int(last_event))
+        except ValueError as exc:
+            raise HTTPException(400, "invalid Last-Event-ID") from exc
+    return StreamingResponse(
+        stream_thread_registry_events(session["sub"], cursor=cursor, include_all=all),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -2015,6 +2082,50 @@ async def api_get_thread(
         email=session.get("email"),
         mark_viewed=mark_viewed,
     )
+
+
+@router.patch("/threads/{thread_id}")
+async def api_patch_thread(
+    thread_id: str,
+    body: ThreadPatchBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await patch_dashboard_registry_thread(
+        thread_id, session["sub"], body, email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/messages")
+async def api_get_thread_messages(
+    thread_id: str,
+    after_seq: int = 0,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_messages(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+        after_seq=after_seq,
+    )
+
+
+@router.post("/threads/{thread_id}/handoff")
+async def api_handoff_thread(
+    thread_id: str,
+    body: ThreadHandoffBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await handoff_dashboard_thread(
+        thread_id, session["sub"], body, email=session.get("email")
+    )
+
+
+@router.post("/internal/local-report")
+async def api_local_report(
+    body: LocalReportBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await report_local_run(session["sub"], body, email=session.get("email"))
 
 
 def _cloud_terminal_websocket_url(thread_id: str) -> str:

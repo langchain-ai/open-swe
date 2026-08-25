@@ -1,32 +1,22 @@
-"""Reconciliation sweep: cancel runs stuck in ``pending`` past their deadline.
-
-The durable-dispatch contract relies on the platform's completion webhook to
-end every run. When that webhook never fires (crash, lost delivery), a run can
-sit in ``pending`` forever and hold its thread ``busy``. This sweep is the
-safety net: find busy threads, look for stale ``pending`` runs on them, and
-cancel the ones older than ``max_age_seconds`` so the thread frees up.
-"""
+"""Safety-net reconciliation for registry lifecycle rows."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .dashboard.thread_registry import ThreadRow, get_thread_registry
 from .utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
-
-_SEARCH_PAGE_SIZE = 100
+_PAGE_SIZE = 100
 
 
 def _parse_created_at(value: Any) -> datetime | None:
-    """Parse a run's ``created_at`` into an aware UTC datetime, or None."""
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     if not isinstance(value, str) or not value:
         return None
-    text = value.strip()
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
+    text = f"{value[:-1]}+00:00" if value.endswith("Z") else value
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
@@ -35,85 +25,98 @@ def _parse_created_at(value: Any) -> datetime | None:
 
 
 async def reconcile_stale_runs(*, max_age_seconds: int = 1800) -> dict[str, int]:
-    """Cancel ``pending`` runs older than ``max_age_seconds`` on busy threads.
-
-    Walks every ``busy`` thread (paginated), lists its ``pending`` runs, and
-    cancels those whose ``created_at`` is older than the cutoff. Per-thread work
-    is wrapped in try/except so one bad thread never aborts the sweep.
-
-    Returns counts: ``{"threads_checked", "stale_runs", "cancelled"}``.
-    """
+    """Correct stale queued/running rows from the cloud run or device heartbeat."""
     client = langgraph_client()
+    registry = await get_thread_registry()
     now = datetime.now(UTC)
-
     threads_checked = 0
     stale_runs = 0
-    cancelled = 0
+    corrected = 0
 
-    offset = 0
-    while True:
+    async def reconcile(thread: ThreadRow) -> None:
+        nonlocal threads_checked, stale_runs, corrected
+        threads_checked += 1
+        if (now - thread.status_at).total_seconds() <= max_age_seconds:
+            return
+        stale_runs += 1
+        if not thread.status_run_id:
+            return
         try:
-            threads = await client.threads.search(
-                metadata=None,
-                status="busy",
-                limit=_SEARCH_PAGE_SIZE,
-                offset=offset,
-            )
-        except Exception:
-            logger.exception("Reconcile sweep: thread search failed at offset %d", offset)
-            break
-        if not threads:
-            break
-
-        for thread in threads:
-            thread_id = thread.get("thread_id") if isinstance(thread, dict) else None
-            if not thread_id:
-                continue
-            threads_checked += 1
-            try:
-                runs = await client.runs.list(thread_id, status="pending")
-                stale_run_ids: list[str] = []
-                for run in runs:
-                    created = _parse_created_at(run.get("created_at"))
-                    if created is None:
-                        logger.warning(
-                            "Reconcile sweep: unparseable created_at on run %s (thread %s)",
-                            run.get("run_id"),
-                            thread_id,
-                        )
-                        continue
-                    if (now - created).total_seconds() <= max_age_seconds:
-                        continue
-                    run_id = run.get("run_id")
-                    if run_id:
-                        stale_run_ids.append(run_id)
-
-                if not stale_run_ids:
-                    continue
-                stale_runs += len(stale_run_ids)
-                await client.runs.cancel_many(
-                    thread_id=thread_id,
-                    run_ids=stale_run_ids,
-                    action="interrupt",
+            if thread.environment == "local":
+                device = (
+                    await registry.device(thread.device_id, thread.owner_login)
+                    if thread.device_id
+                    else None
                 )
-                cancelled += len(stale_run_ids)
-                logger.info(
-                    "Reconcile sweep: cancelled %d stale pending run(s) on thread %s",
-                    len(stale_run_ids),
-                    thread_id,
+                last_seen = _parse_created_at(device.get("last_seen_at")) if device else None
+                if last_seen and (now - last_seen).total_seconds() <= max_age_seconds:
+                    return
+                await registry.transition(
+                    thread.id,
+                    thread.status_run_id,
+                    "error",
+                    environment="local",
+                    device_id=thread.device_id,
+                    error="device went offline",
+                )
+                corrected += 1
+                return
+            run = await client.runs.get(thread.id, thread.status_run_id)
+            raw_status = run.get("status") if isinstance(run, dict) else None
+            mapped = {
+                "pending": "queued",
+                "running": "running",
+                "success": "finished",
+                "interrupted": "interrupted",
+                "error": "error",
+                "timeout": "error",
+            }.get(raw_status)
+            if mapped and mapped != thread.status:
+                await registry.transition(
+                    thread.id,
+                    thread.status_run_id,
+                    mapped,  # type: ignore[arg-type]
+                    environment="cloud",
+                    error=str(raw_status) if mapped == "error" else None,
+                )
+                corrected += 1
+        except Exception:
+            logger.exception("Reconcile sweep: failed to reconcile thread %s", thread.id)
+
+    for status in ("queued", "running"):
+        cursor: str | None = None
+        candidates: list[ThreadRow] = []
+        while True:
+            try:
+                page = await registry.list(
+                    None,
+                    status=status,
+                    limit=_PAGE_SIZE,
+                    cursor=cursor,
                 )
             except Exception:
-                logger.exception("Reconcile sweep: failed to reconcile thread %s", thread_id)
-                continue
+                logger.exception("Reconcile sweep: registry query failed for status %s", status)
+                break
+            candidates.extend(page.items)
+            if not page.has_more or not page.cursor:
+                break
+            cursor = page.cursor
+        for thread in candidates:
+            await reconcile(thread)
 
-        if len(threads) < _SEARCH_PAGE_SIZE:
-            break
-        offset += _SEARCH_PAGE_SIZE
-
+    events_pruned = await prune_thread_events()
     counts = {
         "threads_checked": threads_checked,
         "stale_runs": stale_runs,
-        "cancelled": cancelled,
+        "corrected": corrected,
+        "events_pruned": events_pruned,
     }
     logger.info("Reconcile sweep complete: %s", counts)
     return counts
+
+
+async def prune_thread_events(*, max_age_hours: int = 24) -> int:
+    registry = await get_thread_registry()
+    return await registry.prune_events(
+        older_than=datetime.now(UTC) - timedelta(hours=max_age_hours)
+    )

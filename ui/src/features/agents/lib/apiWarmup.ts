@@ -97,7 +97,6 @@ function warmApiRequests(
 function sidebarUrlTemplate(): string {
   const search = new URLSearchParams()
   search.set("limit", String(SIDEBAR_PAGE_SIZE))
-  search.set("offset", "0")
   search.set("resolved", "false")
   search.set("scope", "__SIDEBAR_SCOPE__")
   return `${agentsLangGraphApiUrl}/threads/page?${search.toString()}`

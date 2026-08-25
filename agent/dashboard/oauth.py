@@ -340,6 +340,8 @@ def build_settings_url() -> str | None:
 
 
 def require_session(request: HTTPConnection) -> dict[str, Any]:
+    if os.environ.get("OPEN_SWE_LOCAL_ONLY") == "1":
+        return {"sub": "local", "email": None, "avatar_url": None, "local_only": True}
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")

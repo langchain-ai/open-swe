@@ -6,6 +6,7 @@ export type ThreadGrouping =
   | "status"
   | "repo"
   | "source"
+  | "environment"
   | "pr"
   | "none"
 
@@ -23,6 +24,7 @@ export const THREAD_GROUPING_OPTIONS: Array<{
   { value: "status", label: "Status" },
   { value: "repo", label: "Repository" },
   { value: "source", label: "Source" },
+  { value: "environment", label: "Environment" },
   { value: "pr", label: "Pull request" },
   { value: "none", label: "None" },
 ]
@@ -35,6 +37,7 @@ const FOCUS_GROUPS = [
 ]
 
 const STATUS_ORDER: Array<AgentStatus> = [
+  "queued",
   "running",
   "finished",
   "interrupted",
@@ -43,6 +46,7 @@ const STATUS_ORDER: Array<AgentStatus> = [
 ]
 
 const STATUS_LABELS: Record<AgentStatus, string> = {
+  queued: "Queued",
   running: "Running",
   finished: "Finished",
   interrupted: "Interrupted",
@@ -135,6 +139,16 @@ export function groupThreadsForView(
       SOURCE_ORDER.map((key) => ({ key, label: SOURCE_LABELS[key] })),
       threads,
       (thread) => thread.source ?? "dashboard"
+    )
+  }
+  if (grouping === "environment") {
+    return buildGroups(
+      [
+        { key: "cloud", label: "Cloud" },
+        { key: "local", label: "Local" },
+      ],
+      threads,
+      (thread) => thread.environment
     )
   }
   if (grouping === "pr") {

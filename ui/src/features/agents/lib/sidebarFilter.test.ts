@@ -22,6 +22,7 @@ function makeThread(overrides: Partial<AgentThread> = {}): AgentThread {
     repo: "repo",
     repoFullName: "acme/repo",
     branch: "main",
+    environment: "cloud",
     model: "gpt-5",
     source: "dashboard",
     status: "idle",

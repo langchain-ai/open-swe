@@ -7,17 +7,18 @@ import json
 import logging
 import os
 import posixpath
+import re
+import shlex
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..dispatch import dispatch_agent_run
 from ..input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -32,7 +33,6 @@ from ..utils.json_types import (
     as_thread_dict,
     thread_metadata,
 )
-from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import (
     lookup_slack_thread_run_mapping,
     parse_github_pr_url,
@@ -45,7 +45,6 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
-from ..utils.timing import phase
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
@@ -61,6 +60,15 @@ from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .pull_request_status import get_pull_request_statuses
 from .team_settings import get_team_default_model, get_team_fable_enabled
+from .thread_registry import (
+    ThreadCreate,
+    ThreadEnvironment,
+    ThreadRow,
+    _as_utc,
+    get_thread_registry,
+    utcnow,
+)
+from .thread_transcript import ui_messages_to_state
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
 
@@ -85,13 +93,9 @@ _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _DISCOVERY_HISTORY_LIMIT = 5
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
-_THREAD_POST_COMMAND_METHODS = frozenset(
-    {"run.start", "input.respond", "input.inject", "state.fork"}
-)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
-_PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 _SANDBOX_CREATING_SENTINEL = "__creating__"
@@ -131,10 +135,6 @@ def _langgraph_proxy_headers(
     return headers
 
 
-def _thread_is_busy(thread: ThreadLike) -> bool:
-    return thread.get("status") == "busy"
-
-
 async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
     """Email used for GitHub/LangSmith auth on a run.
 
@@ -165,6 +165,44 @@ class ThreadMessageBody(BaseModel):
 
 class ThreadResolveBody(BaseModel):
     resolved: bool = True
+
+
+class ThreadCreateBody(BaseModel):
+    id: str | None = Field(default=None, max_length=128)
+    title: str = Field(default="Untitled agent", max_length=500)
+    repo: str | None = Field(default=None, max_length=500)
+    branch: str | None = Field(default=None, max_length=500)
+    environment: Literal["cloud", "local"] = "cloud"
+    device_id: str | None = Field(default=None, max_length=255)
+    device_name: str | None = Field(default=None, max_length=255)
+    model: str | None = Field(default=None, max_length=255)
+    effort: str | None = Field(default=None, max_length=100)
+
+
+class ThreadPatchBody(BaseModel):
+    title: str | None = Field(default=None, max_length=500)
+    resolved: bool | None = None
+    viewed_run_id: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=255)
+    effort: str | None = Field(default=None, max_length=100)
+
+
+class ThreadHandoffBody(BaseModel):
+    target: Literal["cloud", "local"]
+    device_id: str | None = Field(default=None, max_length=255)
+    device_name: str | None = Field(default=None, max_length=255)
+    git_checkpoint: dict[str, Any] | None = None
+
+
+class LocalReportBody(BaseModel):
+    thread_id: str | None = Field(default=None, max_length=128)
+    device_id: str = Field(max_length=255)
+    device_name: str = Field(max_length=255)
+    run_id: str | None = Field(default=None, max_length=128)
+    status: Literal["queued", "running", "interrupted", "finished", "error"] | None = None
+    error: str | None = Field(default=None, max_length=10_000)
+    messages: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    git_checkpoint: dict[str, Any] | None = None
 
 
 async def _resolve_agent_model_choice(
@@ -356,937 +394,20 @@ def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     return "", "", ""
 
 
-def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
-    # "interrupted" wins over a still-``busy`` thread: cancellation is async, so a
-    # just-cancelled thread reports busy for a moment and would otherwise look
-    # like it is still running. Callers refresh the newest run's real status
-    # first, so a follow-up run that superseded an interrupted one reads as
-    # pending/running here.
-    if run_status == "interrupted":
-        return "interrupted"
-    if thread_status == "busy" or run_status in {"pending", "running"}:
-        return "running"
-    if run_status in {"error", "failed", "timeout"}:
-        return "error"
-    if run_status == "success":
-        return "finished"
-    return "idle"
-
-
-def _thread_run_id(metadata: Mapping[str, Any], latest_run_id: str | None) -> str | None:
-    if latest_run_id:
-        return latest_run_id
-    run_id = metadata.get("latest_run_id")
-    return run_id if isinstance(run_id, str) and run_id else None
-
-
-def _is_thread_viewed(metadata: Mapping[str, Any], latest_run_id: str | None) -> bool:
-    viewed_at = metadata.get("last_viewed_at_ms")
-    viewed_run_id = metadata.get("last_viewed_run_id")
-    run_id = _thread_run_id(metadata, latest_run_id)
-    if run_id:
-        return viewed_run_id == run_id
-    return isinstance(viewed_at, (int, float))
-
-
 def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
-
-
-def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
-    if metadata.get("repo_private") is not True:
-        return None
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, dict):
-        return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return None
-    permalink = slack_thread.get("permalink")
-    return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
-
-
-def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
-    value = metadata.get(key)
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
-    return (
-        _metadata_string(metadata, "thread_category") == "automation"
-        or _thread_source(metadata) == "schedule"
-        or _metadata_string(metadata, "schedule_id") is not None
-    )
-
-
-def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
-    source = _thread_source(metadata)
-    origin = _metadata_string(metadata, "origin") or source
-    trigger_kind = _metadata_string(metadata, "trigger_kind") or (
-        "schedule_test"
-        if metadata.get("schedule_test") is True
-        else "schedule"
-        if source == "schedule" or _metadata_string(metadata, "schedule_id")
-        else "user"
-    )
-    category = _metadata_string(metadata, "thread_category")
-    if not category:
-        source_context = metadata.get("source_context")
-        if _is_automation_thread(metadata):
-            category = "automation"
-        elif isinstance(metadata.get("pr_number"), int) or (
-            isinstance(source_context, dict) and source_context.get("pr_number")
-        ):
-            category = "pull_request"
-        elif isinstance(source_context, dict) and (
-            source_context.get("github_issue") or source_context.get("linear_issue")
-        ):
-            category = "issue"
-        else:
-            category = "interactive"
-    return category, origin, trigger_kind
-
-
-def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any] | None:
-    if not isinstance(record, dict):
-        return None
-    repo_full_name = record.get("repo_full_name")
-    number = record.get("number")
-    url = record.get("url")
-    if (
-        not isinstance(repo_full_name, str)
-        or repo_full_name.count("/") != 1
-        or not isinstance(number, int)
-        or isinstance(number, bool)
-        or not isinstance(url, str)
-    ):
-        return None
-    title = record.get("title")
-    state = record.get("state")
-    stats = record.get("diff_stats")
-    stats = stats if isinstance(stats, dict) else {}
-    return {
-        "repoFullName": repo_full_name,
-        "number": number,
-        "title": title if isinstance(title, str) and title else fallback_title,
-        "state": state if state in _PR_STATES else "open",
-        "headRef": record.get("head_ref") if isinstance(record.get("head_ref"), str) else "",
-        "baseRef": record.get("base_ref") if isinstance(record.get("base_ref"), str) else "main",
-        "url": url,
-        "author": record.get("author") if isinstance(record.get("author"), str) else None,
-        "authorAvatarUrl": (
-            record.get("author_avatar_url")
-            if isinstance(record.get("author_avatar_url"), str)
-            else None
-        ),
-        "createdAt": record.get("created_at")
-        if isinstance(record.get("created_at"), str)
-        else None,
-        "diffStats": {
-            key: max(0, value) if isinstance(value := stats.get(key), int) else 0
-            for key in ("files", "additions", "deletions")
-        },
-    }
-
-
-async def _thread_summary(
-    thread: ThreadLike,
-    *,
-    latest_run_status: str | None = None,
-    latest_run_id: str | None = None,
-    owner_login: str | None = None,
-    owner_email: str | None = None,
-) -> dict[str, Any]:
-    metadata = thread_metadata(thread)
-    owner, name, full_name = _metadata_repo(metadata)
-    created_at = metadata.get("created_at_ms")
-    if not isinstance(created_at, (int, float)):
-        created_at = _thread_timestamp_ms(thread, "created_at")
-    updated_at = metadata.get("updated_at_ms")
-    if not isinstance(updated_at, (int, float)):
-        updated_at = _thread_timestamp_ms(thread, "updated_at")
-    raw_title = metadata.get("title")
-    title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
-    model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
-    effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
-    thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
-    metadata_run_status = metadata.get("latest_run_status")
-    run_status = latest_run_status or (
-        metadata_run_status if isinstance(metadata_run_status, str) else None
-    )
-    status = _run_status_to_agent_status(thread_status, run_status)
-
-    pr_number = metadata.get("pr_number")
-    pr_url = metadata.get("pr_url")
-    pr_title = metadata.get("pr_title")
-    pr_state = metadata.get("pr_state")
-    thread_category, origin, trigger_kind = _thread_classification(metadata)
-
-    thread_id = thread.get("thread_id") or thread.get("id")
-    trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
-
-    raw_sandbox_id = metadata.get("sandbox_id")
-    sandbox_id = (
-        raw_sandbox_id
-        if isinstance(raw_sandbox_id, str)
-        and raw_sandbox_id
-        and raw_sandbox_id != _SANDBOX_CREATING_SENTINEL
-        else None
-    )
-
-    summary: dict[str, Any] = {
-        "id": thread_id,
-        "title": title,
-        "repo": name,
-        "repoFullName": full_name,
-        "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
-        "model": model,
-        "effort": effort,
-        "planMode": metadata.get("plan_mode") is True,
-        "adminThread": metadata.get("admin_thread") is True,
-        "environment": metadata.get("environment"),
-        "planStatus": metadata.get("plan_status"),
-        "source": _thread_source(metadata),
-        "origin": origin,
-        "threadCategory": thread_category,
-        "triggerKind": trigger_kind,
-        "automationId": _metadata_string(metadata, "schedule_id"),
-        "automationName": _metadata_string(metadata, "schedule_name"),
-        "automationActionPosted": (
-            thread_category == "automation"
-            and _metadata_string(metadata, "automation_action_posted_at") is not None
-        ),
-        "status": status,
-        "viewed": _is_thread_viewed(metadata, latest_run_id),
-        "viewedAt": (
-            int(metadata["last_viewed_at_ms"])
-            if isinstance(metadata.get("last_viewed_at_ms"), (int, float))
-            else None
-        ),
-        "resolved": _is_thread_resolved(metadata),
-        "resolvedAt": (
-            int(metadata["resolved_at_ms"])
-            if isinstance(metadata.get("resolved_at_ms"), (int, float))
-            else None
-        ),
-        "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
-        "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
-        "ownerLogin": _thread_owner_login(metadata),
-        "isOwner": (_user_owns_thread(metadata, owner_login, owner_email) if owner_login else True),
-        "traceUrl": trace_url,
-        "sourceUrl": _thread_source_url(metadata),
-        "sandboxId": sandbox_id,
-    }
-    raw_pull_requests = metadata.get("pull_requests")
-    pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
-    pull_requests = [
-        parsed
-        for record in pull_request_records
-        if (parsed := _pull_request_summary(record, title)) is not None
-    ]
-    if not pull_requests and isinstance(pr_number, int) and isinstance(pr_url, str):
-        pr_ref = parse_github_pr_url(pr_url)
-        legacy_repo = (
-            full_name
-            if full_name.count("/") == 1
-            else f"{pr_ref.owner}/{pr_ref.repo}"
-            if pr_ref
-            else "unknown/unknown"
-        )
-        legacy_record = {
-            "repo_full_name": legacy_repo,
-            "number": pr_number,
-            "url": pr_url,
-            "title": pr_title,
-            "state": pr_state,
-            "head_ref": metadata.get("branch_name"),
-            "base_ref": metadata.get("base_branch"),
-            "diff_stats": as_json_object(metadata.get("diff_stats")),
-        }
-        legacy_pr = _pull_request_summary(legacy_record, title)
-        if legacy_pr:
-            pull_requests.append(legacy_pr)
-    if pull_requests:
-        latest_pr = pull_requests[-1]
-        summary["pullRequests"] = pull_requests
-        summary["pr"] = {
-            key: latest_pr[key] for key in ("number", "title", "state", "headRef", "baseRef", "url")
-        }
-        summary["diffStats"] = latest_pr["diffStats"]
-    # The transcript hydrates client-side from the SDK (`GET …/state` →
-    # `stream.messages`); the summary only carries metadata.
-    summary["messages"] = []
-    return summary
-
-
-async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
-    try:
-        runs = await client.runs.list(thread_id, limit=1)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)
-        return None, None
-    if not runs:
-        return None, None
-    run = runs[0]
-    raw_status = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
-    raw_id = (
-        (run.get("run_id") or run.get("id"))
-        if isinstance(run, dict)
-        else (getattr(run, "run_id", None) or getattr(run, "id", None))
-    )
-    status = raw_status.lower() if isinstance(raw_status, str) else None
-    run_id = raw_id if isinstance(raw_id, str) and raw_id else None
-    return status, run_id
-
-
-async def _latest_run_status(thread_id: str) -> str | None:
-    status, _ = await _latest_run_info(langgraph_client(), thread_id)
-    return status
-
-
-async def _refresh_latest_run_metadata(
-    client: Any, thread: ThreadLike, *, timings: dict[str, float] | None = None
-) -> tuple[ThreadLike, str | None, str | None]:
-    record = timings if timings is not None else {}
-    thread_id = thread.get("thread_id") or thread.get("id")
-    if not isinstance(thread_id, str) or not thread_id:
-        return thread, None, None
-    with phase(record, "runs_list"):
-        latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
-    metadata = thread_metadata(thread)
-    metadata_update: dict[str, Any] = {}
-    if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
-        metadata_update["latest_run_status"] = latest_run_status
-    if latest_run_id and latest_run_id != metadata.get("latest_run_id"):
-        metadata_update["latest_run_id"] = latest_run_id
-    if metadata_update:
-        with phase(record, "thread_update"):
-            try:
-                await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "Could not persist latest run metadata for %s", thread_id, exc_info=True
-                )
-            else:
-                thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
-    return thread, latest_run_status, latest_run_id
-
-
-_THREADS_SEARCH_PAGE = 500
-_THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
-_RUN_REFRESH_CONCURRENCY = 8
-_RUNNING_METADATA_STATUSES = {"pending", "running"}
-_ThreadSortBy = Literal["created_at", "updated_at"]
-
-
-def _thread_id(thread: ThreadLike) -> str | None:
-    thread_id = thread.get("thread_id") or thread.get("id")
-    return thread_id if isinstance(thread_id, str) and thread_id else None
-
-
-def _thread_metadata(thread: ThreadLike) -> JsonObject:
-    return thread_metadata(thread)
-
-
-def _owner_search_filters(
-    login: str, *, email: str | None = None, include_all: bool = False
-) -> list[dict[str, Any]]:
-    if include_all:
-        return [{}]
-    searches = [{"github_login": login}]
-    if email and email.strip():
-        searches.append({"triggering_user_email": email.strip().lower()})
-    return searches
-
-
-def _search_metadata_filter(
-    owner_filter: dict[str, Any],
-    *,
-    resolved: bool | None = None,
-    source: str | None = None,
-    automation_id: str | None = None,
-) -> dict[str, Any]:
-    metadata = dict(owner_filter)
-    if resolved is True:
-        metadata["resolved"] = True
-    if source and source != _DASHBOARD_SOURCE:
-        metadata["source"] = source
-    if automation_id:
-        metadata["schedule_id"] = automation_id
-    return metadata
-
-
-async def _search_threads_batch(
-    client: Any,
-    metadata: JsonObject,
-    *,
-    limit: int,
-    offset: int,
-    sort_by: _ThreadSortBy = "updated_at",
-) -> list[ThreadLike]:
-    batch = await client.threads.search(
-        metadata=metadata,
-        limit=limit,
-        offset=offset,
-        sort_by=sort_by,
-        sort_order="desc",
-        select=_THREAD_LIST_SELECT,
-    )
-    return [thread for thread in batch or [] if isinstance(thread, Mapping)]
-
-
-def _thread_timestamp_ms(thread: ThreadLike, field: _ThreadSortBy) -> int:
-    metadata = _thread_metadata(thread)
-    value = metadata.get(f"{field}_ms")
-    if isinstance(value, (int, float)):
-        return int(value)
-    timestamp = thread.get(field)
-    if isinstance(timestamp, str) and timestamp:
-        try:
-            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except ValueError:
-            return 0
-        return int(parsed.timestamp() * 1000)
-    return 0
-
-
-def _thread_updated_ms(thread: ThreadLike) -> int:
-    return _thread_timestamp_ms(thread, "updated_at")
-
-
-def _metadata_matches_filters(
-    metadata: Mapping[str, Any],
-    *,
-    resolved: bool | None,
-    source: str | None,
-    query: str | None,
-    scope: Literal["all", "interactive", "automation"] = "all",
-    automation_id: str | None = None,
-) -> bool:
-    """Metadata-only filters that don't require fetching the latest run."""
-    is_automation = _is_automation_thread(metadata)
-    if scope == "interactive" and is_automation:
-        return False
-    if scope == "automation" and not is_automation:
-        return False
-    if automation_id and _metadata_string(metadata, "schedule_id") != automation_id:
-        return False
-    if resolved is not None and _is_thread_resolved(metadata) is not resolved:
-        return False
-    if source and _thread_source(metadata) != source:
-        return False
-    if query:
-        title = metadata.get("title")
-        title = title if isinstance(title, str) else "Untitled agent"
-        if query.lower() not in title.lower():
-            return False
-    return True
-
-
-def _summary_matches_filters(
-    summary: dict[str, Any],
-    *,
-    resolved: bool | None,
-    viewed: bool | None,
-    source: str | None,
-    status: str | None,
-    query: str | None,
-) -> bool:
-    if resolved is not None and bool(summary.get("resolved")) is not resolved:
-        return False
-    if viewed is not None and bool(summary.get("viewed")) is not viewed:
-        return False
-    if source and summary.get("source") != source:
-        return False
-    if status and summary.get("status") != status:
-        return False
-    if query:
-        title = summary.get("title")
-        if not isinstance(title, str) or query.lower() not in title.lower():
-            return False
-    return True
-
-
-def _should_refresh_latest_run(thread: ThreadLike) -> bool:
-    metadata = _thread_metadata(thread)
-    metadata_status = metadata.get("latest_run_status")
-    thread_status = thread.get("status")
-    return (
-        thread_status == "busy"
-        or metadata_status in _RUNNING_METADATA_STATUSES
-        or not isinstance(metadata_status, str)
-    )
-
-
-async def _summarize_thread(
-    client: Any,
-    thread: ThreadLike,
-    *,
-    owner_login: str | None = None,
-    owner_email: str | None = None,
-    refresh_active_run: bool = True,
-) -> dict[str, Any]:
-    latest_run_status = latest_run_id = None
-    if refresh_active_run and _should_refresh_latest_run(thread):
-        thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
-            client, thread
-        )
-    return await _thread_summary(
-        thread,
-        latest_run_status=latest_run_status,
-        latest_run_id=latest_run_id,
-        owner_login=owner_login,
-        owner_email=owner_email,
-    )
-
-
-async def _summarize_threads(
-    client: Any,
-    threads: list[ThreadLike],
-    *,
-    owner_login: str | None = None,
-    owner_email: str | None = None,
-) -> list[dict[str, Any]]:
-    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
-
-    async def summarize(thread: ThreadLike) -> dict[str, Any]:
-        if not _should_refresh_latest_run(thread):
-            return await _summarize_thread(
-                client,
-                thread,
-                owner_login=owner_login,
-                owner_email=owner_email,
-                refresh_active_run=False,
-            )
-        async with semaphore:
-            return await _summarize_thread(
-                client,
-                thread,
-                owner_login=owner_login,
-                owner_email=owner_email,
-            )
-
-    return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
-
-
-async def _collect_thread_candidates(
-    client: Any,
-    searches: list[dict[str, Any]],
-    *,
-    include_all: bool,
-    login: str,
-    email: str | None,
-    resolved: bool | None = None,
-    source: str | None = None,
-    query: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
-    automation_id: str | None = None,
-    target_per_search: int | None = None,
-    surfaced_only: bool = False,
-    sort_by: _ThreadSortBy = "updated_at",
-) -> list[ThreadLike]:
-    seen: dict[str, ThreadLike] = {}
-    for owner_filter in searches:
-        matched_for_search = 0
-        offset = 0
-        metadata_filter = _search_metadata_filter(
-            owner_filter,
-            resolved=resolved,
-            source=source,
-            automation_id=automation_id,
-        )
-        while offset < _THREADS_PAGE_SCAN_CAP:
-            batch = await _search_threads_batch(
-                client,
-                metadata_filter,
-                limit=_THREADS_SEARCH_PAGE,
-                offset=offset,
-                sort_by=sort_by,
-            )
-            if not batch:
-                break
-            for thread in batch:
-                metadata = _thread_metadata(thread)
-                if surfaced_only and _thread_source(metadata) not in _SURFACED_SOURCES:
-                    continue
-                if not include_all and not _user_owns_thread(metadata, login, email):
-                    continue
-                if not _metadata_matches_filters(
-                    metadata,
-                    resolved=resolved,
-                    source=source,
-                    query=query,
-                    scope=scope,
-                    automation_id=automation_id,
-                ):
-                    continue
-                thread_id = _thread_id(thread)
-                if not thread_id:
-                    continue
-                matched_for_search += 1
-                seen.setdefault(thread_id, thread)
-            if len(batch) < _THREADS_SEARCH_PAGE:
-                break
-            if target_per_search is not None and matched_for_search >= target_per_search:
-                break
-            offset += _THREADS_SEARCH_PAGE
-    return sorted(
-        seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
-    )
-
-
-async def list_dashboard_threads(
-    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
-) -> list[dict[str, Any]]:
-    page = await list_dashboard_threads_page(
-        login,
-        email=email,
-        limit=limit,
-        offset=0,
-        include_all=include_all,
-    )
-    return page["items"]
-
-
-async def _sidebar_active_thread_summary(
-    client: Any,
-    active_thread_id: str | None,
-    *,
-    fallback_threads: Mapping[str, ThreadLike],
-    visible_thread_ids: set[str],
-    login: str,
-    email: str | None,
-    include_all: bool,
-) -> tuple[dict[str, Any], bool] | None:
-    if not active_thread_id or active_thread_id in visible_thread_ids:
-        return None
-    thread = fallback_threads.get(active_thread_id)
-    if thread is None:
-        try:
-            fetched = await client.threads.get(active_thread_id)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "Could not fetch active sidebar thread %s", active_thread_id, exc_info=True
-            )
-            return None
-        if not isinstance(fetched, Mapping):
-            return None
-        thread = fetched
-    metadata = _thread_metadata(thread)
-    if not include_all:
-        try:
-            _assert_thread_readable(metadata)
-        except HTTPException:
-            return None
-    summary = await _summarize_thread(
-        client,
-        thread,
-        owner_login=login,
-        owner_email=email,
-    )
-    return summary, _is_thread_resolved(metadata)
-
-
-async def list_dashboard_threads_sidebar(
-    login: str,
-    *,
-    email: str | None = None,
-    active_limit: int = 50,
-    resolved_limit: int = 20,
-    active_thread_id: str | None = None,
-    include_automations: bool = False,
-    include_all: bool = False,
-    timings: dict[str, float] | None = None,
-    counts: dict[str, int] | None = None,
-) -> dict[str, Any]:
-    record = timings if timings is not None else {}
-    count_record = counts if counts is not None else {}
-    client = langgraph_client()
-    searches = _owner_search_filters(login, email=email, include_all=include_all)
-    safe_active_limit = min(max(active_limit, 1), 100)
-    safe_resolved_limit = min(max(resolved_limit, 1), 100)
-    active_target = safe_active_limit + 1
-    resolved_target = safe_resolved_limit + 1
-    active: dict[str, ThreadLike] = {}
-    resolved_threads: dict[str, ThreadLike] = {}
-
-    with phase(record, "search"):
-        for owner_filter in searches:
-            local_active = 0
-            local_resolved = 0
-            offset = 0
-            while offset < _THREADS_PAGE_SCAN_CAP and (
-                local_active < active_target or local_resolved < resolved_target
-            ):
-                batch = await _search_threads_batch(
-                    client,
-                    owner_filter,
-                    limit=_THREADS_SEARCH_PAGE,
-                    offset=offset,
-                )
-                if not batch:
-                    break
-                for thread in batch:
-                    metadata = _thread_metadata(thread)
-                    if not include_all and not _user_owns_thread(metadata, login, email):
-                        continue
-                    if not include_automations and _is_automation_thread(metadata):
-                        continue
-                    thread_id = _thread_id(thread)
-                    if not thread_id or thread_id in active or thread_id in resolved_threads:
-                        continue
-                    if _is_thread_resolved(metadata):
-                        local_resolved += 1
-                        resolved_threads[thread_id] = thread
-                    else:
-                        local_active += 1
-                        active[thread_id] = thread
-                if len(batch) < _THREADS_SEARCH_PAGE:
-                    break
-                offset += _THREADS_SEARCH_PAGE
-
-    active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
-    resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
-    active_window = active_candidates[:safe_active_limit]
-    resolved_window = resolved_candidates[:safe_resolved_limit]
-    active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}
-    # The dominant cost when a user's threads have no cached run status: one
-    # `runs.list` per thread, eight at a time.
-    count_record["run_refreshes"] = sum(
-        _should_refresh_latest_run(thread) for thread in (*active_window, *resolved_window)
-    )
-    count_record["threads"] = len(active_window) + len(resolved_window)
-    with phase(record, "summarize"):
-        active_items, resolved_items, active_thread = await asyncio.gather(
-            _summarize_threads(
-                client,
-                active_window,
-                owner_login=login,
-                owner_email=email,
-            ),
-            _summarize_threads(
-                client,
-                resolved_window,
-                owner_login=login,
-                owner_email=email,
-            ),
-            _sidebar_active_thread_summary(
-                client,
-                active_thread_id,
-                fallback_threads={**active, **resolved_threads},
-                visible_thread_ids=active_ids,
-                login=login,
-                email=email,
-                include_all=include_all,
-            ),
-        )
-    active_has_more = len(active_candidates) > safe_active_limit
-    resolved_has_more = len(resolved_candidates) > safe_resolved_limit
-    if active_thread:
-        active_thread_summary, is_resolved_active_thread = active_thread
-        if is_resolved_active_thread:
-            resolved_items = [
-                active_thread_summary,
-                *[item for item in resolved_items if item["id"] != active_thread_summary["id"]],
-            ]
-            active_items = [
-                item for item in active_items if item["id"] != active_thread_summary["id"]
-            ]
-            if len(resolved_items) > safe_resolved_limit:
-                resolved_items = resolved_items[:safe_resolved_limit]
-                resolved_has_more = True
-        else:
-            active_items = [
-                active_thread_summary,
-                *[item for item in active_items if item["id"] != active_thread_summary["id"]],
-            ]
-            resolved_items = [
-                item for item in resolved_items if item["id"] != active_thread_summary["id"]
-            ]
-            if len(active_items) > safe_active_limit:
-                active_items = active_items[:safe_active_limit]
-                active_has_more = True
-    return {
-        "active": {
-            "items": active_items,
-            "limit": safe_active_limit,
-            "hasMore": active_has_more,
-        },
-        "resolved": {
-            "items": resolved_items,
-            "limit": safe_resolved_limit,
-            "hasMore": resolved_has_more,
-        },
-    }
-
-
-async def list_dashboard_threads_page(
-    login: str,
-    *,
-    email: str | None = None,
-    limit: int = 25,
-    offset: int = 0,
-    include_all: bool = False,
-    resolved: bool | None = None,
-    viewed: bool | None = None,
-    source: str | None = None,
-    status: str | None = None,
-    query: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
-    automation_id: str | None = None,
-    filter_owner_login: str | None = None,
-    surfaced_only: bool = False,
-    sort_by: _ThreadSortBy = "updated_at",
-) -> dict[str, Any]:
-    client = langgraph_client()
-    search_login = filter_owner_login or login
-    search_email = email if search_login == login else None
-    searches = _owner_search_filters(search_login, email=search_email, include_all=include_all)
-    safe_offset = max(offset, 0)
-    safe_limit = min(max(limit, 1), 100)
-    summary_filters = viewed is not None or status is not None
-    target = None if summary_filters else safe_offset + safe_limit + 1
-
-    candidates = await _collect_thread_candidates(
-        client,
-        searches,
-        include_all=include_all,
-        login=search_login,
-        email=search_email,
-        resolved=resolved,
-        source=source,
-        query=query,
-        scope=scope,
-        automation_id=automation_id,
-        target_per_search=target,
-        surfaced_only=surfaced_only,
-        sort_by=sort_by,
-    )
-
-    if summary_filters:
-        summaries = await _summarize_threads(
-            client,
-            candidates,
-            owner_login=login,
-            owner_email=email,
-        )
-        filtered = [
-            summary
-            for summary in summaries
-            if _summary_matches_filters(
-                summary,
-                resolved=resolved,
-                viewed=viewed,
-                source=source,
-                status=status,
-                query=query,
-            )
-        ]
-        summary_sort_field = "createdAt" if sort_by == "created_at" else "updatedAt"
-        filtered.sort(key=lambda item: item.get(summary_sort_field, 0), reverse=True)
-        items = filtered[safe_offset : safe_offset + safe_limit]
-        has_more = len(filtered) > safe_offset + safe_limit
-    else:
-        window = candidates[safe_offset : safe_offset + safe_limit]
-        items = await _summarize_threads(
-            client,
-            window,
-            owner_login=login,
-            owner_email=email,
-        )
-        has_more = len(candidates) > safe_offset + safe_limit
-
-    return {"items": items, "limit": safe_limit, "offset": safe_offset, "hasMore": has_more}
-
-
-async def _mark_thread_viewed(
-    client: Any,
-    thread_id: str,
-    metadata: dict[str, Any],
-    *,
-    latest_run_id: str | None,
-) -> dict[str, Any]:
-    now_ms = _now_ms()
-    metadata_update: dict[str, Any] = {"last_viewed_at_ms": now_ms}
-    run_id = _thread_run_id(metadata, latest_run_id)
-    if run_id:
-        metadata_update["last_viewed_run_id"] = run_id
-    try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
-        return metadata
-    return {**metadata, **metadata_update}
 
 
 async def get_dashboard_terminal_sandbox(
     thread_id: str, login: str, *, email: str | None = None
 ) -> tuple[str, str | None]:
-    client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    _assert_thread_owner(metadata, login, email)
-    sandbox_id = metadata.get("sandbox_id")
-    if (
-        not isinstance(sandbox_id, str)
-        or not sandbox_id
-        or sandbox_id == _SANDBOX_CREATING_SENTINEL
-    ):
+    row = await _registry_thread(thread_id, login, email=email)
+    if row.environment != "cloud":
+        raise HTTPException(409, "local terminals are served by the assigned device")
+    if not row.sandbox_id or row.sandbox_id == _SANDBOX_CREATING_SENTINEL:
         raise HTTPException(404, "thread sandbox is not ready")
-    repo_name = metadata.get("repo_name")
-    if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
-        repo_name = None
-    return sandbox_id, repo_name
-
-
-async def get_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
-) -> dict[str, Any]:
-    client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Thread lookup failed for %s", thread_id, exc_info=True)
-        raise HTTPException(404, "thread not found") from exc
-
-    metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
-    is_owner = _user_owns_thread(metadata, login, email)
-
-    # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
-    # `GET …/state` → `stream.messages`), so the detail endpoint returns
-    # metadata only — no server-side message conversion.
-    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
-    metadata = thread_metadata(thread)
-    status = _run_status_to_agent_status(
-        thread.get("status") if isinstance(thread.get("status"), str) else "idle",
-        latest_run_status
-        or (
-            metadata.get("latest_run_status")
-            if isinstance(metadata.get("latest_run_status"), str)
-            else None
-        ),
-    )
-    if mark_viewed and is_owner and status != "running":
-        metadata = await _mark_thread_viewed(
-            client,
-            thread_id,
-            metadata,
-            latest_run_id=latest_run_id,
-        )
-        thread = {**as_thread_dict(thread), "metadata": metadata}
-
-    return await _thread_summary(
-        thread,
-        latest_run_status=latest_run_status,
-        latest_run_id=latest_run_id,
-        owner_login=login,
-        owner_email=email,
-    )
+    repo_name = row.repo_full_name.rsplit("/", 1)[-1] if row.repo_full_name else None
+    return row.sandbox_id, repo_name
 
 
 async def _resolve_requested_environment(requested: Any) -> str | None:
@@ -1376,6 +497,24 @@ async def _create_dashboard_thread_record(
     client = langgraph_client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
+    registry = await get_thread_registry()
+    await registry.create(
+        ThreadCreate(
+            id=thread_id,
+            owner_login=login,
+            owner_email=await _resolve_run_email(login, profile),
+            title=initial_title,
+            repo_full_name=(f"{repo_config['owner']}/{repo_config['name']}" if has_repo else None),
+            branch=str(metadata.get("base_branch") or "main"),
+            environment="cloud",
+            source=_DASHBOARD_SOURCE,
+            category="interactive",
+            trigger_kind="user",
+            model=str(metadata_model) if metadata_model else None,
+            effort=str(metadata_effort) if metadata_effort else None,
+            metadata=metadata,
+        )
+    )
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
 
@@ -1799,6 +938,9 @@ async def _notify_slack_web_handoff(
 async def send_dashboard_message(
     thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
 ) -> dict[str, Any]:
+    row = await _registry_thread(thread_id, login, email=email)
+    if row.environment != "cloud":
+        raise HTTPException(409, "local messages must be sent through the assigned device")
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -1862,153 +1004,15 @@ async def send_dashboard_message(
         await _notify_slack_web_handoff(thread_id, handoff_metadata, client)
     except Exception:
         logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
-    thread = await client.threads.get(thread_id)
-    return await _thread_summary(thread)
-
-
-async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
-    run_ids: set[str] = set()
-    for status in ("pending", "running"):
-        offset = 0
-        while True:
-            runs = await client.runs.list(thread_id, status=status, limit=100, offset=offset)
-            run_ids.update(
-                run_id for run in runs if isinstance((run_id := run.get("run_id")), str) and run_id
-            )
-            if len(runs) < 100:
-                break
-            offset += len(runs)
-    if run_ids:
-        await client.runs.cancel_many(
-            thread_id=thread_id,
-            run_ids=sorted(run_ids),
-            action="interrupt",
-        )
-
-
-async def cancel_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None
-) -> dict[str, Any]:
-    """Interrupt every live run on a thread on behalf of its owner.
-
-    Cancels by thread rather than by ``latest_run_id`` so the stop button works
-    for runs this browser never started (Slack/Linear/GitHub triggers, CI
-    auto-fix): the client-side ``stream.stop()`` can only cancel a run it
-    dispatched itself, and cached ``latest_run_id`` metadata can lag the run the
-    platform is actually executing.
-    """
-    client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-
-    metadata = thread_metadata(thread)
-    _assert_thread_owner(metadata, login, email)
-
-    try:
-        await _cancel_active_thread_runs(client, thread_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to cancel active runs for thread %s", thread_id)
-        raise HTTPException(502, "failed to request thread cancellation") from exc
-
-    metadata_update: dict[str, Any] = {
-        "latest_run_status": "interrupted",
-        "updated_at_ms": _now_ms(),
+    registry_fields: dict[str, Any] = {
+        "resolved": False,
+        "resolved_at": None,
+        "metadata": {**row.metadata, **metadata_update},
     }
-    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
-    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
-    if queued_messages:
-        try:
-            configurable = await _build_dashboard_configurable(thread_id, login, metadata)
-            run = await dispatch_agent_run(
-                thread_id,
-                None,
-                configurable,
-                source=_DASHBOARD_SOURCE,
-                input={"messages": []},
-                client=client,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
-            raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
-        run_id = run.get("run_id") if isinstance(run, dict) else None
-        metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
-
-    if queued_messages:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    thread = await client.threads.get(thread_id)
-    return await _thread_summary(thread)
-
-
-async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
-    client = langgraph_client()
-    try:
-        await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-
-    try:
-        await _cancel_active_thread_runs(client, thread_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to cancel active runs for thread %s", thread_id)
-        raise HTTPException(502, "failed to request thread cancellation") from exc
-
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
-    )
-    updated_thread = await client.threads.get(thread_id)
-    return await _thread_summary(updated_thread)
-
-
-async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
-    client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-
-    metadata = thread_metadata(thread)
-    _assert_thread_owner(metadata, login, email)
-
-    run_id = metadata.get("latest_run_id")
-    if isinstance(run_id, str) and run_id:
-        try:
-            await client.runs.cancel(thread_id, run_id, wait=False)
-        except Exception:
-            logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
-
-    await client.threads.delete(thread_id)
-
-
-async def resolve_dashboard_thread(
-    thread_id: str, login: str, *, resolved: bool, email: str | None = None
-) -> dict[str, Any]:
-    """Mark a thread resolved/unresolved via thread metadata."""
-    client = langgraph_client()
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    metadata_update: dict[str, Any] = {
-        "resolved": resolved,
-        "resolved_at_ms": _now_ms() if resolved else None,
-    }
-    try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
-        raise HTTPException(502, "failed to update thread") from exc
-    thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
-    return await _thread_summary(thread)
-
-
-async def _authorized_thread_metadata(
-    thread_id: str, login: str, *, email: str | None = None
-) -> dict[str, Any]:
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    return metadata
+    if chosen_model and chosen_effort:
+        registry_fields.update(model=chosen_model, effort=chosen_effort)
+    row = await (await get_thread_registry()).update_meta(thread_id, **registry_fields)
+    return row.api_dict()
 
 
 async def get_dashboard_thread_pull_request_status(
@@ -2035,29 +1039,24 @@ async def get_dashboard_thread_pull_request_status(
 
 
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
+    await _registry_thread(thread_id, login, email=email)
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    _assert_thread_owner(metadata, login, email)
     return thread
 
 
 async def _readable_thread(
     thread_id: str, *, login: str | None = None, email: str | None = None
 ) -> ThreadLike:
-    """Fetch a thread and assert it is readable by the requesting user.
-
-    Read access is granted to any authenticated org member for surfaced-source
-    threads; ``login``/``email`` are accepted for API parity but not required.
-    """
+    if login is None:
+        raise HTTPException(401, "authentication required")
+    await _registry_thread(thread_id, login, email=email)
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
     return thread
 
 
@@ -2067,45 +1066,6 @@ async def _readable_thread_metadata(
     thread = await _readable_thread(thread_id, login=login, email=email)
     metadata = thread_metadata(thread)
     return metadata
-
-
-async def get_dashboard_thread_state(
-    thread_id: str,
-    login: str,
-    *,
-    email: str | None = None,
-    timings: dict[str, float] | None = None,
-) -> dict[str, Any]:
-    record = timings if timings is not None else {}
-    client = langgraph_client()
-    with phase(record, "thread_get"):
-        try:
-            thread = await client.threads.get(thread_id)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
-    thread, latest_run_status, _ = await _refresh_latest_run_metadata(
-        client, thread, timings=record
-    )
-    metadata = thread_metadata(thread)
-    with phase(record, "get_state"):
-        state = await client.threads.get_state(thread_id)
-    result = as_json_object(state)
-    # The SDK's `useStream` opens its live event subscription only when the
-    # hydrated `getState()` looks active (`next` non-empty / absent). When a
-    # run was just started out-of-band (our REST run-create), the latest
-    # checkpoint can still be the previous finished one with `next == []`,
-    # which the SDK reads as idle and never opens the stream. Drop `next`
-    # while a run is pending/running so the SDK treats the thread as active.
-    metadata_run_status = metadata.get("latest_run_status")
-    if (
-        _thread_is_busy(thread)
-        or latest_run_status in {"pending", "running"}
-        or metadata_run_status in {"pending", "running"}
-    ):
-        result.pop("next", None)
-    return result
 
 
 def _recovery_patch_filename(thread_id: str) -> str:
@@ -2548,15 +1508,13 @@ async def proxy_dashboard_thread_commands(
     if not isinstance(parsed, dict):
         raise HTTPException(400, "command body must be a JSON object")
 
-    # The dashboard mints the thread id client-side and submits straight away,
-    # so the very first ``run.start`` may target a thread that doesn't exist
-    # yet. That command lazily creates + stamps + owns the thread (in
-    # ``_enrich_run_start_command``); any other command against a missing thread
-    # is a 404. On an existing thread, ``run.start`` (the posting path) is open
-    # to any org member and attributed in ``_enrich_run_start_command``. Input
-    # commands on admin threads require an admin; other threads keep unattributed
-    # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
+    registry = await get_thread_registry()
+    registry_row = await registry.get(thread_id)
+    if registry_row is not None:
+        _assert_registry_owner(registry_row, login, email)
+        if registry_row.environment != "cloud":
+            raise HTTPException(409, "local threads execute on their assigned device")
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception:  # noqa: BLE001
@@ -2567,19 +1525,12 @@ async def proxy_dashboard_thread_commands(
         if method != "run.start":
             raise HTTPException(404, "thread not found")
         creating = True
-        metadata: dict[str, Any] = {}
-        thread_busy = False
+        metadata = dict(registry_row.metadata) if registry_row else {}
     else:
+        if registry_row is None:
+            raise HTTPException(404, "thread not found")
         metadata = thread_metadata(thread)
-        post_command = method in _THREAD_POST_COMMAND_METHODS
-        if post_command:
-            _assert_thread_postable(metadata, login, email)
-        else:
-            _assert_thread_readable(metadata)
-        if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            _assert_thread_owner(metadata, login, email)
-        metadata_run_status = metadata.get("latest_run_status")
-        thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
+    thread_busy = bool(registry_row and registry_row.status in {"queued", "running"})
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = _langgraph_proxy_headers(content_type=content_type)
@@ -2629,6 +1580,18 @@ async def proxy_dashboard_thread_commands(
             )
 
     if run_start_succeeded and run_id is not None:
+        try:
+            await registry.transition(
+                thread_id,
+                run_id,
+                "queued",
+                environment="cloud",
+                guard_run_id=registry_row.status_run_id if registry_row else None,
+            )
+        except (KeyError, ValueError):
+            logger.exception(
+                "Failed to record queued dashboard run %s on thread %s", run_id, thread_id
+            )
         task = asyncio.create_task(
             _observe_dashboard_run_ttft(
                 thread_id,
@@ -2638,22 +1601,6 @@ async def proxy_dashboard_thread_commands(
         )
         _TTFT_OBSERVER_TASKS.add(task)
         task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
-        try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "latest_run_id": run_id,
-                    "latest_run_status": "pending",
-                    "updated_at_ms": _now_ms(),
-                },
-            )
-        except Exception:
-            logger.warning(
-                "Failed to persist started dashboard run %s on thread %s",
-                run_id,
-                thread_id,
-                exc_info=True,
-            )
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 
@@ -2696,7 +1643,9 @@ async def proxy_dashboard_thread_run_cancel(
     action: str = "interrupt",
     email: str | None = None,
 ) -> tuple[int, bytes, str | None]:
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    row = await _registry_thread(thread_id, login, email=email)
+    if row.environment != "cloud":
+        raise HTTPException(409, "local threads execute on their assigned device")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = _langgraph_proxy_headers()
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
@@ -2707,19 +1656,14 @@ async def proxy_dashboard_thread_run_cancel(
         )
     if response.status_code in {200, 202, 204}:
         try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "latest_run_status": "interrupted",
-                    "updated_at_ms": _now_ms(),
-                },
-            )
-        except Exception:
-            logger.debug(
-                "Could not update thread metadata after run cancel for %s",
+            await (await get_thread_registry()).transition(
                 thread_id,
-                exc_info=True,
+                run_id,
+                "interrupted",
+                environment="cloud",
             )
+        except (KeyError, ValueError):
+            logger.debug("Cancelled run %s is no longer current for %s", run_id, thread_id)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 
@@ -2727,12 +1671,9 @@ async def proxy_dashboard_thread_run_cancel(
 async def stream_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, last_event_id: str | None = None
 ) -> AsyncIterator[str]:
-    try:
-        thread = await langgraph_client().threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    row = await _registry_thread(thread_id, login, email=email)
+    if row.environment != "cloud":
+        raise HTTPException(409, "local streams are served by the assigned device")
 
     stream = await langgraph_client().threads.join_stream(
         thread_id,
@@ -2751,3 +1692,485 @@ async def stream_dashboard_thread(
         if event_id is not None:
             chunk = f"id: {event_id}\n{chunk}"
         yield chunk
+
+
+# Registry-backed lifecycle API. LangGraph endpoints above remain execution-only.
+def _assert_registry_owner(row: ThreadRow, login: str, email: str | None = None) -> None:
+    if row.owner_login == login:
+        return
+    if email and row.owner_email and row.owner_email.lower() == email.lower():
+        return
+    raise HTTPException(404, "thread not found")
+
+
+async def _registry_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadRow:
+    row = await (await get_thread_registry()).get(thread_id)
+    if row is None:
+        raise HTTPException(404, "thread not found")
+    _assert_registry_owner(row, login, email)
+    return row
+
+
+async def create_dashboard_registry_thread(
+    login: str,
+    body: ThreadCreateBody,
+    *,
+    email: str | None = None,
+) -> dict[str, Any]:
+    if body.environment == "local" and not body.device_id:
+        raise HTTPException(422, "local threads require device_id")
+    repo = _parse_repo(body.repo)
+    if body.repo and repo is None:
+        raise HTTPException(422, "repo must be in owner/name form")
+    thread_id = body.id or str(uuid.uuid4())
+    registry = await get_thread_registry()
+    existing = await registry.get(thread_id)
+    if existing is not None:
+        _assert_registry_owner(existing, login, email)
+        raise HTTPException(409, "thread already exists")
+    row = await registry.create(
+        ThreadCreate(
+            id=thread_id,
+            owner_login=login,
+            owner_email=email,
+            title=body.title,
+            repo_full_name=(f"{repo['owner']}/{repo['name']}" if repo else None),
+            branch=body.branch,
+            environment=body.environment,
+            device_id=body.device_id,
+            device_name=body.device_name,
+            model=body.model,
+            effort=body.effort,
+            metadata={"execution_environment": body.environment},
+        )
+    )
+    if body.environment == "cloud":
+        metadata = {
+            "github_login": login,
+            "triggering_user_email": email,
+            "title": body.title,
+            "source": "dashboard",
+            "execution_environment": "cloud",
+            "repo_owner": repo.get("owner") if repo else None,
+            "repo_name": repo.get("name") if repo else None,
+            "base_branch": body.branch or "main",
+            "model": body.model,
+            "effort": body.effort,
+        }
+        try:
+            await langgraph_client().threads.create(
+                thread_id=thread_id, metadata=metadata, if_exists="do_nothing"
+            )
+        except Exception as exc:  # noqa: BLE001
+            await registry.delete(thread_id)
+            raise HTTPException(502, "could not create execution thread") from exc
+    return row.api_dict()
+
+
+async def patch_dashboard_registry_thread(
+    thread_id: str,
+    login: str,
+    body: ThreadPatchBody,
+    *,
+    email: str | None = None,
+) -> dict[str, Any]:
+    row = await _registry_thread(thread_id, login, email=email)
+    fields = body.model_dump(exclude_unset=True)
+    if "resolved" in fields:
+        fields["resolved_at"] = utcnow() if fields["resolved"] else None
+    if fields.get("viewed_run_id") is None and "viewed_run_id" in fields:
+        fields["viewed_run_id"] = row.last_finished_run_id
+    try:
+        updated = await (await get_thread_registry()).update_meta(thread_id, **fields)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return updated.api_dict()
+
+
+async def list_dashboard_threads(
+    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
+) -> list[dict[str, Any]]:
+    page = await (await get_thread_registry()).list(
+        None if include_all else login,
+        limit=min(max(limit, 1), 200),
+    )
+    return [row.api_dict(is_owner=row.owner_login == login) for row in page.items]
+
+
+async def list_dashboard_threads_sidebar(
+    login: str,
+    *,
+    email: str | None = None,
+    active_limit: int = 50,
+    resolved_limit: int = 20,
+    active_thread_id: str | None = None,
+    include_automations: bool = False,
+    include_all: bool = False,
+    timings: dict[str, float] | None = None,
+    counts: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    del email, active_thread_id, timings, counts
+    registry = await get_thread_registry()
+    owner = None if include_all else login
+    scope = "all" if include_automations else "interactive"
+    active, resolved = await asyncio.gather(
+        registry.list(owner, resolved=False, scope=scope, limit=active_limit),
+        registry.list(owner, resolved=True, scope=scope, limit=resolved_limit),
+    )
+    return {
+        "active": {
+            "items": [row.api_dict(is_owner=row.owner_login == login) for row in active.items],
+            "ids": [row.id for row in active.items],
+            "cursor": active.cursor,
+            "limit": min(max(active_limit, 1), 200),
+            "hasMore": active.has_more,
+        },
+        "resolved": {
+            "items": [row.api_dict(is_owner=row.owner_login == login) for row in resolved.items],
+            "ids": [row.id for row in resolved.items],
+            "cursor": resolved.cursor,
+            "limit": min(max(resolved_limit, 1), 200),
+            "hasMore": resolved.has_more,
+        },
+    }
+
+
+async def list_dashboard_threads_page(
+    login: str,
+    *,
+    email: str | None = None,
+    limit: int = 25,
+    cursor: str | None = None,
+    include_all: bool = False,
+    resolved: bool | None = None,
+    viewed: bool | None = None,
+    environment: str | None = None,
+    source: str | None = None,
+    status: str | None = None,
+    query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
+    filter_owner_login: str | None = None,
+    surfaced_only: bool = False,
+    sort_by: Literal["created_at", "updated_at"] = "updated_at",
+    offset: int | None = None,
+) -> dict[str, Any]:
+    del email, surfaced_only, sort_by
+    if offset not in (None, 0):
+        raise HTTPException(400, "offset pagination was removed; use cursor")
+    owner = None if include_all else (filter_owner_login or login)
+    try:
+        page = await (await get_thread_registry()).list(
+            owner,
+            resolved=resolved,
+            viewed=viewed,
+            environment=environment,
+            source=source,
+            status=status,
+            q=query,
+            scope=scope,
+            automation_id=automation_id,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "items": [row.api_dict(is_owner=row.owner_login == login) for row in page.items],
+        "ids": [row.id for row in page.items],
+        "limit": min(max(limit, 1), 200),
+        "cursor": page.cursor,
+        "hasMore": page.has_more,
+    }
+
+
+async def get_dashboard_thread(
+    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
+) -> dict[str, Any]:
+    row = await _registry_thread(thread_id, login, email=email)
+    if mark_viewed and row.status not in {"queued", "running"} and not row.viewed:
+        row = await (await get_thread_registry()).update_meta(
+            thread_id, viewed_run_id=row.last_finished_run_id
+        )
+    return row.api_dict()
+
+
+async def get_dashboard_thread_messages(
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    after_seq: int = 0,
+) -> dict[str, Any]:
+    await _registry_thread(thread_id, login, email=email)
+    items = await (await get_thread_registry()).get_messages(thread_id, after_seq=max(0, after_seq))
+    return {"items": items, "lastSeq": items[-1]["seq"] if items else after_seq}
+
+
+async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
+    row = await _registry_thread(thread_id, login, email=email)
+    if row.status in {"queued", "running"} and row.status_run_id:
+        raise HTTPException(409, "stop the thread before deleting it")
+    if row.environment == "cloud":
+        try:
+            await langgraph_client().threads.delete(thread_id)
+        except Exception:
+            logger.debug("Execution thread %s was already absent", thread_id, exc_info=True)
+    await (await get_thread_registry()).delete(thread_id)
+
+
+async def resolve_dashboard_thread(
+    thread_id: str, login: str, *, resolved: bool, email: str | None = None
+) -> dict[str, Any]:
+    return await patch_dashboard_registry_thread(
+        thread_id, login, ThreadPatchBody(resolved=resolved), email=email
+    )
+
+
+async def cancel_dashboard_thread(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    row = await _registry_thread(thread_id, login, email=email)
+    run_id = row.status_run_id
+    if run_id and row.status in {"queued", "running"}:
+        if row.environment == "cloud":
+            try:
+                await langgraph_client().runs.cancel(
+                    thread_id, run_id, wait=False, action="interrupt"
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(502, "failed to request thread cancellation") from exc
+        row = await (await get_thread_registry()).transition(
+            thread_id,
+            run_id,
+            "interrupted",
+            environment=cast(ThreadEnvironment, row.environment),
+            device_id=row.device_id,
+        )
+    return row.api_dict()
+
+
+async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
+    row = await (await get_thread_registry()).get(thread_id)
+    if row is None:
+        raise HTTPException(404, "thread not found")
+    if row.status_run_id and row.status in {"queued", "running"}:
+        if row.environment == "cloud":
+            await langgraph_client().runs.cancel(
+                thread_id, row.status_run_id, wait=False, action="interrupt"
+            )
+        row = await (await get_thread_registry()).transition(
+            thread_id,
+            row.status_run_id,
+            "interrupted",
+            environment=cast(ThreadEnvironment, row.environment),
+            device_id=row.device_id,
+        )
+    return row.api_dict()
+
+
+async def get_dashboard_thread_state(
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    timings: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    del timings
+    row = await _registry_thread(thread_id, login, email=email)
+    if row.environment != "cloud":
+        raise HTTPException(409, "local thread state is served by its device")
+    try:
+        state = await langgraph_client().threads.get_state(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "execution state is unavailable") from exc
+    result = as_json_object(state)
+    if row.status in {"queued", "running"}:
+        result.pop("next", None)
+    return result
+
+
+async def report_local_run(
+    login: str,
+    body: LocalReportBody,
+    *,
+    email: str | None = None,
+) -> dict[str, Any]:
+    registry = await get_thread_registry()
+    await registry.record_heartbeat(body.device_id, login, body.device_name)
+    if body.thread_id is None:
+        return {"deviceId": body.device_id, "deviceName": body.device_name}
+    row = await _registry_thread(body.thread_id, login, email=email)
+    if row.environment != "local" or row.device_id != body.device_id:
+        raise HTTPException(409, "thread is not assigned to this device")
+    if body.status is not None:
+        if not body.run_id:
+            raise HTTPException(422, "run_id is required with status")
+        try:
+            row = await registry.transition(
+                body.thread_id,
+                body.run_id,
+                body.status,
+                environment="local",
+                device_id=body.device_id,
+                error=body.error,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    if body.messages:
+        await registry.append_messages(body.thread_id, body.run_id, body.messages)
+    if body.git_checkpoint is not None:
+        checkpoint = body.git_checkpoint
+        if not all(
+            isinstance(checkpoint.get(key), str) and checkpoint[key]
+            for key in ("repo", "ref", "branch")
+        ) or not isinstance(checkpoint.get("pushed"), bool):
+            raise HTTPException(422, "invalid git checkpoint")
+        row = await registry.update_meta(body.thread_id, git_checkpoint=checkpoint)
+    return row.api_dict()
+
+
+async def _cloud_handoff_checkpoint(row: ThreadRow) -> dict[str, Any]:
+    if not row.sandbox_id or not row.repo_full_name:
+        if row.git_checkpoint and row.git_checkpoint.get("pushed") is True:
+            return row.git_checkpoint
+        raise HTTPException(409, "cloud work is not available to checkpoint")
+    from ..utils.sandbox_paths import aresolve_sandbox_work_dir
+
+    repo_name = row.repo_full_name.split("/", 1)[-1]
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", repo_name):
+        raise HTTPException(422, "invalid repository name")
+    branch = row.branch or f"open-swe/handoff-{row.id[:12]}"
+    if _safe_git_ref(branch) is None:
+        branch = f"open-swe/handoff-{re.sub(r'[^A-Za-z0-9._-]', '-', row.id)[:12]}"
+    try:
+        sandbox = await create_sandbox(row.sandbox_id)
+        work_dir = await aresolve_sandbox_work_dir(sandbox)
+        repo_dir = posixpath.join(work_dir, repo_name)
+        command = " && ".join(
+            (
+                f"cd {shlex.quote(repo_dir)}",
+                "git add -A -- .",
+                "git diff --cached --quiet || git commit -m 'Open SWE handoff checkpoint'",
+                f"git push origin HEAD:refs/heads/{shlex.quote(branch)}",
+                "git rev-parse HEAD",
+            )
+        )
+        result = await sandbox.aexecute(command, timeout=120)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            409, "could not commit and push cloud work; check repository write access"
+        ) from exc
+    output = _response_output(result).strip().splitlines()
+    commit = output[-1] if output else ""
+    if _response_exit_code(result) not in {0, None} or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise HTTPException(409, "could not create a pushed cloud checkpoint")
+    return {
+        "repo": row.repo_full_name,
+        "ref": commit,
+        "branch": branch,
+        "pushed": True,
+    }
+
+
+async def _seed_cloud_handoff(row: ThreadRow, checkpoint: Mapping[str, Any]) -> None:
+    owner, repo = row.repo_full_name.split("/", 1) if row.repo_full_name else ("", "")
+    metadata = {
+        **row.metadata,
+        "github_login": row.owner_login,
+        "triggering_user_email": row.owner_email,
+        "source": row.source,
+        "execution_environment": "cloud",
+        "repo_owner": owner,
+        "repo_name": repo,
+        "base_branch": checkpoint["branch"],
+        "branch_name": checkpoint["branch"],
+        "git_checkpoint_ref": checkpoint["ref"],
+        "resumed_from_environment": "local",
+    }
+    client = langgraph_client()
+    await client.threads.create(thread_id=row.id, metadata=metadata, if_exists="do_nothing")
+    messages = await (await get_thread_registry()).get_messages(row.id)
+    seeded = ui_messages_to_state(messages)
+    if seeded:
+        await client.threads.update_state(row.id, values={"messages": seeded})
+
+
+async def handoff_dashboard_thread(
+    thread_id: str,
+    login: str,
+    body: ThreadHandoffBody,
+    *,
+    email: str | None = None,
+) -> dict[str, Any]:
+    row = await _registry_thread(thread_id, login, email=email)
+    if row.status in {"queued", "running"}:
+        raise HTTPException(409, "interrupt the active run before handing off")
+    if not row.repo_full_name:
+        raise HTTPException(422, "repo-less threads cannot be handed off")
+    if body.target == row.environment:
+        return row.api_dict()
+    target_device: dict[str, Any] | None = None
+    if body.target == "local":
+        if not body.device_id:
+            raise HTTPException(422, "device_id is required for a local handoff")
+        target_device = await (await get_thread_registry()).device(body.device_id, login)
+        if target_device is None:
+            raise HTTPException(404, "target device has not checked in")
+        last_seen = _as_utc(target_device.get("last_seen_at"))
+        if last_seen is None or (utcnow() - last_seen).total_seconds() > 300:
+            raise HTTPException(409, "target device is offline")
+    checkpoint = (
+        await _cloud_handoff_checkpoint(row)
+        if row.environment == "cloud"
+        else body.git_checkpoint or row.git_checkpoint
+    )
+    if not isinstance(checkpoint, dict) or checkpoint.get("pushed") is not True:
+        raise HTTPException(409, "commit and push the current work before handing off")
+    if not all(
+        isinstance(checkpoint.get(key), str) and checkpoint[key]
+        for key in ("repo", "ref", "branch")
+    ):
+        raise HTTPException(422, "invalid git checkpoint")
+    fields: dict[str, Any] = {
+        "environment": body.target,
+        "git_checkpoint": checkpoint,
+        "branch": checkpoint["branch"],
+        "device_id": None,
+        "device_name": None,
+    }
+    if body.target == "local":
+        assert target_device is not None
+        fields.update(
+            device_id=body.device_id,
+            device_name=body.device_name or target_device["name"],
+        )
+    else:
+        try:
+            await _seed_cloud_handoff(row, checkpoint)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Could not seed cloud execution for handoff %s", thread_id)
+            raise HTTPException(502, "could not prepare cloud execution for handoff") from exc
+        fields["sandbox_id"] = None
+    updated = await (await get_thread_registry()).update_meta(thread_id, **fields)
+    return updated.api_dict()
+
+
+async def stream_thread_registry_events(
+    login: str,
+    *,
+    cursor: int = 0,
+    include_all: bool = False,
+) -> AsyncIterator[str]:
+    registry = await get_thread_registry()
+    current = max(0, cursor)
+    owner = None if include_all else login
+    while True:
+        events = await registry.events_since(current, owner)
+        if not events:
+            yield ": heartbeat\n\n"
+            await registry.wait_for_events(15.0)
+            continue
+        for event in events:
+            current = event.id
+            yield f"id: {event.id}\nevent: {event.kind}\ndata: {json.dumps(event.api_dict(), default=str)}\n\n"

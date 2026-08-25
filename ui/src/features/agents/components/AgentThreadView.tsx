@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
+import { useQueryClient } from "@tanstack/react-query"
 import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
 import type {
@@ -27,10 +28,14 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
+  agentThreadKeys,
   useAgentSkills,
+  useAgentThreadMessages,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
+import { agentsApi } from "@/features/agents/lib/api"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import { transportForThread } from "@/features/agents/lib/threadTransport"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -61,6 +66,7 @@ export function AgentThreadView({
   autoFocusComposer = false,
 }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
+  const queryClient = useQueryClient()
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
   const isDesktop =
@@ -69,6 +75,50 @@ export function AgentThreadView({
   const skills = useAgentSkills()
   const session = useSession()
   const canPost = !thread.adminThread || session.data?.is_admin === true
+  const canExecuteHere = transportForThread(thread).canExecuteHere(thread)
+  const durableMessages = useAgentThreadMessages(thread.id).data ?? []
+  const [handoffPending, setHandoffPending] = useState(false)
+  const [handoffError, setHandoffError] = useState<string | null>(null)
+  const canHandoff = Boolean(thread.repoFullName && isDesktop)
+  const handoff = useCallback(async () => {
+    if (!window.openSweDesktop || !thread.repoFullName || handoffPending) return
+    setHandoffPending(true)
+    setHandoffError(null)
+    try {
+      if (thread.status === "queued" || thread.status === "running") {
+        await agentsApi.cancelThread(thread.id)
+      }
+      const target = thread.environment === "local" ? "cloud" : "local"
+      const checkpoint =
+        target === "cloud"
+          ? await window.openSweDesktop.prepareCloudHandoff(thread.id)
+          : undefined
+      const updated = await agentsApi.handoffThread(thread.id, {
+        target,
+        ...(target === "local"
+          ? {
+              device_id: window.openSweDesktop.deviceId ?? undefined,
+            }
+          : { git_checkpoint: checkpoint }),
+      })
+      if (target === "local" && updated.deviceId && updated.gitCheckpoint) {
+        await window.openSweDesktop.prepareLocalHandoff({
+          threadId: updated.id,
+          deviceId: updated.deviceId,
+          repoFullName: updated.repoFullName,
+          gitCheckpoint: updated.gitCheckpoint,
+          modelId: updated.model,
+          effort: updated.effort,
+          messages: durableMessages,
+        })
+      }
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), updated)
+    } catch (error) {
+      setHandoffError(error instanceof Error ? error.message : "Could not hand off thread")
+    } finally {
+      setHandoffPending(false)
+    }
+  }, [durableMessages, handoffPending, queryClient, thread])
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
@@ -116,6 +166,40 @@ export function AgentThreadView({
       thread.id,
     ]
   )
+  const submittedInitialLocalPrompt = useRef<string | null>(null)
+  useEffect(() => {
+    if (
+      thread.environment !== "local" ||
+      !canExecuteHere ||
+      submittedInitialLocalPrompt.current === thread.id
+    ) {
+      return
+    }
+    submittedInitialLocalPrompt.current = thread.id
+    void stream.hydrationPromise
+      .then(() => window.openSweDesktop?.getLocalPrompt(thread.id))
+      .then(async (pending) => {
+        if (!pending) return
+        await sendMessage.mutateAsync({
+          content: pending.prompt,
+          images: pending.images,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+        })
+        await window.openSweDesktop?.clearLocalPrompt(thread.id)
+      })
+      .catch(() => {
+        submittedInitialLocalPrompt.current = null
+      })
+  }, [
+    activeSelection?.effort,
+    activeSelection?.modelId,
+    canExecuteHere,
+    sendMessage,
+    stream.hydrationPromise,
+    thread.environment,
+    thread.id,
+  ])
   const fixPullRequest = useCallback(
     (prompt: string) => submitMessage(prompt, []),
     [submitMessage]
@@ -149,19 +233,24 @@ export function AgentThreadView({
 
   const baseMessages = useMemo<Array<Message>>(() => {
     if (thread.messages.length > 0) return thread.messages
+    if (durableMessages.length > 0) return durableMessages
     return streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
-  }, [stream.messages, stream.toolCalls, thread.messages])
+  }, [durableMessages, stream.messages, stream.toolCalls, thread.messages])
 
   const isStreaming =
+    thread.status === "queued" ||
     thread.status === "running" ||
     stream.isLoading ||
     thread.messages.length > 0
   const activeRun = useMemo(
-    () => ({ threadId: thread.id, running: thread.status === "running" }),
+    () => ({
+      threadId: thread.id,
+      running: thread.status === "queued" || thread.status === "running",
+    }),
     [thread.id, thread.status]
   )
   const queuedMessages = useMemo(
@@ -228,10 +317,31 @@ export function AgentThreadView({
               </span>
             )}
             <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              Cloud
+              {thread.environment === "local"
+                ? thread.deviceName || "This device"
+                : "Cloud"}
             </span>
+            {canHandoff && (
+              <button
+                type="button"
+                className="shrink-0 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                disabled={handoffPending || (thread.environment === "cloud" && !window.openSweDesktop?.deviceId)}
+                onClick={() => void handoff()}
+              >
+                {handoffPending
+                  ? "Handing off…"
+                  : thread.status === "queued" || thread.status === "running"
+                    ? "Interrupt & hand off"
+                    : `Hand off to ${thread.environment === "local" ? "cloud" : "this Mac"}`}
+              </button>
+            )}
           </div>
         </header>
+        {handoffError && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3 text-xs text-destructive">
+            {handoffError}
+          </div>
+        )}
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
@@ -294,7 +404,7 @@ export function AgentThreadView({
                   }
                   autoFocus={autoFocusComposer}
                   compact
-                  disabled={!canPost}
+                  disabled={!canPost || !canExecuteHere}
                   busy={isStreaming}
                   activeRun={activeRun}
                   onSubmit={submitMessage}
@@ -353,7 +463,7 @@ export function AgentThreadView({
                 }
                 autoFocus={autoFocusComposer}
                 compact
-                disabled={!canPost}
+                disabled={!canPost || !canExecuteHere}
                 busy={isStreaming}
                 activeRun={activeRun}
                 onSubmit={(content, images) =>
@@ -377,13 +487,15 @@ export function AgentThreadView({
           </div>
         )}
       </div>
-      <AgentGitPanel
-        thread={thread}
-        revealFilePath={revealFilePath}
-        revealChangesKey={revealChangesKey}
-        collapsed={panelCollapsed}
-        onCollapsedChange={handlePanelCollapsedChange}
-      />
+      {thread.environment === "cloud" && (
+        <AgentGitPanel
+          thread={thread}
+          revealFilePath={revealFilePath}
+          revealChangesKey={revealChangesKey}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      )}
     </div>
   )
 }

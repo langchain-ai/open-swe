@@ -37,7 +37,6 @@ async function recordedSidebarUrl(
   await agentsApi
     .listThreadsPage({
       limit: SIDEBAR_PAGE_SIZE,
-      offset: 0,
       resolved: false,
       scope: includeAutomations ? "all" : "interactive",
     })

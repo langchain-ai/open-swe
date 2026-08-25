@@ -54,6 +54,7 @@ export const STATUS_FILTER_OPTIONS: Array<{
   value: AgentStatus
   label: string
 }> = [
+  { value: "queued", label: "Queued" },
   { value: "running", label: "Running" },
   { value: "finished", label: "Finished" },
   { value: "interrupted", label: "Interrupted" },
@@ -174,6 +175,7 @@ export function reconcilePinnedAttentionThread(
 }
 
 const STATUS_GROUP_ORDER: Array<AgentStatus> = [
+  "queued",
   "running",
   "finished",
   "interrupted",
@@ -182,6 +184,7 @@ const STATUS_GROUP_ORDER: Array<AgentStatus> = [
 ]
 
 const STATUS_GROUP_LABEL: Record<AgentStatus, string> = {
+  queued: "Queued",
   running: "Running",
   finished: "Finished",
   interrupted: "Interrupted",

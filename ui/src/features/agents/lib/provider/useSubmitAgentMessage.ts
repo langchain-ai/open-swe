@@ -4,10 +4,7 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
-import {
-  agentThreadKeys,
-  setAgentThreadStatus,
-} from "@/features/agents/lib/queries"
+import { agentThreadKeys } from "@/features/agents/lib/queries"
 
 /**
  * Construct the message content for the LangGraph run.
@@ -76,6 +73,31 @@ export function useSubmitAgentMessage(threadId: string) {
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
+      const thread = queryClient.getQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId)
+      )
+      if (thread?.environment === "local") {
+        const context = await window.openSweDesktop?.getLocalThread(threadId)
+        if (!context) throw new Error("This local thread is unavailable on this device")
+        void stream.submit(
+          { messages: [{ type: "human", content: messageContent(vars) }] },
+          {
+            config: {
+              configurable: {
+                source: "desktop",
+                local_project_path: context.cwd,
+                ...(vars.model_id && vars.effort
+                  ? {
+                      agent_model_id: vars.model_id,
+                      agent_effort: vars.effort,
+                    }
+                  : {}),
+              },
+            },
+          }
+        )
+        return
+      }
       // `optimistic` is only safe when a run is known to be in flight. Idle
       // sends still probe `/messages` first (a run may have started elsewhere),
       // and that probe answers 409 — showing the bubble up front would flash a
@@ -144,16 +166,7 @@ export function useSubmitAgentMessage(threadId: string) {
           { messages: [{ type: "human", content: messageContent(vars) }] },
           { config }
         )
-        .catch(() => {
-          // The run failed to start (e.g. expired OAuth token → 401, or a
-          // 409 active-run race), but `onSuccess` already optimistically set
-          // `status: "running"`. Surface the failure and clear the busy state
-          // instead of leaving the thread falsely running.
-          setAgentThreadStatus(queryClient, threadId, "error")
-        })
-    },
-    onSuccess: () => {
-      setAgentThreadStatus(queryClient, threadId, "running")
+        .catch(() => undefined)
     },
   })
 }

@@ -3,8 +3,6 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
-  CaretLeftIcon,
-  CaretRightIcon,
   CheckCircleIcon,
   CircleNotchIcon,
   DotsSixVerticalIcon,
@@ -27,7 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   useResolveAgentThread,
-  useThreadsPage,
+  useInfiniteThreadsPages,
 } from "@/features/agents/lib/queries"
 import {
   THREAD_GROUPING_OPTIONS,
@@ -48,8 +46,8 @@ export interface ThreadsPageFilters {
   viewed?: boolean
   source?: AgentSource
   status?: AgentStatus
+  environment?: "cloud" | "local"
   q?: string
-  page: number
   layout: ThreadsLayout
   group: ThreadGrouping
   order?: string
@@ -73,11 +71,18 @@ const SOURCE_OPTIONS: Array<{ value: AgentSource | "any"; label: string }> = [
 
 const STATUS_OPTIONS: Array<{ value: AgentStatus | "any"; label: string }> = [
   { value: "any", label: "Any status" },
+  { value: "queued", label: "Queued" },
   { value: "running", label: "Running" },
   { value: "finished", label: "Finished" },
   { value: "interrupted", label: "Interrupted" },
   { value: "error", label: "Error" },
   { value: "idle", label: "Idle" },
+]
+
+const ENVIRONMENT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "any", label: "Any environment" },
+  { value: "cloud", label: "Cloud" },
+  { value: "local", label: "Local" },
 ]
 
 function boolToTri(value?: boolean): TriState {
@@ -116,13 +121,12 @@ export function AgentsThreadsPage({
   const [search, setSearch] = useState(filters.q ?? "")
   const [personalOrder, setPersonalOrder] = useState(filters.order)
   const pageSize = filters.layout === "board" ? BOARD_PAGE_SIZE : LIST_PAGE_SIZE
-  const offset = (filters.page - 1) * pageSize
-  const query = useThreadsPage(
+  const query = useInfiniteThreadsPages(
     {
       limit: pageSize,
-      offset,
       resolved: filters.resolved,
       viewed: filters.viewed,
+      environment: filters.environment,
       source: filters.source,
       status: filters.status,
       q: filters.q,
@@ -138,11 +142,7 @@ export function AgentsThreadsPage({
     setPersonalOrder(filters.order ?? storedColumnOrder(filters.group))
   }, [filters.group, filters.order])
 
-  const data = query.data
-  const items = data?.items ?? []
-  const hasMore = data?.hasMore ?? false
-  const exactTotal = data?.total
-  const end = offset + items.length
+  const items = query.data?.pages.flatMap((page) => page.items) ?? []
   const groups = useMemo(
     () => groupThreadsForView(items, filters.group),
     [filters.group, items]
@@ -158,7 +158,7 @@ export function AgentsThreadsPage({
     .filter((group): group is ThreadViewGroup => Boolean(group))
 
   const update = (patch: Partial<ThreadsPageFilters>) => {
-    onFiltersChange({ ...filters, ...patch, page: patch.page ?? 1 })
+    onFiltersChange({ ...filters, ...patch })
   }
 
   const onSearchSubmit = (event: React.FormEvent) => {
@@ -267,6 +267,16 @@ export function AgentsThreadsPage({
               onChange={(value) => update({ viewed: triToBool(value) })}
             />
             <SelectFilter
+              value={filters.environment ?? "any"}
+              options={ENVIRONMENT_OPTIONS}
+              onChange={(value) =>
+                update({
+                  environment:
+                    value === "any" ? undefined : (value as "cloud" | "local"),
+                })
+              }
+            />
+            <SelectFilter
               value={filters.source ?? "any"}
               options={SOURCE_OPTIONS}
               onChange={(value) =>
@@ -303,33 +313,19 @@ export function AgentsThreadsPage({
           )}
         </div>
 
-        {(items.length > 0 || filters.page > 1) && (
+        {items.length > 0 && (
           <div className="flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
-            <span>
-              {items.length > 0 ? `${offset + 1}–${end}` : "No results"}
-              {exactTotal != null ? ` of ${exactTotal}` : hasMore ? "+" : ""}
-            </span>
-            <div className="flex items-center gap-2">
+            <span>{items.length} thread{items.length === 1 ? "" : "s"}</span>
+            {query.hasNextPage && (
               <Button
                 size="sm"
                 variant="outline"
-                disabled={filters.page <= 1}
-                onClick={() => update({ page: filters.page - 1 })}
+                disabled={query.isFetchingNextPage}
+                onClick={() => void query.fetchNextPage()}
               >
-                <CaretLeftIcon className="size-3" />
-                Prev
+                {query.isFetchingNextPage ? "Loading…" : "Load more"}
               </Button>
-              <span>Page {filters.page}</span>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!hasMore}
-                onClick={() => update({ page: filters.page + 1 })}
-              >
-                Next
-                <CaretRightIcon className="size-3" />
-              </Button>
-            </div>
+            )}
           </div>
         )}
       </div>

@@ -4,11 +4,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import {
-  agentThreadKeys,
-  invalidateAgentThreadLists,
-  useCancelAgentThread,
-} from "@/features/agents/lib/queries"
+import { agentThreadKeys, useCancelAgentThread } from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
 
 export interface ActiveRun {
@@ -176,7 +172,6 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
         queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
           prev ? { ...prev, status: "interrupted" as const } : prev
         )
-        invalidateAgentThreadLists(queryClient)
       }
     } finally {
       setStopping(false)

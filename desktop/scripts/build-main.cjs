@@ -11,6 +11,11 @@ execFileSync(
     stdio: "inherit",
   },
 );
-for (const file of ["backend-supervisor.cjs", "local-thread-store.cjs"]) {
+for (const file of [
+  "backend-supervisor.cjs",
+  "device-identity.cjs",
+  "local-execution-context.cjs",
+  "local-run-reporter.cjs",
+]) {
   fs.copyFileSync(path.join(root, "src", file), path.join(root, "build", file));
 }

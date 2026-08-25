@@ -13,6 +13,8 @@ function isDesktopCommandId(value) {
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
+  localOnly: process.env.OPEN_SWE_LOCAL_ONLY === "1",
+  deviceId: process.env.OPEN_SWE_DEVICE_ID || null,
   onCommand: (callback) => {
     const listener = (_event, commandId) => {
       if (isDesktopCommandId(commandId)) callback(commandId);
@@ -23,6 +25,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranches: (cwd) =>
     ipcRenderer.invoke("desktop:project-branches", cwd),
+  getProjectRepository: (cwd) =>
+    ipcRenderer.invoke("desktop:project-repository", cwd),
   checkoutProjectBranch: (input) =>
     ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
@@ -41,12 +45,11 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
   getLocalThread: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-thread", threadId),
-  listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
+  prepareCloudHandoff: (threadId) =>
+    ipcRenderer.invoke("desktop:prepare-cloud-handoff", threadId),
+  prepareLocalHandoff: (input) =>
+    ipcRenderer.invoke("desktop:prepare-local-handoff", { ...input }),
   localActivity: () => ipcRenderer.invoke("desktop:local-activity"),
-  updateLocalThread: (input) =>
-    ipcRenderer.invoke("desktop:update-local-thread", input),
-  deleteLocalThread: (threadId) =>
-    ipcRenderer.invoke("desktop:delete-local-thread", threadId),
   getLocalDiff: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-diff", threadId),
   getLocalPrDiff: (threadId) =>

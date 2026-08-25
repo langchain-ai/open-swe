@@ -4,25 +4,28 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppCommandPalette } from "./AppCommandPalette"
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
-  cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
+  cloudThread: {
+    id: "cloud-1",
+    title: "Cloud result",
+    environment: "cloud",
+  } as AgentThread,
   localThread: {
     id: "local-1",
     title: "Local result",
-    cwd: "/tmp/repo",
+    environment: "local",
     status: "idle",
     viewed: true,
     createdAt: 1,
     updatedAt: 2,
-    modelId: null,
+    model: "Default",
     effort: null,
-  } as DesktopLocalThreadSummary,
+  } as AgentThread,
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -30,16 +33,13 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
   useInfiniteThreadsPages: () => ({
-    data: { pages: [{ items: [mocks.cloudThread] }] },
+    data: { pages: [{ items: [mocks.cloudThread, mocks.localThread] }] },
     isFetching: false,
     isError: false,
     hasNextPage: true,
     isFetchingNextPage: false,
     fetchNextPage: mocks.fetchNextPage,
   }),
-}))
-vi.mock("@/features/agents/lib/desktopLocal", () => ({
-  useDesktopLocalThreads: () => ({ data: [mocks.localThread] }),
 }))
 
 afterEach(() => {
@@ -84,8 +84,8 @@ describe("AppCommandPalette", () => {
     fireEvent.click(screen.getByRole("option", { name: /Local result/ }))
 
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/agents/local/$sessionId",
-      params: { sessionId: "local-1" },
+      to: "/agents/$threadId",
+      params: { threadId: "local-1" },
     })
   })
 

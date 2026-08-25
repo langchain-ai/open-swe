@@ -15,6 +15,7 @@ async def health_check() -> dict[str, str]:
 
 
 @router.post("/webhooks/run-complete")
+@router.post("/internal/run-complete")
 async def run_complete_webhook(request: Request) -> dict[str, Any]:
     if not verify_run_complete_token(request.query_params.get("token")):
         raise HTTPException(status_code=401, detail="Invalid run-complete token")

@@ -29,6 +29,7 @@ const thread: AgentThread = {
   repo: "open-swe",
   repoFullName: "langchain-ai/open-swe",
   branch: "main",
+  environment: "cloud",
   model: "test-model",
   status: "finished",
   viewed: false,

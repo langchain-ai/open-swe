@@ -264,7 +264,64 @@ async def create_durable_run(
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
+    registry = None
+    registry_run_guard: str | None = None
+    if assistant_id == "agent":
+        from .dashboard.thread_registry import ThreadCreate, get_thread_registry
+
+        configurable = run_config.get("configurable")
+        configurable = configurable if isinstance(configurable, dict) else {}
+        owner_login = configurable.get("github_login")
+        owner_email = configurable.get("user_email")
+        if isinstance(owner_login, str) and owner_login:
+            registry = await get_thread_registry()
+            repo = configurable.get("repo")
+            repo_full_name = (
+                f"{repo['owner']}/{repo['name']}"
+                if isinstance(repo, dict)
+                and isinstance(repo.get("owner"), str)
+                and isinstance(repo.get("name"), str)
+                else None
+            )
+            registry_row = await registry.create(
+                ThreadCreate(
+                    id=thread_id,
+                    owner_login=owner_login,
+                    owner_email=owner_email if isinstance(owner_email, str) else None,
+                    repo_full_name=repo_full_name,
+                    environment="cloud",
+                    source=source,
+                    category=(
+                        "automation"
+                        if source in {"schedule", "wakeup", "baby_sit"}
+                        else "interactive"
+                    ),
+                    trigger_kind=str(configurable.get("trigger_kind") or "user"),
+                    model=(
+                        configurable.get("agent_model_id")
+                        if isinstance(configurable.get("agent_model_id"), str)
+                        else None
+                    ),
+                    effort=(
+                        configurable.get("agent_effort")
+                        if isinstance(configurable.get("agent_effort"), str)
+                        else None
+                    ),
+                    metadata={**configurable, **(metadata or {})},
+                )
+            )
+            registry_run_guard = registry_row.status_run_id
+
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    if registry is not None and isinstance(run_id, str) and run_id:
+        await registry.transition(
+            thread_id,
+            run_id,
+            "queued",
+            environment="cloud",
+            guard_run_id=registry_run_guard,
+        )
     logger.info(
         "Dispatched %s run on thread %s (source=%s, run=%s)",
         assistant_id,

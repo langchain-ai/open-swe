@@ -4,6 +4,7 @@ import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { ThreadEventsProvider } from "@/features/agents/lib/ThreadEventsProvider"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
@@ -44,13 +45,8 @@ function AgentsLayout() {
     threadId !== "local"
       ? threadId
       : undefined
-  const activeLocalSessionId =
-    section === "agents" && threadId === "local" ? nestedRoute : undefined
   const localOnly = !session.data && isDesktopLocalModeEnabled()
-  const isLocalRoute =
-    pathname === "/agents" ||
-    pathname === "/agents/" ||
-    pathname.startsWith("/agents/local/")
+  const isLocalRoute = pathname.startsWith("/agents")
 
   if (session.isLoading) {
     return (
@@ -67,10 +63,11 @@ function AgentsLayout() {
       user={session.data ?? null}
       localOnly={localOnly}
       activeThreadId={activeThreadId}
-      activeLocalSessionId={activeLocalSessionId}
     >
       <AgentThreadStreamProvider threadId={activeThreadId ?? null}>
-        <Outlet />
+        <ThreadEventsProvider activeThreadId={activeThreadId}>
+          <Outlet />
+        </ThreadEventsProvider>
       </AgentThreadStreamProvider>
     </AgentsShell>
   )

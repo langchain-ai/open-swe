@@ -3,41 +3,24 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
-  DESKTOP_LOCAL_MODE_STORAGE_KEY,
-  enableDesktopLocalMode,
   isDesktopLocalModeEnabled,
 } from "./desktop-local-mode"
-import { readStoredDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 
 beforeEach(() => {
-  const values = new Map<string, string>()
-  Object.defineProperty(window, "localStorage", {
-    configurable: true,
-    value: {
-      clear: () => values.clear(),
-      getItem: (key: string) => values.get(key) ?? null,
-      removeItem: (key: string) => values.delete(key),
-      setItem: (key: string, value: string) => values.set(key, value),
-    },
-  })
   window.openSweDesktop = undefined
 })
 
 describe("desktop local mode", () => {
   it("is unavailable outside the desktop app", () => {
-    window.localStorage.setItem(DESKTOP_LOCAL_MODE_STORAGE_KEY, "true")
     expect(isDesktopLocalModeEnabled()).toBe(false)
   })
 
-  it("persists local-only mode and selects This Mac", () => {
-    window.openSweDesktop = { isDesktop: true } as Window["openSweDesktop"]
-
-    enableDesktopLocalMode()
+  it("reads local-only mode from the desktop process", () => {
+    window.openSweDesktop = {
+      isDesktop: true,
+      localOnly: true,
+    } as Window["openSweDesktop"]
 
     expect(isDesktopLocalModeEnabled()).toBe(true)
-    expect(window.localStorage.getItem(DESKTOP_LOCAL_MODE_STORAGE_KEY)).toBe(
-      "true"
-    )
-    expect(readStoredDesktopThreadSource()).toBe("local")
   })
 })

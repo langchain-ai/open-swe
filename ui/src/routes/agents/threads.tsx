@@ -16,6 +16,7 @@ const SOURCES: ReadonlyArray<AgentSource> = [
 ]
 const STATUSES: ReadonlyArray<AgentStatus> = [
   "idle",
+  "queued",
   "running",
   "finished",
   "interrupted",
@@ -27,6 +28,7 @@ const GROUPINGS: ReadonlyArray<ThreadGrouping> = [
   "status",
   "repo",
   "source",
+  "environment",
   "pr",
   "none",
 ]
@@ -49,10 +51,6 @@ export const Route = createFileRoute("/agents/threads")({
       STATUSES.includes(search.status as AgentStatus)
         ? (search.status as AgentStatus)
         : undefined
-    const page =
-      typeof search.page === "number" && search.page >= 1
-        ? Math.floor(search.page)
-        : 1
     const layout =
       typeof search.layout === "string" &&
       LAYOUTS.includes(search.layout as ThreadsLayout)
@@ -68,8 +66,11 @@ export const Route = createFileRoute("/agents/threads")({
       viewed: parseBool(search.viewed),
       source,
       status,
+      environment:
+        search.environment === "cloud" || search.environment === "local"
+          ? search.environment
+          : undefined,
       q: typeof search.q === "string" && search.q ? search.q : undefined,
-      page,
       layout,
       group,
       order:
@@ -95,8 +96,8 @@ function AgentsThreadsRoute() {
             viewed: next.viewed,
             source: next.source,
             status: next.status,
+            environment: next.environment,
             q: next.q,
-            page: next.page,
             layout: next.layout,
             group: next.group,
             order: next.order,

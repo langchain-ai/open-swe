@@ -17,6 +17,7 @@ _MIDDLEWARE_MODULES = {
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
+    "RunLifecycleMiddleware": ".run_lifecycle",
     "SandboxCircuitBreakerMiddleware": ".sandbox_circuit_breaker",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
@@ -43,6 +44,7 @@ __all__ = [
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
+    "RunLifecycleMiddleware",
     "SanitizeFireworksMessagesMiddleware",
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
@@ -75,6 +77,7 @@ if TYPE_CHECKING:
     from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from .refresh_github_proxy import refresh_github_proxy_before_model
     from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
+    from .run_lifecycle import RunLifecycleMiddleware
     from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
     from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
     from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware

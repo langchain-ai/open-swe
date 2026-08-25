@@ -14,6 +14,7 @@ export type TodoStatus = "pending" | "in_progress" | "completed"
 
 export type AgentStatus =
   | "idle"
+  | "queued"
   | "running"
   | "finished"
   | "interrupted"
@@ -316,6 +317,9 @@ export interface AgentThread {
   repo: string
   repoFullName: string
   branch: string
+  environment: "cloud" | "local"
+  deviceId?: string | null
+  deviceName?: string | null
   model: string
   effort?: string | null
   planMode?: boolean
@@ -329,6 +333,8 @@ export interface AgentThread {
   automationName?: string | null
   automationActionPosted?: boolean
   status: AgentStatus
+  statusRunId?: string | null
+  statusAt?: string | null
   viewed: boolean
   viewedAt?: number | null
   resolved?: boolean
@@ -339,6 +345,12 @@ export interface AgentThread {
   traceUrl?: string | null
   sourceUrl?: string | null
   sandboxId?: string | null
+  gitCheckpoint?: {
+    repo: string
+    ref: string
+    branch: string
+    pushed: boolean
+  } | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
   pr?: AgentPullRequestSummary

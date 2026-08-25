@@ -16,6 +16,7 @@ function thread(overrides: Partial<AgentThread> = {}): AgentThread {
     repo: "open-swe",
     repoFullName: "langchain-ai/open-swe",
     branch: "main",
+    environment: "cloud",
     model: "default",
     source: "dashboard",
     status: "idle",

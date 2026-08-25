@@ -14,7 +14,9 @@ const {
   shell,
 } = require("electron");
 const { BackendSupervisor } = require("./backend-supervisor.cjs");
-const { LocalThreadStore } = require("./local-thread-store.cjs");
+const { loadDeviceIdentity } = require("./device-identity.cjs");
+const { LocalExecutionContext } = require("./local-execution-context.cjs");
+const { LocalRunReporter } = require("./local-run-reporter.cjs");
 const {
   captureCheckpoint,
   checkpointRef,
@@ -24,13 +26,15 @@ const {
   deleteRefs,
   readBranchDiff,
   readDiff,
+  remoteRepository,
   repoRoot,
   repositoryMetadata,
+  pushHandoffCheckpoint,
+  createManagedWorktree,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
   configureTerminalIpc,
-  closeThreadTerminals,
 } = require("./terminal-manager.cjs");
 const {
   addProject,
@@ -65,6 +69,7 @@ const appRuntime = resolveAppRuntime({
   appDataPath: app.getPath("appData"),
 });
 const isDevelopment = appRuntime.isDevelopment;
+const isLocalOnly = process.env.OPEN_SWE_LOCAL_ONLY === "1";
 if (appRuntime.userDataPath) {
   fs.mkdirSync(appRuntime.userDataPath, { recursive: true });
   app.setName(appRuntime.name);
@@ -91,10 +96,11 @@ let mainWindow = null;
 let setupWindow = null;
 let loginFlow = null;
 let quitting = false;
-let localThreadStore = null;
-let lastActivity = {};
+let localExecutionContext = null;
 let backendSupervisor = null;
 let openAiOAuth = null;
+let deviceIdentity = null;
+let localRunReporter = null;
 
 function sendDesktopCommand(commandId) {
   if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
@@ -143,7 +149,7 @@ function registeredProject(cwd) {
 }
 
 function resolveLocalProjectPath(localSessionId, value) {
-  const localSession = localThreadStore.get(localSessionId);
+  const localSession = localExecutionContext.get(localSessionId);
   if (!localSession || typeof value !== "string" || value.length === 0)
     return null;
   try {
@@ -170,7 +176,7 @@ async function recordLocalCheckpoint(thread) {
   const ref = checkpointRef(thread.id);
   await captureCheckpoint(repo, ref);
   const branch = await currentBranch(repo);
-  return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
+  return localExecutionContext.setCheckpoint(thread.id, { repo, ref, branch });
 }
 
 /**
@@ -183,7 +189,7 @@ async function syncThreadBranch(thread) {
   const branch = await currentBranch(thread.checkpoint.repo);
   if (!branch || branch === thread.checkpoint.branch) return thread;
   return (
-    localThreadStore.setCheckpoint(thread.id, {
+    localExecutionContext.setCheckpoint(thread.id, {
       ...thread.checkpoint,
       branch,
     }) ?? thread
@@ -192,10 +198,63 @@ async function syncThreadBranch(thread) {
 
 /** A running thread owns the checkout, so its branch can still be changing. */
 async function diffThread(threadId) {
-  const thread = localThreadStore.get(threadId);
+  const thread = localExecutionContext.get(threadId);
   if (!thread) return thread;
   const activity = await backendSupervisor.threadActivity();
   return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
+}
+
+async function projectForRepository(repoFullName) {
+  for (const project of listProjects()) {
+    const root = await repoRoot(project.cwd);
+    if (root && (await remoteRepository(root)) === repoFullName) return root;
+  }
+  return null;
+}
+
+async function prepareLocalHandoff(input) {
+  if (!input || typeof input.threadId !== "string" || !input.threadId)
+    throw new Error("Thread id is required");
+  if (input.deviceId !== deviceIdentity.id)
+    throw new Error("This handoff belongs to another device");
+  const existing = localExecutionContext.get(input.threadId);
+  if (existing) return existing;
+  const repo = await projectForRepository(input.repoFullName);
+  if (!repo)
+    throw new Error(`Add a local checkout of ${input.repoFullName} before continuing`);
+  const destination = path.join(
+    app.getPath("userData"),
+    "worktrees",
+    input.threadId.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64),
+  );
+  await createManagedWorktree(repo, destination, input.gitCheckpoint);
+  const thread = localExecutionContext.create({
+    id: input.threadId,
+    cwd: destination,
+    prompt: "",
+    pending: null,
+    managedWorktree: true,
+    modelId: input.modelId,
+    effort: input.effort,
+  });
+  localExecutionContext.setCheckpoint(input.threadId, {
+    repo: destination,
+    ref: input.gitCheckpoint.ref,
+    branch: input.gitCheckpoint.branch,
+  });
+  await backendSupervisor.createThread(input.threadId, {
+    graph_id: "agent",
+    execution_environment: "local",
+    device_id: deviceIdentity.id,
+    device_name: deviceIdentity.name,
+    local_project_path: destination,
+    resumed_from_environment: "cloud",
+  });
+  if (Array.isArray(input.messages) && input.messages.length > 0) {
+    await backendSupervisor.seedThread(input.threadId, input.messages);
+  }
+  localRunReporter.heartbeat(input.threadId);
+  return thread;
 }
 
 function configureDesktopIpc() {
@@ -213,6 +272,18 @@ function configureDesktopIpc() {
       localBranches(project),
     ]);
     return { current, branches };
+  });
+
+  ipcMain.handle("desktop:project-repository", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    if (!project) return null;
+    const root = await repoRoot(project);
+    if (!root) return null;
+    return {
+      repoFullName: await remoteRepository(root),
+      branch: await currentBranch(root),
+    };
   });
 
   ipcMain.handle("desktop:checkout-project-branch", async (event, input) => {
@@ -298,12 +369,25 @@ function configureDesktopIpc() {
         "Add a valid project to Open SWE before starting a local agent",
       );
     await backendSupervisor.start();
-    let thread = localThreadStore.create({ ...input, cwd });
+    if (typeof input?.threadId !== "string" || !input.threadId)
+      throw new Error("Registry thread id is required");
+    let thread = localExecutionContext.create({
+      ...input,
+      id: input.threadId,
+      cwd,
+    });
     try {
       thread = await recordLocalCheckpoint(thread);
-      await backendSupervisor.createThread(thread.id);
+      await backendSupervisor.createThread(thread.id, {
+        graph_id: "agent",
+        execution_environment: "local",
+        device_id: deviceIdentity.id,
+        device_name: deviceIdentity.name,
+        local_project_path: cwd,
+      });
+      localRunReporter.heartbeat(thread.id);
     } catch (error) {
-      localThreadStore.delete(thread.id);
+      localExecutionContext.delete(thread.id);
       if (thread.checkpoint.repo && thread.checkpoint.ref)
         deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
       throw error;
@@ -312,60 +396,45 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:get-local-prompt", (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.pendingPrompt(threadId);
+    return localExecutionContext.pendingPrompt(threadId);
   });
   ipcMain.handle("desktop:clear-local-prompt", (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.clearPrompt(threadId);
+    return localExecutionContext.clearPrompt(threadId);
   });
   ipcMain.handle("desktop:get-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
+    const thread = localExecutionContext.get(threadId);
     if (!thread) return null;
     await backendSupervisor.createThread(thread.id);
     return thread;
   });
-  ipcMain.handle("desktop:list-local-threads", (event) => {
+  ipcMain.handle("desktop:prepare-cloud-handoff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.list();
+    const thread = localExecutionContext.get(threadId);
+    if (!thread) throw new Error("This local thread is unavailable on this device");
+    const activity = await backendSupervisor.threadActivity();
+    if (activity?.[threadId] === "running")
+      throw new Error("Interrupt the local run before handing it off");
+    const repo = await repoRoot(thread.cwd);
+    if (!repo) throw new Error("This thread is not backed by a Git repository");
+    const checkpoint = await pushHandoffCheckpoint(repo, threadId);
+    localExecutionContext.setCheckpoint(threadId, {
+      repo,
+      ref: checkpoint.ref,
+      branch: checkpoint.branch,
+    });
+    return checkpoint;
+  });
+  ipcMain.handle("desktop:prepare-local-handoff", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    return prepareLocalHandoff(input);
   });
   ipcMain.handle("desktop:local-activity", async (event) => {
     requireTrustedDesktopIpc(event);
     const activity = await backendSupervisor.threadActivity();
     if (!activity) throw new Error("Could not read local agent activity");
-    for (const [threadId, status] of Object.entries(lastActivity)) {
-      if (status === "running" && activity[threadId] !== "running")
-        localThreadStore.update(threadId, { viewed: false });
-    }
-    lastActivity = activity;
     return activity;
-  });
-  ipcMain.handle("desktop:update-local-thread", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const updated = localThreadStore.update(input?.threadId, {
-      ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
-      ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
-      ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
-    });
-    return syncThreadBranch(updated);
-  });
-  ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
-    if (!thread) return false;
-    const activity = await backendSupervisor.threadActivity();
-    if (!activity || activity[threadId] === "running")
-      throw new Error("Stop the local agent before deleting it");
-    await closeThreadTerminals(threadId);
-    try {
-      await backendSupervisor.deleteThread(threadId);
-    } catch (error) {
-      console.warn("Could not delete local LangGraph thread", error);
-    }
-    localThreadStore.delete(threadId);
-    if (thread.checkpoint.repo && thread.checkpoint.ref)
-      deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
-    return true;
   });
   ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
@@ -541,6 +610,12 @@ async function proxyBackendRequest(request) {
   return upstream;
 }
 
+async function proxyRegistryRequest(request) {
+  return isLocalOnly
+    ? backendSupervisor.proxy(request, "")
+    : proxyBackendRequest(request);
+}
+
 async function storeResponseCookies(targetUrl, response) {
   const values = response.headers.getSetCookie?.() ?? [];
   for (const value of values) {
@@ -595,7 +670,7 @@ async function serveBundledUi(request) {
     return new Response("Backend is not configured", { status: 503 });
   const url = new URL(request.url);
   if (url.pathname.startsWith("/dashboard/api"))
-    return proxyBackendRequest(request);
+    return proxyRegistryRequest(request);
   if (
     url.pathname === "/local-graph" ||
     url.pathname.startsWith("/local-graph/")
@@ -1001,9 +1076,11 @@ if (!hasSingleInstanceLock) {
     }
 
     if (process.platform === "darwin") app.dock.setIcon(iconPath());
-    localThreadStore = new LocalThreadStore(
-      path.join(app.getPath("userData"), "desktop-local-threads.json"),
+    deviceIdentity = loadDeviceIdentity(
+      path.join(app.getPath("userData"), "device-identity.json"),
     );
+    process.env.OPEN_SWE_DEVICE_ID = deviceIdentity.id;
+    localExecutionContext = new LocalExecutionContext();
     openAiOAuth = new OpenAiOAuthManager({
       storagePath: path.join(app.getPath("userData"), "openai-auth.bin"),
       encryptString: (value) => {
@@ -1027,7 +1104,31 @@ if (!hasSingleInstanceLock) {
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
+      onRunCreated: (threadId, runId) =>
+        localRunReporter?.track(threadId, runId),
     });
+    localRunReporter = new LocalRunReporter({
+      supervisor: backendSupervisor,
+      device: deviceIdentity,
+      report: async (payload) => {
+        const request = new Request(
+          `${APP_ORIGIN}/dashboard/api/internal/local-report`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: APP_ORIGIN,
+            },
+            body: JSON.stringify(payload),
+          },
+        );
+        const response = await proxyRegistryRequest(request);
+        if (!response.ok) {
+          throw new Error(`Registry rejected local run report (${response.status})`);
+        }
+      },
+    });
+    localRunReporter.heartbeat(null);
     protocol.handle("open-swe", serveBundledUi);
     configurePermissions();
     configureDesktopIpc();
@@ -1038,7 +1139,7 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
-      getLocalThread: (id) => localThreadStore.get(id),
+      getLocalThread: (id) => localExecutionContext.get(id),
       userDataPath: app.getPath("userData"),
     });
 
@@ -1058,6 +1159,7 @@ if (!hasSingleInstanceLock) {
     void Promise.all([
       closeAllTerminals(),
       backendSupervisor?.close(),
+      localRunReporter?.close(),
       openAiOAuth?.close(),
     ]).finally(() => {
       app.quit();

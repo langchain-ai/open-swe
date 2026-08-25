@@ -152,6 +152,15 @@ class BackendSupervisor {
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
+        ...(process.env.OPEN_SWE_LOCAL_ONLY === "1"
+          ? {
+              OPEN_SWE_LOCAL_ONLY: "1",
+              OPEN_SWE_REGISTRY_SQLITE_PATH: path.join(
+                this.options.stateDir,
+                "thread-registry.sqlite3",
+              ),
+            }
+          : {}),
         ...(this.options.stateDir
           ? {
               OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(
@@ -269,20 +278,63 @@ class BackendSupervisor {
     }
   }
 
-  async createThread(threadId) {
+  async createThread(threadId, metadata = {}) {
     const response = await this.request("/threads", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         thread_id: threadId,
         if_exists: "do_nothing",
-        metadata: { graph_id: "agent" },
+        metadata: { graph_id: "agent", ...metadata },
       }),
     });
     if (!response.ok) {
       throw new Error(
         `Could not create local LangGraph thread (${response.status})`,
       );
+    }
+  }
+
+  async getRun(threadId, runId) {
+    const response = await this.request(
+      `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}`,
+    );
+    return response.ok ? response.json() : null;
+  }
+
+  async getThreadState(threadId) {
+    const response = await this.request(
+      `/threads/${encodeURIComponent(threadId)}/state`,
+    );
+    return response.ok ? response.json() : null;
+  }
+
+  async seedThread(threadId, messages) {
+    const values = {
+      messages: messages
+        .map((message) => {
+          const content = Array.isArray(message?.chunks)
+            ? message.chunks
+                .filter((chunk) => chunk?.kind === "text" && typeof chunk.text === "string")
+                .map((chunk) => chunk.text)
+                .join("\n")
+            : "";
+          if (!content) return null;
+          const type = message.author === "user" ? "human" : message.author === "agent" ? "ai" : "system";
+          return { type, content, id: message.id };
+        })
+        .filter(Boolean),
+    };
+    const response = await this.request(
+      `/threads/${encodeURIComponent(threadId)}/state`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Could not seed local thread history (${response.status})`);
     }
   }
 
@@ -314,7 +366,7 @@ class BackendSupervisor {
     const body = ["GET", "HEAD"].includes(request.method)
       ? undefined
       : request.body;
-    return this.request(
+    const response = await this.request(
       `${source.pathname.slice(prefix.length) || "/"}${source.search}`,
       {
         method: request.method,
@@ -324,6 +376,21 @@ class BackendSupervisor {
         ...(body ? { duplex: "half" } : {}),
       },
     );
+    const upstreamPath = source.pathname.slice(prefix.length) || "/";
+    const match = /^\/threads\/([^/]+)\/commands$/.exec(upstreamPath);
+    if (match && response.ok && this.options.onRunCreated) {
+      void response
+        .clone()
+        .json()
+        .then((payload) => {
+          const runId = payload?.run_id || payload?.result?.run_id;
+          if (typeof runId === "string" && runId) {
+            this.options.onRunCreated(decodeURIComponent(match[1]), runId);
+          }
+        })
+        .catch(() => undefined);
+    }
+    return response;
   }
 
   async close() {

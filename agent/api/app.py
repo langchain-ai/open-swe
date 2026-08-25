@@ -23,15 +23,18 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from ..dashboard.thread_registry import close_thread_registry, initialize_thread_registry
     from ..utils.model import close_cached_models, validate_local_dev_llm_config
     from ..utils.sandbox import validate_sandbox_startup_config
 
     pin_single_event_loop()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    await initialize_thread_registry()
     try:
         yield
     finally:
+        await close_thread_registry()
         await close_cached_models()
 
 

@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useMemo } from "react"
 import { StreamProvider } from "@langchain/react"
 import { Client, overrideFetchImplementation } from "@langchain/langgraph-sdk"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 
 import { agentsApi } from "./api"
-import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
+import { agentThreadKeys } from "./queries"
+import { transportForThread } from "./threadTransport"
 import type { ReactNode } from "react"
-
-const AGENT_ASSISTANT_ID = "agent"
-const LOCAL_AGENT_ASSISTANT_ID = "agent"
 
 const dashboardFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, credentials: "include" })
@@ -44,7 +42,7 @@ const agentStreamApiUrl = toAbsoluteApiUrl(agentsApi.langGraphApiUrl)
 export function AgentThreadStreamProvider({
   threadId,
   children,
-  transport = "cloud",
+  transport: transportOverride,
 }: {
   /**
    * The active thread, or `null` on routes without one (the Agents home,
@@ -57,43 +55,31 @@ export function AgentThreadStreamProvider({
   children: ReactNode
   transport?: "cloud" | "local"
 }) {
-  const queryClient = useQueryClient()
+  const threadQuery = useQuery({
+    queryKey: agentThreadKeys.detail(threadId ?? ""),
+    queryFn: () => agentsApi.getThread(threadId as string),
+    enabled: Boolean(threadId),
+    staleTime: 30_000,
+  })
+  const environment = transportOverride ?? threadQuery.data?.environment ?? "cloud"
+  const transport = transportForThread(
+    threadQuery.data
+      ? { ...threadQuery.data, environment }
+      : undefined
+  )
+  const base = transport.streamBase(threadQuery.data)
   const apiUrl =
-    transport === "local" ? toAbsoluteApiUrl("/local-graph") : agentStreamApiUrl
-  const assistantId =
-    transport === "local" ? LOCAL_AGENT_ASSISTANT_ID : AGENT_ASSISTANT_ID
+    environment === "cloud" ? agentStreamApiUrl : toAbsoluteApiUrl(base.apiUrl)
+  const assistantId = base.assistantId
   const client = useMemo(
     () =>
       new Client({
         apiUrl,
         apiKey: null,
-        ...(transport === "cloud" ? { onRequest: dashboardRequest } : {}),
+        ...(environment === "cloud" ? { onRequest: dashboardRequest } : {}),
       }),
-    [apiUrl, transport]
+    [apiUrl, environment]
   )
-
-  // The SDK captures the lifecycle callbacks once at controller creation, so
-  // they must be stable. Read the live thread id from a ref instead of
-  // closing over the (changing) prop.
-  const threadIdRef = useRef<string | null>(threadId)
-  useEffect(() => {
-    threadIdRef.current = threadId
-  }, [threadId])
-
-  const onCreated = useCallback(() => {
-    if (transport === "cloud") invalidateAgentThreadLists(queryClient)
-  }, [queryClient, transport])
-
-  const onCompleted = useCallback(() => {
-    if (transport !== "cloud") return
-    const id = threadIdRef.current
-    if (id) {
-      void queryClient.invalidateQueries({
-        queryKey: agentThreadKeys.detail(id),
-      })
-    }
-    invalidateAgentThreadLists(queryClient)
-  }, [queryClient, transport])
 
   return (
     <StreamProvider
@@ -101,8 +87,6 @@ export function AgentThreadStreamProvider({
       assistantId={assistantId}
       client={client}
       threadId={threadId ?? undefined}
-      onCreated={onCreated}
-      onCompleted={onCompleted}
     >
       {children}
     </StreamProvider>

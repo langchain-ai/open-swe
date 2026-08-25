@@ -15,7 +15,7 @@ export interface DesktopProject {
   addedAt: number
 }
 
-export interface DesktopLocalThreadSummary {
+export interface DesktopLocalExecutionContext {
   id: string
   cwd: string
   title: string
@@ -137,12 +137,18 @@ declare global {
   interface Window {
     openSweDesktop?: {
       isDesktop: true
+      localOnly: boolean
+      deviceId: string | null
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
         current: string | null
         branches: Array<string>
       }>
+      getProjectRepository: (cwd: string) => Promise<{
+        repoFullName: string | null
+        branch: string | null
+      } | null>
       checkoutProjectBranch: (input: {
         cwd: string
         branch: string
@@ -166,29 +172,37 @@ declare global {
       signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {
+          threadId: string
           cwd: string
           modelId?: string
           effort?: string
         }
-      ) => Promise<DesktopLocalThreadSummary>
+      ) => Promise<DesktopLocalExecutionContext>
       getLocalPrompt: (
         threadId: string
       ) => Promise<DesktopLocalPromptInput | null>
       clearLocalPrompt: (
         threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
+      ) => Promise<DesktopLocalExecutionContext | null>
       getLocalThread: (
         threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
-      listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
-      localActivity: () => Promise<DesktopLocalActivity>
-      updateLocalThread: (input: {
+      ) => Promise<DesktopLocalExecutionContext | null>
+      prepareCloudHandoff: (threadId: string) => Promise<{
+        repo: string
+        ref: string
+        branch: string
+        pushed: true
+      }>
+      prepareLocalHandoff: (input: {
         threadId: string
-        viewed?: boolean
-        modelId?: string
-        effort?: string
-      }) => Promise<DesktopLocalThreadSummary | null>
-      deleteLocalThread: (threadId: string) => Promise<boolean>
+        deviceId: string
+        repoFullName: string
+        gitCheckpoint: { repo: string; ref: string; branch: string; pushed: boolean }
+        modelId?: string | null
+        effort?: string | null
+        messages?: Array<Message>
+      }) => Promise<DesktopLocalExecutionContext>
+      localActivity: () => Promise<DesktopLocalActivity>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge

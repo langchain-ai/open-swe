@@ -6,6 +6,36 @@ from fastapi import HTTPException
 from agent.dashboard import thread_api
 
 
+class _RegistryRow:
+    environment = "cloud"
+    owner_login = "octocat"
+    owner_email = "octocat@example.com"
+    metadata: dict[str, Any] = {}
+
+    def api_dict(self) -> dict[str, Any]:
+        return {"id": "thread-1", "environment": "cloud"}
+
+
+class _Registry:
+    row = _RegistryRow()
+
+    async def get(self, thread_id: str) -> _RegistryRow:
+        return self.row
+
+    async def update_meta(self, thread_id: str, **fields: Any) -> _RegistryRow:
+        return self.row
+
+
+@pytest.fixture(autouse=True)
+def registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    value = _Registry()
+
+    async def get_registry() -> _Registry:
+        return value
+
+    monkeypatch.setattr(thread_api, "get_thread_registry", get_registry)
+
+
 class _FakeThreads:
     def __init__(self, metadata: dict[str, Any]) -> None:
         self.metadata = metadata

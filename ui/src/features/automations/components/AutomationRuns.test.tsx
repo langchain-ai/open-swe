@@ -47,6 +47,7 @@ describe("AutomationRuns", () => {
       repo: "open-swe",
       repoFullName: "langchain-ai/open-swe",
       branch: "main",
+      environment: "cloud",
       model: "Default",
       source: "schedule",
       threadCategory: "automation",

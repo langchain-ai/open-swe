@@ -3,7 +3,6 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -13,22 +12,17 @@ import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Logo } from "@/features/agents/components/chat/Logo"
 import {
   agentThreadKeys,
-  invalidateAgentThreadLists,
   optimisticThread,
-  seedAgentThreadLists,
   useAgentSkills,
   useEnvironmentOptions,
 } from "@/features/agents/lib/queries"
+import { agentsApi } from "@/features/agents/lib/api"
 import {
   persistModelSelection,
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import {
-  ensureDesktopModelCredential,
-  localThreadKeys,
-} from "@/features/agents/lib/desktopLocal"
-import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { ensureDesktopModelCredential } from "@/features/agents/lib/desktopExecution"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -83,12 +77,9 @@ export function AgentsHome() {
   const [submitting, setSubmitting] = useState(false)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
-  const runTarget: RunTarget = isDesktop
-    ? cloudEnabled
-      ? desktopThreadSource
-      : "local"
-    : "cloud"
+  const [runTarget, setRunTarget] = useState<RunTarget>(
+    isDesktop && !cloudEnabled ? "local" : "cloud"
+  )
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
   const localProjectPathRef = useRef(localProjectPath)
   useEffect(() => {
@@ -130,8 +121,6 @@ export function AgentsHome() {
     draftRef.current = null
     const thread = optimisticThread(id, draft)
     queryClient.setQueryData(agentThreadKeys.detail(id), thread)
-    seedAgentThreadLists(queryClient, thread)
-    invalidateAgentThreadLists(queryClient)
     void navigate({ to: "/agents/$threadId", params: { threadId: id } })
   }, [stream.threadId, queryClient, navigate])
 
@@ -166,14 +155,13 @@ export function AgentsHome() {
   }, [refreshLocalProjectBranch])
 
   const handleRunTargetChange = (next: RunTarget) => {
-    setDesktopThreadSource(next)
+    setRunTarget(next)
     setLocalError(null)
   }
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
-    setDesktopThreadSource("local")
     setLocalError(null)
   }
 
@@ -214,6 +202,10 @@ export function AgentsHome() {
         setLocalError("Choose or add a project from This Mac before sending.")
         return
       }
+      if (!desktop.deviceId) {
+        setLocalError("This device has not finished registering. Restart Open SWE and try again.")
+        return
+      }
       setSubmitting(true)
       setLocalError(null)
       window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
@@ -230,7 +222,18 @@ export function AgentsHome() {
         const managedSkills = cloudEnabled
           ? await skills.refetch()
           : { personal: [], organization: [] }
-        const localSession = await desktop.startLocalThread({
+        const repository = await desktop.getProjectRepository(localProjectPath)
+        const thread = await agentsApi.createThread({
+          title: prompt.trim().slice(0, 80) || "New local agent",
+          repo: repository?.repoFullName ?? null,
+          branch: repository?.branch ?? null,
+          environment: "local",
+          device_id: desktop.deviceId,
+          model: activeSelection?.modelId,
+          effort: activeSelection?.effort,
+        })
+        await desktop.startLocalThread({
+          threadId: thread.id,
           cwd: localProjectPath,
           prompt,
           images,
@@ -244,20 +247,10 @@ export function AgentsHome() {
           modelId: activeSelection?.modelId,
           effort: activeSelection?.effort,
         })
-        queryClient.setQueryData(
-          localThreadKeys.detail(localSession.id),
-          localSession
-        )
-        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-          localThreadKeys.all,
-          (current = []) => [
-            localSession,
-            ...current.filter((thread) => thread.id !== localSession.id),
-          ]
-        )
+        queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
         await navigate({
-          to: "/agents/local/$sessionId",
-          params: { sessionId: localSession.id },
+          to: "/agents/$threadId",
+          params: { threadId: thread.id },
         })
       } catch (error) {
         setSubmitting(false)

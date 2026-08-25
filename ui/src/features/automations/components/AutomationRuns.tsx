@@ -8,6 +8,7 @@ import { useThreadsPage } from "@/features/agents/lib/queries"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
 const STATUS_LABELS: Record<AgentStatus, string> = {
+  queued: "Queued",
   running: "Running",
   finished: "Finished",
   interrupted: "Interrupted",
@@ -24,7 +25,6 @@ export function AutomationRuns({
 }) {
   const runsQuery = useThreadsPage({
     limit,
-    offset: 0,
     scope: "automation",
     automationId,
   })

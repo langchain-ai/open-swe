@@ -103,6 +103,31 @@ function repoFullNameFromUrl(url: URL) {
   return owner && repo ? `${owner}/${repo}` : null;
 }
 
+function repoFullNameFromRemote(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\.git$/, "");
+  const ssh = /^git@github\.com:([^/]+\/[^/]+)$/.exec(trimmed);
+  if (ssh) return ssh[1];
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname.toLowerCase() !== "github.com") return null;
+    const [owner, repo] = url.pathname.split("/").filter(Boolean);
+    return owner && repo ? `${owner}/${repo}` : null;
+  } catch {
+    return null;
+  }
+}
+
+async function remoteRepository(repo) {
+  try {
+    return repoFullNameFromRemote(
+      text(await git(repo, ["remote", "get-url", "origin"], null, 5_000)),
+    );
+  } catch {
+    return null;
+  }
+}
+
 function parsePullRequest(raw) {
   try {
     const value = JSON.parse(raw);
@@ -264,6 +289,78 @@ async function captureCheckpoint(repo, ref) {
   );
   await git(repo, ["update-ref", ref, commit]);
   return ref;
+}
+
+function handoffBranch(threadId) {
+  const suffix = String(threadId || "thread")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .slice(0, 12);
+  return `open-swe/handoff-${suffix || "thread"}`;
+}
+
+async function pushHandoffCheckpoint(repo, threadId) {
+  const repository = await remoteRepository(repo);
+  if (!repository) {
+    throw new Error("This project needs a GitHub origin before it can be handed off");
+  }
+  const ref = checkpointRef(threadId);
+  await captureCheckpoint(repo, ref);
+  const commit = text(await git(repo, ["rev-parse", "--verify", `${ref}^{commit}`]));
+  const current = await currentBranch(repo);
+  const branch =
+    current && !["main", "master"].includes(current)
+      ? current
+      : handoffBranch(threadId);
+  await git(repo, ["check-ref-format", "--branch", branch], null, 5_000);
+  try {
+    await git(
+      repo,
+      ["push", "origin", `${commit}:refs/heads/${branch}`],
+      { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      120_000,
+    );
+  } catch {
+    throw new Error(
+      `Could not push ${branch}. Check that this device can write to ${repository}`,
+    );
+  }
+  return { repo: repository, ref: commit, branch, pushed: true };
+}
+
+async function createManagedWorktree(repo, destination, checkpoint) {
+  if (
+    !checkpoint ||
+    typeof checkpoint.ref !== "string" ||
+    !/^[0-9a-f]{40}$/i.test(checkpoint.ref) ||
+    typeof checkpoint.branch !== "string"
+  ) {
+    throw new Error("The handoff checkpoint is invalid");
+  }
+  await git(repo, ["check-ref-format", "--branch", checkpoint.branch], null, 5_000);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  if (fs.existsSync(destination)) {
+    const root = await repoRoot(destination);
+    if (root === destination) return destination;
+    throw new Error("The managed worktree destination is already in use");
+  }
+  await git(
+    repo,
+    ["fetch", "origin", `refs/heads/${checkpoint.branch}`],
+    { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    120_000,
+  );
+  const fetched = text(await git(repo, ["rev-parse", "--verify", "FETCH_HEAD^{commit}"]));
+  if (fetched.toLowerCase() !== checkpoint.ref.toLowerCase()) {
+    throw new Error("The pushed checkpoint no longer matches the requested ref");
+  }
+  await git(repo, ["worktree", "add", "--detach", destination, fetched], null, 120_000);
+  return destination;
+}
+
+async function removeManagedWorktree(repo, destination) {
+  try {
+    await git(repo, ["worktree", "remove", "--force", destination], null, 30_000);
+  } catch {}
 }
 
 /** Synchronous so it can also run from Electron's `before-quit`. */
@@ -528,6 +625,10 @@ module.exports = {
   parsePullRequest,
   readDiff,
   repoRoot,
+  remoteRepository,
   repositoryMetadata,
+  pushHandoffCheckpoint,
+  createManagedWorktree,
+  removeManagedWorktree,
   staleRefs,
 };

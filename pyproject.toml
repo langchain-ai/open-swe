@@ -32,6 +32,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.1",
     "stagehand>=3.22.0",
     "websockets>=15.0.1",
+    "asyncpg>=0.31.0,<0.32",
 ]
 
 [project.optional-dependencies]
