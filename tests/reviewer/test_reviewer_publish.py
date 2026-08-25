@@ -709,11 +709,11 @@ async def test_resolve_review_thread_returns_false_on_graphql_errors() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_review_skips_findings_already_published() -> None:
-    """Re-runs must not re-post findings that already have a github_review_comment_id."""
+    """Re-runs must not re-post findings that already carry a review comment id."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
-        _f(id="f_old", severity="high", file="a.py", github_review_comment_id=42),
+        _f(id="f_old", severity="high", file="a.py", github_review_comment_ids=[42]),
         _f(id="f_new", severity="high", file="b.py"),
     ]
 
@@ -762,7 +762,7 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     """Re-review with nothing new to surface must not spam another comment."""
     from agent.tools.publish_review import _publish_review_async
 
-    # All findings already have github_review_comment_id from the prior publish
+    # All findings already carry a review comment id from the prior publish
     # (so none are "unpublished"), plus one previously-resolved finding whose
     # thread still needs to be resolved on GitHub.
     findings = [
@@ -779,7 +779,7 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
             "status": "resolved",
             "first_seen_sha": "s",
             "last_confirmed_sha": "s",
-            "github_review_comment_id": 100,
+            "github_review_comment_ids": [100],
         },
     ]
     list_async = AsyncMock(return_value=findings)
@@ -835,8 +835,6 @@ async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
             file="caller.py",
             in_diff=False,
             first_seen_sha="newsha",
-            github_review_comment_id=None,
-            github_review_id=None,
         )
     ]
     post_review = AsyncMock(return_value={"id": 555})
@@ -1153,7 +1151,7 @@ async def test_open_swe_review_exists_returns_none_on_http_error() -> None:
 async def test_re_review_backfills_existing_marker_and_skips_duplicate_post() -> None:
     from agent.tools.publish_review import _publish_review_async
 
-    finding = _f(id="f_old", first_seen_sha="oldsha", github_review_comment_id=None)
+    finding = _f(id="f_old", first_seen_sha="oldsha")
     findings = [finding]
     thread = {
         "id": "THREAD_1",
@@ -1199,8 +1197,8 @@ async def test_re_review_backfills_existing_marker_and_skips_duplicate_post() ->
 
     post_review.assert_not_called()
     assert result["skipped_empty_re_review"] is True
-    assert findings[0]["github_review_comment_id"] == 101
-    assert findings[0]["github_review_thread_id"] == "THREAD_1"
+    assert findings[0]["github_review_comment_ids"] == [101]
+    assert findings[0]["github_review_thread_ids"] == ["THREAD_1"]
 
 
 @pytest.mark.asyncio
@@ -1210,7 +1208,6 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
     finding = _f(
         id="f_old",
         first_seen_sha="oldsha",
-        github_review_comment_id=None,
         status="resolved",
         resolution_note="The duplicate threads are fixed by the latest commit.",
     )
@@ -1287,7 +1284,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
     assert findings[0]["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert findings[0]["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert findings[0]["github_posted_resolution_comment_ids"] == [101, 102]
-    assert findings[0]["github_thread_resolved"] is True
+    assert findings[0]["surface_state"] == "resolved"
 
 
 @pytest.mark.asyncio
@@ -1348,8 +1345,8 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
     assert result["review_id"] == 999
     assert fetch_threads.await_count == 2
     assert findings[0]["github_review_id"] == 999
-    assert findings[0]["github_review_comment_id"] == 202
-    assert findings[0]["github_review_thread_id"] == "THREAD_1"
+    assert findings[0]["github_review_comment_ids"] == [202]
+    assert findings[0]["github_review_thread_ids"] == ["THREAD_1"]
 
 
 @pytest.mark.asyncio
@@ -1401,7 +1398,7 @@ async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
     assert [comment["path"] for comment in inline_comments] == ["new.py"]
     assert old["github_review_id"] is None
     assert new["github_review_id"] == 888
-    assert new["github_review_comment_id"] == 303
+    assert new["github_review_comment_ids"] == [303]
 
 
 @pytest.mark.asyncio
@@ -1452,8 +1449,8 @@ async def test_publish_review_matches_comment_ids_by_marker_not_path_line_body()
 
     assert result["success"] is True
     by_id = {f["id"]: f for f in findings}
-    assert by_id["f_one"]["github_review_comment_id"] == 901
-    assert by_id["f_two"]["github_review_comment_id"] == 902
+    assert by_id["f_one"]["github_review_comment_ids"] == [901]
+    assert by_id["f_two"]["github_review_comment_ids"] == [902]
 
 
 @pytest.mark.asyncio
@@ -1504,13 +1501,12 @@ async def test_publish_review_records_review_id_and_comment_id_in_single_write()
     # half-stamped intermediate state.
     persisted_snapshots = [call.args[1] for call in replace.await_args_list]
     assert any(
-        snap[0].get("github_review_id") == 555 and snap[0].get("github_review_comment_id") == 808
+        snap[0].get("github_review_id") == 555 and snap[0].get("github_review_comment_ids") == [808]
         for snap in persisted_snapshots
     )
     assert all(
         not (
-            snap[0].get("github_review_id") == 555
-            and snap[0].get("github_review_comment_id") is None
+            snap[0].get("github_review_id") == 555 and not snap[0].get("github_review_comment_ids")
         )
         for snap in persisted_snapshots
     )
