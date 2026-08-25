@@ -1,0 +1,160 @@
+/*
+ * The agents surface runs t3code's palette. Everything here is scoped to
+ * `.agents-ui` so the rest of the app (login, standalone settings) keeps the
+ * neutral open-swe theme.
+ *
+ * The semantic tokens (`--background`, `--card`, …) are redefined here rather
+ * than mirrored into a parallel set of names: everything under these routes
+ * already styles itself with `bg-card` / `text-muted-foreground` / …, so one
+ * block of values recolours the whole surface.
+ *
+ * Colour stops are written as literals rather than `var(--color-zinc-200)`
+ * because Tailwind tree-shakes unreferenced theme colours out of the build.
+ *
+ * `html[data-agents-theme]` carries the same block because popovers, tooltips
+ * and menus portal to `<body>` — outside the `.agents-ui` subtree — and would
+ * otherwise open in the old palette. The route sets the attribute; the class
+ * still does the work on first paint, before the effect runs.
+ */
+
+.agents-ui,
+html[data-agents-theme] {
+  color-scheme: light;
+
+  --background: oklch(97.4% 0.002 106); /* soft warm off-white */
+  --app-chrome-background: var(--background);
+  --foreground: oklch(27.4% 0.006 286.033); /* zinc-800 */
+  --card: oklch(99.3% 0.001 106);
+  --card-foreground: var(--foreground);
+  --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
+  --popover: oklch(99.3% 0.001 106);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: #fff;
+  --secondary: oklch(96.3% 0.002 106);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(96.3% 0.002 106);
+  --muted-foreground: oklch(48% 0.016 285.938); /* zinc-600 */
+  --accent: oklch(94.2% 0.003 106);
+  --accent-foreground: oklch(21% 0.006 285.885); /* zinc-900 */
+  --destructive: oklch(63.7% 0.237 25.331); /* red-500 */
+  --destructive-foreground: oklch(50.5% 0.213 27.518); /* red-700 */
+  --info: oklch(62.3% 0.214 259.815); /* blue-500 */
+  --info-foreground: oklch(48.8% 0.243 264.376); /* blue-700 */
+  --success: oklch(69.6% 0.17 162.48); /* emerald-500 */
+  --success-foreground: oklch(50.8% 0.118 165.612); /* emerald-700 */
+  --warning: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --warning-foreground: oklch(55.5% 0.163 48.998); /* amber-700 */
+  --border: oklch(90.6% 0.003 106);
+  --input: oklch(86.5% 0.004 106);
+  --ring: oklch(0.488 0.217 264);
+
+  --sidebar: oklch(96.3% 0.002 106);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-muted-foreground: var(--muted-foreground);
+  --sidebar-control-surface: oklch(94.2% 0.003 106);
+  --sidebar-row-hover: oklch(97.9% 0.002 106);
+  --sidebar-row-active: var(--card);
+  --sidebar-row-selected: var(--card);
+  --sidebar-border: var(--border);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-ring: var(--ring);
+}
+
+.dark .agents-ui,
+.dark.agents-ui,
+html.dark[data-agents-theme] {
+  color-scheme: dark;
+
+  --background: oklch(22.6% 0 0); /* soft charcoal, not black */
+  --app-chrome-background: var(--background);
+  --foreground: #fff;
+  --card: color-mix(in srgb, var(--background) 92%, #fff);
+  --card-foreground: var(--foreground);
+  --surface-raised: var(--secondary);
+  --popover: color-mix(in srgb, var(--background) 88%, #fff);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.588 0.217 264);
+  --primary-foreground: #fff;
+  --secondary: color-mix(in srgb, #fff 4%, transparent);
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, #fff 4%, transparent);
+  --muted-foreground: oklch(85% 0 0);
+  --accent: color-mix(in srgb, #fff 4%, transparent);
+  --accent-foreground: var(--foreground);
+  --destructive: color-mix(in srgb, oklch(63.7% 0.237 25.331) 90%, #fff);
+  --destructive-foreground: oklch(70.4% 0.191 22.216); /* red-400 */
+  --info: oklch(62.3% 0.214 259.815);
+  --info-foreground: oklch(70.7% 0.165 254.624); /* blue-400 */
+  --success: oklch(69.6% 0.17 162.48);
+  --success-foreground: oklch(76.5% 0.177 163.223); /* emerald-400 */
+  --warning: oklch(76.9% 0.188 70.08);
+  --warning-foreground: oklch(82.8% 0.189 84.429); /* amber-400 */
+  --border: color-mix(in srgb, #fff 14%, transparent);
+  --input: color-mix(in srgb, #fff 12%, transparent);
+  --ring: oklch(0.588 0.217 264);
+
+  --sidebar: var(--card);
+  --sidebar-control-surface: var(--muted);
+  --sidebar-row-hover: var(--accent);
+  --sidebar-row-active: var(--accent);
+  --sidebar-row-selected: var(--muted);
+  --sidebar-border: var(--border);
+}
+
+.agents-ui,
+html[data-agents-theme] {
+  font-family:
+    "IBM Plex Sans Variable", "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * Base density for unclassed text. Deliberately NOT on `html` — the root font
+ * size is what every rem-based Tailwind utility scales off.
+ *
+ * No `background` here either: this file is unlayered, so it outranks every
+ * Tailwind utility and would silently beat the `bg-*` class on the same
+ * element. Surfaces pick their own background via utilities.
+ */
+.agents-ui {
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.agents-ui *,
+html[data-agents-theme] * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 18%, transparent) transparent;
+}
+
+.agents-ui .shimmer-text,
+html[data-agents-theme] .shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 35%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 65%
+  );
+  background-size: 150% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: agents-shimmer 2s linear infinite;
+}
+
+@keyframes agents-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}

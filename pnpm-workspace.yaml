@@ -3,6 +3,7 @@ packages:
   - oxlint-plugin-openswe
   - packages/*
   - scripts
+  - ui
 
 # Successor to onlyBuiltDependencies/ignoredBuiltDependencies (pnpm 11).
 # true = allowed to run build scripts; false mirrors the pnpm 10 behavior
@@ -18,6 +19,7 @@ allowBuilds:
   msw: false
   node-pty: true
   sharp: true
+  unrs-resolver: true
   utf-8-validate: false
   workerd: false
 
@@ -77,6 +79,7 @@ minimumReleaseAgeExclude:
   - "@legendapp/list@3.3.5"
 
 overrides:
+  "@hono/node-server": 2.0.10
   # The SDK always receives the user's Claude executable, so its bundled binaries are unused.
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-arm64": "-"
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-x64": "-"
@@ -110,11 +113,24 @@ overrides:
   "@expo/metro-config": 56.0.14
   "@pierre/diffs>@shikijs/transformers": ^4.2.0
   "@types/node": "catalog:"
+  "brace-expansion@2.1.1": 2.1.4
+  "brace-expansion@>=5.0.0": 5.0.9
+  dompurify: 3.4.13
   effect: "catalog:"
+  fast-uri: 3.1.5
+  hono: 4.12.34
+  ip-address: 10.3.1
+  js-yaml: 4.3.1
+  mermaid: 11.16.1
+  "nanoid@>=3.0.0 <4.0.0": 3.3.18
+  "open-swe-dashboard>@types/node": ^22.19.15
+  "open-swe-dashboard>vite": ^8.2.2
+  postcss: 8.5.23
   expo-modules-jsi: 56.0.10
   "expo-sharing>@expo/config-plugins": 56.0.9
   "expo-sharing>@expo/config-types": 56.0.6
   vite: "catalog:"
+  undici: 7.29.0
   yaml: "catalog:"
 
 packageExtensions:
