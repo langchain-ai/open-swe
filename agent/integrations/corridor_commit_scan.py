@@ -26,11 +26,13 @@ _HOOK_NAMES = (
 _HOOK = """#!/bin/sh
 set -eu
 hook_name="$(basename "$0")"
-if [ "$hook_name" = pre-commit ]; then
-    corridor scan --staged
-fi
 repo_hook="$(git rev-parse --path-format=absolute --git-common-dir)/hooks/$hook_name"
-if [ -x "$repo_hook" ] && [ "$repo_hook" != "$0" ]; then
+if [ "$hook_name" = pre-commit ]; then
+    if [ -x "$repo_hook" ] && [ "$repo_hook" != "$0" ]; then
+        "$repo_hook" "$@"
+    fi
+    corridor scan --staged
+elif [ -x "$repo_hook" ] && [ "$repo_hook" != "$0" ]; then
     exec "$repo_hook" "$@"
 fi
 """
@@ -54,8 +56,6 @@ def corridor_hook_setup_command() -> str:
     setup = (
         "set -eu; "
         "command -v corridor >/dev/null; "
-        'repo_hooks="$(git config --local --get core.hooksPath || true)"; '
-        'test -z "$repo_hooks"; '
         'current="$(git config --global --get core.hooksPath || true)"; '
         f'test -z "$current" || test "$current" = "{CORRIDOR_HOOKS_PATH}"; '
         f"install -d -m 0700 {CORRIDOR_HOOKS_PATH}; "

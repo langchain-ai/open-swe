@@ -1,3 +1,5 @@
+import base64
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -31,16 +33,22 @@ def test_commit_scanning_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     assert corridor_commit_scanning_enabled() is True
 
 
-def test_hook_scans_then_chains_repo_hooks() -> None:
+def test_hook_chains_repo_pre_commit_before_scanning() -> None:
     command = corridor_hook_setup_command()
-    assert "corridor scan --staged" not in command
+    encoded = re.search(r"printf %s ([A-Za-z0-9+/=]+) \| base64 -d", command)
+    assert encoded is not None
+    hook = base64.b64decode(encoded.group(1)).decode()
+
+    repo_hook_call = '"$repo_hook" "$@"'
+    assert hook.index(repo_hook_call) < hook.index("corridor scan --staged")
+    assert f"exec {repo_hook_call}" in hook
     assert "base64 -d" in command
     assert CORRIDOR_HOOKS_PATH in command
     assert "could not be configured; continuing" in command
     assert "open-swe-corridor-hook" in command
-    assert "pre-commit" in command
     assert "commit-msg" in command
     assert "pre-push" in command
+    assert "git config --local" not in command
 
 
 def test_cleanup_only_removes_the_managed_hooks_path() -> None:
