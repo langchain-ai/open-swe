@@ -249,13 +249,13 @@ describe("groupThreadsByMode", () => {
     ).toBeUndefined()
   })
 
-  it("buckets by date and drops empty buckets", () => {
+  it("buckets by last activity and drops empty buckets", () => {
     const now = Date.now()
     const sections = groupThreadsByMode(
       [
-        makeThread({ createdAt: now }),
-        makeThread({ createdAt: now - 3 * DAY }),
-        makeThread({ createdAt: now - 40 * DAY }),
+        makeThread({ createdAt: now - 40 * DAY, updatedAt: now }),
+        makeThread({ updatedAt: now - 3 * DAY }),
+        makeThread({ updatedAt: now - 40 * DAY }),
       ],
       "date"
     )
@@ -264,6 +264,14 @@ describe("groupThreadsByMode", () => {
     expect(sections.find((s) => s.key === "today")?.defaultCollapsed).toBe(
       false
     )
+  })
+
+  it("keeps creation order within a date bucket", () => {
+    const now = Date.now()
+    const older = makeThread({ createdAt: 1, updatedAt: now })
+    const newer = makeThread({ createdAt: 2, updatedAt: now - 1 })
+    const [section] = groupThreadsByMode([older, newer], "date")
+    expect(section?.threads).toEqual([newer, older])
   })
 
   it("groups by status in a fixed order", () => {

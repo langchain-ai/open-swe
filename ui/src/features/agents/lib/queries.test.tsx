@@ -239,7 +239,7 @@ describe("setAgentThreadStatus", () => {
       limit: SIDEBAR_PAGE_SIZE,
       resolved: false,
       scope: "interactive",
-      sortBy: "created_at",
+      sortBy: "updated_at",
     })
     client.setQueryData(key, {
       pages: [
@@ -296,7 +296,7 @@ describe("useSidebarThreads", () => {
       offset: 0,
       resolved: false,
       scope: "interactive",
-      sortBy: "created_at",
+      sortBy: "updated_at",
     })
 
     view.rerender(
@@ -311,7 +311,7 @@ describe("useSidebarThreads", () => {
       offset: 0,
       resolved: true,
       scope: "interactive",
-      sortBy: "created_at",
+      sortBy: "updated_at",
     })
   })
 
@@ -363,7 +363,7 @@ describe("useSidebarThreads", () => {
       offset: SIDEBAR_PAGE_SIZE,
       resolved: false,
       scope: "interactive",
-      sortBy: "created_at",
+      sortBy: "updated_at",
     })
   })
 
