@@ -55,6 +55,34 @@ def test_hook_chains_repo_pre_commit_before_scanning() -> None:
     assert "git config --local" not in command
 
 
+def test_setup_without_corridor_warns_and_does_not_install(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    bin_dir = tmp_path / "bin"
+    home.mkdir()
+    bin_dir.mkdir()
+    git = subprocess.run(
+        ["which", "git"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (bin_dir / "git").symlink_to(git)
+
+    result = subprocess.run(
+        ["/bin/sh", "-c", corridor_hook_setup_command()],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"HOME": str(home), "PATH": str(bin_dir)},
+    )
+
+    assert "could not be configured; continuing" in result.stderr
+    hooks_path = subprocess.run(
+        [git, "config", "--global", "--get", "core.hooksPath"],
+        capture_output=True,
+        text=True,
+        env={"HOME": str(home)},
+    )
+    assert hooks_path.returncode == 1
+
+
 def test_real_commit_scans_changes_staged_by_repo_hook(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     hooks = tmp_path / "managed-hooks"

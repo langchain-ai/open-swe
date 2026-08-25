@@ -57,21 +57,19 @@ def corridor_hook_setup_command() -> str:
     links = "; ".join(
         f"ln -sf open-swe-corridor-hook {CORRIDOR_HOOKS_PATH}/{name}" for name in _HOOK_NAMES
     )
-    setup = (
-        "set -eu; "
-        "command -v corridor >/dev/null; "
-        'current="$(git config --global --get core.hooksPath || true)"; '
-        f'test -z "$current" || test "$current" = "{CORRIDOR_HOOKS_PATH}"; '
-        f"install -d -m 0700 {CORRIDOR_HOOKS_PATH}; "
-        f"printf %s {encoded_hook} | base64 -d > {dispatcher}; "
-        f"chmod 0700 {dispatcher}; "
-        f"{links}; "
+    install = (
+        f"install -d -m 0700 {CORRIDOR_HOOKS_PATH} && "
+        f"printf %s {encoded_hook} | base64 -d > {dispatcher} && "
+        f"chmod 0700 {dispatcher} && "
+        f"{links} && "
         f"git config --global core.hooksPath {CORRIDOR_HOOKS_PATH}"
     )
+    warning = "echo 'Warning: Corridor commit scanning could not be configured; continuing' >&2"
     return (
-        f"if ! ({setup}); then "
-        "echo 'Warning: Corridor commit scanning could not be configured; continuing' >&2; "
-        "fi"
+        f"if ! command -v corridor >/dev/null; then {warning}; else "
+        'current="$(git config --global --get core.hooksPath || true)"; '
+        f'if [ -n "$current" ] && [ "$current" != "{CORRIDOR_HOOKS_PATH}" ]; then '
+        f"{warning}; elif ! ({install}); then {warning}; fi; fi"
     )
 
 
