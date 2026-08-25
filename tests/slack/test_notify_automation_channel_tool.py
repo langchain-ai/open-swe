@@ -63,6 +63,7 @@ def test_notify_automation_channel_exported() -> None:
 def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     client = _FakeClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
+    monkeypatch.setattr(notification_tool, "get_client", lambda: client)
     monkeypatch.setattr(
         notification_tool,
         "dashboard_thread_url",

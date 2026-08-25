@@ -5,8 +5,8 @@ from typing import Any
 from weakref import WeakValueDictionary
 
 from langgraph.config import get_config
+from langgraph_sdk import get_client
 
-from .. import store
 from ..store import delete_value, get_value, now_iso, put_value
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.slack import append_slack_web_link_footer, post_slack_top_level_message_with_ts
@@ -35,7 +35,7 @@ async def _release_reservation(thread_id: str) -> None:
 
 async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
     try:
-        await store.store_client().threads.update(
+        await get_client().threads.update(
             thread_id=thread_id,
             metadata={"automation_action_posted_at": notified_at},
         )
