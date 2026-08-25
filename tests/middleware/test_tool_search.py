@@ -362,3 +362,88 @@ async def test_a_result_states_the_description_once() -> None:
 
     assert body.count("Post a message to the current Slack thread") == 1
     assert '"title"' not in body
+
+
+def _search_tool(middleware: ToolSearchMiddleware) -> BaseTool:
+    return next(tool for tool in middleware.tools if tool.name == TOOL_SEARCH_NAME)
+
+
+async def _search(middleware: ToolSearchMiddleware, query: str, state: Any) -> str:
+    command = await _search_tool(middleware).ainvoke(
+        {
+            "name": TOOL_SEARCH_NAME,
+            "args": {"query": query, "state": {"messages": [], **state}},
+            "id": "s1",
+            "type": "tool_call",
+        }
+    )
+    update = cast(dict[str, Any], cast(Command, command).update)
+    return cast(str, cast(ToolMessage, update["messages"][0]).content)
+
+
+async def _invoke(middleware: ToolSearchMiddleware, name: str, state: Any) -> ToolMessage:
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="ran", tool_call_id=request.tool_call["id"])
+
+    call = _Request(
+        state=state,
+        tools=[],
+        messages=[],
+        tool_call={"name": name, "args": {"value": "x"}, "id": "c1"},
+    )
+    return cast(ToolMessage, await middleware.awrap_tool_call(cast(ToolCallRequest, call), handler))
+
+
+async def test_a_state_gated_tool_is_unreachable_while_the_gate_is_closed() -> None:
+    middleware = _middleware(
+        excluded=lambda state: ["slack_thread_reply"] if state.get("plan_mode") else []
+    )
+
+    # Open: the proxy behaves exactly as it does without a gate.
+    assert "slack_thread_reply" in await _search(middleware, "reply thread", {})
+    assert (await _invoke(middleware, "slack_thread_reply", {})).content == "ran"
+
+    # Closed: search stops offering it and invoke refuses it, which is the only
+    # place the restriction can be enforced once the tool array is collapsed.
+    closed = {"plan_mode": True}
+    assert "slack_thread_reply" not in await _search(middleware, "reply thread", closed)
+    refused = await _invoke(middleware, "slack_thread_reply", closed)
+    assert refused.status == "error"
+    assert "not available" in cast(str, refused.content)
+
+    # A tool outside the gate is untouched.
+    assert (await _invoke(middleware, "linear_comment", closed)).content == "ran"
+
+
+async def test_a_scope_cannot_reach_what_its_parent_can() -> None:
+    parent = _middleware()
+    scope = parent.scoped(["slack_thread_reply"])
+
+    assert "slack_thread_reply" in parent.proxied_names
+    assert "slack_thread_reply" not in await _search(scope, "reply thread", {})
+    assert "slack_thread_reply" not in _search_tool(scope).description
+    refused = await _invoke(scope, "slack_thread_reply", {})
+    assert refused.status == "error"
+
+    # Everything else still resolves through the shared catalog.
+    assert (await _invoke(scope, "slack_add_reaction", {})).content == "ran"
+    assert (await _invoke(parent, "slack_thread_reply", {})).content == "ran"
+
+
+async def test_a_scope_shares_its_parents_loading() -> None:
+    loads = 0
+
+    async def load() -> list[BaseTool]:
+        nonlocal loads
+        loads += 1
+        return [_tool("datadog_search_logs", "Search Datadog logs")]
+
+    parent = ToolSearchMiddleware(
+        {"Datadog": ToolGroup(tool_names=["datadog_search_logs"], load=load)}
+    )
+    scope = parent.scoped(["nothing_here"])
+
+    assert (await _invoke(parent, "datadog_search_logs", {})).content == "ran"
+    assert (await _invoke(scope, "datadog_search_logs", {})).content == "ran"
+    # A second instance would repeat the remote handshake this middleware defers.
+    assert loads == 1

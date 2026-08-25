@@ -47,6 +47,11 @@ _SUMMARY_CHARS = 200
 _MAX_LIMIT = 25
 
 
+# Either a fixed set of names this agent may not reach, or a callable over run
+# state for a restriction that turns on mid-run (plan mode).
+Excluded = Collection[str] | Callable[[Mapping[str, Any]], Collection[str]]
+
+
 def _merge_names(current: list[str], update: list[str]) -> list[str]:
     return sorted(set(current) | set(update))
 
@@ -149,6 +154,7 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
         groups: Mapping[str, ToolGroup | Sequence[BaseTool]],
         *,
         always_visible: Collection[str] = (),
+        excluded: Excluded = (),
     ) -> None:
         self._always_visible = {
             *always_visible,
@@ -156,6 +162,13 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
             TOOL_DESCRIBE_NAME,
             TOOL_INVOKE_NAME,
         }
+        self._source_groups = dict(groups)
+        self._gate: Callable[[Mapping[str, Any]], Collection[str]] | None = None
+        self._excluded: frozenset[str] = frozenset()
+        if callable(excluded):
+            self._gate = excluded
+        else:
+            self._excluded = frozenset(excluded)
         self._groups: dict[str, ToolGroup] = {}
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
@@ -182,10 +195,40 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
 
     # ---- catalog -------------------------------------------------------
 
-    def _catalog(self) -> str:
+    def scoped(self, excluded: Collection[str]) -> "ToolSearchMiddleware":
+        """A narrower view of this catalog, for an agent allowed fewer tools.
+
+        Resolution is shared, so a group still loads once however many scopes
+        exist — a second instance would otherwise repeat every remote handshake
+        this middleware exists to defer.
+        """
+        clone = ToolSearchMiddleware(
+            self._source_groups,
+            always_visible=self._always_visible,
+            excluded=excluded,
+        )
+        clone._groups = self._groups
+        clone._group_of = self._group_of
+        clone._resolved = self._resolved
+        clone._locks = self._locks
+        clone._loading = self._loading
+        clone.tools = [clone._search_tool(), clone._describe_tool(), clone._invoke_tool()]
+        return clone
+
+    def _blocked(self, state: Mapping[str, Any] | None) -> Collection[str]:
+        return () if self._gate is None else self._gate(state or {})
+
+    def _reachable(self, name: str, blocked: Collection[str] = ()) -> bool:
+        return name in self._group_of and name not in self._excluded and name not in blocked
+
+    def _catalog(self, blocked: Collection[str] = ()) -> str:
+        """The group listing. Called with no argument for the tool description,
+        which must stay byte-stable; `blocked` is for runtime output only."""
         lines = []
         for group, entry in sorted(self._groups.items()):
-            names = ", ".join(sorted(n for n in entry.tool_names if n in self._group_of))
+            names = ", ".join(sorted(n for n in entry.tool_names if self._reachable(n, blocked)))
+            if not names:
+                continue
             summary = f" — {entry.summary}" if entry.summary else ""
             lines.append(f"- {group}{summary}: {names}")
         return "\n".join(lines)
@@ -235,9 +278,9 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                 continue
             self._loading[group] = asyncio.create_task(self._resolve(group))
 
-    async def _tool(self, name: str) -> BaseTool | None:
+    async def _tool(self, name: str, blocked: Collection[str] = ()) -> BaseTool | None:
         group = self._group_of.get(name)
-        if group is None:
+        if group is None or not self._reachable(name, blocked):
             return None
         return (await self._resolve(group)).get(name)
 
@@ -247,13 +290,16 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
         async def tool_search(
             query: str,
             limit: int = _DEFAULT_LIMIT,
+            state: Annotated[ToolSearchState | None, InjectedState] = None,
             tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
         ) -> Command:
-            matches = await self._search(query, limit)
+            blocked = self._blocked(state)
+            matches = await self._search(query, limit, blocked)
             if not matches:
+                catalog = self._catalog(blocked)
                 body = (
-                    f"No tools matched {query!r}. The catalog is:\n{self._catalog()}"
-                    if self._catalog()
+                    f"No tools matched {query!r}. The catalog is:\n{catalog}"
+                    if catalog
                     else f"No tools matched {query!r}."
                 )
             elif len(matches) == 1:
@@ -287,12 +333,14 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
     def _describe_tool(self) -> BaseTool:
         async def tool_describe(
             names: list[str],
+            state: Annotated[ToolSearchState | None, InjectedState] = None,
             tool_call_id: Annotated[str, InjectedToolCallId] = "",
         ) -> Command:
+            blocked = self._blocked(state)
             found: list[BaseTool] = []
             missing: list[str] = []
             for name in names:
-                tool = await self._tool(name)
+                tool = await self._tool(name, blocked)
                 if tool is None:
                     missing.append(name)
                 else:
@@ -354,7 +402,9 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
             ),
         )
 
-    async def _search(self, query: str, limit: int) -> list[BaseTool]:
+    async def _search(
+        self, query: str, limit: int, blocked: Collection[str] = ()
+    ) -> list[BaseTool]:
         """Full-text match over the name and description of every built tool.
 
         A group still loading is simply absent from this result rather than
@@ -369,7 +419,7 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
         scored: list[tuple[int, str, BaseTool]] = []
         for group in sorted(self._groups):
             for name, tool in (self._resolved.get(group) or _Resolved()).tools.items():
-                if name not in self._group_of:
+                if not self._reachable(name, blocked):
                     continue
                 score = self._score(terms, name, tool.description or "")
                 if score:
@@ -474,11 +524,21 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
         name = request.tool_call["name"]
+        blocked = self._blocked(request.state)
+        # Checked before the pass-through below: the model reaches a proxied tool
+        # by name only through this middleware, so refusing here is what keeps a
+        # restriction the collapsed tool array can no longer express.
+        if name in self._group_of and not self._reachable(name, blocked):
+            return ToolMessage(
+                content=f"{name} is not available in this context.",
+                tool_call_id=request.tool_call["id"],
+                status="error",
+            )
         # The agent registers the curated tools itself; only groups it never saw
         # need this middleware to supply the implementation.
         if name not in self._group_of or request.tool is not None:
             return await handler(request)
-        tool = await self._tool(name)
+        tool = await self._tool(name, blocked)
         if tool is None:
             return ToolMessage(
                 content=f"{name} is unavailable right now. Continue without it.",

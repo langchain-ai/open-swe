@@ -11,7 +11,7 @@ the agent itself is stateless.
 import logging
 import os
 import warnings
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -906,9 +906,8 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     )
 
 
-def _is_subagent_excluded_tool(tool: Any) -> bool:
+def _is_subagent_excluded_name(name: str) -> bool:
     """Return whether a tool depends on parent-only source context."""
-    name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
     return name.startswith("slack_") or name in {
         "get_thread",
         "list_threads",
@@ -916,6 +915,10 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "notify_automation_channel",
         "read_user_settings",
     }
+
+
+def _is_subagent_excluded_tool(tool: Any) -> bool:
+    return _is_subagent_excluded_name(getattr(tool, "name", None) or getattr(tool, "__name__", ""))
 
 
 def _general_purpose_subagent(
@@ -1771,7 +1774,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             load=_load_corridor_mcp_tools,
             summary="security analysis of a plan before writing code",
         )
-    tool_search_middleware = ToolSearchMiddleware(tool_groups, always_visible=DEEP_AGENT_TOOL_NAMES)
+
+    def _plan_mode_blocked(state: Mapping[str, Any]) -> Collection[str]:
+        # PlanModeMiddleware filters `request.tools`, which no longer carries the
+        # proxied names, so the same restriction has to be applied where the
+        # model now reaches them.
+        active = state.get("plan_mode")
+        return (
+            PLAN_MODE_EXCLUDED_TOOLS if (active if isinstance(active, bool) else plan_mode) else ()
+        )
+
+    tool_search_middleware = ToolSearchMiddleware(
+        tool_groups,
+        always_visible=DEEP_AGENT_TOOL_NAMES,
+        excluded=_plan_mode_blocked,
+    )
+    subagent_tool_search = tool_search_middleware.scoped(
+        [name for name in tool_search_middleware.proxied_names if _is_subagent_excluded_name(name)]
+    )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -1824,7 +1844,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 subagent_model,
                 tools=subagent_tools,
                 skills=skill_sources,
-                searchable_tools=tool_search_middleware,
+                searchable_tools=subagent_tool_search,
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
