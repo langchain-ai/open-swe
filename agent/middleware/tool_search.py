@@ -394,7 +394,6 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
     def _collapse(self, messages: Sequence[AnyMessage]) -> list[AnyMessage]:
         """Rewrite historical calls to proxied tools into `tool_invoke` form."""
         collapsed: list[AnyMessage] = []
-        renamed: set[str] = set()
         for message in messages:
             if isinstance(message, AIMessage) and message.tool_calls:
                 calls = []
@@ -402,7 +401,6 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                 for call in message.tool_calls:
                     if call.get("name") in self._group_of:
                         changed = True
-                        renamed.add(str(call.get("id")))
                         calls.append(
                             {
                                 **call,
@@ -418,9 +416,6 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                 collapsed.append(
                     message.model_copy(update={"tool_calls": calls}) if changed else message
                 )
-                continue
-            if isinstance(message, ToolMessage) and message.tool_call_id in renamed:
-                collapsed.append(message.model_copy(update={"name": TOOL_INVOKE_NAME}))
                 continue
             collapsed.append(message)
         return collapsed

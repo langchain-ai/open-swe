@@ -278,7 +278,9 @@ async def test_history_is_collapsed_so_the_wire_only_names_declared_tools() -> N
         "name": "slack_thread_reply",
         "arguments": {"value": "earlier"},
     }
-    assert cast(ToolMessage, captured["messages"][1]).name == TOOL_INVOKE_NAME
+    # The result keeps the real tool's name: `tool_call_id` is what links it to
+    # the call, and the name is provenance the model still reads.
+    assert cast(ToolMessage, captured["messages"][1]).name == "slack_thread_reply"
     # State keeps the real call; only the wire is collapsed.
     assert cast(AIMessage, history[0]).tool_calls[0]["name"] == "slack_thread_reply"
 
