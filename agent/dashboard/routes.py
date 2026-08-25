@@ -104,6 +104,7 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
+from .provider_capabilities import provider_capabilities_payload
 from .repo_access import require_repo_access_for_user
 from .repo_cache import (
     REPO_LIST_FRESH_MS,
@@ -299,6 +300,14 @@ def _require_admin(session: dict[str, Any]) -> dict[str, Any]:
 
 
 _SESSION_DEP = Depends(require_session)
+
+
+def _require_provider_capabilities_access(request: Request) -> None:
+    expected = os.environ.get("OPEN_SWE_LOCAL_AUTH_TOKEN", "")
+    scheme, _, supplied = request.headers.get("authorization", "").partition(" ")
+    if expected and scheme.lower() == "bearer" and hmac.compare_digest(supplied, expected):
+        return
+    require_session(request)
 
 
 def _admin_session(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
@@ -623,6 +632,14 @@ async def options() -> dict[str, Any]:
         "default_agent_subagent_model": subagent_model,
         "default_agent_subagent_reasoning_effort": subagent_effort,
     }
+
+
+@router.get(
+    "/provider-capabilities",
+    dependencies=[Depends(_require_provider_capabilities_access)],
+)
+async def provider_capabilities() -> dict[str, Any]:
+    return provider_capabilities_payload()
 
 
 @router.get("/profile")

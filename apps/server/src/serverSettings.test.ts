@@ -143,10 +143,12 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       yield* serverSettings.updateSettings({
         providers: {
           codex: {
+            enabled: true,
             binaryPath: "/usr/local/bin/codex",
             homePath: "/Users/julius/.codex",
           },
           claudeAgent: {
+            enabled: true,
             binaryPath: "/usr/local/bin/claude",
             customModels: ["claude-custom"],
           },
@@ -234,6 +236,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       // Start with Claude text generation selection
       yield* serverSettings.updateSettings({
+        providers: {
+          claudeAgent: { enabled: true },
+        },
         textGenerationModelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),
           model: "claude-sonnet-4-6",
@@ -248,6 +253,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       // Switch to Codex — the stale Claude "effort" in options must not
       // cause the update to lose the selected model.
       const next = yield* serverSettings.updateSettings({
+        providers: {
+          codex: { enabled: true },
+        },
         textGenerationModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5.4",
@@ -422,6 +430,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
 
       yield* serverSettings.updateSettings({
+        providers: {
+          codex: { enabled: true },
+        },
         textGenerationModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
@@ -568,7 +579,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
 
       assert.deepEqual(next.providers.codex, {
-        enabled: true,
+        enabled: false,
         binaryPath: "/opt/homebrew/bin/codex",
         homePath: "",
         shadowHomePath: "",
@@ -576,7 +587,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: [],
       });
       assert.deepEqual(next.providers.claudeAgent, {
-        enabled: true,
+        enabled: false,
         binaryPath: "/opt/homebrew/bin/claude",
         homePath: "",
         customModels: [],

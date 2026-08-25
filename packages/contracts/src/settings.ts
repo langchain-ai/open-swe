@@ -322,7 +322,7 @@ export function makeProviderSettingsSchema<const Fields extends Schema.Struct.Fi
 export const CodexSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting("codex").pipe(
@@ -376,7 +376,7 @@ export type CodexSettings = typeof CodexSettings.Type;
 export const ClaudeSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting("claude").pipe(
@@ -419,9 +419,8 @@ export type ClaudeSettings = typeof ClaudeSettings.Type;
 
 export const CursorSettings = makeProviderSettingsSchema(
   {
-    // Enabled by default alongside Codex and Claude Agent.
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting("cursor-agent").pipe(
@@ -455,8 +454,7 @@ export type CursorSettings = typeof CursorSettings.Type;
 
 export const GrokSettings = makeProviderSettingsSchema(
   {
-    // Off by default (like Cursor and OpenCode): the binding is not yet
-    // stable enough to probe on every install. Users opt in from Settings.
+    // Users opt in from Settings.
     enabled: Schema.Boolean.pipe(
       Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
@@ -481,8 +479,7 @@ export type GrokSettings = typeof GrokSettings.Type;
 
 export const OpenCodeSettings = makeProviderSettingsSchema(
   {
-    // Off by default (like Cursor and Grok): the binding is not yet stable
-    // enough to probe on every install. Users opt in from Settings.
+    // Users opt in from Settings.
     enabled: Schema.Boolean.pipe(
       Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
@@ -533,11 +530,9 @@ export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 
 export const LangGraphSettings = makeProviderSettingsSchema(
   {
-    // Off by default like the other non-CLI bindings: the driver attaches to
-    // a LangGraph server the user runs themselves, so there is nothing to
-    // probe on a fresh install until they point it somewhere.
+    // Open SWE is the only provider enabled on a fresh install.
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     serverUrl: TrimmedString.pipe(

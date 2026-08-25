@@ -149,7 +149,7 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     expect(decoded.providerInstances).toEqual({});
     // Legacy `providers` struct is still hydrated with its per-driver defaults
     // so existing call sites keep working through the migration.
-    expect(decoded.providers.codex.enabled).toBe(true);
+    expect(decoded.providers.codex.enabled).toBe(false);
   });
 
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {
@@ -196,19 +196,21 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 });
 
 describe("provider enabled defaults", () => {
-  it("enables only the stable bindings by default", () => {
+  it("enables only Open SWE by default", () => {
     const decoded = decodeServerSettings({});
-    expect(decoded.providers.codex.enabled).toBe(true);
-    expect(decoded.providers.claudeAgent.enabled).toBe(true);
-    expect(decoded.providers.cursor.enabled).toBe(true);
+    expect(decoded.providers.codex.enabled).toBe(false);
+    expect(decoded.providers.claudeAgent.enabled).toBe(false);
+    expect(decoded.providers.cursor.enabled).toBe(false);
     expect(decoded.providers.grok.enabled).toBe(false);
     expect(decoded.providers.opencode.enabled).toBe(false);
+    expect(decoded.providers.langgraph.enabled).toBe(true);
   });
 
   it("derives per-driver defaults from the settings schemas", () => {
-    expect(defaultEnabledForDriver(ProviderDriverKind.make("codex"))).toBe(true);
-    expect(defaultEnabledForDriver(ProviderDriverKind.make("cursor"))).toBe(true);
+    expect(defaultEnabledForDriver(ProviderDriverKind.make("codex"))).toBe(false);
+    expect(defaultEnabledForDriver(ProviderDriverKind.make("cursor"))).toBe(false);
     expect(defaultEnabledForDriver(ProviderDriverKind.make("grok"))).toBe(false);
+    expect(defaultEnabledForDriver(ProviderDriverKind.make("langgraph"))).toBe(true);
     // Unknown fork drivers stay enabled; their own build decides otherwise.
     expect(defaultEnabledForDriver(ProviderDriverKind.make("ollama"))).toBe(true);
   });
@@ -216,9 +218,11 @@ describe("provider enabled defaults", () => {
   it("resolves instance enabled state with explicit false winning", () => {
     const grok = ProviderDriverKind.make("grok");
     const codex = ProviderDriverKind.make("codex");
+    const langgraph = ProviderDriverKind.make("langgraph");
     // No flags anywhere: driver default applies.
     expect(resolveProviderInstanceEnabled({ driver: grok, config: {} })).toBe(false);
-    expect(resolveProviderInstanceEnabled({ driver: codex, config: {} })).toBe(true);
+    expect(resolveProviderInstanceEnabled({ driver: codex, config: {} })).toBe(false);
+    expect(resolveProviderInstanceEnabled({ driver: langgraph, config: {} })).toBe(true);
     // Envelope flag wins over the driver default.
     expect(resolveProviderInstanceEnabled({ driver: grok, enabled: true, config: {} })).toBe(true);
     expect(resolveProviderInstanceEnabled({ driver: codex, enabled: false, config: {} })).toBe(

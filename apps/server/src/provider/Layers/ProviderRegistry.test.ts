@@ -53,8 +53,8 @@ const decodeServerSettings = Schema.decodeSync(ServerSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS);
 
-const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({});
-const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({});
+const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({ enabled: true });
+const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({ enabled: true });
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 const disabledCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({
   enabled: false,
@@ -394,7 +394,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       it.effect("passes configured launch args to the Codex provider probe", () =>
         Effect.gen(function* () {
           let observedLaunchArgs: string | undefined;
-          const settings = decodeCodexSettings({ launchArgs: "--strict-config --enable foo" });
+          const settings = decodeCodexSettings({
+            enabled: true,
+            launchArgs: "--strict-config --enable foo",
+          });
 
           const status = yield* checkCodexProviderStatus(settings, (input) => {
             observedLaunchArgs = input.launchArgs;

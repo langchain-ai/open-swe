@@ -7,7 +7,12 @@
  *
  * @module provider/Drivers/LangGraphDriver
  */
-import { LangGraphSettings, ProviderDriverKind, type ServerProvider } from "@openswe/contracts";
+import {
+  LangGraphSettings,
+  ProviderDriverKind,
+  type ProviderInstanceEnvironment,
+  type ServerProvider,
+} from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -20,6 +25,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeLangGraphTextGeneration } from "../../textGeneration/LangGraphTextGeneration.ts";
 import { makeLangGraphAdapter } from "../Layers/LangGraphAdapter.ts";
+import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import {
   buildInitialLangGraphProviderSnapshot,
   checkLangGraphProviderStatus,
@@ -31,6 +37,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   makeManualOnlyProviderMaintenanceCapabilities,
   makeStaticProviderMaintenanceResolver,
@@ -62,6 +69,23 @@ export function resolveLangGraphDriverConfig(input: {
   return { ...input.config, enabled: input.enabled };
 }
 
+export function resolveLangGraphInstanceRuntime(input: {
+  readonly enabled: boolean;
+  readonly config: LangGraphSettings;
+  readonly environment: ProviderInstanceEnvironment;
+  readonly baseEnvironment?: NodeJS.ProcessEnv;
+}): { readonly config: LangGraphSettings; readonly environment: NodeJS.ProcessEnv } {
+  const environment = mergeProviderInstanceEnvironment(input.environment, input.baseEnvironment);
+  return {
+    config: resolveLangGraphDriverConfig({
+      enabled: input.enabled,
+      config: input.config,
+      environment,
+    }),
+    environment,
+  };
+}
+
 // Nothing to update: the server is not a binary this app installs.
 const UPDATE = makeStaticProviderMaintenanceResolver(
   makeManualOnlyProviderMaintenanceCapabilities({
@@ -75,6 +99,7 @@ export type LangGraphDriverEnv =
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
+  | ProviderEventLoggers
   | ServerConfig
   | ServerSettingsService;
 
@@ -102,11 +127,12 @@ export const LangGraphDriver: ProviderDriver<LangGraphSettings, LangGraphDriverE
   },
   configSchema: LangGraphSettings,
   defaultConfig: (): LangGraphSettings => decodeLangGraphSettings({}),
-  create: ({ instanceId, displayName, accentColor, enabled, config }) =>
+  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const httpClient = yield* HttpClient.HttpClient;
       const fileSystem = yield* FileSystem.FileSystem;
       const pathService = yield* Path.Path;
+      const eventLoggers = yield* ProviderEventLoggers;
       const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -119,22 +145,28 @@ export const LangGraphDriver: ProviderDriver<LangGraphSettings, LangGraphDriverE
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      const effectiveConfig = resolveLangGraphDriverConfig({ enabled, config });
+      const runtime = resolveLangGraphInstanceRuntime({ enabled, config, environment });
+      const effectiveConfig = runtime.config;
+      const processEnv = runtime.environment;
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: "",
-        env: {},
+        env: processEnv,
       });
 
       const adapter = yield* makeLangGraphAdapter(effectiveConfig, instanceId, {
         attachmentsDir: serverConfig.attachmentsDir,
+        environment: processEnv,
+        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       }).pipe(
         Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, pathService),
       );
-      const textGeneration = yield* makeLangGraphTextGeneration();
+      const textGeneration = yield* makeLangGraphTextGeneration(effectiveConfig, processEnv).pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+      );
 
-      const checkProvider = checkLangGraphProviderStatus(effectiveConfig).pipe(
+      const checkProvider = checkLangGraphProviderStatus(effectiveConfig, processEnv).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(HttpClient.HttpClient, httpClient),
       );
