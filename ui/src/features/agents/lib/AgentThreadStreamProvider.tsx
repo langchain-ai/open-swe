@@ -78,9 +78,15 @@ export function AgentThreadStreamProvider({
   // they must be stable. Read the live thread id from a ref instead of
   // closing over the (changing) prop.
   const threadIdRef = useRef<string | null>(threadId)
+  const onThreadIdRef = useRef(onThreadId)
   useEffect(() => {
     threadIdRef.current = threadId
-  }, [threadId])
+    onThreadIdRef.current = onThreadId
+  }, [onThreadId, threadId])
+
+  const handleThreadId = useCallback((id: string) => {
+    onThreadIdRef.current?.(id)
+  }, [])
 
   const onCreated = useCallback(() => {
     if (transport === "cloud") invalidateAgentThreadLists(queryClient)
@@ -103,7 +109,7 @@ export function AgentThreadStreamProvider({
       assistantId={assistantId}
       client={client}
       threadId={threadId ?? undefined}
-      onThreadId={onThreadId}
+      onThreadId={handleThreadId}
       onCreated={onCreated}
       onCompleted={onCompleted}
     >

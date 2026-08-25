@@ -37,21 +37,32 @@ afterEach(() => {
 })
 
 describe("AgentThreadStreamProvider", () => {
-  it("forwards new thread ids", () => {
+  it("forwards new thread ids to the latest callback", () => {
     const queryClient = new QueryClient()
-    const onThreadId = vi.fn()
+    const firstCallback = vi.fn()
+    const latestCallback = vi.fn()
 
-    render(
+    const view = render(
       <QueryClientProvider client={queryClient}>
-        <AgentThreadStreamProvider threadId={null} onThreadId={onThreadId}>
+        <AgentThreadStreamProvider threadId="existing" onThreadId={firstCallback}>
           <div>thread</div>
         </AgentThreadStreamProvider>
       </QueryClientProvider>
     )
+    const capturedCallback = mocks.streamProviderProps.mock.calls[0]?.[0]
+      .onThreadId as (threadId: string) => void
 
-    expect(mocks.streamProviderProps).toHaveBeenCalledWith(
-      expect.objectContaining({ onThreadId })
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <AgentThreadStreamProvider threadId={null} onThreadId={latestCallback}>
+          <div>thread</div>
+        </AgentThreadStreamProvider>
+      </QueryClientProvider>
     )
+    capturedCallback("new-thread")
+
+    expect(firstCallback).not.toHaveBeenCalled()
+    expect(latestCallback).toHaveBeenCalledWith("new-thread")
   })
 
   it("does not rehydrate the thread on foreground", () => {
