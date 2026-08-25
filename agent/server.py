@@ -80,7 +80,7 @@ from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop
 from .input_messages import (
     SystemIdentity,
     build_input_messages,
-    dynamic_context_hashes_from_messages,
+    visible_dynamic_context_hashes,
 )
 from .integrations.corridor_mcp import (
     CORRIDOR_TOOL_NAMES,
@@ -99,7 +99,6 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
-    DynamicContextMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     IntegrationGroup,
@@ -1236,7 +1235,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
         ):
             return []
-        injected = dynamic_context_hashes_from_messages(state.get("messages"))
+        injected = visible_dynamic_context_hashes(state)
         return cast(
             list[Any],
             build_input_messages(
@@ -1787,7 +1786,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
-                DynamicContextMiddleware(),
                 notify_step_limit_reached,
                 *fallback_middleware,
                 *plan_mode_middleware,

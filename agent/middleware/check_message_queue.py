@@ -20,7 +20,7 @@ from ..input_messages import (
     PersonIdentity,
     SystemIdentity,
     build_input_messages,
-    dynamic_context_hashes_from_messages,
+    visible_dynamic_context_hashes,
 )
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
@@ -219,7 +219,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
 
         queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
-        injected = dynamic_context_hashes_from_messages(state.get("messages"))
+        injected = visible_dynamic_context_hashes(state)
         plan_approval_blocked: bool | None = None
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
         if pending_autofix:
