@@ -14,10 +14,10 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_profile_context_window,
     models_with_profile_context_windows,
+    normalize_model_choice,
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
-from agent.dashboard.schedules import _normalize_model_choice as normalize_schedule_model_choice
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     get_team_default_model,
@@ -74,13 +74,13 @@ def test_canonical_model_pair_falls_back_to_replacement_default_effort() -> None
     assert canonical_model_pair(DEPRECATED_ANTHROPIC, None) == (SUPPORTED_ANTHROPIC, "high")
 
 
-def test_schedule_model_choice_migrates_deprecated_ids() -> None:
-    assert normalize_schedule_model_choice(DEPRECATED_OPENAI, "high") == (SUPPORTED_OPENAI, "high")
-    assert normalize_schedule_model_choice(DEPRECATED_ANTHROPIC, "max") == (
+def test_normalize_model_choice_migrates_deprecated_ids() -> None:
+    assert normalize_model_choice(DEPRECATED_OPENAI, "high") == (SUPPORTED_OPENAI, "high")
+    assert normalize_model_choice(DEPRECATED_ANTHROPIC, "max") == (
         SUPPORTED_ANTHROPIC,
         "max",
     )
-    assert normalize_schedule_model_choice("mystery:model", "high") == (None, None)
+    assert normalize_model_choice("mystery:model", "high") == (None, None)
 
 
 def test_canonical_model_pair_ignores_live_and_unknown_ids() -> None:
