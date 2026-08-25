@@ -76,7 +76,7 @@ help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
-	@echo 'desktop                      - run the backend and Electron desktop app'
+	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'

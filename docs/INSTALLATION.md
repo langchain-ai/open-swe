@@ -665,12 +665,14 @@ For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CL
 > **Experimental:** The desktop wrapper is an early-access convenience surface. The web UI is
 > the recommended way to use Open SWE.
 
-The Electron app in `desktop/` includes the compiled dashboard UI. It only needs the Open SWE
-backend to be running:
+The Electron app in `desktop/` includes the compiled dashboard UI. Run it alongside the Open SWE
+backend (and, optionally, the web UI) in separate terminals:
 
 ```bash
 pnpm install                  # from the repo root
-pnpm run dev:desktop
+make dev                      # terminal 1
+pnpm run dev:desktop          # terminal 2
+pnpm run dev                  # terminal 3, optional web UI
 ```
 
 Development connects to `http://localhost:2024`. To use a hosted backend instead, run

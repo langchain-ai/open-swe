@@ -54,15 +54,20 @@ backend settings, login sessions, and projects are preserved.
 
 ## Local development
 
-Install the workspace dependencies, then start the backend and Electron together:
+Install the workspace dependencies, then run the backend, desktop app, and web UI independently:
 
 ```bash
-pnpm install                  # from the repo root
+# terminal 1
+make dev
+
+# terminal 2
 make desktop
+
+# terminal 3 (optional web UI)
+pnpm run dev
 ```
 
-`pnpm run dev:desktop` is the equivalent workspace command. Both commands stop the backend when
-the desktop app exits, and stop the desktop app if the backend fails.
+`pnpm run dev:desktop` is equivalent to `make desktop`. The desktop app starts its private local-agent backend on a random loopback port while connecting cloud features and GitHub login to the shared backend at `http://localhost:2024`.
 
 Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run
 beside an installed `Open SWE` app without sharing its login session, backend configuration,
