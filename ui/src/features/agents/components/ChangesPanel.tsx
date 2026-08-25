@@ -85,7 +85,7 @@ function ScopeSwitcher(props: {
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <MenuTrigger
-        className="flex h-6 min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-1 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
         aria-label={`Diff scope: ${label}`}
       >
         <span className="min-w-0 truncate">{label}</span>
@@ -142,7 +142,7 @@ export function ChangesPanel({
           title="Refresh changes"
           onClick={onRefresh}
           disabled={isFetching}
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
         >
           <RefreshCwIcon
             className={isFetching ? "size-3.5 animate-spin" : "size-3.5"}
@@ -154,10 +154,14 @@ export function ChangesPanel({
             href={pr.url}
             target="_blank"
             rel="noreferrer"
-            className="flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            aria-label="View PR"
+            title="View PR"
+            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
           >
-            <GitPullRequestIcon className="size-3.5" />
-            View PR
+            <GitPullRequestIcon className="size-3.5 shrink-0" />
+            <span className="whitespace-nowrap @max-[680px]:hidden">
+              View PR
+            </span>
           </a>
         )}
       </>
@@ -180,14 +184,17 @@ export function ChangesPanel({
         emptyLabel={emptyLabel}
         truncated={truncated}
         leading={
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
             <ScopeSwitcher
               scope={scope}
               branchScopeAvailable={branchScopeAvailable}
               onScopeChange={onScopeChange}
             />
             {branch && (
-              <span className="min-w-0 truncate text-xs text-muted-foreground">
+              <span
+                className="min-w-0 truncate text-xs text-muted-foreground @max-[520px]:hidden"
+                title={branch}
+              >
                 {branch}
               </span>
             )}
