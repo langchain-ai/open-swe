@@ -38,6 +38,10 @@ fi
 """
 
 
+def corridor_hook_script() -> str:
+    return _HOOK
+
+
 def corridor_commit_scanning_enabled() -> bool:
     return os.environ.get(CORRIDOR_COMMIT_SCANNING_ENV, "").strip().lower() in {
         "1",

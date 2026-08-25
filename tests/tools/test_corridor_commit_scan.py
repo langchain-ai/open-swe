@@ -1,5 +1,8 @@
 import base64
+import os
 import re
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,6 +13,7 @@ from agent.integrations.corridor_commit_scan import (
     CORRIDOR_HOOKS_PATH,
     corridor_commit_scanning_enabled,
     corridor_hook_cleanup_command,
+    corridor_hook_script,
     corridor_hook_setup_command,
 )
 from agent.prompt import construct_system_prompt
@@ -49,6 +53,57 @@ def test_hook_chains_repo_pre_commit_before_scanning() -> None:
     assert "commit-msg" in command
     assert "pre-push" in command
     assert "git config --local" not in command
+
+
+def test_real_commit_scans_changes_staged_by_repo_hook(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    hooks = tmp_path / "managed-hooks"
+    bin_dir = tmp_path / "bin"
+    repo.mkdir()
+    hooks.mkdir()
+    bin_dir.mkdir()
+    scanned = tmp_path / "scanned"
+
+    dispatcher = hooks / "open-swe-corridor-hook"
+    dispatcher.write_text(corridor_hook_script())
+    dispatcher.chmod(0o700)
+    (hooks / "pre-commit").symlink_to(dispatcher.name)
+    corridor = bin_dir / "corridor"
+    corridor.write_text(f'#!/bin/sh\ngit show :tracked.txt > "{scanned}"\n')
+    corridor.chmod(0o700)
+
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"], check=True, env=env
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.hooksPath", str(hooks)], check=True, env=env
+    )
+    tracked = repo / "tracked.txt"
+    tracked.write_text("before\n")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "initial"], check=True, env=env)
+
+    repo_hook = repo / ".git" / "hooks" / "pre-commit"
+    repo_hook.write_text('#!/bin/sh\nprintf "after\\n" > tracked.txt\ngit add tracked.txt\n')
+    repo_hook.chmod(0o700)
+    tracked.write_text("pending\n")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "update"], check=True, env=env)
+
+    assert scanned.read_text() == "after\n"
+    assert (
+        subprocess.run(
+            ["git", "-C", str(repo), "show", "HEAD:tracked.txt"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        ).stdout
+        == "after\n"
+    )
 
 
 def test_cleanup_only_removes_the_managed_hooks_path() -> None:
