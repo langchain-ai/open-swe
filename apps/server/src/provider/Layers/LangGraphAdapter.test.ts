@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  ApprovalRequestId,
   LangGraphSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -395,6 +396,193 @@ describe("LangGraphAdapter", () => {
         yield* Deferred.await(secondCompleted);
         yield* Fiber.interrupt(eventFiber);
         assert.equal(runRequests, 2);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
+  it.effect("surfaces LangGraph HITL requests and resumes the active turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const requests: Array<{ url: string; body: unknown }> = [];
+        let runRequest = 0;
+        const client = HttpClient.make((request) => {
+          requests.push({ url: request.url, body: requestJson(request) });
+          if (request.url.endsWith("/threads")) {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, Response.json({ thread_id: "lg-hitl" })),
+            );
+          }
+          runRequest += 1;
+          return Effect.succeed(
+            runRequest === 1
+              ? sseResponse(
+                  request,
+                  [
+                    'event: metadata\ndata: {"run_id":"run-hitl"}\n',
+                    'event: updates\ndata: {"__interrupt__":[{"id":"interrupt-1","value":{"action_requests":[{"name":"execute","args":{"command":"git status"},"description":"Run command"}],"review_configs":[{"action_name":"execute","allowed_decisions":["approve","reject"]}]}}]}\n',
+                    "",
+                  ].join("\n"),
+                )
+              : sseResponse(
+                  request,
+                  'event: messages-tuple\ndata: [{"type":"AIMessageChunk","id":"after-hitl","content":"done"},{}]\n\n',
+                ),
+          );
+        });
+        const adapter = yield* makeLangGraphAdapter(
+          decodeSettings({ serverUrl: "https://example.test", graphId: "agent" }),
+          instanceId,
+        ).pipe(Effect.provideService(HttpClient.HttpClient, client));
+        const opened = yield* Deferred.make<ProviderRuntimeEvent>();
+        const completed = yield* Deferred.make<void>();
+        const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.all(
+            [
+              event.type === "request.opened" ? Deferred.succeed(opened, event) : Effect.void,
+              event.type === "turn.completed"
+                ? Deferred.succeed(completed, undefined)
+                : Effect.void,
+            ],
+            { discard: true },
+          ),
+        ).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        yield* adapter.startSession({ threadId, runtimeMode: "approval-required" });
+        yield* adapter.sendTurn({ threadId, input: "check status" });
+        const requestEvent = yield* Deferred.await(opened);
+        assert.equal(requestEvent.type, "request.opened");
+        if (requestEvent.type === "request.opened") {
+          assert.equal(requestEvent.payload.requestType, "command_execution_approval");
+          assert.equal(requestEvent.requestId, "interrupt-1");
+        }
+
+        yield* adapter.respondToRequest(threadId, ApprovalRequestId.make("interrupt-1"), "accept");
+        yield* Deferred.await(completed);
+        yield* Fiber.interrupt(eventFiber);
+
+        const runBodies = requests
+          .filter((entry) => entry.url.endsWith("/runs/stream"))
+          .map((entry) => entry.body);
+        const initialBody = runBodies[0] as {
+          config?: { configurable?: Record<string, unknown> };
+        };
+        assert.equal(initialBody.config?.configurable?.["runtime_mode"], "approval-required");
+        const resumeBody = runBodies[1] as { command?: { resume?: Record<string, unknown> } };
+        assert.deepStrictEqual(resumeBody.command?.resume, {
+          "interrupt-1": { decisions: [{ type: "approve" }] },
+        });
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
+  it.effect("reuses a session-scoped approval without prompting again", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const runBodies: Array<unknown> = [];
+        let runRequest = 0;
+        const interruptFrame = (id: string) =>
+          `event: updates\ndata: {"__interrupt__":[{"id":"${id}","value":{"action_requests":[{"name":"execute","args":{"command":"git status"}}],"review_configs":[]}}]}\n\n`;
+        const client = HttpClient.make((request) => {
+          if (request.url.endsWith("/threads")) {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, Response.json({ thread_id: "lg-session-hitl" })),
+            );
+          }
+          runBodies.push(requestJson(request));
+          runRequest += 1;
+          return Effect.succeed(
+            sseResponse(
+              request,
+              runRequest === 1
+                ? interruptFrame("interrupt-session-1")
+                : runRequest === 3
+                  ? interruptFrame("interrupt-session-2")
+                  : "event: values\ndata: {}\n\n",
+            ),
+          );
+        });
+        const adapter = yield* makeLangGraphAdapter(
+          decodeSettings({ serverUrl: "https://example.test" }),
+          instanceId,
+        ).pipe(Effect.provideService(HttpClient.HttpClient, client));
+        const opened = yield* Deferred.make<void>();
+        const secondCompleted = yield* Deferred.make<void>();
+        let openedCount = 0;
+        let completedCount = 0;
+        const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+          if (event.type === "request.opened") {
+            openedCount += 1;
+            return Deferred.succeed(opened, undefined);
+          }
+          if (event.type === "turn.completed") {
+            completedCount += 1;
+            return completedCount === 2
+              ? Deferred.succeed(secondCompleted, undefined)
+              : Effect.void;
+          }
+          return Effect.void;
+        }).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        yield* adapter.startSession({ threadId, runtimeMode: "approval-required" });
+        yield* adapter.sendTurn({ threadId, input: "first" });
+        yield* Deferred.await(opened);
+        yield* adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.make("interrupt-session-1"),
+          "acceptForSession",
+        );
+        while (completedCount < 1) yield* Effect.yieldNow;
+        yield* adapter.sendTurn({ threadId, input: "second" });
+        yield* Deferred.await(secondCompleted);
+        yield* Fiber.interrupt(eventFiber);
+
+        assert.equal(openedCount, 1);
+        assert.deepStrictEqual(
+          (runBodies[3] as { command?: { resume?: Record<string, unknown> } }).command?.resume,
+          { "interrupt-session-2": { decisions: [{ type: "approve" }] } },
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
+  it.effect("fails closed when LangGraph returns a malformed interrupt", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = HttpClient.make((request) =>
+          Effect.succeed(
+            request.url.endsWith("/threads")
+              ? HttpClientResponse.fromWeb(request, Response.json({ thread_id: "lg-bad-hitl" }))
+              : sseResponse(
+                  request,
+                  'event: updates\ndata: {"__interrupt__":[{"id":"bad","value":{"action_requests":[]}}]}\n\n',
+                ),
+          ),
+        );
+        const adapter = yield* makeLangGraphAdapter(
+          decodeSettings({ serverUrl: "https://example.test" }),
+          instanceId,
+        ).pipe(Effect.provideService(HttpClient.HttpClient, client));
+        const completed = yield* Deferred.make<ProviderRuntimeEvent>();
+        let opened = false;
+        const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+          if (event.type === "request.opened") opened = true;
+          return event.type === "turn.completed" ? Deferred.succeed(completed, event) : Effect.void;
+        }).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        yield* adapter.startSession({ threadId, runtimeMode: "approval-required" });
+        yield* adapter.sendTurn({ threadId, input: "unsafe" });
+        const event = yield* Deferred.await(completed);
+        yield* Fiber.interrupt(eventFiber);
+
+        assert.isFalse(opened);
+        assert.equal(event.type, "turn.completed");
+        if (event.type === "turn.completed") {
+          assert.equal(event.payload.state, "failed");
+          assert.include(event.payload.errorMessage ?? "", "malformed approval request");
+        }
       }).pipe(Effect.provide(NodeServices.layer)),
     ),
   );

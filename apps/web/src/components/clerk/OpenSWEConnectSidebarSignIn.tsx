@@ -5,7 +5,7 @@ import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
 import { OpenSWEConnectUserProfilePage } from "./OpenSWEConnectUserProfilePage";
-import { useT3ConnectAuthPrompt } from "./useT3ConnectAuthPrompt";
+import { useT3ConnectAuthPrompt } from "./useOpenSWEConnectAuthPrompt";
 
 export function OpenSWEConnectSidebarSignIn() {
   if (!hasCloudPublicConfig()) return null;

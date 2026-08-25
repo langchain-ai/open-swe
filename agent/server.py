@@ -77,7 +77,12 @@ from .dashboard.team_settings import (
     get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
-from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
+from .desktop import (
+    create_desktop_backend,
+    desktop_artifact_routes,
+    desktop_interrupt_on,
+    is_desktop_run,
+)
 from .input_messages import (
     SystemIdentity,
     build_input_messages,
@@ -1738,6 +1743,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ],
         skills=skill_sources,
         backend=agent_backend,
+        interrupt_on=desktop_interrupt_on(configurable),
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [

@@ -9,6 +9,7 @@ from blockbuster import BlockBuster
 from agent.desktop import (
     create_desktop_backend,
     desktop_artifact_routes,
+    desktop_interrupt_on,
     resolve_desktop_project,
 )
 
@@ -79,3 +80,31 @@ async def test_artifact_routes_reject_a_traversing_thread_id(
     for backend in routes.values():
         root = Path(str(backend.cwd)).resolve()
         assert artifacts.resolve() in root.parents
+
+
+@pytest.mark.parametrize("runtime_mode", ["auto", "full-access"])
+def test_desktop_unrestricted_modes_bypass_hitl(runtime_mode: str) -> None:
+    assert desktop_interrupt_on({"source": "desktop", "runtime_mode": runtime_mode}) is None
+
+
+def test_desktop_approval_required_gates_mutating_and_external_tools() -> None:
+    interrupt_on = desktop_interrupt_on({"source": "desktop", "runtime_mode": "approval-required"})
+
+    assert interrupt_on is not None
+    assert set(interrupt_on) == {
+        "delete",
+        "edit_file",
+        "execute",
+        "fetch_url",
+        "http_request",
+        "task",
+        "web_search",
+        "write_file",
+    }
+
+
+def test_desktop_auto_accept_edits_only_gates_non_editing_side_effects() -> None:
+    interrupt_on = desktop_interrupt_on({"source": "desktop", "runtime_mode": "auto-accept-edits"})
+
+    assert interrupt_on is not None
+    assert set(interrupt_on) == {"execute", "fetch_url", "http_request", "task", "web_search"}

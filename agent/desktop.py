@@ -8,12 +8,56 @@ from typing import Any
 
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
+from langchain.agents.middleware.human_in_the_loop import InterruptOnConfig
 
 SHELL_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
+
+_APPROVAL_REQUIRED_TOOLS = {
+    "delete",
+    "edit_file",
+    "execute",
+    "fetch_url",
+    "http_request",
+    "task",
+    "web_search",
+    "write_file",
+}
+_AUTO_ACCEPT_EDITS_TOOLS = {
+    "execute",
+    "fetch_url",
+    "http_request",
+    "task",
+    "web_search",
+}
 
 
 def is_desktop_run(configurable: dict[str, Any]) -> bool:
     return configurable.get("source") == "desktop"
+
+
+def desktop_interrupt_on(
+    configurable: dict[str, Any],
+) -> dict[str, InterruptOnConfig] | None:
+    """Return the deterministic desktop tool-approval policy for this run."""
+    if not is_desktop_run(configurable):
+        return None
+
+    runtime_mode = configurable.get("runtime_mode")
+    if runtime_mode in {"auto", "full-access"}:
+        return None
+
+    tools = (
+        _AUTO_ACCEPT_EDITS_TOOLS
+        if runtime_mode == "auto-accept-edits"
+        else _APPROVAL_REQUIRED_TOOLS
+    )
+    return {
+        tool: {
+            "allowed_decisions": ["approve", "reject"],
+            "description": f"Open SWE requests permission to run `{tool}`.",
+        }
+        for tool in tools
+    }
 
 
 def resolve_desktop_project(configurable: dict[str, Any]) -> str:

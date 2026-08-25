@@ -18,16 +18,20 @@
  * @module provider/Layers/LangGraphAdapter
  */
 import {
+  ApprovalRequestId,
   type ChatAttachment,
   type CanonicalItemType,
+  type CanonicalRequestType,
   EventId,
   type LangGraphSettings,
+  type ProviderApprovalDecision,
   ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSession,
   isProviderSendTurnSupportedImageMimeType,
   RuntimeItemId,
+  RuntimeRequestId,
   type ThreadId,
   TurnId,
 } from "@openswe/contracts";
@@ -63,7 +67,12 @@ interface LangGraphSessionState {
   activeTurnId: TurnId | undefined;
   activeRunId: string | undefined;
   activeFiber: Fiber.Fiber<void, never> | undefined;
+  activeRunConfig: Record<string, unknown> | undefined;
+  activeEventState: LangGraphTurnEventState | undefined;
   readonly pendingTurns: Array<LangGraphPendingTurn>;
+  readonly pendingApprovals: Map<string, LangGraphPendingApproval>;
+  readonly resolvedInterrupts: Map<string, LangGraphHitlResponse>;
+  readonly sessionApprovedTools: Set<string>;
   lastError: string | undefined;
 }
 
@@ -73,6 +82,39 @@ interface LangGraphPendingTurn {
   readonly body: Record<string, unknown>;
   readonly model: string | undefined;
   readonly effort: string | undefined;
+}
+
+interface LangGraphActionRequest {
+  readonly name: string;
+  readonly args: Record<string, unknown>;
+  readonly description?: string;
+}
+
+interface LangGraphInterrupt {
+  readonly id: string;
+  readonly actions: ReadonlyArray<LangGraphActionRequest>;
+}
+
+interface LangGraphPendingApproval extends LangGraphInterrupt {
+  readonly requestId: ApprovalRequestId;
+  readonly requestType: CanonicalRequestType;
+}
+
+interface LangGraphHitlResponse {
+  readonly decisions: ReadonlyArray<{
+    readonly type: "approve" | "reject";
+    readonly message?: string;
+  }>;
+}
+
+interface LangGraphTurnEventState {
+  readonly emittedText: Map<string, number>;
+  readonly assistantItems: Set<string>;
+  readonly startedTools: Set<string>;
+  readonly completedTools: Set<string>;
+  readonly emittedUsage: Set<string>;
+  readonly chunkHistory: Map<string, Array<string>>;
+  failure: string | undefined;
 }
 
 interface LangGraphResumeCursor {
@@ -114,6 +156,66 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
   if (name.includes("web_search")) return "web_search";
   if (name.startsWith("mcp")) return "mcp_tool_call";
   return "dynamic_tool_call";
+}
+
+function classifyRequestType(actions: ReadonlyArray<LangGraphActionRequest>): CanonicalRequestType {
+  const itemTypes = new Set(actions.map((action) => classifyToolItemType(action.name)));
+  if (itemTypes.size !== 1) return "dynamic_tool_call";
+  const itemType = itemTypes.values().next().value;
+  if (itemType === "command_execution") return "command_execution_approval";
+  if (itemType === "file_change") return "file_change_approval";
+  if (itemType === "mcp_tool_call") return "mcp_elicitation_approval";
+  return "dynamic_tool_call";
+}
+
+function readInterrupts(value: unknown): ReadonlyArray<LangGraphInterrupt> | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const interrupts: Array<LangGraphInterrupt> = [];
+  for (const rawInterrupt of value) {
+    const interrupt = asRecord(rawInterrupt);
+    const id = interrupt?.["id"];
+    const actionRequests = asRecord(interrupt?.["value"])?.["action_requests"];
+    if (typeof id !== "string" || id.length === 0 || !Array.isArray(actionRequests)) {
+      return undefined;
+    }
+    const actions: Array<LangGraphActionRequest> = [];
+    for (const rawAction of actionRequests) {
+      const action = asRecord(rawAction);
+      const name = action?.["name"];
+      const args = asRecord(action?.["args"]);
+      const description = action?.["description"];
+      if (typeof name !== "string" || name.length === 0 || args === undefined) return undefined;
+      actions.push({
+        name,
+        args,
+        ...(typeof description === "string" && description.length > 0 ? { description } : {}),
+      });
+    }
+    if (actions.length === 0) return undefined;
+    interrupts.push({ id, actions });
+  }
+  return interrupts;
+}
+
+function hitlResponse(
+  actions: ReadonlyArray<LangGraphActionRequest>,
+  decision: ProviderApprovalDecision,
+): LangGraphHitlResponse {
+  const approved =
+    decision === "accept" || decision === "acceptForSession" || decision === "acceptAlways";
+  return {
+    decisions: actions.map(() =>
+      approved
+        ? { type: "approve" as const }
+        : {
+            type: "reject" as const,
+            message:
+              decision === "cancel"
+                ? "User cancelled tool execution."
+                : "User declined tool execution.",
+          },
+    ),
+  };
 }
 
 function titleForItemType(itemType: CanonicalItemType, toolName: string): string {
@@ -460,6 +562,10 @@ export function makeLangGraphAdapter(
           );
         }
 
+        if (sessions.has(input.threadId)) {
+          yield* stopSession(input.threadId);
+        }
+
         yield* ensureDesktopProjectAllowed(input.cwd);
 
         const resumed = readResumeCursor(input.resumeCursor);
@@ -495,7 +601,12 @@ export function makeLangGraphAdapter(
           activeTurnId: undefined,
           activeRunId: undefined,
           activeFiber: undefined,
+          activeRunConfig: undefined,
+          activeEventState: undefined,
           pendingTurns: [],
+          pendingApprovals: new Map(),
+          resolvedInterrupts: new Map(),
+          sessionApprovedTools: new Set(),
           lastError: undefined,
         });
 
@@ -546,14 +657,18 @@ export function makeLangGraphAdapter(
       >
         ? A
         : never,
+      eventState: LangGraphTurnEventState,
     ) => {
-      const emittedText = new Map<string, number>();
-      const assistantItems = new Set<string>();
-      const startedTools = new Set<string>();
-      const completedTools = new Set<string>();
-      const emittedUsage = new Set<string>();
+      const {
+        emittedText,
+        assistantItems,
+        startedTools,
+        completedTools,
+        emittedUsage,
+        chunkHistory,
+      } = eventState;
+      const streamChunkCursor = new Map<string, number>();
       let streamedAssistantText = false;
-      let failure: string | undefined;
 
       const handleMessage = (raw: unknown, fromUpdates = false): Effect.Effect<void> =>
         Effect.gen(function* () {
@@ -618,7 +733,18 @@ export function makeLangGraphAdapter(
             // Chunk frames carry an incremental delta; the trailing `updates`
             // frame carries the whole assembled message under the same id, so
             // only the part not already streamed goes out.
-            const delta = type === "AIMessageChunk" ? text : text.slice(already);
+            let delta = type === "AIMessageChunk" ? text : text.slice(already);
+            if (type === "AIMessageChunk") {
+              const cursor = streamChunkCursor.get(id) ?? 0;
+              const history = chunkHistory.get(id) ?? [];
+              streamChunkCursor.set(id, cursor + 1);
+              if (history[cursor] === text) {
+                delta = "";
+              } else {
+                history.push(text);
+                chunkHistory.set(id, history);
+              }
+            }
             if (delta.length > 0) {
               if (!fromUpdates) streamedAssistantText = true;
               emittedText.set(id, already + delta.length);
@@ -679,7 +805,7 @@ export function makeLangGraphAdapter(
           }
 
           if (frame.event === "error") {
-            failure =
+            eventState.failure =
               summarize(asRecord(parsed)?.["message"] ?? parsed) ?? "The Open SWE run failed.";
             return;
           }
@@ -695,6 +821,59 @@ export function makeLangGraphAdapter(
           if (frame.event === "updates" || frame.event === "values") {
             const record = asRecord(parsed);
             if (record === undefined) return;
+            if ("__interrupt__" in record) {
+              const interrupts = readInterrupts(record["__interrupt__"]);
+              if (interrupts === undefined) {
+                eventState.failure = "The Open SWE run returned a malformed approval request.";
+                return;
+              }
+              for (const interrupt of interrupts) {
+                if (
+                  session.pendingApprovals.has(interrupt.id) ||
+                  session.resolvedInterrupts.has(interrupt.id)
+                ) {
+                  continue;
+                }
+                if (
+                  interrupt.actions.every((action) => session.sessionApprovedTools.has(action.name))
+                ) {
+                  session.resolvedInterrupts.set(
+                    interrupt.id,
+                    hitlResponse(interrupt.actions, "accept"),
+                  );
+                  continue;
+                }
+                const requestId = ApprovalRequestId.make(interrupt.id);
+                const requestType = classifyRequestType(interrupt.actions);
+                const detail = summarize(
+                  interrupt.actions.map(
+                    (action) => action.description ?? `${action.name}: ${summarize(action.args)}`,
+                  ),
+                );
+                session.pendingApprovals.set(interrupt.id, {
+                  ...interrupt,
+                  requestId,
+                  requestType,
+                });
+                yield* emit({
+                  type: "request.opened",
+                  threadId,
+                  turnId,
+                  requestId: RuntimeRequestId.make(interrupt.id),
+                  payload: {
+                    requestType,
+                    ...(detail === undefined ? {} : { detail }),
+                    options: [
+                      { decision: "accept", label: "Allow once" },
+                      { decision: "acceptForSession", label: "Always allow this session" },
+                      { decision: "decline", label: "Decline" },
+                    ],
+                    args: { actions: interrupt.actions },
+                  },
+                });
+              }
+              return;
+            }
             for (const value of Object.values(record)) {
               const messages = asRecord(value)?.["messages"];
               if (!Array.isArray(messages)) continue;
@@ -709,12 +888,39 @@ export function makeLangGraphAdapter(
         Stream.runForEach(handleFrame),
         Effect.catchCause((cause) =>
           Effect.sync(() => {
-            failure = Cause.pretty(cause);
+            eventState.failure = Cause.pretty(cause);
           }),
         ),
         Effect.andThen(() =>
           Effect.gen(function* () {
             if (session.activeTurnId !== turnId) return;
+            session.activeFiber = undefined;
+            session.activeRunId = undefined;
+            if (eventState.failure === undefined && session.pendingApprovals.size > 0) {
+              yield* emit({
+                type: "session.state.changed",
+                threadId,
+                payload: { state: "waiting", reason: "Open SWE is waiting for permission" },
+              });
+              return;
+            }
+            if (eventState.failure === undefined && session.resolvedInterrupts.size > 0) {
+              yield* resumeTurn(session, threadId, turnId, eventState);
+              return;
+            }
+            if (eventState.failure !== undefined) {
+              for (const pending of session.pendingApprovals.values()) {
+                yield* emit({
+                  type: "request.resolved",
+                  threadId,
+                  turnId,
+                  requestId: RuntimeRequestId.make(String(pending.requestId)),
+                  payload: { requestType: pending.requestType, decision: "cancel" },
+                });
+              }
+              session.pendingApprovals.clear();
+              session.resolvedInterrupts.clear();
+            }
             for (const itemId of assistantItems) {
               yield* emit({
                 type: "item.completed",
@@ -723,38 +929,103 @@ export function makeLangGraphAdapter(
                 itemId: RuntimeItemId.make(itemId),
                 payload: {
                   itemType: "assistant_message",
-                  status: failure === undefined ? "completed" : "failed",
+                  status: eventState.failure === undefined ? "completed" : "failed",
                 },
               });
             }
-            session.lastError = failure;
+            session.lastError = eventState.failure;
             session.activeTurnId = undefined;
-            session.activeRunId = undefined;
-            session.activeFiber = undefined;
+            session.activeRunConfig = undefined;
+            session.activeEventState = undefined;
             yield* emit({
               type: "turn.completed",
               threadId,
               turnId,
               payload:
-                failure === undefined
+                eventState.failure === undefined
                   ? { state: "completed" }
-                  : { state: "failed", errorMessage: failure },
+                  : { state: "failed", errorMessage: eventState.failure },
             });
-            if (failure !== undefined) {
+            if (eventState.failure !== undefined) {
               yield* emit({
                 type: "runtime.error",
                 threadId,
                 turnId,
-                payload: { message: failure },
+                payload: { message: eventState.failure },
               });
             }
             yield* emit({
               type: "session.state.changed",
               threadId,
               payload:
-                failure === undefined
+                eventState.failure === undefined
                   ? { state: "ready", reason: "Open SWE turn completed" }
-                  : { state: "error", reason: failure },
+                  : { state: "error", reason: eventState.failure },
+            });
+            yield* startNextQueued(session);
+          }),
+        ),
+      );
+    };
+
+    const resumeTurn = (
+      session: LangGraphSessionState,
+      threadId: ThreadId,
+      turnId: TurnId,
+      eventState: LangGraphTurnEventState,
+    ): Effect.Effect<void> => {
+      const resume = Object.fromEntries(session.resolvedInterrupts);
+      session.resolvedInterrupts.clear();
+      return Effect.gen(function* () {
+        const response = yield* request(
+          "respondToRequest",
+          HttpClientRequest.post(
+            `${baseUrl}/threads/${encodeURIComponent(session.langGraphThreadId)}/runs/stream`,
+          ).pipe(
+            HttpClientRequest.bodyJsonUnsafe({
+              assistant_id: config.graphId,
+              command: { resume },
+              stream_mode: ["messages-tuple", "updates"],
+              ...(session.activeRunConfig === undefined ? {} : { config: session.activeRunConfig }),
+            }),
+          ),
+        );
+        yield* emit({
+          type: "session.state.changed",
+          threadId,
+          payload: { state: "running", reason: "Open SWE permission resolved" },
+        });
+        const fiber = yield* consumeRun(threadId, turnId, session, response, eventState).pipe(
+          Effect.forkIn(providerScope),
+        );
+        if (session.activeTurnId === turnId) session.activeFiber = fiber;
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.gen(function* () {
+            const message = cause.message;
+            eventState.failure = message;
+            session.lastError = message;
+            session.activeTurnId = undefined;
+            session.activeRunId = undefined;
+            session.activeFiber = undefined;
+            session.activeRunConfig = undefined;
+            session.activeEventState = undefined;
+            yield* emit({
+              type: "turn.completed",
+              threadId,
+              turnId,
+              payload: { state: "failed", errorMessage: message },
+            });
+            yield* emit({
+              type: "runtime.error",
+              threadId,
+              turnId,
+              payload: { message },
+            });
+            yield* emit({
+              type: "session.state.changed",
+              threadId,
+              payload: { state: "error", reason: message },
             });
             yield* startNextQueued(session);
           }),
@@ -787,10 +1058,25 @@ export function makeLangGraphAdapter(
         });
 
         session.activeTurnId = pending.turnId;
+        session.activeRunConfig = asRecord(pending.body["config"]);
+        const eventState: LangGraphTurnEventState = {
+          emittedText: new Map(),
+          assistantItems: new Set(),
+          startedTools: new Set(),
+          completedTools: new Set(),
+          emittedUsage: new Set(),
+          chunkHistory: new Map(),
+          failure: undefined,
+        };
+        session.activeEventState = eventState;
         session.lastError = undefined;
-        const fiber = yield* consumeRun(pending.threadId, pending.turnId, session, response).pipe(
-          Effect.forkIn(providerScope),
-        );
+        const fiber = yield* consumeRun(
+          pending.threadId,
+          pending.turnId,
+          session,
+          response,
+          eventState,
+        ).pipe(Effect.forkIn(providerScope));
         if (session.activeTurnId === pending.turnId) session.activeFiber = fiber;
       });
 
@@ -854,6 +1140,7 @@ export function makeLangGraphAdapter(
               ...(model === undefined ? {} : { agent_model_id: model }),
               ...(effort === undefined ? {} : { agent_effort: effort }),
               plan_mode: input.interactionMode === "plan",
+              runtime_mode: session.runtimeMode,
             },
           },
         };
@@ -909,6 +1196,19 @@ export function makeLangGraphAdapter(
           yield* Fiber.interrupt(session.activeFiber);
         }
         session.activeFiber = undefined;
+        session.activeRunConfig = undefined;
+        session.activeEventState = undefined;
+        for (const pending of session.pendingApprovals.values()) {
+          yield* emit({
+            type: "request.resolved",
+            threadId,
+            turnId,
+            requestId: RuntimeRequestId.make(String(pending.requestId)),
+            payload: { requestType: pending.requestType, decision: "cancel" },
+          });
+        }
+        session.pendingApprovals.clear();
+        session.resolvedInterrupts.clear();
 
         yield* emit({
           type: "turn.aborted",
@@ -924,17 +1224,66 @@ export function makeLangGraphAdapter(
         yield* startNextQueued(session);
       });
 
+    const respondToRequest: ProviderAdapterShape<ProviderAdapterRequestError>["respondToRequest"] =
+      (threadId, requestId, decision) =>
+        Effect.gen(function* () {
+          const session = yield* requireSession(threadId, "respondToRequest");
+          const key = String(requestId);
+          const pending = session.pendingApprovals.get(key);
+          if (pending === undefined) {
+            return yield* Effect.fail(
+              failRequest("respondToRequest", `Unknown Open SWE approval request '${key}'.`),
+            );
+          }
+          const turnId = session.activeTurnId;
+          const eventState = session.activeEventState;
+          if (turnId === undefined || eventState === undefined) {
+            return yield* Effect.fail(
+              failRequest("respondToRequest", "The Open SWE approval turn is no longer active."),
+            );
+          }
+
+          session.pendingApprovals.delete(key);
+          if (decision === "acceptForSession" || decision === "acceptAlways") {
+            for (const action of pending.actions) session.sessionApprovedTools.add(action.name);
+          }
+          session.resolvedInterrupts.set(pending.id, hitlResponse(pending.actions, decision));
+          yield* emit({
+            type: "request.resolved",
+            threadId,
+            turnId,
+            requestId: RuntimeRequestId.make(key),
+            payload: { requestType: pending.requestType, decision },
+          });
+
+          if (session.pendingApprovals.size === 0) {
+            yield* resumeTurn(session, threadId, turnId, eventState);
+          }
+        });
+
     const stopSession: ProviderAdapterShape<ProviderAdapterRequestError>["stopSession"] = (
       threadId,
     ) =>
       Effect.gen(function* () {
         const session = sessions.get(threadId);
         if (session === undefined) return;
+        const activeTurnId = session.activeTurnId;
         session.activeTurnId = undefined;
         session.activeRunId = undefined;
         if (session.activeFiber !== undefined) {
           yield* Fiber.interrupt(session.activeFiber);
         }
+        for (const pending of session.pendingApprovals.values()) {
+          yield* emit({
+            type: "request.resolved",
+            threadId,
+            ...(activeTurnId === undefined ? {} : { turnId: activeTurnId }),
+            requestId: RuntimeRequestId.make(String(pending.requestId)),
+            payload: { requestType: pending.requestType, decision: "cancel" },
+          });
+        }
+        session.pendingApprovals.clear();
+        session.resolvedInterrupts.clear();
         for (const pending of session.pendingTurns.splice(0)) {
           yield* emit({
             type: "turn.aborted",
@@ -1036,13 +1385,7 @@ export function makeLangGraphAdapter(
       startSession,
       sendTurn,
       interruptTurn,
-      respondToRequest: () =>
-        Effect.fail(
-          failRequest(
-            "respondToRequest",
-            "Open SWE runs without interactive approvals; there is nothing to respond to.",
-          ),
-        ),
+      respondToRequest,
       respondToUserInput: () =>
         Effect.fail(
           failRequest("respondToUserInput", "Open SWE does not request structured user input."),
