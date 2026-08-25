@@ -77,7 +77,7 @@ The system prompt instructs the agent to call a tool every turn, and `ensure_no_
 
 Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`.
 
-There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `gh` and `slack_thread_reply` / `linear_comment`.
+The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. In hosted sessions, `WorkflowPushGuardMiddleware` gates pushes containing `.github/workflows/` changes. Run such a push as a standalone `git push origin <branch>` or `git -C <repo> push origin <branch>` command. If it returns `WorkflowPushApprovalRequired`, do not bypass the gate or change the workflow diff; wait for the generated Slack/Web approval, then retry the same standalone push.
 
 ### Tools
 
