@@ -25,6 +25,7 @@ interface WindowsProbeOptions {
 const DesktopShellEnvironmentProbe = Schema.Literals([
   "login-shell",
   "launchctl-path",
+  "launchctl-gateway",
   "powershell-profile",
   "powershell-no-profile",
 ]);
@@ -67,7 +68,7 @@ export class DesktopShellEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/shell/DesktopShellEnvironment") {}
 
-const MODEL_PROVIDER_ENV_NAMES = [
+export const MODEL_PROVIDER_ENV_NAMES = [
   "OPENAI_API_KEY",
   "OPENAI_BASE_URL",
   "OPENAI_API_BASE",
@@ -298,11 +299,11 @@ const extractEnvironment = (output: string, names: ReadonlyArray<string>): Envir
 
 export function applyModelProviderEnvironment(
   env: NodeJS.ProcessEnv,
-  shellEnvironment: Readonly<EnvironmentPatch>,
+  providerEnvironment: Readonly<EnvironmentPatch>,
 ): void {
   for (const name of MODEL_PROVIDER_ENV_NAMES) {
-    if (env[name] === undefined && shellEnvironment[name]) {
-      env[name] = shellEnvironment[name];
+    if (env[name] === undefined && providerEnvironment[name]) {
+      env[name] = providerEnvironment[name];
     }
   }
 }
@@ -368,6 +369,13 @@ const readLoginShellEnvironment = (
         args: ["-ilc", capturePosixEnvironmentCommand(names)],
         timeout: LOGIN_SHELL_TIMEOUT,
       }).pipe(Effect.map((output) => extractEnvironment(output, names)));
+
+const readLaunchctlGatewayKey = runCommandOutput({
+  probe: "launchctl-gateway",
+  command: "/bin/launchctl",
+  args: ["getenv", "LC_GATEWAY_KEY"],
+  timeout: LAUNCHCTL_TIMEOUT,
+}).pipe(Effect.map(trimNonEmpty));
 
 const readLaunchctlPath = runCommandOutput({
   probe: "launchctl-path",
@@ -462,6 +470,18 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       if (shellEnvironment.PATH) break;
     }
     applyModelProviderEnvironment(config.env, shellEnvironment);
+    if (
+      config.platform === "darwin" &&
+      config.env.LANGSMITH_GATEWAY_API_KEY === undefined
+    ) {
+      const gatewayKey = yield* readLaunchctlGatewayKey;
+      if (Option.isSome(gatewayKey)) {
+        config.env.LANGSMITH_GATEWAY_API_KEY = gatewayKey.value;
+        if (config.env.LANGSMITH_GATEWAY_ENABLED === undefined) {
+          config.env.LANGSMITH_GATEWAY_ENABLED = "true";
+        }
+      }
+    }
 
     const launchctlPath =
       config.platform === "darwin" && !shellEnvironment.PATH

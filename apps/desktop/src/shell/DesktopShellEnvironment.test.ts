@@ -69,7 +69,15 @@ function runShellEnvironment(input: {
   readonly platform: NodeJS.Platform;
   readonly handler: (command: ChildProcess.Command) => string;
   readonly failure?: PlatformError.PlatformError;
+  readonly probeGateway?: boolean;
 }) {
+  if (
+    input.platform === "darwin" &&
+    input.probeGateway !== true &&
+    input.env.LANGSMITH_GATEWAY_API_KEY === undefined
+  ) {
+    input.env.LANGSMITH_GATEWAY_API_KEY = "existing-test-gateway-key";
+  }
   const environmentLayer = Layer.succeed(
     DesktopEnvironment.DesktopEnvironment,
     DesktopEnvironment.DesktopEnvironment.of({
@@ -111,6 +119,30 @@ describe("DesktopShellEnvironment", () => {
     assert.equal(env.OPENAI_API_KEY, "managed-test-key");
     assert.equal(env.OPENAI_BASE_URL, "https://gateway.example/openai/v1");
   });
+
+  it.effect("loads the managed LangSmith gateway key from launchctl", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = {
+        SHELL: "/bin/zsh",
+        PATH: "/usr/bin",
+      };
+
+      yield* runShellEnvironment({
+        env,
+        platform: "darwin",
+        probeGateway: true,
+        handler: (command) => {
+          if (command._tag !== "StandardCommand") return "";
+          return command.command === "/bin/launchctl" && command.args.at(-1) === "LC_GATEWAY_KEY"
+            ? "managed-gateway-test-key\n"
+            : envOutput({ PATH: "/usr/bin" });
+        },
+      });
+
+      assert.equal(env.LANGSMITH_GATEWAY_API_KEY, "managed-gateway-test-key");
+      assert.equal(env.LANGSMITH_GATEWAY_ENABLED, "true");
+    }),
+  );
 
   it("preserves explicit provider configuration", () => {
     const env: NodeJS.ProcessEnv = {
