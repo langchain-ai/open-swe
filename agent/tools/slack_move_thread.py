@@ -135,8 +135,9 @@ async def slack_move_thread(
     new_slack = _new_slack_context(active, target_channel, new_ts)
     destination_bound = False
     try:
-        async with slack_thread_mutation_lock(client, source_channel, source_ts):
-            locked_active = await get_active_slack_thread(client, thread_id)
+        async with slack_thread_mutation_lock(
+            client, source_channel, source_ts, thread_id=thread_id
+        ) as locked_active:
             if not locked_active or (
                 locked_active.get("channel_id"),
                 locked_active.get("thread_ts"),

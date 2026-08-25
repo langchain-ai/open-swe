@@ -3,6 +3,7 @@ import shlex
 import uuid
 from typing import Any
 
+from deepagents.backends.protocol import FileDownloadResponse
 from langgraph.config import get_config
 
 from ..utils.slack import (
@@ -17,19 +18,20 @@ _MAX_SLACK_ATTACHMENT_BYTES = 10 * 1024 * 1024
 _MAX_COMMENT_CHARS = 3000
 
 
-async def slack_attach_file(
+async def slack_attach_html(
     file_path: str,
     title: str | None = None,
     initial_comment: str | None = None,
 ) -> dict[str, Any]:
-    """Attach a sandbox file to the current Slack thread.
+    """Attach a sandbox HTML preview to the current Slack thread.
 
-    Use this when the user asks to receive or preview a generated file directly in Slack. The file
-    must be a regular file inside the active sandbox work directory and no larger than 10 MB. Slack
-    may render supported formats, including HTML in enabled workspaces, inline. Do not attach secrets,
-    credentials, private keys, environment files, or other sensitive data.
+    Use this when the user asks to receive or preview generated HTML directly in Slack. The file must
+    be a regular `.html` file inside the active sandbox work directory and no larger than 10 MB. Do
+    not attach secrets, credentials, private keys, environment files, or other sensitive data.
     """
     backend, path, work_dir = await _resolve_sandbox_file(file_path)
+    if not path.lower().endswith(".html"):
+        return {"success": False, "error": "file_path must identify an HTML file"}
     staged_path = posixpath.join(work_dir, f".open-swe-slack-upload-{uuid.uuid4().hex}")
     prepare = await backend.aexecute(_prepare_file_command(path, staged_path))
     if prepare.exit_code != 0:
@@ -69,10 +71,12 @@ async def slack_attach_file(
         configurable = config.get("configurable", {})
         slack_thread = configurable.get("slack_thread", {})
         thread_id = configurable.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            return {"success": False, "error": "Missing thread_id in config"}
         client = langgraph_client()
         active = await get_active_slack_thread(
             client,
-            thread_id if isinstance(thread_id, str) else None,
+            thread_id,
             slack_thread if isinstance(slack_thread, dict) else None,
         )
         active = active or {}
@@ -86,11 +90,12 @@ async def slack_attach_file(
         if content is None or len(content) != size:
             return {"success": False, "error": "failed to read staged sandbox file"}
 
-        async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-            current = await get_active_slack_thread(
-                client,
-                thread_id if isinstance(thread_id, str) else None,
-            )
+        async with slack_thread_mutation_lock(
+            client,
+            channel_id,
+            thread_ts,
+            thread_id=thread_id,
+        ) as current:
             if not current or (current.get("channel_id"), current.get("thread_ts")) != (
                 channel_id,
                 thread_ts,
@@ -146,25 +151,5 @@ def _has_control_chars(value: str, *, allowed: str = "") -> bool:
     return any(ord(char) < 32 and char not in allowed for char in value)
 
 
-def _download_content(result: Any) -> bytes | None:
-    for attr in ("content", "data", "bytes"):
-        value = result.get(attr) if isinstance(result, dict) else getattr(result, attr, None)
-        if isinstance(value, bytes):
-            return value
-        if isinstance(value, str):
-            return value.encode()
-    file_data = (
-        result.get("file_data") if isinstance(result, dict) else getattr(result, "file_data", None)
-    )
-    if isinstance(file_data, bytes):
-        return file_data
-    if isinstance(file_data, str):
-        return file_data.encode()
-    if isinstance(file_data, dict):
-        for key in ("content", "data", "bytes"):
-            value = file_data.get(key)
-            if isinstance(value, bytes):
-                return value
-            if isinstance(value, str):
-                return value.encode()
-    return None
+def _download_content(result: FileDownloadResponse | None) -> bytes | None:
+    return result.content if result else None

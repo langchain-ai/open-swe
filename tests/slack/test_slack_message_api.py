@@ -218,6 +218,22 @@ async def test_post_slack_thread_reply_forwards_blocks(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_upload_slack_thread_file_rejects_content_over_16_mb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    result = await slack_utils.upload_slack_thread_file(
+        "C1",
+        "1.0",
+        "plan.html",
+        b"x" * (slack_utils.SLACK_FILE_UPLOAD_MAX_BYTES + 1),
+    )
+
+    assert result == (None, "file_too_large")
+
+
+@pytest.mark.asyncio
 async def test_upload_slack_thread_file_completes_external_upload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

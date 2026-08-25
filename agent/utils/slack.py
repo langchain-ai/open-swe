@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
+SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 
 SlackChannelContext = dict[str, str]
@@ -717,6 +718,8 @@ async def upload_slack_thread_file(
         return None, "missing_slack_bot_token"
     if not content:
         return None, "empty_file"
+    if len(content) > SLACK_FILE_UPLOAD_MAX_BYTES:
+        return None, "file_too_large"
 
     try:
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -1142,9 +1145,13 @@ def _slack_thread_version_namespace(channel_id: str, thread_ts: str) -> tuple[st
 
 @asynccontextmanager
 async def slack_thread_mutation_lock(
-    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
-) -> AsyncIterator[None]:
-    """Serialize inbound version updates with version-checked Slack posts."""
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    *,
+    thread_id: str | None = None,
+) -> AsyncIterator[dict[str, Any] | None]:
+    """Lock a Slack thread and optionally return its current active location."""
     channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
     lock_id = str(
         uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-thread-lock:{channel}:{timestamp}")
@@ -1163,7 +1170,7 @@ async def slack_thread_mutation_lock(
                 raise TimeoutError("Timed out waiting for the Slack thread mutation lock") from None
             await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
     try:
-        yield
+        yield await get_active_slack_thread(langgraph_client, thread_id) if thread_id else None
     finally:
         try:
             await langgraph_client.threads.delete(lock_id)
