@@ -10,6 +10,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
+import { UserMessage } from "@/features/agents/components/messages/UserMessage"
 import { Logo } from "@/features/agents/components/chat/Logo"
 import {
   agentThreadKeys,
@@ -81,6 +82,8 @@ export function AgentsHome() {
       ? defaultEnvironmentSlug
       : null)
   const [submitting, setSubmitting] = useState(false)
+  const [submittedDraft, setSubmittedDraft] =
+    useState<CreateAgentThreadVariables | null>(null)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
@@ -119,21 +122,18 @@ export function AgentsHome() {
       ? (profileQuery.data?.default_repo ?? null)
       : repoOverride
 
-  // Holds the just-submitted prompt until the SDK mints the thread id; the
-  // effect then seeds the optimistic summary and navigates exactly once.
+  // Holds the just-submitted prompt until the SDK mints the thread id.
   const draftRef = useRef<CreateAgentThreadVariables | null>(null)
 
   useEffect(() => {
     const id = stream.threadId
     const draft = draftRef.current
     if (!id || !draft) return
-    draftRef.current = null
     const thread = optimisticThread(id, draft)
     queryClient.setQueryData(agentThreadKeys.detail(id), thread)
     seedAgentThreadLists(queryClient, thread)
     invalidateAgentThreadLists(queryClient)
-    void navigate({ to: "/agents/$threadId", params: { threadId: id } })
-  }, [stream.threadId, queryClient, navigate])
+  }, [stream.threadId, queryClient])
 
   useEffect(() => {
     if (!isDesktop || localProjects.length === 0) return
@@ -270,7 +270,7 @@ export function AgentsHome() {
       }
       return
     }
-    draftRef.current = {
+    const draft = {
       prompt,
       images,
       repo,
@@ -278,6 +278,8 @@ export function AgentsHome() {
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
     }
+    draftRef.current = draft
+    setSubmittedDraft(draft)
     setSubmitting(true)
 
     const configurable: Record<string, unknown> = {}
@@ -302,6 +304,7 @@ export function AgentsHome() {
         // Submit failed before the SDK minted a thread id — re-enable the
         // prompt instead of leaving it disabled until a reload.
         draftRef.current = null
+        setSubmittedDraft(null)
         setSubmitting(false)
         throw error
       })
@@ -312,7 +315,17 @@ export function AgentsHome() {
       {session.data && <OnboardingDialog />}
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
         <div className="flex w-full flex-col items-center gap-6">
-          <Logo />
+          {submittedDraft ? (
+            <div className="w-full self-stretch">
+              <UserMessage
+                message={
+                  optimisticThread("pending", submittedDraft).messages[0]!
+                }
+              />
+            </div>
+          ) : (
+            <Logo />
+          )}
           {localError && (
             <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {localError}

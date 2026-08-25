@@ -742,8 +742,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       const visible = (element: Element) =>
         (element as HTMLElement).getClientRects().length > 0;
       const sample = () => {
-        const userMessageVisible = Array.from(
-          document.querySelectorAll('[data-testid="user-message"]'),
+        const submittedMessageVisible = Array.from(
+          document.querySelectorAll(
+            '[data-testid="user-message"], [data-testid="composer-editor"]',
+          ),
         ).some(
           (element) =>
             visible(element) &&
@@ -761,11 +763,15 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         if (/^\/agents\/[^/]+$/.test(window.location.pathname)) {
           observations.threadSeen = true;
         }
-        if (userMessageVisible) observations.messageSeen = true;
-        if (observations.messageSeen && !userMessageVisible) {
+        if (submittedMessageVisible) observations.messageSeen = true;
+        if (observations.messageSeen && !submittedMessageVisible) {
           observations.messageDisappeared = true;
         }
-        if (observations.threadSeen && newChatVisible) {
+        if (
+          observations.messageSeen &&
+          !submittedMessageVisible &&
+          newChatVisible
+        ) {
           observations.newChatReturned = true;
         }
       };

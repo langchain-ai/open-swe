@@ -45,6 +45,7 @@ export function AgentThreadStreamProvider({
   threadId,
   children,
   transport = "cloud",
+  onThreadId,
 }: {
   /**
    * The active thread, or `null` on routes without one (the Agents home,
@@ -56,6 +57,7 @@ export function AgentThreadStreamProvider({
   threadId: string | null
   children: ReactNode
   transport?: "cloud" | "local"
+  onThreadId?: (threadId: string) => void
 }) {
   const queryClient = useQueryClient()
   const apiUrl =
@@ -101,6 +103,7 @@ export function AgentThreadStreamProvider({
       assistantId={assistantId}
       client={client}
       threadId={threadId ?? undefined}
+      onThreadId={onThreadId}
       onCreated={onCreated}
       onCompleted={onCompleted}
     >
