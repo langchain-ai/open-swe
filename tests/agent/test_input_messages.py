@@ -1,11 +1,14 @@
 from xml.etree import ElementTree
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.input_messages import (
     build_input_messages,
     build_run_input,
     human_input,
+    person_introduction,
+    visible_dynamic_context_hashes,
     wrap_system_prompt,
 )
 
@@ -119,14 +122,15 @@ def test_entity_ids_must_be_namespaced() -> None:
         human_input("hello", {"sender_id": "octocat", "surface": "web", "kind": "human"})
 
 
+def _person_intro_message(entity_id: str) -> HumanMessage:
+    content = person_introduction({"id": entity_id, "display_name": "Ramon"})["content"]
+    assert isinstance(content, str)
+    return HumanMessage(content=content)
+
+
 def test_visible_dynamic_context_hashes_ignores_summarized_prefix() -> None:
-    from langchain_core.messages import AIMessage, HumanMessage
-
-    from agent.input_messages import person_introduction, visible_dynamic_context_hashes
-
-    intro = person_introduction({"id": "slack:U1", "display_name": "Ramon"})
     messages = [
-        HumanMessage(content=intro["content"]),
+        _person_intro_message("slack:U1"),
         AIMessage(content="working"),
         HumanMessage(content="follow up"),
     ]
@@ -137,13 +141,19 @@ def test_visible_dynamic_context_hashes_ignores_summarized_prefix() -> None:
     assert visible_dynamic_context_hashes(summarized) == set()
 
 
-def test_visible_dynamic_context_hashes_tolerates_bad_cutoff() -> None:
-    from langchain_core.messages import HumanMessage
+def test_visible_dynamic_context_hashes_falls_back_without_a_usable_cutoff() -> None:
+    messages = [_person_intro_message("slack:U1")]
 
-    from agent.input_messages import person_introduction, visible_dynamic_context_hashes
-
-    intro = person_introduction({"id": "slack:U1", "display_name": "Ramon"})
-    messages = [HumanMessage(content=intro["content"])]
-
-    for event in ({"cutoff_index": 99}, {"cutoff_index": "x"}, {}, None):
+    for event in ({"cutoff_index": "x"}, {}, None):
         assert visible_dynamic_context_hashes({"messages": messages, "_summarization_event": event})
+
+
+def test_visible_dynamic_context_hashes_honors_out_of_range_cutoff() -> None:
+    """DeepAgents builds the prompt from summary_message alone, so nothing is visible."""
+    messages = [_person_intro_message("slack:U1")]
+    event = {"cutoff_index": 99}
+
+    assert (
+        visible_dynamic_context_hashes({"messages": messages, "_summarization_event": event})
+        == set()
+    )

@@ -207,7 +207,7 @@ def visible_dynamic_context_hashes(state: object) -> set[str]:
         return set()
     event = state.get(SUMMARIZATION_EVENT_KEY)
     cutoff = event.get("cutoff_index") if isinstance(event, dict) else None
-    if isinstance(cutoff, int) and 0 <= cutoff <= len(messages):
+    if isinstance(cutoff, int) and cutoff >= 0:
         messages = messages[cutoff:]
     return dynamic_context_hashes_from_messages(messages)
 
