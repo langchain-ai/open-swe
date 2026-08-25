@@ -1184,13 +1184,15 @@ export function AgentsShell({
   return (
     <SidebarLayoutProvider value={layout}>
       <div className="agents-ui flex h-svh overflow-hidden bg-background">
-        <AgentsSidebar
-          user={user}
-          localOnly={localOnly}
-          activeThreadId={activeThreadId}
-          activeLocalSessionId={activeLocalSessionId}
-          layout={layout}
-        />
+        {!(typeof window !== "undefined" && window.openSweDesktop) && (
+          <AgentsSidebar
+            user={user}
+            localOnly={localOnly}
+            activeThreadId={activeThreadId}
+            activeLocalSessionId={activeLocalSessionId}
+            layout={layout}
+          />
+        )}
         <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">
           {children}
         </main>

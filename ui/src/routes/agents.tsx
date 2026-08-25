@@ -4,6 +4,7 @@ import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { DesktopAgentTabsProvider } from "@/features/agents/components/DesktopAgentTabs"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
@@ -62,7 +63,7 @@ function AgentsLayout() {
 
   if (!session.data && (!localOnly || !isLocalRoute)) return <RequireLogin />
 
-  return (
+  const content = (
     <AgentsShell
       user={session.data ?? null}
       localOnly={localOnly}
@@ -74,4 +75,17 @@ function AgentsLayout() {
       </AgentThreadStreamProvider>
     </AgentsShell>
   )
+
+  if (typeof window !== "undefined" && window.openSweDesktop) {
+    return (
+      <DesktopAgentTabsProvider
+        activeThreadId={activeThreadId}
+        activeLocalSessionId={activeLocalSessionId}
+        cloudEnabled={Boolean(session.data)}
+      >
+        {content}
+      </DesktopAgentTabsProvider>
+    )
+  }
+  return content
 }

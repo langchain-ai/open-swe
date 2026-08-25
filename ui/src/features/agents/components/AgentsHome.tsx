@@ -11,6 +11,7 @@ import type { RunTarget } from "@/features/agents/components/composer/RunTargetS
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Logo } from "@/features/agents/components/chat/Logo"
+import { DesktopThreadsHome } from "@/features/agents/components/DesktopThreadsHome"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
@@ -83,6 +84,13 @@ export function AgentsHome() {
   const [submitting, setSubmitting] = useState(false)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const [desktopCreating, setDesktopCreating] = useState(() => {
+    if (!isDesktop) return false
+    const creating =
+      window.sessionStorage.getItem("open-swe.desktop.new-thread") === "1"
+    window.sessionStorage.removeItem("open-swe.desktop.new-thread")
+    return creating
+  })
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
@@ -305,6 +313,15 @@ export function AgentsHome() {
         setSubmitting(false)
         throw error
       })
+  }
+
+  if (isDesktop && !desktopCreating) {
+    return (
+      <DesktopThreadsHome
+        cloudEnabled={cloudEnabled}
+        onNewThread={() => setDesktopCreating(true)}
+      />
+    )
   }
 
   return (
