@@ -404,11 +404,26 @@ export function useSeedAgentThreadDetails(
 
 export const SIDEBAR_PAGE_SIZE = 10
 
+function uniqueThreads(
+  ...groups: Array<Array<AgentThread>>
+): Array<AgentThread> {
+  return [
+    ...new Map(groups.flat().map((thread) => [thread.id, thread])).values(),
+  ]
+}
+
 function infinitePageThreads(
   data?: InfiniteData<ThreadsPage>
 ): Array<AgentThread> {
-  const threads = data?.pages.flatMap((page) => page.items) ?? []
-  return [...new Map(threads.map((thread) => [thread.id, thread])).values()]
+  return uniqueThreads(data?.pages.flatMap((page) => page.items) ?? [])
+}
+
+function sidebarPageThreads(
+  recent: Array<AgentThread>,
+  stablePages?: InfiniteData<ThreadsPage>
+): Array<AgentThread> {
+  const stable = infinitePageThreads(stablePages)
+  return uniqueThreads(recent, stable).slice(0, stable.length)
 }
 
 export function useSidebarThreads({
@@ -424,15 +439,29 @@ export function useSidebarThreads({
 }) {
   const scope = includeAutomations ? "all" : "interactive"
   const activeQuery = useInfiniteThreadsPages(
+    { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope, sortBy: "created_at" },
+    { enabled, pollWhileRunning: true }
+  )
+  const activeRecentQuery = useThreadsPage(
     { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope, sortBy: "updated_at" },
     { enabled, pollWhileRunning: true }
   )
   const resolvedQuery = useInfiniteThreadsPages(
-    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope, sortBy: "updated_at" },
+    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope, sortBy: "created_at" },
     { enabled: enabled && includeResolved, pollWhileRunning: true }
   )
-  const loadedActive = infinitePageThreads(activeQuery.data)
-  const loadedResolved = infinitePageThreads(resolvedQuery.data)
+  const resolvedRecentQuery = useThreadsPage(
+    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope, sortBy: "updated_at" },
+    { enabled: enabled && includeResolved }
+  )
+  const loadedActive = sidebarPageThreads(
+    activeRecentQuery.data?.items ?? [],
+    activeQuery.data
+  )
+  const loadedResolved = sidebarPageThreads(
+    resolvedRecentQuery.data?.items ?? [],
+    resolvedQuery.data
+  )
   const activeThreadLoaded = [
     ...loadedActive,
     ...(includeResolved ? loadedResolved : []),
@@ -913,13 +942,22 @@ export function useInfiniteThreadsPages(
 
 export function useThreadsPage(
   params: ThreadsPageParams,
-  options: { enabled?: boolean; staleWhileRevalidate?: boolean } = {}
+  options: {
+    enabled?: boolean
+    staleWhileRevalidate?: boolean
+    pollWhileRunning?: boolean
+  } = {}
 ) {
   return useQuery({
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
     enabled: options.enabled,
     placeholderData: (prev) => prev,
+    refetchInterval: (query) =>
+      options.pollWhileRunning &&
+      query.state.data?.items.some((thread) => thread.status === "running")
+        ? 2000
+        : false,
     ...(options.staleWhileRevalidate
       ? {
           staleTime: 30_000,
