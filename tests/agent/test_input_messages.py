@@ -117,3 +117,33 @@ def test_run_input_preserves_files() -> None:
 def test_entity_ids_must_be_namespaced() -> None:
     with pytest.raises(ValueError):
         human_input("hello", {"sender_id": "octocat", "surface": "web", "kind": "human"})
+
+
+def test_visible_dynamic_context_hashes_ignores_summarized_prefix() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from agent.input_messages import person_introduction, visible_dynamic_context_hashes
+
+    intro = person_introduction({"id": "slack:U1", "display_name": "Ramon"})
+    messages = [
+        HumanMessage(content=intro["content"]),
+        AIMessage(content="working"),
+        HumanMessage(content="follow up"),
+    ]
+
+    assert visible_dynamic_context_hashes({"messages": messages})
+
+    summarized = {"messages": messages, "_summarization_event": {"cutoff_index": 1}}
+    assert visible_dynamic_context_hashes(summarized) == set()
+
+
+def test_visible_dynamic_context_hashes_tolerates_bad_cutoff() -> None:
+    from langchain_core.messages import HumanMessage
+
+    from agent.input_messages import person_introduction, visible_dynamic_context_hashes
+
+    intro = person_introduction({"id": "slack:U1", "display_name": "Ramon"})
+    messages = [HumanMessage(content=intro["content"])]
+
+    for event in ({"cutoff_index": 99}, {"cutoff_index": "x"}, {}, None):
+        assert visible_dynamic_context_hashes({"messages": messages, "_summarization_event": event})
