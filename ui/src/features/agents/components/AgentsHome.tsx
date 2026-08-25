@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useRouterState } from "@tanstack/react-router"
 
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
@@ -59,6 +59,9 @@ export function AgentsHome() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
+  const routePending = useRouterState({
+    select: (state) => state.status === "pending",
+  })
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? defaultSelection
@@ -312,7 +315,7 @@ export function AgentsHome() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-      {session.data && <OnboardingDialog />}
+      {session.data && !routePending && <OnboardingDialog />}
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
         <div className="flex w-full flex-col items-center gap-6">
           {submittedDraft ? (
