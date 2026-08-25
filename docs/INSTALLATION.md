@@ -644,10 +644,10 @@ The dashboard is the web app in `ui/`. It's a server-rendered TanStack Start app
 
 ```bash
 pnpm install          # from the repo root: ui/ and desktop/ are one pnpm workspace
-pnpm run dev          # turbo -> vite dev --port 3000 -> http://localhost:3000
+make web             # pnpm run dev -> Vite on http://localhost:3000
 ```
 
-No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `pnpm run dev`. It is read at request time, so the same build can front any backend.
+No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `make web` or `pnpm run dev`. It is read at request time, so the same build can front any backend.
 
 To enable Datadog browser RUM, set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building the dashboard. Optional build-time settings are `VITE_DATADOG_SITE` (default `datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` (default `100`), and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay is enabled by default for sampled RUM sessions with all content masked; telemetry also strips URL query strings and fragments. Values prefixed with `VITE_` are public in the browser bundle; use a Datadog client token, never an API or application key.
 
@@ -671,7 +671,7 @@ backend (and, optionally, the web UI) in separate terminals:
 pnpm install                  # from the repo root
 make dev                      # terminal 1
 pnpm run dev:desktop          # terminal 2
-pnpm run dev                  # terminal 3, optional web UI
+make web                      # terminal 3, optional web UI
 ```
 
 Development connects to `http://localhost:2024`. To use a hosted backend instead, run
@@ -791,7 +791,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 ### Dashboard UI can't reach the backend
 
 - Confirm the backend is running via `make dev` on `:2024` (not `make run` on `:8000`).
-- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `pnpm run dev`.
+- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `make web` or `pnpm run dev`.
 
 ### Sandbox creation failures
 

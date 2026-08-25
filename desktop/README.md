@@ -64,7 +64,7 @@ make dev
 make desktop
 
 # terminal 3 (optional web UI)
-pnpm run dev
+make web
 ```
 
 `pnpm run dev:desktop` is equivalent to `make desktop`. The desktop app starts its private local-agent backend on a random loopback port while connecting cloud features and GitHub login to the shared backend at `http://localhost:2024`.
