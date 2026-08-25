@@ -168,6 +168,126 @@ describe("LangGraphAdapter", () => {
     ),
   );
 
+  it.effect("forwards effort, plan mode, images, usage, and hydrates thread history", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const attachmentsDir = yield* fs.makeTempDirectoryScoped({ prefix: "open-swe-images-" });
+        const attachmentId = "thread-open-swe-test-00000000-0000-4000-8000-000000000001";
+        yield* fs.writeFile(
+          `${attachmentsDir}/${attachmentId}.png`,
+          new TextEncoder().encode("pixels"),
+        );
+        const requests: Array<{ url: string; body: unknown }> = [];
+        const client = HttpClient.make((request) => {
+          requests.push({ url: request.url, body: requestJson(request) });
+          if (request.url.endsWith("/threads")) {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, Response.json({ thread_id: "lg-history" })),
+            );
+          }
+          if (request.url.endsWith("/state")) {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json({
+                  values: {
+                    messages: [
+                      { type: "human", id: "human-1", content: "first" },
+                      { type: "ai", id: "ai-1", content: "done" },
+                      { type: "human", id: "human-2", content: "second" },
+                      { type: "tool", tool_call_id: "tool-1", content: "ok" },
+                    ],
+                  },
+                }),
+              ),
+            );
+          }
+          return Effect.succeed(
+            sseResponse(
+              request,
+              [
+                'event: messages-tuple\ndata: [{"type":"AIMessageChunk","id":"ai-usage","content":"done","usage_metadata":{"input_tokens":7,"output_tokens":3,"total_tokens":10,"input_token_details":{"cache_read":2}}},{}]\n',
+                'event: updates\ndata: {"agent":{"messages":[{"type":"ai","id":"ai-usage","content":"done","usage_metadata":{"input_tokens":7,"output_tokens":3,"total_tokens":10,"input_token_details":{"cache_read":2}}}]}}\n',
+                "",
+              ].join("\n"),
+            ),
+          );
+        });
+        const adapter = yield* makeLangGraphAdapter(
+          decodeSettings({ serverUrl: "https://example.test", graphId: "agent" }),
+          instanceId,
+          { attachmentsDir },
+        ).pipe(Effect.provideService(HttpClient.HttpClient, client));
+        const events: ProviderRuntimeEvent[] = [];
+        const completed = yield* Deferred.make<void>();
+        const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => events.push(event)).pipe(
+            Effect.andThen(
+              event.type === "turn.completed"
+                ? Deferred.succeed(completed, undefined)
+                : Effect.void,
+            ),
+          ),
+        ).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+        yield* adapter.sendTurn({
+          threadId,
+          input: "inspect this",
+          interactionMode: "plan",
+          modelSelection: {
+            instanceId,
+            model: "openai:gpt-5.6-sol",
+            options: [{ id: "effort", value: "high" }],
+          },
+          attachments: [
+            {
+              type: "image",
+              id: attachmentId,
+              name: "screen.png",
+              mimeType: "image/png",
+              sizeBytes: 6,
+            },
+          ],
+        });
+        yield* Deferred.await(completed);
+        const snapshot = yield* adapter.readThread(threadId);
+        yield* Fiber.interrupt(eventFiber);
+
+        const runBody = requests.find((entry) => entry.url.endsWith("/runs/stream"))?.body as {
+          input?: { messages?: Array<{ content?: unknown }> };
+          config?: { configurable?: Record<string, unknown> };
+        };
+        assert.deepInclude(runBody.config?.configurable, {
+          agent_model_id: "openai:gpt-5.6-sol",
+          agent_effort: "high",
+          plan_mode: true,
+        });
+        assert.deepStrictEqual(runBody.input?.messages?.[0]?.content, [
+          { type: "text", text: "inspect this" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,cGl4ZWxz" } },
+        ]);
+        const usageEvents = events.filter((event) => event.type === "thread.token-usage.updated");
+        assert.lengthOf(usageEvents, 1);
+        const usageEvent = usageEvents[0];
+        assert.equal(usageEvent?.type, "thread.token-usage.updated");
+        if (usageEvent?.type === "thread.token-usage.updated") {
+          assert.equal(usageEvent.payload.usage.usedTokens, 10);
+          assert.equal(usageEvent.payload.usage.inputTokens, 7);
+          assert.equal(usageEvent.payload.usage.cachedInputTokens, 2);
+          assert.equal(usageEvent.payload.usage.outputTokens, 3);
+        }
+        assert.equal(snapshot.turns.length, 2);
+        assert.equal(snapshot.turns[0]?.id, "human-1");
+        assert.equal(snapshot.turns[0]?.items.length, 2);
+        assert.equal(snapshot.turns[1]?.id, "human-2");
+        assert.equal(snapshot.turns[1]?.items.length, 2);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
   it.effect("cancels the run id received in the metadata frame", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -216,6 +336,65 @@ describe("LangGraphAdapter", () => {
         yield* Deferred.await(aborted);
         yield* Fiber.interrupt(eventFiber);
         assert.isTrue(requestUrls.some((url) => url.endsWith("/runs/run-cancel/cancel")));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
+  it.effect("queues a steering turn until the active LangGraph run completes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let firstController: ReadableStreamDefaultController<Uint8Array> | undefined;
+        let runRequests = 0;
+        const client = HttpClient.make((request) => {
+          if (request.url.endsWith("/threads")) {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, Response.json({ thread_id: "lg-queue" })),
+            );
+          }
+          runRequests += 1;
+          if (runRequests === 1) {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                new Response(
+                  new ReadableStream<Uint8Array>({
+                    start(controller) {
+                      firstController = controller;
+                    },
+                  }),
+                  { headers: { "content-type": "text/event-stream" } },
+                ),
+              ),
+            );
+          }
+          return Effect.succeed(sseResponse(request, "event: values\ndata: {}\n\n"));
+        });
+        const adapter = yield* makeLangGraphAdapter(
+          decodeSettings({ serverUrl: "https://example.test" }),
+          instanceId,
+        ).pipe(Effect.provideService(HttpClient.HttpClient, client));
+        const secondCompleted = yield* Deferred.make<void>();
+        let completions = 0;
+        const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          event.type === "turn.completed"
+            ? Effect.sync(() => ++completions).pipe(
+                Effect.flatMap((count) =>
+                  count === 2 ? Deferred.succeed(secondCompleted, undefined) : Effect.void,
+                ),
+              )
+            : Effect.void,
+        ).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+        const first = yield* adapter.sendTurn({ threadId, input: "first" });
+        const second = yield* adapter.sendTurn({ threadId, input: "steer next" });
+        assert.notEqual(first.turnId, second.turnId);
+        assert.equal(runRequests, 1);
+
+        firstController?.close();
+        yield* Deferred.await(secondCompleted);
+        yield* Fiber.interrupt(eventFiber);
+        assert.equal(runRequests, 2);
       }).pipe(Effect.provide(NodeServices.layer)),
     ),
   );

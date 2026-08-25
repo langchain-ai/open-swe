@@ -30,13 +30,35 @@ import {
 const LANGGRAPH_PRESENTATION = {
   displayName: "Open SWE",
   badgeLabel: "Experimental",
-  showInteractionModeToggle: false,
+  showInteractionModeToggle: true,
   requiresNewThreadForModelChange: false,
 } as const;
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
+
+function modelCapabilities(efforts: ReadonlyArray<string>, defaultEffort: string) {
+  return createModelCapabilities({
+    optionDescriptors: [
+      {
+        id: "effort",
+        type: "select",
+        label: "Reasoning effort",
+        description: "Controls how much reasoning Open SWE uses for this model.",
+        currentValue: defaultEffort,
+        options: efforts.map((effort) => ({
+          id: effort,
+          label:
+            effort === "xhigh"
+              ? "Extra high"
+              : `${effort[0]?.toUpperCase() ?? ""}${effort.slice(1)}`,
+          ...(effort === defaultEffort ? { isDefault: true } : {}),
+        })),
+      },
+    ],
+  });
+}
 
 const HEALTH_TIMEOUT_MS = 4_000;
 
@@ -45,48 +67,66 @@ const HEALTH_TIMEOUT_MS = 4_000;
  * validates the model id server-side, so a stale entry here degrades to a
  * rejected run rather than silent misbehaviour.
  */
-const LANGGRAPH_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
+export const LANGGRAPH_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: "anthropic:claude-opus-5",
     name: "Opus 5",
     isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
+    capabilities: modelCapabilities(["low", "medium", "high", "xhigh", "max"], "high"),
   },
   {
     slug: "anthropic:claude-sonnet-5",
     name: "Sonnet 5",
     isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
+    capabilities: modelCapabilities(["low", "medium", "high", "xhigh", "max"], "high"),
   },
   {
     slug: "anthropic:claude-fable-5",
     name: "Fable 5",
     isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
+    capabilities: modelCapabilities(["low", "medium", "high", "xhigh", "max"], "high"),
   },
   {
     slug: "openai:gpt-5.6-sol",
     name: "GPT-5.6 Sol",
     isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
+    capabilities: modelCapabilities(["none", "low", "medium", "high", "xhigh"], "xhigh"),
   },
   {
     slug: "openai:gpt-5.6-terra",
     name: "GPT-5.6 Terra",
     isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
+    capabilities: modelCapabilities(["none", "low", "medium", "high", "xhigh"], "xhigh"),
   },
   {
     slug: "openai:gpt-5.6-luna",
     name: "GPT-5.6 Luna",
     isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
+    capabilities: modelCapabilities(["none", "low", "medium", "high", "xhigh", "max"], "xhigh"),
   },
   {
     slug: "google_genai:gemini-3.7-flash",
     name: "Gemini 3.7 Flash",
     isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
+    capabilities: modelCapabilities(["minimal", "low", "medium", "high"], "medium"),
+  },
+  {
+    slug: "fireworks:accounts/fireworks/models/kimi-k3",
+    name: "Kimi K3",
+    isCustom: false,
+    capabilities: modelCapabilities(["low", "high", "max"], "high"),
+  },
+  {
+    slug: "fireworks:accounts/fireworks/models/deepseek-v4-pro",
+    name: "DeepSeek V4 Pro",
+    isCustom: false,
+    capabilities: modelCapabilities(["none", "low", "medium", "high", "xhigh", "max"], "high"),
+  },
+  {
+    slug: "fireworks:accounts/fireworks/models/glm-5p2",
+    name: "GLM 5.2",
+    isCustom: false,
+    capabilities: modelCapabilities(["none", "high", "max"], "high"),
   },
 ];
 

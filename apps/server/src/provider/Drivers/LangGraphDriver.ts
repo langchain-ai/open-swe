@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeLangGraphTextGeneration } from "../../textGeneration/LangGraphTextGeneration.ts";
@@ -74,6 +75,7 @@ export type LangGraphDriverEnv =
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
+  | ServerConfig
   | ServerSettingsService;
 
 const withInstanceIdentity =
@@ -105,6 +107,7 @@ export const LangGraphDriver: ProviderDriver<LangGraphSettings, LangGraphDriverE
       const httpClient = yield* HttpClient.HttpClient;
       const fileSystem = yield* FileSystem.FileSystem;
       const pathService = yield* Path.Path;
+      const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -122,7 +125,9 @@ export const LangGraphDriver: ProviderDriver<LangGraphSettings, LangGraphDriverE
         env: {},
       });
 
-      const adapter = yield* makeLangGraphAdapter(effectiveConfig, instanceId).pipe(
+      const adapter = yield* makeLangGraphAdapter(effectiveConfig, instanceId, {
+        attachmentsDir: serverConfig.attachmentsDir,
+      }).pipe(
         Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, pathService),
