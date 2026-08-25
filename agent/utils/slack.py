@@ -23,6 +23,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.run_usage import RunUsageSummary
 
+from ..thread_ids import slack_thread_id
 from .http import DEFAULT_HTTP_TIMEOUT
 from .user_messages import WARNING_ICON
 
@@ -1538,7 +1539,7 @@ async def resolve_slack_thread_id(
 
     candidate = next(
         iter(matching_ids),
-        str(uuid.uuid5(uuid.NAMESPACE_URL, f"slack:{channel}:{timestamp}:{nonce or ''}")),
+        slack_thread_id(channel, timestamp, nonce),
     )
     await bind_slack_thread_id(langgraph_client, channel, timestamp, candidate)
     return candidate
