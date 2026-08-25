@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
+import { LangChainIcon } from "../Icons";
+import { PROVIDER_ICON_BY_PROVIDER } from "../chat/providerIconUtils";
 import { DRIVER_OPTION_BY_VALUE } from "./providerDriverMeta";
 import {
   deriveProviderSettingsFields,
@@ -10,6 +12,13 @@ import {
 } from "./ProviderSettingsForm";
 
 describe("ProviderSettingsForm helpers", () => {
+  it("uses the LangChain logo for the Open SWE provider", () => {
+    const driver = ProviderDriverKind.make("langgraph");
+
+    expect(DRIVER_OPTION_BY_VALUE[driver]?.icon).toBe(LangChainIcon);
+    expect(PROVIDER_ICON_BY_PROVIDER[driver]).toBe(LangChainIcon);
+  });
+
   it("derives visible provider config fields from the client definition schema", () => {
     const codex = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("codex")];
 

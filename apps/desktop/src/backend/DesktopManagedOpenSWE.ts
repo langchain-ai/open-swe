@@ -71,6 +71,7 @@ export function makeManagedOpenSWECommand(input: ManagedOpenSWECommandInput): Ch
       cwd: input.cwd,
       env: {
         ...(input.inheritedEnv ?? process.env),
+        PYTHONDONTWRITEBYTECODE: "1",
         OPEN_SWE_LOCAL_AUTH_TOKEN: input.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: input.projectsFile,
         OPEN_SWE_LOCAL_ARTIFACTS_DIR: input.artifactsDir,
@@ -131,10 +132,9 @@ const make = Effect.gen(function* () {
       return yield* Effect.fail(stageError("port selection")("no loopback port available"));
     }
 
-    const token = yield* crypto.randomBytes(32).pipe(
-      Effect.map(Encoding.encodeHex),
-      Effect.mapError(stageError("token generation")),
-    );
+    const token = yield* crypto
+      .randomBytes(32)
+      .pipe(Effect.map(Encoding.encodeHex), Effect.mapError(stageError("token generation")));
     const serverUrl = `http://127.0.0.1:${port}`;
     const child = yield* spawner
       .spawn(

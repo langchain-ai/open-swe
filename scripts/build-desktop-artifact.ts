@@ -51,7 +51,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
+const DESKTOP_APP_ID = "com.langchain.openswe";
 const OPEN_SWE_PYTHON_VERSION = "3.12.12";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
@@ -1689,6 +1689,33 @@ const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBundleIsSel
   },
 );
 
+const BUNDLED_PYTHON_ALIASES = [
+  ["bin/2to3", "2to3-3.12"],
+  ["bin/idle3", "idle3.12"],
+  ["bin/pydoc3", "pydoc3.12"],
+  ["bin/python", "python3.12"],
+  ["bin/python3", "python3.12"],
+  ["bin/python3-config", "python3.12-config"],
+  ["lib/pkgconfig/python3-embed.pc", "python-3.12-embed.pc"],
+  ["lib/pkgconfig/python3.pc", "python-3.12.pc"],
+  ["share/man/man1/python3.1", "python3.12.1"],
+] as const;
+
+export const materializeBundledPythonAliases = Effect.fn("materializeBundledPythonAliases")(
+  function* (pythonDir: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+
+    yield* Effect.forEach(BUNDLED_PYTHON_ALIASES, ([relativeAlias, target]) => {
+      const aliasPath = path.join(pythonDir, relativeAlias);
+      const targetPath = path.join(path.dirname(aliasPath), target);
+      return fs
+        .remove(aliasPath, { force: true })
+        .pipe(Effect.andThen(fs.copyFile(targetPath, aliasPath)));
+    });
+  },
+);
+
 export const stageOpenSweRuntime = Effect.fn("stageOpenSweRuntime")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
@@ -1712,11 +1739,9 @@ export const stageOpenSweRuntime = Effect.fn("stageOpenSweRuntime")(function* (i
   const wheelDir = path.join(tempDir, "wheel");
 
   const pythonOutput = yield* runCommandCapture(
-    ChildProcess.make(
-      "uv",
-      ["python", "find", OPEN_SWE_PYTHON_VERSION, "--managed-python"],
-      { cwd: input.repoRoot },
-    ),
+    ChildProcess.make("uv", ["python", "find", OPEN_SWE_PYTHON_VERSION, "--managed-python"], {
+      cwd: input.repoRoot,
+    }),
     { label: `uv python find ${OPEN_SWE_PYTHON_VERSION}`, verbose: input.verbose },
   );
   const sourcePython = pythonOutput.trim();
@@ -1726,12 +1751,10 @@ export const stageOpenSweRuntime = Effect.fn("stageOpenSweRuntime")(function* (i
     });
   }
   const sourcePrefix = path.dirname(path.dirname(sourcePython));
-  const sourceArchitecture = (
-    yield* runCommandCapture(
-      ChildProcess.make(sourcePython, ["-c", "import platform; print(platform.machine())"]),
-      { label: "inspect Open SWE Python architecture", verbose: input.verbose },
-    )
-  ).trim();
+  const sourceArchitecture = (yield* runCommandCapture(
+    ChildProcess.make(sourcePython, ["-c", "import platform; print(platform.machine())"]),
+    { label: "inspect Open SWE Python architecture", verbose: input.verbose },
+  )).trim();
   const expectedArchitecture = input.arch === "arm64" ? "arm64" : "x86_64";
   if (sourceArchitecture !== expectedArchitecture) {
     return yield* new OpenSweRuntimeBuildError({
@@ -1742,6 +1765,7 @@ export const stageOpenSweRuntime = Effect.fn("stageOpenSweRuntime")(function* (i
   yield* fs.remove(runtimeDir, { recursive: true, force: true }).pipe(Effect.ignore);
   yield* fs.makeDirectory(runtimeDir, { recursive: true });
   yield* fs.copy(sourcePrefix, pythonDir);
+  yield* materializeBundledPythonAliases(pythonDir);
   yield* fs.copyFile(
     path.join(input.repoRoot, "langgraph.desktop.json"),
     path.join(runtimeDir, "langgraph.desktop.json"),
@@ -2205,8 +2229,8 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    ? "Open SWE (Nightly)"
+    : (desktopPackageJson.productName ?? "Open SWE");
 }
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -2226,7 +2250,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "Open-SWE-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [...DESKTOP_FILE_EXCLUSIONS],
     directories: {
@@ -2262,8 +2286,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       protocols: [
         {
-          name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          name: "Open SWE",
+          schemes: ["open-swe", "open-swe-dev"],
         },
       ],
       ...(macPasskeySigning
@@ -2301,21 +2325,21 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: "open-swe",
       icon: "icons",
       category: "Development",
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
-      // t3code:// OAuth callbacks to the app.
+      // open-swe:// OAuth callbacks to the app.
       protocols: [
         {
-          name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          name: "Open SWE",
+          schemes: ["open-swe", "open-swe-dev"],
         },
       ],
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: "open-swe",
         },
       },
     };
@@ -3098,7 +3122,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
       : undefined;
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: "open-swe",
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
@@ -3360,7 +3384,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T3 Code."),
+  Command.withDescription("Build a desktop artifact for Open SWE."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

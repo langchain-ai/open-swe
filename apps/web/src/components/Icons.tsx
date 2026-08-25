@@ -3,6 +3,12 @@ import { cn } from "~/lib/utils";
 
 export type Icon = React.FC<SVGProps<SVGSVGElement>>;
 
+export const LangChainIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 973 973" fill="none">
+    <image href="/langchain-logo.png" width="973" height="973" />
+  </svg>
+);
+
 export const GitHubIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 1024 1024" fill="none">
     <path

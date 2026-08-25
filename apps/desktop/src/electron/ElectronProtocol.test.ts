@@ -35,7 +35,7 @@ describe("ElectronProtocol", () => {
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
-            scheme: "t3code-dev",
+            scheme: "open-swe-dev",
             targetOrigin: new URL("http://127.0.0.1:3773/"),
             backendOrigin: new URL("http://127.0.0.1:3774/"),
             clerkFrontendApiHostname: "clerk.t3.codes",
@@ -44,11 +44,11 @@ describe("ElectronProtocol", () => {
 
           const response = yield* Effect.promise(() =>
             handler!(
-              new Request("t3code-dev://app/api/health?verbose=1", {
+              new Request("open-swe-dev://app/api/health?verbose=1", {
                 headers: {
                   accept: "application/json",
-                  origin: "t3code-dev://app",
-                  referer: "t3code-dev://app/",
+                  origin: "open-swe-dev://app",
+                  referer: "open-swe-dev://app/",
                   "sec-fetch-site": "same-origin",
                 },
               }),
@@ -65,18 +65,18 @@ describe("ElectronProtocol", () => {
           );
           assert.include(
             response.headers.get("content-security-policy") ?? "",
-            "img-src 'self' t3code-dev: blob: data: http: https:",
+            "img-src 'self' open-swe-dev: blob: data: http: https:",
           );
           assert.include(
             response.headers.get("content-security-policy") ?? "",
-            "font-src 'self' t3code-dev: data:",
+            "font-src 'self' open-swe-dev: data:",
           );
         }),
       );
 
       assert.deepEqual(
         handleMock.mock.calls.map((call) => call[0]),
-        ["t3code-dev"],
+        ["open-swe-dev"],
       );
       assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
       const forwardedHeaders = new Headers(netFetchMock.mock.calls[0]?.[1]?.headers);
@@ -84,7 +84,7 @@ describe("ElectronProtocol", () => {
       assert.isNull(forwardedHeaders.get("origin"));
       assert.isNull(forwardedHeaders.get("referer"));
       assert.isNull(forwardedHeaders.get("sec-fetch-site"));
-      assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
+      assert.deepEqual(unhandleMock.mock.calls, [["open-swe-dev"]]);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
@@ -99,12 +99,12 @@ describe("ElectronProtocol", () => {
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
-            scheme: "t3code",
+            scheme: "open-swe",
             targetOrigin: new URL("http://127.0.0.1:3773/"),
             backendOrigin: new URL("http://127.0.0.1:3773/"),
             clerkFrontendApiHostname: undefined,
           });
-          return yield* Effect.promise(() => handler!(new Request("t3code://other/")));
+          return yield* Effect.promise(() => handler!(new Request("open-swe://other/")));
         }),
       );
 
@@ -127,12 +127,12 @@ describe("ElectronProtocol", () => {
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
-            scheme: "t3code-dev",
+            scheme: "open-swe-dev",
             targetOrigin: new URL("http://127.0.0.1:5733/"),
             backendOrigin: new URL("http://127.0.0.1:3773/"),
             clerkFrontendApiHostname: undefined,
           });
-          return yield* Effect.promise(() => handler!(new Request("t3code-dev://app/")));
+          return yield* Effect.promise(() => handler!(new Request("open-swe-dev://app/")));
         }),
       );
 
@@ -151,7 +151,7 @@ describe("ElectronProtocol", () => {
       const protocol = yield* ElectronProtocol.ElectronProtocol;
       const error = yield* Effect.scoped(
         protocol.registerDesktopProtocol({
-          scheme: "t3code-dev",
+          scheme: "open-swe-dev",
           targetOrigin: new URL("http://127.0.0.1:3773/"),
           backendOrigin: new URL("http://127.0.0.1:3774/"),
           clerkFrontendApiHostname: undefined,
@@ -159,9 +159,9 @@ describe("ElectronProtocol", () => {
       ).pipe(Effect.flip);
 
       assert.instanceOf(error, ElectronProtocol.ElectronProtocolRegistrationError);
-      assert.equal(error.scheme, "t3code-dev");
+      assert.equal(error.scheme, "open-swe-dev");
       assert.strictEqual(error.cause, cause);
-      assert.equal(error.message, 'Failed to register Electron protocol scheme "t3code-dev".');
+      assert.equal(error.message, 'Failed to register Electron protocol scheme "open-swe-dev".');
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
@@ -176,7 +176,7 @@ describe("ElectronProtocol", () => {
       const exit = yield* Effect.exit(
         Effect.scoped(
           protocol.registerDesktopProtocol({
-            scheme: "t3code",
+            scheme: "open-swe",
             targetOrigin: new URL("http://127.0.0.1:3773/"),
             backendOrigin: new URL("http://127.0.0.1:3773/"),
             clerkFrontendApiHostname: undefined,
@@ -188,16 +188,16 @@ describe("ElectronProtocol", () => {
       if (exit._tag === "Failure") {
         const error = Cause.squash(exit.cause);
         assert.instanceOf(error, ElectronProtocol.ElectronProtocolUnregistrationError);
-        assert.equal(error.scheme, "t3code");
+        assert.equal(error.scheme, "open-swe");
         assert.strictEqual(error.cause, cause);
-        assert.equal(error.message, 'Failed to unregister Electron protocol scheme "t3code".');
+        assert.equal(error.message, 'Failed to unregister Electron protocol scheme "open-swe".');
       }
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
   it("keeps executable sources host-restricted while allowing runtime network resources", () => {
     const policy = ElectronProtocol.makeDesktopContentSecurityPolicy({
-      scheme: "t3code",
+      scheme: "open-swe",
       targetOrigin: new URL("http://127.0.0.1:3773/"),
       backendOrigin: new URL("http://127.0.0.1:3773/"),
       clerkFrontendApiHostname: "clerk.t3.codes",
@@ -219,12 +219,12 @@ describe("ElectronProtocol", () => {
     assert.deepEqual(directives["connect-src"], ["'self'", "http:", "https:", "ws:", "wss:"]);
     assert.deepEqual(directives["img-src"], [
       "'self'",
-      "t3code:",
+      "open-swe:",
       "blob:",
       "data:",
       "http:",
       "https:",
     ]);
-    assert.deepEqual(directives["font-src"], ["'self'", "t3code:", "data:"]);
+    assert.deepEqual(directives["font-src"], ["'self'", "open-swe:", "data:"]);
   });
 });

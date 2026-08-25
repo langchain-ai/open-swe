@@ -11,9 +11,9 @@ import type * as Schema from "effect/Schema";
 import {
   ClaudeAI,
   CursorIcon,
-  GitHubIcon,
   GrokIcon,
   type Icon,
+  LangChainIcon,
   OpenAI,
   OpenCodeIcon,
 } from "../Icons";
@@ -79,7 +79,7 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
   {
     value: ProviderDriverKind.make("langgraph"),
     label: "Open SWE",
-    icon: GitHubIcon,
+    icon: LangChainIcon,
     badgeLabel: "Experimental",
     settingsSchema: LangGraphSettings,
   },

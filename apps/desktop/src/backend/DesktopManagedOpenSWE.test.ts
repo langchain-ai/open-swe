@@ -32,15 +32,13 @@ describe("DesktopManagedOpenSWE", () => {
       "/repo/langgraph.desktop.json",
     ]);
     assert.equal(command.options.cwd, "/repo");
+    assert.equal(command.options.env?.PYTHONDONTWRITEBYTECODE, "1");
     assert.equal(command.options.env?.OPEN_SWE_LOCAL_AUTH_TOKEN, "secret-token");
     assert.equal(
       command.options.env?.OPEN_SWE_LOCAL_PROJECTS_FILE,
       "/state/open-swe/projects.json",
     );
-    assert.equal(
-      command.options.env?.OPEN_SWE_LOCAL_ARTIFACTS_DIR,
-      "/state/open-swe/artifacts",
-    );
+    assert.equal(command.options.env?.OPEN_SWE_LOCAL_ARTIFACTS_DIR, "/state/open-swe/artifacts");
     assert.equal(command.options.extendEnv, false);
   });
 });

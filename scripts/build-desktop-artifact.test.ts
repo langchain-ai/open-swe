@@ -47,6 +47,7 @@ import {
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
   resolvePackageManagerUserAgent,
+  materializeBundledPythonAliases,
   stageLinuxIconSize,
   stageDesktopDmgBackground,
   stageResourceMonitor,
@@ -138,7 +139,7 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
     path.join(resourcesDir, "resource-monitor/t3-resource-monitor.exe"),
     "monitor",
   );
-  const appExecutableName = "t3code.exe";
+  const appExecutableName = "open-swe.exe";
   yield* fs.writeFileString(path.join(packagedAppDir, appExecutableName), "electron");
   yield* fs.writeFileString(path.join(packagedAppDir, "chrome_crashpad_handler.exe"), "crashpad");
 
@@ -158,8 +159,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "Open SWE (Alpha)");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Open SWE (Nightly)");
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
@@ -478,7 +479,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "**/node_modules/.bin/**",
       ]);
       assert.deepStrictEqual(mac.dmg, {
-        title: "T3 Code (Alpha) 1.2.3 Installer",
+        title: "Open SWE (Alpha) 1.2.3 Installer",
         background: "dmg/dmg-background-latest.png",
         window: { width: 540, height: 412 },
         contents: [
@@ -489,9 +490,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         iconTextSize: 12,
       });
       // Linux must register the renderer schemes so the generated .desktop
-      // entry advertises MimeType=x-scheme-handler/t3code; for OAuth deep links.
+      // entry advertises MimeType=x-scheme-handler/open-swe; for OAuth deep links.
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "Open SWE", schemes: ["open-swe", "open-swe-dev"] },
       ]);
       for (const config of [mac, linux, win]) {
         assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
@@ -1004,7 +1005,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: "com.langchain.openswe",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1024,7 +1025,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, "<string>ABC1234567.com.langchain.openswe</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -1119,11 +1120,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
 
       const mac = config.mac as Record<string, unknown>;
-      assert.equal(config.appId, "com.t3tools.t3code");
+      assert.equal(config.appId, "com.langchain.openswe");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.deepStrictEqual(mac.protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "Open SWE", schemes: ["open-swe", "open-swe-dev"] },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
@@ -1411,6 +1412,42 @@ it("keeps the prefix of a UNC path instead of going relative", () => {
   }
   assert.deepStrictEqual(paths[0], "\\\\server\\share\\tmp\\node_modules");
 });
+
+it.effect("materializes uv-managed Python aliases as in-bundle files", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const pythonDir = yield* fs.makeTempDirectoryScoped({ prefix: "open-swe-python-links-" });
+    const expectedLinks = [
+      ["bin/2to3", "2to3-3.12"],
+      ["bin/idle3", "idle3.12"],
+      ["bin/pydoc3", "pydoc3.12"],
+      ["bin/python", "python3.12"],
+      ["bin/python3", "python3.12"],
+      ["bin/python3-config", "python3.12-config"],
+      ["lib/pkgconfig/python3-embed.pc", "python-3.12-embed.pc"],
+      ["lib/pkgconfig/python3.pc", "python-3.12.pc"],
+      ["share/man/man1/python3.1", "python3.12.1"],
+    ] as const;
+
+    yield* fs.makeDirectory(path.join(pythonDir, "bin"), { recursive: true });
+    yield* fs.makeDirectory(path.join(pythonDir, "lib/pkgconfig"), { recursive: true });
+    yield* fs.makeDirectory(path.join(pythonDir, "share/man/man1"), { recursive: true });
+    for (const [relativeAlias, target] of expectedLinks) {
+      yield* fs.writeFileString(
+        path.join(path.dirname(path.join(pythonDir, relativeAlias)), target),
+        target,
+      );
+    }
+    yield* materializeBundledPythonAliases(pythonDir);
+
+    for (const [relativeAlias, target] of expectedLinks) {
+      const aliasPath = path.join(pythonDir, relativeAlias);
+      assert.equal(yield* fs.readFileString(aliasPath), target);
+      assert.equal((yield* fs.stat(aliasPath)).type, "File");
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it.effect("rebases packaged links into the isolated tree", () =>
   Effect.gen(function* () {
