@@ -46,12 +46,21 @@ export interface PlanData {
   user: PlanUser
 }
 
+export interface PlanTextAnchor {
+  exact: string
+  prefix: string
+  suffix: string
+  start: number
+  end: number
+}
+
 export interface PlanComment {
   id: string
   author: string
   author_login: string
   body: string
   created_at: string
+  anchor: PlanTextAnchor | null
 }
 
 export class PlanApiError extends Error {
@@ -107,11 +116,12 @@ export async function getPlanComments(
 
 export function addPlanComment(
   threadId: string,
-  body: string
+  body: string,
+  anchor: PlanTextAnchor
 ): Promise<PlanComment> {
   return req(`/plan/${encodeURIComponent(threadId)}/comments`, {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, anchor }),
   })
 }
 

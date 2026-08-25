@@ -1,13 +1,14 @@
 """REST API for HTML plan artifacts, comments, approval, and change requests."""
 
 import asyncio
+import html
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from ..dispatch import dispatch_agent_run
 from ..utils.slack import post_slack_thread_reply
@@ -46,8 +47,23 @@ plan_router = APIRouter(
 _SESSION_DEP = Depends(require_session)
 
 
+class TextAnchor(BaseModel):
+    exact: str = Field(min_length=1, max_length=1000)
+    prefix: str = Field(max_length=64)
+    suffix: str = Field(max_length=64)
+    start: int = Field(ge=0, le=2_000_000)
+    end: int = Field(gt=0, le=2_000_000)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "TextAnchor":
+        if self.end <= self.start or self.end - self.start != len(self.exact):
+            raise ValueError("anchor range must match the selected text")
+        return self
+
+
 class CommentBody(BaseModel):
-    body: str
+    body: str = Field(min_length=1, max_length=10_000)
+    anchor: TextAnchor | None = None
 
 
 class PlanUpdate(BaseModel):
@@ -172,7 +188,11 @@ async def post_plan_comment(
         raise HTTPException(422, "comment body cannot be empty")
     login = session["sub"]
     return await add_plan_comment(
-        thread_id, author=session.get("name") or login, author_login=login, body=text
+        thread_id,
+        author=session.get("name") or login,
+        author_login=login,
+        body=text,
+        anchor=body.anchor.model_dump() if body.anchor else None,
     )
 
 
@@ -369,7 +389,15 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
         if not body:
             continue
         author = str(comment.get("author") or "reviewer").strip()
-        lines.append(f"{index}. {author}: {body}")
+        anchor = comment.get("anchor")
+        exact = str(anchor.get("exact") or "").strip() if isinstance(anchor, dict) else ""
+        attributes = f' author="{html.escape(author, quote=True)}"'
+        if exact:
+            attributes += f' selected_text="{html.escape(exact, quote=True)}"'
+        lines.append(
+            f"{index}. <untrusted-plan-comment{attributes}>"
+            f"{html.escape(body)}</untrusted-plan-comment>"
+        )
         index += 1
     return "\n".join(lines)
 

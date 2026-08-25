@@ -27,15 +27,41 @@ def test_format_comments_numbers_and_skips_blank() -> None:
             {"author": "carol", "body": "   "},  # blank → skipped
         ]
     )
-    assert "1. alice: add a docstring" in text
-    assert "2. bob: looks good" in text
+    assert (
+        '1. <untrusted-plan-comment author="alice">add a docstring</untrusted-plan-comment>' in text
+    )
+    assert '2. <untrusted-plan-comment author="bob">looks good</untrusted-plan-comment>' in text
     assert "carol" not in text
 
 
-def test_format_comments_empty() -> None:
+def test_format_comments_includes_selected_quote() -> None:
     from agent.dashboard.plan_api import _format_comments
 
+    text = _format_comments(
+        [
+            {
+                "author": "alice",
+                "body": "make this concrete",
+                "anchor": {"exact": "Persist the result"},
+            }
+        ]
+    )
+
+    assert text == (
+        '1. <untrusted-plan-comment author="alice" selected_text="Persist the result">'
+        "make this concrete</untrusted-plan-comment>"
+    )
+
+
+def test_format_comments_empty() -> None:
+    from agent.dashboard.plan_api import CommentBody, _format_comments
+
     assert _format_comments([]) == ""
+    with pytest.raises(ValueError, match="anchor range"):
+        CommentBody(
+            body="comment",
+            anchor={"exact": "text", "prefix": "", "suffix": "", "start": 0, "end": 3},
+        )
 
 
 def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:

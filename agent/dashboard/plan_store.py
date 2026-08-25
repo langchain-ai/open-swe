@@ -232,14 +232,20 @@ async def clear_plan_comments(thread_id: str) -> None:
 
 
 async def add_plan_comment(
-    thread_id: str, *, author: str, author_login: str, body: str
+    thread_id: str,
+    *,
+    author: str,
+    author_login: str,
+    body: str,
+    anchor: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Append a whole-document comment; returns the stored comment."""
+    """Append an anchored comment; returns the stored comment."""
     comment = {
         "id": uuid.uuid4().hex,
         "author": author,
         "author_login": author_login,
         "body": body,
+        "anchor": anchor,
         "created_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(_comments_namespace(thread_id), comment["id"], comment)
