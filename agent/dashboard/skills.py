@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from ..store import delete_value, get_value, now_iso, put_value, search_values
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 SKILLS_NAMESPACE = "user_skills"
 ORGANIZATION_SKILLS_NAMESPACE = "organization_skills"

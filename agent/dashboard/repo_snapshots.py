@@ -20,7 +20,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..store import KeyedRecordStore, now_iso
+from agent.store import KeyedRecordStore, now_iso
+
 from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)

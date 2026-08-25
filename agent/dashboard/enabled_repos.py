@@ -8,7 +8,8 @@ review comments on every PR.
 
 import logging
 
-from ..store import get_value, now_iso, put_value
+from agent.store import get_value, now_iso, put_value
+
 from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)

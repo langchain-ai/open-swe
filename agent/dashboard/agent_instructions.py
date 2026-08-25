@@ -8,7 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..store import KeyedRecordStore, now_iso
+from agent.store import KeyedRecordStore, now_iso
+
 from .review_styles import normalize_repo_full_name
 
 AGENT_INSTRUCTIONS_NAMESPACE: list[str] = ["agent_instructions"]

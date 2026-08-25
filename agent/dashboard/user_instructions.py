@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ..store import delete_value, get_value, now_iso, put_value
+from agent.store import delete_value, get_value, now_iso, put_value
 
 USER_INSTRUCTIONS_NAMESPACE: list[str] = ["user_instructions"]
 

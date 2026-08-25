@@ -9,8 +9,9 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 
+from agent.store import delete_value, get_value, now_iso, put_value
+
 from ..encryption import decrypt_token, encrypt_token
-from ..store import delete_value, get_value, now_iso, put_value
 
 NOTION_MCP_URL = "https://mcp.notion.com/mcp"
 NOTION_STATE_COOKIE_NAME = "osw_notion_oauth_state"

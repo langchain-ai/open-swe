@@ -17,8 +17,9 @@ from typing import Any
 
 from pydantic import BaseModel, model_validator
 
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
+
 from ..encryption import decrypt_token, encrypt_token
-from ..store import delete_value, get_value, now_iso, put_value, search_values
 from .oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,

@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..store import KeyedRecordStore, now_iso
+from agent.store import KeyedRecordStore, now_iso
 
 logger = logging.getLogger(__name__)
 

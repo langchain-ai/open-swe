@@ -9,7 +9,7 @@ agent thread so a disable command is honored even before any fix run exists.
 
 import logging
 
-from ..store import get_value, now_iso, put_value
+from agent.store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
 

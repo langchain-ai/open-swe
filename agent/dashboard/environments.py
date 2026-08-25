@@ -28,7 +28,8 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field, JsonValue, field_validator
 
-from ..store import KeyedRecordStore, now_iso
+from agent.store import KeyedRecordStore, now_iso
+
 from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)

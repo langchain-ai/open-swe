@@ -12,7 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from ..store import get_value, now_iso, put_value
+from agent.store import get_value, now_iso, put_value
+
 from ..utils.gateway import resolve_gateway_enabled
 from .options import (
     FABLE_MODEL_IDS,

@@ -17,7 +17,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from ..store import get_value, now_ms, put_value
+from agent.store import get_value, now_ms, put_value
 
 logger = logging.getLogger(__name__)
 
