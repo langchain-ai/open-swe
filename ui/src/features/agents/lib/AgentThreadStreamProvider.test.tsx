@@ -44,7 +44,10 @@ describe("AgentThreadStreamProvider", () => {
 
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <AgentThreadStreamProvider threadId="existing" onThreadId={firstCallback}>
+        <AgentThreadStreamProvider
+          threadId="existing"
+          onThreadId={firstCallback}
+        >
           <div>thread</div>
         </AgentThreadStreamProvider>
       </QueryClientProvider>
