@@ -96,6 +96,21 @@ def test_corridor_proxy_rule_keeps_api_key_opaque() -> None:
     assert "secret" not in rule["env_vars"].values()
 
 
+def test_corridor_proxy_rule_accepts_legacy_url_token() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "CORRIDOR_COMMIT_SCANNING_ENABLED": "true",
+            "CORRIDOR_MCP_URL": "https://app.corridor.dev/api/mcp?token=legacy",
+        },
+        clear=True,
+    ):
+        rule = _corridor_proxy_rules()[0]
+
+    assert rule["headers"][0]["value"] == "Bearer legacy"
+    assert rule["env_vars"] == {"CORRIDOR_API_KEY": CORRIDOR_API_KEY_PLACEHOLDER}
+
+
 def test_stagehand_proxy_rule_keeps_model_key_opaque() -> None:
     with patch.dict(
         "os.environ",

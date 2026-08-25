@@ -23,7 +23,7 @@ from agent.integrations.corridor_commit_scan import (
     CORRIDOR_API_KEY_PLACEHOLDER,
     corridor_commit_scanning_enabled,
 )
-from agent.integrations.corridor_mcp import corridor_token
+from agent.integrations.corridor_mcp import load_corridor_mcp_config
 from agent.utils.sandbox import SandboxGoneError
 
 logger = logging.getLogger(__name__)
@@ -226,8 +226,8 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
 def _corridor_proxy_rules() -> list[dict[str, Any]]:
     if not corridor_commit_scanning_enabled():
         return []
-    token = corridor_token()
-    if not token:
+    config = load_corridor_mcp_config()
+    if config is None:
         return []
     return [
         {
@@ -237,7 +237,7 @@ def _corridor_proxy_rules() -> list[dict[str, Any]]:
                 {
                     "name": "Authorization",
                     "type": "opaque",
-                    "value": f"Bearer {token}",
+                    "value": f"Bearer {config.token}",
                 }
             ],
             "env_vars": {"CORRIDOR_API_KEY": CORRIDOR_API_KEY_PLACEHOLDER},

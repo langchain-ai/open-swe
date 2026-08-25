@@ -15,6 +15,7 @@ from agent.integrations.corridor_commit_scan import (
     corridor_hook_cleanup_command,
     corridor_hook_script,
     corridor_hook_setup_command,
+    validate_corridor_commit_scanning_sandbox,
 )
 from agent.prompt import construct_system_prompt
 
@@ -35,6 +36,13 @@ def test_commit_scanning_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     assert corridor_commit_scanning_enabled() is False
     monkeypatch.setenv("CORRIDOR_COMMIT_SCANNING_ENABLED", "yes")
     assert corridor_commit_scanning_enabled() is True
+
+
+def test_commit_scanning_requires_langsmith(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORRIDOR_COMMIT_SCANNING_ENABLED", "true")
+    with pytest.raises(ValueError, match="SANDBOX_TYPE=langsmith"):
+        validate_corridor_commit_scanning_sandbox("local")
+    validate_corridor_commit_scanning_sandbox("langsmith")
 
 
 def test_hook_chains_repo_pre_commit_before_scanning() -> None:

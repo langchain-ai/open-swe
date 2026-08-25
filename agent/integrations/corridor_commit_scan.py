@@ -74,6 +74,11 @@ def corridor_hook_setup_command() -> str:
     )
 
 
+def validate_corridor_commit_scanning_sandbox(sandbox_type: str) -> None:
+    if corridor_commit_scanning_enabled() and sandbox_type != "langsmith":
+        raise ValueError(f"{CORRIDOR_COMMIT_SCANNING_ENV} requires SANDBOX_TYPE=langsmith")
+
+
 def corridor_hook_cleanup_command() -> str:
     return (
         'current="$(git config --global --get core.hooksPath || true)"; '
