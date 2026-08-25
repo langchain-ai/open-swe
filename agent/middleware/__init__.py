@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
-    "DynamicContextMiddleware": ".dynamic_context",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
@@ -34,7 +33,6 @@ _MIDDLEWARE_MODULES = {
 }
 
 __all__ = [
-    "DynamicContextMiddleware",
     "ExcludeToolsMiddleware",
     "ModelCallTimeoutMiddleware",
     "ModelFallbackMiddleware",
@@ -66,7 +64,6 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
-    from .dynamic_context import DynamicContextMiddleware
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_call_timeout import ModelCallTimeoutMiddleware

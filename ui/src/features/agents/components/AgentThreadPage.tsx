@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { Navigate } from "@tanstack/react-router"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
@@ -15,6 +16,16 @@ export function AgentThreadPage({
   autoFocusComposer?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
+  const title = threadQuery.data?.title
+
+  useEffect(() => {
+    if (!active || !title) return
+    const documentTitle = `${title} - Open SWE`
+    document.title = documentTitle
+    return () => {
+      if (document.title === documentTitle) document.title = "Open SWE"
+    }
+  }, [active, title])
 
   if (threadQuery.isLoading) {
     return (

@@ -1,6 +1,7 @@
 """Typed construction and serialization for application-owned model inputs."""
 
 import hashlib
+from collections.abc import Mapping
 from html import escape
 from typing import Any, Literal, NotRequired, TypedDict, cast
 from xml.etree import ElementTree
@@ -8,6 +9,9 @@ from xml.etree import ElementTree
 from langchain_core.messages import AnyMessage, BaseMessage
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
+# Written by the deepagents summarization middleware; the prompt it builds is the
+# summary message followed by messages[cutoff_index:].
+SUMMARIZATION_EVENT_KEY = "_summarization_event"
 
 Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval"]
 EntityKind = Literal["person", "channel", "system"]
@@ -187,6 +191,24 @@ def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
         if context_hash is not None:
             hashes.add(context_hash)
     return hashes
+
+
+def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
+    """Context hashes the model can still see, so the rest is reintroduced.
+
+    Summarization replaces everything before ``cutoff_index`` with a summary, so a
+    context block behind the cutoff is gone from the prompt while still sitting in
+    state. Treating it as introduced is what leaves the model unable to resolve a
+    sender it is still being shown messages from.
+    """
+    messages = state.get("messages")
+    if not isinstance(messages, (list, tuple)):
+        return set()
+    event = state.get(SUMMARIZATION_EVENT_KEY)
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    if isinstance(cutoff, int) and cutoff >= 0:
+        messages = messages[cutoff:]
+    return dynamic_context_hashes_from_messages(messages)
 
 
 def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
