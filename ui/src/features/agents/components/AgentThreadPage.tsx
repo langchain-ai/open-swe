@@ -5,6 +5,7 @@ import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useAgentThread } from "@/features/agents/lib/queries"
+import { cloudTabId, useSyncTabTitle } from "@/features/agents/lib/tabs"
 
 export function AgentThreadPage({
   threadId,
@@ -17,6 +18,7 @@ export function AgentThreadPage({
 }) {
   const threadQuery = useAgentThread(threadId)
   const title = threadQuery.data?.title
+  useSyncTabTitle(cloudTabId(threadId), title)
 
   useEffect(() => {
     if (!active || !title) return

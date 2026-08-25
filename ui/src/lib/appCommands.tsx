@@ -101,7 +101,7 @@ export function AppCommandProvider({
         desktopId: "show-command-palette",
         desktopShortcuts: ["mod+k"],
       },
-      createNewThreadCommand(() => void navigate({ to: "/agents" })),
+      createNewThreadCommand(() => void navigate({ to: "/agents/new" })),
       {
         id: "open-settings",
         label: "Open settings",

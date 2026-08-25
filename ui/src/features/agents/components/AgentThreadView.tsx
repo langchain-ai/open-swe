@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
+import { CircleAlert as CircleAlertIcon } from "lucide-react"
 
 import type {
   AgentThread,
@@ -9,7 +9,6 @@ import type {
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -19,6 +18,7 @@ import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
+import { useRegisterRightPanelToggle } from "@/features/agents/lib/rightPanelToggle"
 import { Messages } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
@@ -63,9 +63,6 @@ export function AgentThreadView({
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
   const session = useSession()
   const canPost = !thread.adminThread || session.data?.is_admin === true
@@ -136,6 +133,7 @@ export function AgentThreadView({
     },
     [thread.id]
   )
+  useRegisterRightPanelToggle(panelCollapsed, handlePanelCollapsedChange)
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [revealChangesKey, setRevealChangesKey] = useState(0)
   const handleOpenFile = useCallback(
@@ -208,30 +206,6 @@ export function AgentThreadView({
         )}
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <header
-          data-desktop-drag-region=""
-          className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
-        >
-          <div
-            className={cn(
-              "flex h-full w-full items-center gap-3 px-4",
-              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
-              panelCollapsed && "pr-14"
-            )}
-          >
-            {thread.repoFullName && (
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-                <FolderOpen className="size-3.5 shrink-0" />
-                <span className="truncate" title={thread.repoFullName}>
-                  {thread.repoFullName}
-                </span>
-              </span>
-            )}
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              Cloud
-            </span>
-          </div>
-        </header>
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">

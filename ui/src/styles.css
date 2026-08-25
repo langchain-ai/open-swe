@@ -219,6 +219,15 @@
     background-repeat: repeat;
     background-size: 256px 256px;
   }
+
+  /* The tab strip scrolls sideways; a visible bar would eat most of its height. */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @layer base {

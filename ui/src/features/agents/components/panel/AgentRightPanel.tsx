@@ -223,19 +223,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     )
   )
 
-  if (collapsed) {
-    return (
-      <button
-        type="button"
-        onClick={() => onCollapsedChange(false)}
-        aria-label="Show panel"
-        title="Show panel"
-        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-      >
-        <SidebarSimpleIcon className="size-4" />
-      </button>
-    )
-  }
+  if (collapsed) return null
 
   const layoutControls = (
     <div className="flex shrink-0 items-center">

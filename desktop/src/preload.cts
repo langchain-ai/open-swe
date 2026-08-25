@@ -123,6 +123,20 @@ window.addEventListener("DOMContentLoaded", () => {
       left: 0;
     }
 
+    /* The tab strip is its own drag surface; the overlay would sit on top of
+       the tabs and swallow their clicks. */
+    body:has([data-desktop-top-strip]) #${DRAG_REGION_ID} {
+      display: none;
+    }
+
+    [data-desktop-top-strip] {
+      -webkit-app-region: drag;
+    }
+
+    .desktop-fullscreen [data-desktop-top-strip] {
+      padding-left: 0.5rem;
+    }
+
     [data-sidebar-frame] > div:first-child,
     [data-desktop-drag-region] {
       -webkit-app-region: drag;

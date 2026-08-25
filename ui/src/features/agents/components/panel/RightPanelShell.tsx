@@ -75,12 +75,13 @@ export function RightPanelShell(props: {
     <div
       ref={hostRef}
       className={cn(
-        "relative flex h-full min-h-0 max-w-full min-w-0 flex-col self-stretch bg-background",
+        "relative flex min-h-0 max-w-full min-w-0 flex-col self-stretch bg-background",
         isInline
-          ? props.maximized
-            ? "flex-1 border-l border-border"
-            : "shrink-0 border-l border-border"
-          : "w-full"
+          ? cn(
+              "my-4 mr-4 overflow-hidden rounded-xl border border-border",
+              props.maximized ? "flex-1" : "shrink-0"
+            )
+          : "h-full w-full"
       )}
       style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
       data-right-panel-mode={props.mode}

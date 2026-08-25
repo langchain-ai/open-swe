@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
-import { CircleAlert, FolderOpen, X } from "lucide-react"
+import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type {
@@ -11,12 +11,12 @@ import type {
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { useRegisterRightPanelToggle } from "@/features/agents/lib/rightPanelToggle"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
   selectThreadDiffScope,
@@ -27,6 +27,7 @@ import {
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
 import { useAgentSkills } from "@/features/agents/lib/queries"
+import { localTabId, useSyncTabTitle } from "@/features/agents/lib/tabs"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
@@ -44,7 +45,6 @@ import {
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { cn } from "@/lib/utils"
 import { useSession } from "@/lib/session"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
@@ -94,6 +94,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     sessionSelection.sessionId === sessionId ? sessionSelection.selection : null
   const setSelection = (next: ModelSelection | null) =>
     setSessionSelection({ sessionId, selection: next })
+  useSyncTabTitle(localTabId(sessionId), thread?.title)
   const threadModelId = thread?.modelId
   const threadEffort = thread?.effort
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -110,7 +111,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
-  const sidebarCollapsed = useSidebarCollapsed()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
@@ -136,6 +136,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     },
     [sessionId]
   )
+  useRegisterRightPanelToggle(panelCollapsed, handlePanelCollapsedChange)
   const handleOpenFile = useCallback(
     (filePath: string) => {
       setRevealFilePath(filePath)
@@ -327,7 +328,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         {!threadQuery.isPending && (
           <Link
             className="text-foreground underline underline-offset-4"
-            to="/agents"
+            to="/agents/new"
           >
             Start a new task
           </Link>
@@ -342,28 +343,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <header
-          data-desktop-drag-region=""
-          className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
-        >
-          <div
-            className={cn(
-              "flex h-full w-full items-center gap-3 px-4",
-              sidebarCollapsed && "pl-32",
-              panelCollapsed && "pr-14"
-            )}
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-              <FolderOpen className="size-3.5 shrink-0" />
-              <span className="truncate" title={thread.cwd}>
-                {thread.cwd}
-              </span>
-            </span>
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              This Mac
-            </span>
-          </div>
-        </header>
         {(error || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
