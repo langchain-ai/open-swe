@@ -18,6 +18,7 @@ from ..utils.github_token import get_github_token
 from ..utils.linear import comment_on_linear_issue
 from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
 from ..utils.user_messages import warning
+from .message_content import content_to_text
 
 logger = logging.getLogger(__name__)
 
@@ -72,22 +73,6 @@ class SandboxErrorStreak:
     count: int
 
 
-def _content_to_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return str(content)
-
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, Mapping):
-            text = block.get("text", "")
-            parts.append(text if isinstance(text, str) else str(text))
-        else:
-            parts.append(str(block))
-    return " ".join(parts)
-
-
 def extract_sandbox_id(text: str) -> str | None:
     match = _SANDBOX_ID_RE.search(text)
     return match.group(0) if match else None
@@ -96,7 +81,7 @@ def extract_sandbox_id(text: str) -> str | None:
 def _last_message_has_circuit_breaker_marker(messages: Sequence[BaseMessage]) -> bool:
     if not messages:
         return False
-    content = _content_to_text(getattr(messages[-1], "content", "") or "")
+    content = content_to_text(getattr(messages[-1], "content", "") or "")
     return _CIRCUIT_BREAKER_MARKER in content
 
 
@@ -106,7 +91,7 @@ def _sandbox_error_streak(messages: Sequence[BaseMessage]) -> SandboxErrorStreak
 
     for message in reversed(messages):
         if isinstance(message, ToolMessage):
-            text = _content_to_text(message.content)
+            text = content_to_text(message.content)
             message_sandbox_id = extract_sandbox_id(text)
             if "SandboxClientError" not in text or message_sandbox_id is None:
                 break
@@ -117,7 +102,7 @@ def _sandbox_error_streak(messages: Sequence[BaseMessage]) -> SandboxErrorStreak
             count += 1
             continue
 
-        text = _content_to_text(getattr(message, "content", "") or "")
+        text = content_to_text(getattr(message, "content", "") or "")
         if _CIRCUIT_BREAKER_MARKER in text:
             return None
         if getattr(message, "type", "") in {"human", "system"}:
@@ -287,7 +272,7 @@ class SandboxCircuitBreakerMiddleware(AgentMiddleware[AgentState, Any]):
             return None
 
         last_msg = messages[-1]
-        content = _content_to_text(getattr(last_msg, "content", "") or "")
+        content = content_to_text(getattr(last_msg, "content", "") or "")
         if _CIRCUIT_BREAKER_MARKER not in content:
             return None
 
