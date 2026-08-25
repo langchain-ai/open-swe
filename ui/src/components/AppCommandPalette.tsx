@@ -110,12 +110,13 @@ export function AppCommandPalette({
   const navigate = useNavigate()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [activeHighlight, setActiveHighlight] = useState({ key: "", index: 0 })
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   useEffect(() => {
     if (!open) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setQuery("")
       setDebouncedQuery("")
       return
@@ -158,7 +159,14 @@ export function AppCommandPalette({
   }, [results])
   const resultKey = results.map((result) => result.id).join("|")
 
-  useEffect(() => setActiveIndex(0), [resultKey])
+  const activeIndex =
+    activeHighlight.key === resultKey ? activeHighlight.index : 0
+  const setActiveIndex = (next: number | ((current: number) => number)) => {
+    setActiveHighlight({
+      key: resultKey,
+      index: typeof next === "function" ? next(activeIndex) : next,
+    })
+  }
 
   const runResult = (result: PaletteResult | undefined) => {
     if (!result) return

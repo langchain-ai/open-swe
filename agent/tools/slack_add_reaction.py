@@ -1,9 +1,9 @@
 from typing import Any
 
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
-from ..utils.slack import LANGGRAPH_URL, add_slack_reaction, get_active_slack_thread
+from ..utils.slack import add_slack_reaction, get_active_slack_thread
+from ..utils.thread_ops import langgraph_client
 
 
 async def slack_add_reaction(
@@ -25,7 +25,7 @@ async def slack_add_reaction(
     slack_thread = configurable.get("slack_thread", {})
     thread_id = configurable.get("thread_id")
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        langgraph_client(),
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )

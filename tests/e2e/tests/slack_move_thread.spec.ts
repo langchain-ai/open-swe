@@ -106,5 +106,4 @@ test.describe("Slack thread moves", () => {
       "E2E_SOURCE_RETAG",
     );
   });
-
 });

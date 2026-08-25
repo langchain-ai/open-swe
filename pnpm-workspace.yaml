@@ -13,6 +13,7 @@ overrides:
   '@hono/node-server': 2.1.1
   '@pierre/trees>@pierre/theming': 1.0.1
   brace-expansion@2.1.1: 2.1.4
+  crossws: 0.4.12
   'brace-expansion@>=5.0.0': 5.0.9
   dompurify: 3.4.14
   fast-uri: 3.1.5

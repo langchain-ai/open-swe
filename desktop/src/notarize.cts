@@ -1,7 +1,7 @@
-const { notarize } = require('@electron/notarize');
+const { notarize } = require("@electron/notarize");
 
 exports.default = async function (context) {
-  if (context.electronPlatformName !== 'darwin') return;
+  if (context.electronPlatformName !== "darwin") return;
   if (!process.env.APPLE_API_KEY) return;
 
   const appName = context.packager.appInfo.productFilename;

@@ -164,6 +164,15 @@ export interface ThreadGroupSection {
   defaultCollapsed: boolean
 }
 
+export function reconcilePinnedAttentionThread(
+  pinnedThread: AgentThread | undefined,
+  activeThreadId: string | undefined,
+  activeAttentionThread: AgentThread | undefined
+): AgentThread | undefined {
+  if (pinnedThread?.id === activeThreadId) return pinnedThread
+  return activeAttentionThread
+}
+
 const STATUS_GROUP_ORDER: Array<AgentStatus> = [
   "running",
   "finished",
@@ -187,7 +196,8 @@ function sortedByCreation(threads: Array<AgentThread>): Array<AgentThread> {
 /** Split threads into ordered, labelled sections according to the group mode. */
 export function groupThreadsByMode(
   threads: Array<AgentThread>,
-  mode: SidebarGroupMode
+  mode: SidebarGroupMode,
+  pinnedThread?: AgentThread
 ): Array<ThreadGroupSection> {
   if (threads.length === 0) return []
 
@@ -203,9 +213,22 @@ export function groupThreadsByMode(
   }
 
   if (mode === "focus") {
-    return groupThreadsForView(threads, "focus").map((group) => ({
+    const currentPinnedThread = pinnedThread
+      ? threads.find((thread) => thread.id === pinnedThread.id)
+      : undefined
+    const groupedThreads =
+      pinnedThread && currentPinnedThread
+        ? threads.map((thread) =>
+            thread.id === pinnedThread.id
+              ? { ...thread, viewed: pinnedThread.viewed }
+              : thread
+          )
+        : threads
+    return groupThreadsForView(groupedThreads, "focus").map((group) => ({
       ...group,
-      threads: sortedByCreation(group.threads),
+      threads: sortedByCreation(group.threads).map((thread) =>
+        thread.id === currentPinnedThread?.id ? currentPinnedThread : thread
+      ),
       defaultCollapsed: false,
     }))
   }

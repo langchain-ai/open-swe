@@ -183,12 +183,7 @@ async function openThreadActionsMenu(page: Page) {
   await page
     .getByRole("link", { name: /please add a greet/ })
     .first()
-    .hover();
-  const actionsButton = page
-    .getByRole("button", { name: "Thread actions" })
-    .first();
-  await expect(actionsButton).toBeVisible();
-  await actionsButton.click();
+    .click({ button: "right" });
 }
 
 test.describe("Slack → web handoff (real dashboard UI)", () => {
@@ -531,71 +526,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .toBeGreaterThan(2);
   });
 
-  test("bounds inline changed files and reports omitted files", async ({
-    page,
-  }) => {
-    await loginAs(page, SAME_USER);
-    await page.goto("/mock/slack");
-    await page.locator("#reset").click();
-    const prepare = await page.request.post("/control/prepare-sandbox-repo");
-    expect(prepare.ok()).toBeTruthy();
-    await page
-      .locator("#text")
-      .fill("<@U0BOT> E2E_MANY_FILES create several files and open a PR");
-    await page.locator("#send").click();
-    await expect(
-      page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }).last(),
-    ).toBeVisible();
-    const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
-    const href = await webLink.getAttribute("href");
-    if (!href) throw new Error("Open in Web link is missing its href");
-    const threadId = new URL(href, page.url()).pathname.split("/").pop() ?? "";
-    expect(threadId).not.toBe("");
-
-    const turnDiffResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return (
-        response.request().method() === "GET" &&
-        url.pathname === `/dashboard/api/threads/${threadId}/run-diff` &&
-        url.searchParams.get("max_files") === "10" &&
-        url.searchParams.get("include_content") === "false"
-      );
-    });
-    await webLink.click();
-    const response = await turnDiffResponse;
-    expect(response.ok()).toBeTruthy();
-    const payload = (await response.json()) as {
-      status: "ready" | "missing" | "error";
-      truncated: boolean;
-      summary: { files: number; additions: number; deletions: number };
-      files: Array<{
-        originalContent: string | null;
-        modifiedContent: string | null;
-      }>;
-    };
-    expect(payload.status).toBe("ready");
-    expect(payload).toMatchObject({
-      truncated: true,
-      summary: { files: 15, additions: 15, deletions: 0 },
-    });
-    expect(payload.files).toHaveLength(10);
-    expect(
-      payload.files.every(
-        (file) =>
-          file.originalContent === null && file.modifiedContent === null,
-      ),
-    ).toBeTruthy();
-
-    const card = page.getByTestId("turn-changed-files-card");
-    await expect(card).toContainText("15 files changed");
-    await expect(card).toContainText("+15");
-    await expect(card).toContainText("-0");
-    await expect(card.getByTestId("turn-changed-file")).toHaveCount(10);
-    await expect(card.getByTestId("turn-changed-files-omitted")).toHaveText(
-      "5 more files not shown",
-    );
-  });
-
   test("keeps the transcript mounted after navigation and refocus", async ({
     page,
   }) => {
@@ -757,6 +687,36 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   // that rewrite drops the client-minted message id, the SDK's optimistic copy
   // never reconciles with the server's echo and the same text renders twice —
   // once in place, once at the tail of the transcript.
+  test("keeps sender metadata hidden after refreshing a new web thread", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/agents");
+    const dismissOnboarding = page.getByRole("button", {
+      name: "Maybe later",
+    });
+    await expect(dismissOnboarding).toBeVisible();
+    await dismissOnboarding.click();
+    await expect(dismissOnboarding).toBeHidden();
+
+    const prompt = "list my open langchainplus PRs";
+    await typeIntoComposer(page, prompt);
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+
+    const userMessage = page
+      .getByTestId("user-message")
+      .filter({ hasText: prompt });
+    await expect(userMessage).toContainText(prompt);
+    await expect(userMessage).not.toContainText("sender_context");
+    await waitForStateToContain(page, threadId, "system:sender-context");
+
+    await page.reload();
+    await expect(userMessage).toContainText(prompt);
+    await expect(userMessage).not.toContainText("sender_context");
+  });
+
   test("renders a web follow-up exactly once", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);

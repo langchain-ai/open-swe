@@ -68,6 +68,7 @@ export function ReviewStylesPanel() {
 
   useEffect(() => {
     if (detail.data?.custom_prompt != null) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setDraftPrompt(detail.data.custom_prompt)
     } else if (detail.data) {
       setDraftPrompt("")

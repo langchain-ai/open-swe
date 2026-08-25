@@ -1,12 +1,10 @@
 import asyncio
-import os
 import re
 import uuid
 from typing import Any
 
 from fastapi import HTTPException
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
@@ -19,11 +17,8 @@ from ..utils.slack import (
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
+from ..utils.thread_ops import langgraph_client
 from ..webhooks.common import _is_repo_allowed
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
@@ -139,7 +134,8 @@ async def _run_prompt(
         "Use this repository unless the instructions below clearly identify a different repository.\n\n"
         "## Source Slack Thread\n"
         f"- Channel: {channel_id}\n"
-        f"- Thread TS: {thread_ts}\n\n"
+        f"- Thread TS: {thread_ts}\n"
+        "- Thread version: 0\n\n"
         f"{await _run_links_section(thread_id)}\n\n"
         "## Breakout Instructions\n"
         f"{instructions}"
@@ -155,6 +151,7 @@ def _new_slack_thread_context(
     return {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
+        "thread_version": 0,
         "triggering_user_id": original.get("triggering_user_id", ""),
         "triggering_user_name": original.get("triggering_user_name", ""),
         "triggering_user_email": original.get("triggering_user_email", ""),
@@ -173,7 +170,7 @@ async def slack_start_new_thread(
     configured_slack_thread = configurable.get("slack_thread")
     if not isinstance(configured_slack_thread, dict):
         return {"success": False, "error": "Missing slack_thread config"}
-    client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     thread_id_value = configurable.get("thread_id")
     current_slack_thread = await get_active_slack_thread(
         client,

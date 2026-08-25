@@ -28,6 +28,7 @@ from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
+from ..utils.thread_ops import langgraph_client as get_langgraph_client
 from ..utils.user_messages import warning
 from . import common
 
@@ -196,7 +197,7 @@ async def _slack_user_can_reply_to_ready_plan(
 
     try:
         thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            get_langgraph_client(), channel_id, thread_ts
         )
     except Exception:  # noqa: BLE001
         return False
@@ -214,6 +215,7 @@ async def _slack_user_can_reply_to_ready_plan(
 def _format_slack_thread_section(
     channel_id: str,
     thread_ts: str,
+    thread_version: int,
     context_source: str,
     channel_context: dict[str, Any] | None,
 ) -> str:
@@ -228,6 +230,7 @@ def _format_slack_thread_section(
     if channel_name:
         lines.append(f"- Channel name: #{channel_name}")
     lines.append(f"- Thread TS: {thread_ts}")
+    lines.append(f"- Thread version: {thread_version}")
     lines.append(f"- Context starts at: {context_source}")
     channel_description = common.get_slack_channel_context_description(channel_context)
     if channel_description:
@@ -466,7 +469,7 @@ async def _notify_slack_processing_error(
     if not isinstance(thread_id, str) or not thread_id:
         try:
             thread_id = await common.lookup_slack_thread_id(
-                common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+                get_langgraph_client(), channel_id, thread_ts
             )
         except Exception:  # noqa: BLE001
             thread_id = None
@@ -497,7 +500,7 @@ async def _notify_slack_processing_error(
         )
 
     try:
-        await common.get_client(url=common.LANGGRAPH_URL).threads.update(
+        await get_langgraph_client().threads.update(
             thread_id=thread_id,
             metadata={
                 "latest_run_status": "error",
@@ -554,10 +557,18 @@ async def _process_slack_mention_impl(
         )
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = get_langgraph_client()
     thread_id = event_data.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
+    supplied_thread_version = event_data.get("thread_version")
+    thread_version = (
+        supplied_thread_version
+        if isinstance(supplied_thread_version, int)
+        else await common.increment_slack_thread_version(
+            langgraph_client, channel_id, thread_ts, original_message_ts
+        )
+    )
 
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
@@ -667,7 +678,7 @@ async def _process_slack_mention_impl(
     )
 
     slack_thread_section = _format_slack_thread_section(
-        channel_id, thread_ts, context_source, channel_context
+        channel_id, thread_ts, thread_version, context_source, channel_context
     )
     operational_context = (
         _slack_prompt_preamble(untagged_reply, message_update) + "## Default Repository Hint\n"
@@ -773,6 +784,7 @@ async def _process_slack_mention_impl(
         "channel_id": channel_id,
         "channel_context": channel_context,
         "thread_ts": thread_ts,
+        "thread_version": thread_version,
         "triggering_user_id": user_id,
         "triggering_user_name": user_name,
         "triggering_user_email": user_email,
@@ -805,7 +817,7 @@ async def _process_slack_mention_impl(
         configurable["plan_mode"] = thread_plan_mode
 
     is_first_mention = not await common._thread_exists(thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = get_langgraph_client()
     await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without

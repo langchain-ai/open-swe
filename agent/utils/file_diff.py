@@ -2,8 +2,7 @@
 
 Pure: the caller supplies the *before* content it read from the sandbox. This is
 what an edit-approval gate needs to preview a change that has not been applied
-yet — git can only describe edits that already landed (see
-``utils/turn_checkpoint.py`` for the post-hoc side).
+yet — git can only describe edits that already landed.
 """
 
 from collections.abc import Mapping

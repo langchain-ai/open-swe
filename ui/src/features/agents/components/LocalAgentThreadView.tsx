@@ -86,18 +86,25 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     defaultSelection,
     isLoading: modelsLoading,
   } = useModelOptions()
-  const [selection, setSelection] = useState<ModelSelection | null>(null)
-  useEffect(() => setSelection(null), [sessionId])
+  const [sessionSelection, setSessionSelection] = useState<{
+    sessionId: string
+    selection: ModelSelection | null
+  }>({ sessionId, selection: null })
+  const selection =
+    sessionSelection.sessionId === sessionId ? sessionSelection.selection : null
+  const setSelection = (next: ModelSelection | null) =>
+    setSessionSelection({ sessionId, selection: next })
+  const threadModelId = thread?.modelId
+  const threadEffort = thread?.effort
   const threadSelection = useMemo<ModelSelection | null>(() => {
-    if (!thread?.modelId || !thread.effort) return null
+    if (!threadModelId || !threadEffort) return null
     return models.some(
       (model) =>
-        model.id === thread.modelId &&
-        model.efforts.includes(thread.effort ?? "")
+        model.id === threadModelId && model.efforts.includes(threadEffort)
     )
-      ? { modelId: thread.modelId, effort: thread.effort }
+      ? { modelId: threadModelId, effort: threadEffort }
       : null
-  }, [models, thread?.effort, thread?.modelId])
+  }, [models, threadEffort, threadModelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
   const acknowledgedRef = useRef<string | null>(null)
@@ -202,7 +209,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
         localThreadKeys.all,
         (threads = []) =>
-          threads.map((thread) => (thread.id === sessionId ? updated : thread))
+          threads.map((entry) => (entry.id === sessionId ? updated : entry))
       )
     },
     [queryClient, sessionId]
@@ -232,7 +239,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     async (
       prompt: string,
       images: Array<ImageChunk>,
-      skills: DesktopLocalPromptInput["skills"] = []
+      promptSkills: DesktopLocalPromptInput["skills"] = []
     ) => {
       if (!thread) return false
       setError(null)
@@ -250,7 +257,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             messages: [
               { type: "human", content: promptContent(prompt, images) },
             ],
-            ...(skills.length ? { files: skillFiles(skills) } : {}),
+            ...(promptSkills.length ? { files: skillFiles(promptSkills) } : {}),
           },
           {
             config: {
@@ -305,6 +312,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   ])
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     if (stream.error) setError(errorMessage(stream.error))
   }, [stream.error])
 
@@ -334,7 +342,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
+        <header
+          data-desktop-drag-region=""
+          className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
+        >
           <div
             className={cn(
               "flex h-full w-full items-center gap-3 px-4",

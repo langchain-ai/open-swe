@@ -52,6 +52,7 @@ function ReviewPage() {
 
   useEffect(() => {
     if (settings.data) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setLocal(settings.data)
       setGuidelinesDraft(settings.data.org_guidelines ?? "")
     }

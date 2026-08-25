@@ -273,7 +273,7 @@ GitHub triggering works automatically once your GitHub App is set up (step 3). U
 - Tag `@openswe` in issue comments for follow-up instructions
 - Tag `@openswe` in PR review comments to have it address review feedback
 
-The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev` and are configurable — set `OPEN_SWE_MENTION_TAGS` to a comma-separated list. Handles are matched on a word boundary, so `@openswe` does not fire on `@openswe-preview`. Give each deployment a distinct handle when more than one shares a GitHub org, Slack workspace, or Linear workspace.
+The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev` and are configurable — set `OPEN_SWE_MENTION_TAGS` to a comma-separated list. Handles are matched on a word boundary, so `@openswe` does not fire on `@openswe-staging`. Give each deployment a distinct handle when more than one shares a GitHub org, Slack workspace, or Linear workspace.
 
 Which GitHub users can trigger the agent is controlled by the **user mapping** (GitHub login ⇄ work email ⇄ optional Slack ID), stored in the LangGraph Store rather than in code. Manage it in the dashboard under **Admin → User mappings**:
 
@@ -484,11 +484,11 @@ GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
 # === Mention handles (optional) ===
 # Comma-separated handles this deployment answers to, across GitHub, Linear and Slack.
 # Defaults to "@openswe,@open-swe,@openswe-dev".
-OPEN_SWE_MENTION_TAGS=""               # e.g. "@openswe-preview"
+OPEN_SWE_MENTION_TAGS=""               # e.g. "@openswe-staging"
 # Comma-separated bot logins to treat as internal rather than untrusted external
 # commenters. Set this to the bot logins of any other Open SWE deployments sharing
 # these repos.
-EXTRA_INTERNAL_BOT_LOGINS=""           # e.g. "openswe-preview[bot]"
+EXTRA_INTERNAL_BOT_LOGINS=""           # e.g. "openswe-staging[bot]"
 
 # === Dashboard GitHub OAuth (required for the dashboard) ===
 # Direct GitHub OAuth used by the dashboard login flow (not via LangSmith).
@@ -618,8 +618,7 @@ invalidating already-stored GitHub tokens:
 Make sure ngrok is still running from step 2, then start the backend in a second terminal:
 
 ```bash
-make dev          # uv run langgraph dev
-# or: uv run langgraph dev --no-browser
+make dev          # uv run langgraph dev --no-browser --port 2024
 ```
 
 `langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
@@ -645,10 +644,12 @@ The dashboard is the web app in `ui/`. It's a server-rendered TanStack Start app
 
 ```bash
 pnpm install          # from the repo root: ui/ and desktop/ are one pnpm workspace
-pnpm run dev          # turbo -> vite dev --port 3000 -> http://localhost:3000
+make web             # pnpm run dev -> Vite on http://localhost:3000
 ```
 
-No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `pnpm run dev`. It is read at request time, so the same build can front any backend.
+No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `make web` or `pnpm run dev`. It is read at request time, so the same build can front any backend.
+
+To enable Datadog browser RUM, set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building the dashboard. Optional build-time settings are `VITE_DATADOG_SITE` (default `datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` (default `100`), and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay is enabled by default for sampled RUM sessions with all content masked; telemetry also strips URL query strings and fragments. Values prefixed with `VITE_` are public in the browser bundle; use a Datadog client token, never an API or application key.
 
 Because the browser only ever talks to `http://localhost:3000`, no **CORS** preflight is involved. `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` is still required, though: the same allowlist is the backend's CSRF gate for every non-GET request, and it compares the browser's `Origin` — the dashboard's — against the origins it knows. Without it, the dashboard reads fine and every save returns `403 CSRF check failed`.
 
@@ -656,19 +657,21 @@ The `osw_session` cookie has to be set on the dashboard origin too: set `DASHBOA
 
 For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
-Other root scripts run the same task across the workspace through Turborepo: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`. Scope one to a package with `pnpm --filter open-swe-dashboard run <script>`.
+`pnpm run build`, `pnpm run typecheck` and `pnpm run test` run the same task across the workspace through Turborepo; scope one to a package with `pnpm --filter open-swe-dashboard run <script>`. `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) are not Turborepo tasks — they run once from the root over every JS and TS file in the repo, `ui/`, `desktop/` and `tests/e2e/` alike, so there is no per-package variant to scope to.
 
 ### Run the desktop app (optional)
 
 > **Experimental:** The desktop wrapper is an early-access convenience surface. The web UI is
 > the recommended way to use Open SWE.
 
-The Electron app in `desktop/` includes the compiled dashboard UI. It only needs the Open SWE
-backend to be running:
+The Electron app in `desktop/` includes the compiled dashboard UI. Run it alongside the Open SWE
+backend (and, optionally, the web UI) in separate terminals:
 
 ```bash
 pnpm install                  # from the repo root
-pnpm run dev:desktop
+make dev                      # terminal 1
+pnpm run dev:desktop          # terminal 2
+make web                      # terminal 3, optional web UI
 ```
 
 Development connects to `http://localhost:2024`. To use a hosted backend instead, run
@@ -788,7 +791,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 ### Dashboard UI can't reach the backend
 
 - Confirm the backend is running via `make dev` on `:2024` (not `make run` on `:8000`).
-- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `pnpm run dev`.
+- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `make web` or `pnpm run dev`.
 
 ### Sandbox creation failures
 

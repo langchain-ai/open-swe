@@ -1,7 +1,7 @@
-const http = require("node:http")
-const { createHash, randomBytes } = require("node:crypto")
+const http = require("node:http");
+const { createHash, randomBytes } = require("node:crypto");
 
-const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
 function page(heading, detail) {
   return `<!doctype html>
@@ -27,11 +27,17 @@ function page(heading, detail) {
 <p>${detail}</p>
 </body>
 </html>
-`
+`;
 }
 
-const SIGNED_IN_PAGE = page("You're signed in", "You can close this tab and return to Open SWE.")
-const FAILED_PAGE = page("Sign-in failed", "Open SWE did not receive a sign-in code. Try again from the app.")
+const SIGNED_IN_PAGE = page(
+  "You're signed in",
+  "You can close this tab and return to Open SWE.",
+);
+const FAILED_PAGE = page(
+  "Sign-in failed",
+  "Open SWE did not receive a sign-in code. Try again from the app.",
+);
 
 /**
  * Bind a loopback listener for one GitHub sign-in, so the login itself can run
@@ -42,45 +48,45 @@ const FAILED_PAGE = page("Sign-in failed", "Open SWE did not receive a sign-in c
  * superseded by `cancel()`.
  */
 async function beginLogin() {
-  const verifier = randomBytes(32).toString("base64url")
-  const challenge = createHash("sha256").update(verifier).digest("base64url")
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
 
-  let resolveCode: (value: string | null) => void = () => {}
+  let resolveCode: (value: string | null) => void = () => {};
   const code = new Promise<string | null>((resolve) => {
-    resolveCode = resolve
-  })
+    resolveCode = resolve;
+  });
 
   const server = http.createServer((request, response) => {
-    const url = new URL(request.url, "http://127.0.0.1")
+    const url = new URL(request.url, "http://127.0.0.1");
     if (url.pathname !== "/callback") {
-      response.writeHead(404).end()
-      return
+      response.writeHead(404).end();
+      return;
     }
-    const value = url.searchParams.get("code")
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
-    response.end(value ? SIGNED_IN_PAGE : FAILED_PAGE)
-    finish(value || null)
-  })
+    const value = url.searchParams.get("code");
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(value ? SIGNED_IN_PAGE : FAILED_PAGE);
+    finish(value || null);
+  });
 
-  let timer = null
+  let timer = null;
   function finish(value) {
-    if (timer) clearTimeout(timer)
-    timer = null
-    server.closeAllConnections()
-    server.close()
-    resolveCode(value)
+    if (timer) clearTimeout(timer);
+    timer = null;
+    server.closeAllConnections();
+    server.close();
+    resolveCode(value);
   }
 
   await new Promise<void>((resolve, reject) => {
-    server.once("error", reject)
+    server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
-      server.removeListener("error", reject)
-      resolve()
-    })
-  })
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
 
-  timer = setTimeout(() => finish(null), LOGIN_TIMEOUT_MS)
-  timer.unref()
+  timer = setTimeout(() => finish(null), LOGIN_TIMEOUT_MS);
+  timer.unref();
 
   return {
     challenge,
@@ -88,7 +94,7 @@ async function beginLogin() {
     port: server.address().port,
     code,
     cancel: () => finish(null),
-  }
+  };
 }
 
-module.exports = { beginLogin }
+module.exports = { beginLogin };

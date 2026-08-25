@@ -9,7 +9,6 @@ from agent.middleware.check_message_queue import (
     _build_blocks_from_payload,
     check_message_queue_before_model,
 )
-from agent.prompt import construct_system_prompt
 
 
 class _QueuedItem:
@@ -60,9 +59,6 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         }
     )
 
-    slack_prompt = construct_system_prompt(
-        working_dir="/workspace", source="slack", slack_context=True
-    )
     with (
         patch(
             "agent.middleware.check_message_queue.get_config",
@@ -71,10 +67,7 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
         result = await check_message_queue_before_model.abefore_model(
-            cast(
-                LinearNotifyState,
-                {"messages": [], "rendered_system_prompt": slack_prompt},
-            ),
+            cast(LinearNotifyState, {"messages": []}),
             MagicMock(),
         )
 
@@ -93,8 +86,9 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert user_entity.attrib["id"] == "github:octocat"
     assert user_message.findtext("content") == "continue in web"
     assert result["plan_approval_blocked"] is True
-    assert "dashboard/Web UI" in result["rendered_system_prompt"]
-    assert "Make `slack_thread_reply` your first tool call" not in result["rendered_system_prompt"]
+    # The handoff is carried by the injected message alone. Rewriting the system
+    # prompt would say the same thing while invalidating the whole cached prefix.
+    assert "rendered_system_prompt" not in result
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
 
 

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
+import { useIsHydrated } from "@/lib/hydration"
 
 import { PlanReview } from "@/features/agents/components/PlanReview"
 import { buttonVariants } from "@/components/ui/button"
@@ -64,8 +64,7 @@ export function PlanView({
   standalone?: boolean
   onApprove?: (runId: string) => void
 }) {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  const mounted = useIsHydrated()
 
   const query = useQuery({
     queryKey: ["plan", threadId],

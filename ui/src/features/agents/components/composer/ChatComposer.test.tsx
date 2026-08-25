@@ -27,10 +27,9 @@ vi.mock("@langchain/react", () => ({
   useStreamContext: () => stream,
 }))
 
-const cancelThread = vi.fn(async (threadId: string) => ({
-  id: threadId,
-  status: "interrupted",
-}))
+const cancelThread = vi.fn((threadId: string) =>
+  Promise.resolve({ id: threadId, status: "interrupted" })
+)
 
 vi.mock("@/features/agents/lib/api", () => ({
   agentsApi: { cancelThread: (threadId: string) => cancelThread(threadId) },

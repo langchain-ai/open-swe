@@ -293,8 +293,6 @@ export const Messages = memo(function MessagesComponent({
                   isStreaming={messageIsStreaming}
                   isMarkdownLive={messageIsMarkdownLive}
                   projectPath={projectPath}
-                  threadId={threadId}
-                  isLatestTurn={index === lastAgentIndex}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
                   onApprove={onApprove}
                   onReject={onReject}

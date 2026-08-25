@@ -62,13 +62,14 @@ describe("ComposerPromptEditor", () => {
     const { rerender } = render(<Harness initialValue="/autopilot fix this" />)
     expect(screen.queryByText("/autopilot")).toBeNull()
 
-    await act(async () => {
+    await act(() => {
       rerender(
         <Harness
           initialValue="/autopilot fix this"
           skillNames={new Set(["autopilot"])}
         />
       )
+      return Promise.resolve()
     })
 
     expect(screen.getByText("/autopilot")).toBeTruthy()
@@ -109,8 +110,9 @@ describe("ComposerPromptEditor", () => {
     }
 
     const { rerender } = render(<Controlled value="" />)
-    await act(async () => {
+    await act(() => {
       rerender(<Controlled value="look at [a.ts](src/a.ts) " />)
+      return Promise.resolve()
     })
 
     expect(screen.getByText("a.ts")).toBeTruthy()

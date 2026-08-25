@@ -3,7 +3,6 @@ import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
-import viteTsConfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
 import type { Plugin } from "vite"
@@ -158,6 +157,7 @@ const SHELL_PAGE = {
 
 const config = defineConfig({
   base: "/",
+  resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [
       "streamdown",
@@ -182,20 +182,12 @@ const config = defineConfig({
       // same prefixes through devRouteRules, which has a localhost default the
       // handler deliberately refuses to have. Only the two prefixes a deployed
       // dashboard fronts, since proxying `/static` would shadow nitro's assets.
-      handlers: [
-        ...(IS_PRODUCTION
-          ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
-              route: `${prefix}/**`,
-              handler: "./server/backend-proxy.ts",
-            }))
-          : []),
-        // Deliberately outside the proxied prefixes: this one is answered by this
-        // server, not forwarded to the backend.
-        {
-          route: "/operations/restart",
-          handler: "./server/operations-restart.ts",
-        },
-      ],
+      handlers: IS_PRODUCTION
+        ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
+            route: `${prefix}/**`,
+            handler: "./server/backend-proxy.ts",
+          }))
+        : [],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
       // splitting that cycle puts the CommonJS interop helper in the SDK's chunk
@@ -214,12 +206,12 @@ const config = defineConfig({
       // gives the cycle a single initialisation order.
       inlineDynamicImports: true,
     }),
-    viteTsConfigPaths({
-      projects: ["./tsconfig.json"],
-    }),
     tailwindcss(),
     tanstackStart({ pages: [SHELL_PAGE] }),
-    viteReact(),
+    // React Compiler via oxc-transform-react, the Rust port. Upstream still
+    // marks it experimental; the fallback is `@rolldown/plugin-babel` with
+    // plugin-react's `reactCompilerPreset()`, which runs the Babel compiler.
+    viteReact({ compiler: true }),
   ],
 })
 

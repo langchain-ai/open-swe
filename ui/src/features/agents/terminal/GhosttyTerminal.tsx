@@ -21,7 +21,9 @@ export interface GhosttyTerminalProps {
 export function GhosttyTerminal(props: GhosttyTerminalProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const latest = useRef(props)
-  latest.current = props
+  useLayoutEffect(() => {
+    latest.current = props
+  }, [props])
 
   useLayoutEffect(() => {
     const mount = mountRef.current

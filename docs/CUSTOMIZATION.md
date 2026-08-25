@@ -296,22 +296,19 @@ else:
 return create_deep_agent(tools=tools, ...)
 ```
 
-### Browser automation (Stagehand + Browserbase)
+### Browser automation (Stagehand)
 
-A `browser` subagent drives a real Chromium via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. The main agent delegates to it for tasks that need live interaction or JS-rendered pages (logging in, clicking flows, reproducing UI bugs, scraping structured data); static reads should still use `fetch_url`.
+A `browser` subagent drives Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
 
-The tools are added in `agent/server.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
+The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `STAGEHAND_ENV` | `LOCAL` | `LOCAL` runs a local Chromium in-process; `BROWSERBASE` runs the browser on Browserbase cloud. |
-| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | LLM key Stagehand uses for `act`/`observe`/`extract`. Required for `LOCAL`; optional for `BROWSERBASE` (the hosted Stagehand API ships with model support). |
-| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Model Stagehand uses. |
-| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | — | `BROWSERBASE_API_KEY` is required when `STAGEHAND_ENV=BROWSERBASE`; `BROWSERBASE_PROJECT_ID` is forwarded when set. |
-| `STAGEHAND_LOCAL_CHROME_PATH` | `/usr/bin/chromium` in Docker | Path to the Chrome/Chromium binary for `LOCAL` mode. |
-| `STAGEHAND_HEADLESS` | `true` | Run the local browser headless. |
+| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | Model key used by Stagehand. |
+| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
+| `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
 
-For `LOCAL` mode the sandbox image in `Dockerfile.sandbox` installs `chromium`; for `BROWSERBASE` mode no browser binary is needed in the image.
+The sandbox snapshot must be built from `Dockerfile.sandbox`, which installs Chromium, Stagehand, and the browser runtime.
 
 ---
 

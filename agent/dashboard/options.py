@@ -280,6 +280,19 @@ def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, 
     return None
 
 
+def normalize_model_choice(
+    model_id: str | None, effort: str | None
+) -> tuple[str | None, str | None]:
+    if not isinstance(model_id, str):
+        return None, None
+    if model_id not in SUPPORTED_MODEL_IDS:
+        canonical = canonical_model_pair(model_id, effort)
+        return canonical if canonical is not None else (None, None)
+    if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
+        return None, None
+    return model_id, effort
+
+
 def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
     """Newest supported ``(model_id, effort)`` for the same provider/family.
 

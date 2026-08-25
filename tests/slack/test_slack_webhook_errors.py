@@ -39,7 +39,7 @@ async def test_slack_processing_error_posts_dashboard_link(
         slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text
     )
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", upsert)
-    monkeypatch.setattr(slack_webhook.common, "get_client", lambda *, url: client)
+    monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
         slack_webhook.common, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
     )
@@ -449,7 +449,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     fetch_messages = AsyncMock(return_value=[{"ts": "1.0", "user": "U1", "text": "old text"}])
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     store_mapping = AsyncMock()
-    monkeypatch.setattr(slack_webhook.common, "get_client", lambda *, url: client)
+    monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(slack_webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "fetch_slack_thread_messages", fetch_messages)
@@ -486,6 +486,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
             "bot_user_id": "BOT",
             "thread_id": "t1",
             "message_update": True,
+            "thread_version": 1,
         },
         {"owner": "langchain-ai", "name": "open-swe"},
     )

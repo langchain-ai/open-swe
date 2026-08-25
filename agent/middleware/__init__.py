@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
-    "DynamicContextMiddleware": ".dynamic_context",
     "DynamicToolMiddleware": ".dynamic_tools",
+    "IntegrationGroup": ".dynamic_tools",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
@@ -22,6 +22,7 @@ _MIDDLEWARE_MODULES = {
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
+    "StableToolResultOrderMiddleware": ".stable_tool_order",
     "settle_review_check_on_exit": ".settle_review_check",
     "SubdirAgentsReadMiddleware": ".subdir_agents",
     "task_on_failure": ".task_retry",
@@ -32,9 +33,9 @@ _MIDDLEWARE_MODULES = {
 }
 
 __all__ = [
-    "DynamicContextMiddleware",
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
+    "IntegrationGroup",
     "ModelCallTimeoutMiddleware",
     "ModelFallbackMiddleware",
     "BasePrepareRunMiddleware",
@@ -46,6 +47,7 @@ __all__ = [
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
+    "StableToolResultOrderMiddleware",
     "SubdirAgentsReadMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
@@ -62,8 +64,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
-    from .dynamic_context import DynamicContextMiddleware
-    from .dynamic_tools import DynamicToolMiddleware
+    from .dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_call_timeout import ModelCallTimeoutMiddleware
@@ -80,6 +81,7 @@ if TYPE_CHECKING:
     from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from .settle_review_check import settle_review_check_on_exit
+    from .stable_tool_order import StableToolResultOrderMiddleware
     from .subdir_agents import SubdirAgentsReadMiddleware
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware

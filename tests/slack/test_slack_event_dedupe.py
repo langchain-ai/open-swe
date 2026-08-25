@@ -89,9 +89,13 @@ async def _post(
 
 
 @pytest.fixture(autouse=True)
-def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
+def _patch_slack_webhook(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> _FakeClient:
     slack_events.reset_slack_event_claims()
     client = _FakeClient()
+    increment_version = AsyncMock(return_value=1)
+    request.node.thread_version_increment = increment_version
 
     async def channel_context(_channel_id: str) -> dict[str, Any]:
         return {}
@@ -107,11 +111,13 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
+
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
+    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", increment_version)
     return client
 
 
-async def test_redelivered_event_starts_only_one_run() -> None:
+async def test_redelivered_event_starts_only_one_run(request: pytest.FixtureRequest) -> None:
     background_tasks = _FakeBackgroundTasks()
 
     first = await _post(_mention_payload(), background_tasks)
@@ -120,6 +126,7 @@ async def test_redelivered_event_starts_only_one_run() -> None:
     assert first["status"] == "accepted"
     assert second["status"] == "ignored"
     assert [task[0] for task in background_tasks.tasks] == [slack_service.process_slack_mention]
+    request.node.thread_version_increment.assert_awaited_once()
 
 
 async def test_redelivered_event_without_retry_header_is_deduped() -> None:

@@ -20,6 +20,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -183,6 +184,7 @@ export function AgentThreadView({
   const [hydrateRejected, setHydrateRejected] = useState(false)
   useEffect(() => {
     let active = true
+    // oxlint-disable-next-line react/set-state-in-effect
     setHydrateRejected(false)
     stream.hydrationPromise.catch(() => {
       if (active) setHydrateRejected(true)
@@ -195,6 +197,10 @@ export function AgentThreadView({
 
   return (
     <div className="flex min-w-0 flex-1">
+      <OptimisticThreadHydrationRecovery
+        threadId={thread.id}
+        enabled={thread.messages.length > 0}
+      />
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
@@ -202,7 +208,10 @@ export function AgentThreadView({
         )}
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
+        <header
+          data-desktop-drag-region=""
+          className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
+        >
           <div
             className={cn(
               "flex h-full w-full items-center gap-3 px-4",

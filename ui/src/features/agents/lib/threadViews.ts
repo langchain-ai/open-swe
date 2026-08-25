@@ -2,7 +2,12 @@ import type { AgentSource, AgentStatus, AgentThread } from "./types"
 
 export type ThreadsLayout = "board" | "list"
 export type ThreadGrouping =
-  "focus" | "status" | "repo" | "source" | "pr" | "none"
+  | "focus"
+  | "status"
+  | "repo"
+  | "source"
+  | "pr"
+  | "none"
 
 export interface ThreadViewGroup {
   key: string

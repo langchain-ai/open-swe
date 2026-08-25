@@ -7,6 +7,7 @@ import {
   filterThreads,
   groupThreadsByMode,
   hasActiveFilters,
+  reconcilePinnedAttentionThread,
   toggleArrayValue,
 } from "./sidebarFilter"
 import type { SidebarFilters } from "./sidebarFilter"
@@ -208,6 +209,44 @@ describe("groupThreadsByMode", () => {
       ready: ["finished", "idle"],
       done: ["resolved"],
     })
+  })
+
+  it("keeps the active finished thread in attention after it is viewed", () => {
+    const pinnedThread = makeThread({
+      id: "active",
+      status: "finished",
+      viewed: false,
+    })
+    const sections = groupThreadsByMode(
+      [{ ...pinnedThread, title: "Fresh title", viewed: true }],
+      "focus",
+      pinnedThread
+    )
+
+    expect(sections).toHaveLength(1)
+    expect(sections[0]?.key).toBe("attention")
+    expect(sections[0]?.threads[0]).toMatchObject({
+      id: "active",
+      title: "Fresh title",
+      viewed: true,
+    })
+  })
+
+  it("captures an asynchronously loaded active attention thread", () => {
+    const activeThread = makeThread({ id: "active", viewed: false })
+
+    expect(
+      reconcilePinnedAttentionThread(undefined, "active", undefined)
+    ).toBeUndefined()
+    expect(
+      reconcilePinnedAttentionThread(undefined, "active", activeThread)
+    ).toBe(activeThread)
+    expect(
+      reconcilePinnedAttentionThread(activeThread, "active", undefined)
+    ).toBe(activeThread)
+    expect(
+      reconcilePinnedAttentionThread(activeThread, "other", undefined)
+    ).toBeUndefined()
   })
 
   it("buckets by date and drops empty buckets", () => {

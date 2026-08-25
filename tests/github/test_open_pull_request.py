@@ -10,11 +10,26 @@ import agent.tools.open_pull_request  # noqa: F401
 opr = sys.modules["agent.tools.open_pull_request"]
 
 
+class _FakeRequest:
+    def __init__(self, method: str, url: str) -> None:
+        self.method = method
+        self.url = url
+
+
 class _FakeResponse:
-    def __init__(self, status_code: int, payload: Any = None, text: str = "") -> None:
+    def __init__(
+        self,
+        status_code: int,
+        payload: Any = None,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+        request: _FakeRequest | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         self.text = text
+        self.headers = headers or {}
+        self.request = request
 
     def json(self) -> Any:
         return self._payload
@@ -87,13 +102,13 @@ def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -
     monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable})
 
 
-def _open() -> dict[str, Any]:
+def _open(base: str = "main") -> dict[str, Any]:
     return asyncio.run(
         opr._open_pull_request(
             owner="langchain-ai",
             repo="open-swe",
             head="open-swe/feature",
-            base="main",
+            base=base,
             title="feat: x",
             body="body",
             draft=True,
@@ -284,10 +299,9 @@ def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _open()
 
     assert result["success"] is False
-    assert result["code"] == "github_pr_create_failed"
-    assert result["recoverable_by_agent"] is False
-    assert result["pr_created"] is False
+    assert set(result) == {"success", "error"}
     assert "403" in result["error"]
+    assert "PR created: no" in result["error"]
 
 
 def test_404_create_returns_actionable_access_diagnostic(
@@ -301,16 +315,9 @@ def test_404_create_returns_actionable_access_diagnostic(
     result = _open()
 
     assert result["success"] is False
-    assert result["code"] == "github_app_access_missing_or_repo_not_found"
-    assert result["recoverable_by_agent"] is False
-    assert result["owner"] == "langchain-ai"
-    assert result["repo"] == "open-swe"
-    assert result["head"] == "open-swe/feature"
-    assert result["base"] == "main"
-    assert result["branch_pushed"] is True
-    assert result["pr_created"] is False
-    assert "install or grant" in result["suggested_action"]
+    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (yes)" in result["error"]
     assert "PR created: no" in result["error"]
+    assert "not installed on, granted access" in result["error"]
     assert (
         "open_pull_request_failed code=github_app_access_missing_or_repo_not_found" in caplog.text
     )
@@ -336,10 +343,44 @@ def test_preflight_head_branch_404_reports_branch_not_pushed(
     result = _open()
 
     assert result["success"] is False
-    assert result["code"] == "github_pr_branch_not_visible"
-    assert result["branch_pushed"] is False
-    assert result["head_branch_visible"] is False
-    assert result["failed_step"] == "preflight_head_branch"
+    assert "head branch `open-swe/feature`" in result["error"]
+    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (no)" in result["error"]
+    assert client.post_calls == []
+
+
+def test_preflight_base_branch_redirect_surfaces_raw_github_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    redirect = _FakeResponse(
+        301,
+        {"message": "Moved Permanently"},
+        text='{"message":"Moved Permanently"}',
+        headers={"location": "https://api.github.com/repos/langchain-ai/open-swe/branches/main"},
+        request=_FakeRequest(
+            "GET", "https://api.github.com/repos/langchain-ai/open-swe/branches/master"
+        ),
+    )
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={
+            "/repos/langchain-ai/open-swe/branches/master": redirect,
+            "/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True}),
+        },
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open(base="master")
+
+    assert result["success"] is False
+    error = result["error"]
+    assert (
+        "GitHub responded to GET "
+        "https://api.github.com/repos/langchain-ai/open-swe/branches/master with 301" in error
+    )
+    assert "location: https://api.github.com/repos/langchain-ai/open-swe/branches/main" in error
+    assert 'response body: {"message":"Moved Permanently"}' in error
     assert client.post_calls == []
 
 

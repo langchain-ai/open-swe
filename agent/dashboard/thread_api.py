@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..dispatch import dispatch_agent_run
 from ..input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -53,8 +54,8 @@ from .options import (
     canonical_model_pair,
     default_vision_model_pair,
     gate_fable_model,
-    model_supports_effort,
     model_supports_images,
+    normalize_model_choice,
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
@@ -166,19 +167,6 @@ class ThreadResolveBody(BaseModel):
     resolved: bool = True
 
 
-def _normalize_model_choice(
-    model_id: str | None, effort: str | None
-) -> tuple[str | None, str | None]:
-    if not isinstance(model_id, str):
-        return None, None
-    if model_id not in SUPPORTED_MODEL_IDS:
-        canonical = canonical_model_pair(model_id, effort)
-        return canonical if canonical is not None else (None, None)
-    if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
-        return None, None
-    return model_id, effort
-
-
 async def _resolve_agent_model_choice(
     profile: dict[str, Any],
     model_id: str | None,
@@ -188,7 +176,7 @@ async def _resolve_agent_model_choice(
     profile_model, profile_effort = normalize_profile_overrides(profile)
     if profile_model and profile_effort:
         resolved_model, resolved_effort = profile_model, profile_effort
-    chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
+    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     if chosen_model and chosen_effort:
         resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
@@ -1347,7 +1335,7 @@ async def _create_dashboard_thread_record(
         has_images=bool(images),
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
-    chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
+    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
     if images and not model_supports_images(str(metadata_model)):
@@ -1593,7 +1581,7 @@ async def _enrich_run_start_command(
     if not isinstance(client_configurable, dict):
         client_configurable = {}
 
-    chosen_model, chosen_effort = _normalize_model_choice(
+    chosen_model, chosen_effort = normalize_model_choice(
         client_configurable.get("agent_model_id"),
         client_configurable.get("agent_effort"),
     )
@@ -1602,6 +1590,8 @@ async def _enrich_run_start_command(
     command_images = _dashboard_images_from_content(content)
     prepare_run_id = str(uuid.uuid4())
     overrides: dict[str, Any] = {"prepare_run_id": prepare_run_id}
+    run_model: str | None = None
+    run_effort: str | None = None
 
     if creating:
         # First ``run.start`` for a client-minted thread id: stamp the full
@@ -1628,12 +1618,13 @@ async def _enrich_run_start_command(
             ),
         )
         metadata = thread_metadata(thread)
-        if command_images:
-            resolved_model = metadata.get("resolved_model")
-            resolved_effort = metadata.get("resolved_effort")
-            if isinstance(resolved_model, str) and isinstance(resolved_effort, str):
-                overrides["agent_model_id"] = resolved_model
-                overrides["agent_effort"] = resolved_effort
+        run_model = _metadata_model_id(metadata)
+        resolved_effort = metadata.get("resolved_effort")
+        if isinstance(resolved_effort, str):
+            run_effort = resolved_effort
+        if command_images and run_model and run_effort:
+            overrides["agent_model_id"] = run_model
+            overrides["agent_effort"] = run_effort
         elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
@@ -1649,11 +1640,13 @@ async def _enrich_run_start_command(
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
-        if content is None:
-            content = ""
-        sender_id = f"github:{login}"
-        injected = injected_dynamic_context_hashes_from_metadata(metadata)
-        persisted_message_ids: set[str] = set()
+
+    if content is None:
+        content = ""
+    sender_id = f"github:{login}"
+    injected = injected_dynamic_context_hashes_from_metadata(metadata)
+    persisted_message_ids: set[str] = set()
+    if not creating:
         try:
             prior_state = await client.threads.get_state(thread_id)
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
@@ -1669,79 +1662,75 @@ async def _enrich_run_start_command(
                     }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-        person: PersonIdentity = {
-            "id": sender_id,
-            "platform": "github",
-            "github_login": login,
-        }
-        if email:
-            person["email"] = email
-        structured = build_input_messages(
-            content,
-            {"sender_id": sender_id, "surface": "web", "kind": "human"},
-            people=[person],
-            systems=(
-                [
-                    {
-                        "id": "system:dashboard-handoff",
-                        "display_name": "Dashboard handoff",
-                        "platform": "open-swe",
-                    }
-                ]
-                if metadata.get("source") == "slack"
-                else None
-            ),
-            injected_dynamic_context_hashes=injected,
+    person: PersonIdentity = {
+        "id": sender_id,
+        "platform": "github",
+        "github_login": login,
+    }
+    if email:
+        person["email"] = email
+    structured = build_input_messages(
+        content,
+        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        people=[person],
+        systems=(
+            [
+                {
+                    "id": "system:dashboard-handoff",
+                    "display_name": "Dashboard handoff",
+                    "platform": "open-swe",
+                }
+            ]
+            if metadata.get("source") == "slack"
+            else None
+        ),
+        injected_dynamic_context_hashes=injected,
+    )
+    if metadata.get("source") == "slack":
+        structured.insert(
+            -1,
+            build_input_messages(
+                DASHBOARD_HANDOFF_BODY,
+                {
+                    "sender_id": "system:dashboard-handoff",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                injected_dynamic_context_hashes={"system:dashboard-handoff"},
+            )[0],
         )
-        if metadata.get("source") == "slack":
-            structured.insert(
-                -1,
-                build_input_messages(
-                    DASHBOARD_HANDOFF_BODY,
-                    {
-                        "sender_id": "system:dashboard-handoff",
-                        "surface": "automation",
-                        "kind": "system",
-                    },
-                    injected_dynamic_context_hashes={"system:dashboard-handoff"},
-                )[0],
-            )
-        # Keep the id the SDK minted for the submitted message: it reconciles
-        # the optimistic bubble with the server's echo, and a fresh id leaves
-        # both rendered.
-        client_message_id = _command_message_id(params)
-        if client_message_id and client_message_id not in persisted_message_ids:
-            structured[-1]["id"] = client_message_id
-        run_input = params.get("input")
-        if isinstance(run_input, dict):
-            run_input["messages"] = structured
-        metadata_update: dict[str, Any] = {
-            "source": _DASHBOARD_SOURCE,
-            "plan_mode": plan_mode_requested,
-            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
-                metadata.get(PARTICIPANT_LOGINS_KEY), login
-            ),
-            "injected_dynamic_context_hashes": sorted(injected),
-        }
-        if command_images and run_model and run_effort:
-            overrides["agent_model_id"] = run_model
-            overrides["agent_effort"] = run_effort
-            metadata_update["model"] = run_model
-            metadata_update["effort"] = run_effort
-            metadata_update["resolved_model"] = run_model
-            metadata_update["resolved_effort"] = run_effort
-        elif chosen_model and chosen_effort:
-            overrides["agent_model_id"] = chosen_model
-            overrides["agent_effort"] = chosen_effort
-            metadata_update["model"] = chosen_model
-            metadata_update["effort"] = chosen_effort
-        if _is_thread_resolved(metadata):
-            metadata_update["resolved"] = False
-            metadata_update["resolved_at_ms"] = None
-        if metadata_update:
-            metadata_update["updated_at_ms"] = _now_ms()
-            metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata)
+    client_message_id = _command_message_id(params)
+    if client_message_id and client_message_id not in persisted_message_ids:
+        structured[-1]["id"] = client_message_id
+    run_input = params.get("input")
+    if isinstance(run_input, dict):
+        run_input["messages"] = structured
+    metadata_update: dict[str, Any] = {
+        "source": _DASHBOARD_SOURCE,
+        "plan_mode": plan_mode_requested,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
+        "injected_dynamic_context_hashes": sorted(injected),
+    }
+    if command_images and run_model and run_effort:
+        overrides["agent_model_id"] = run_model
+        overrides["agent_effort"] = run_effort
+        metadata_update["model"] = run_model
+        metadata_update["effort"] = run_effort
+        metadata_update["resolved_model"] = run_model
+        metadata_update["resolved_effort"] = run_effort
+    elif chosen_model and chosen_effort:
+        overrides["agent_model_id"] = chosen_model
+        overrides["agent_effort"] = chosen_effort
+        metadata_update["model"] = chosen_model
+        metadata_update["effort"] = chosen_effort
+    if _is_thread_resolved(metadata):
+        metadata_update["resolved"] = False
+        metadata_update["resolved_at_ms"] = None
+    metadata_update["updated_at_ms"] = _now_ms()
+    metadata = {**metadata, **metadata_update}
+    await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
@@ -1821,7 +1810,7 @@ async def send_dashboard_message(
 
     prompt = body.content.strip()
     now_ms = _now_ms()
-    chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
+    chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
@@ -1923,10 +1912,32 @@ async def cancel_dashboard_thread(
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
 
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
-    )
+    metadata_update: dict[str, Any] = {
+        "latest_run_status": "interrupted",
+        "updated_at_ms": _now_ms(),
+    }
+    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
+    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
+    if queued_messages:
+        try:
+            configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+            run = await dispatch_agent_run(
+                thread_id,
+                None,
+                configurable,
+                source=_DASHBOARD_SOURCE,
+                input={"messages": []},
+                client=client,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
+            raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
+        run_id = run.get("run_id") if isinstance(run, dict) else None
+        metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
+
+    if queued_messages:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
 
@@ -2355,10 +2366,6 @@ def _missing_diff() -> dict[str, Any]:
     }
 
 
-def _ready_empty_diff() -> dict[str, Any]:
-    return {**_missing_diff(), "status": "ready"}
-
-
 async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
@@ -2378,86 +2385,9 @@ async def get_dashboard_thread_working_tree_diff(
         )
         return _missing_diff()
     work_dir = await aresolve_sandbox_work_dir(sandbox)
-    checkpoints = metadata.get("turn_checkpoints")
-    repo_path = next(
-        (
-            entry["repo_path"]
-            for entry in reversed(checkpoints if isinstance(checkpoints, list) else [])
-            if isinstance(entry, Mapping) and isinstance(entry.get("repo_path"), str)
-        ),
-        None,
-    )
-    if repo_path is None:
-        _, repo_name, _ = _metadata_repo(metadata)
-        repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
+    _, repo_name, _ = _metadata_repo(metadata)
+    repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)
-
-
-async def get_dashboard_thread_run_diff(
-    thread_id: str,
-    login: str,
-    *,
-    turn_key: str,
-    max_files: int = 200,
-    include_content: bool = True,
-    email: str | None = None,
-) -> dict[str, Any]:
-    """Return a persisted diff for one completed run, with checkpoint fallback."""
-    from ..utils.turn_checkpoint import read_turn_diff
-    from .run_diffs import get_run_diff, project_run_diff
-
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
-    stored = await get_run_diff(thread_id, turn_key)
-    if stored is not None:
-        return project_run_diff(stored, max_files=max_files, include_content=include_content)
-
-    raw_checkpoints = metadata.get("turn_checkpoints")
-    checkpoints = [
-        entry
-        for entry in (raw_checkpoints if isinstance(raw_checkpoints, list) else [])
-        if isinstance(entry, Mapping) and isinstance(entry.get("ref"), str)
-    ]
-    index = next((i for i, entry in enumerate(checkpoints) if entry.get("key") == turn_key), -1)
-    sandbox_id = metadata.get("sandbox_id")
-    if index < 0 or not isinstance(sandbox_id, str) or not sandbox_id:
-        return _missing_diff()
-
-    checkpoint = checkpoints[index]
-    plan_ref = checkpoint.get("plan_ref")
-    if checkpoint.get("plan_mode") is True and (
-        not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref")
-    ):
-        return _ready_empty_diff()
-
-    head = plan_ref if isinstance(plan_ref, str) else None
-    if head is None and index + 1 < len(checkpoints):
-        next_checkpoint = checkpoints[index + 1]
-        repo_path = checkpoint.get("repo_path")
-        next_repo_path = next_checkpoint.get("repo_path")
-        if (
-            isinstance(repo_path, str)
-            and isinstance(next_repo_path, str)
-            and repo_path != next_repo_path
-        ):
-            return _missing_diff()
-        head = next_checkpoint["ref"]
-
-    try:
-        sandbox = await create_sandbox(sandbox_id)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not connect to sandbox %s for run diff", sandbox_id, exc_info=True)
-        return _missing_diff()
-
-    repo_path = checkpoint.get("repo_path")
-    return await read_turn_diff(
-        sandbox,
-        None,
-        str(checkpoint["ref"]),
-        head,
-        max_files=max_files,
-        include_content=include_content,
-        repo_path=repo_path if isinstance(repo_path, str) else None,
-    )
 
 
 _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}

@@ -171,7 +171,9 @@ export function DiffFilesView({
   )
 
   const filesRef = useRef(files)
-  filesRef.current = files
+  useEffect(() => {
+    filesRef.current = files
+  }, [files])
   const selectTreePath = useCallback((path: string) => {
     setSelectedTreePath(path)
     const target = filesRef.current.find((file) => file.treePath === path)
@@ -196,14 +198,15 @@ export function DiffFilesView({
   return (
     <>
       {!hideHeader && (
-        <div className="flex min-h-9 items-center gap-1 border-b border-border px-3 py-1">
-          {leading}
-          <div className="ml-auto flex min-w-0 items-center gap-2">
+        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-border px-3 py-1">
+          <div className="min-w-0 flex-1">{leading}</div>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <DiffWrapToggle />
             {actions}
             {files.length > 0 && (
-              <span className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
+              <span className="flex shrink-0 items-center gap-2 text-[11px] whitespace-nowrap text-muted-foreground/70">
                 <span
+                  className="@max-[620px]:hidden"
                   title={
                     truncated ? "Only the first files are shown" : undefined
                   }

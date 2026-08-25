@@ -22,7 +22,12 @@ export interface PlanUser {
 }
 
 export type PlanStatus =
-  "planning" | "ready" | "shared" | "revising" | "approved" | "cancelled"
+  | "planning"
+  | "ready"
+  | "shared"
+  | "revising"
+  | "approved"
+  | "cancelled"
 
 export interface PlanApprover {
   id: string
@@ -66,7 +71,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: {
       "Content-Type": "application/json",
       ...dashboardForwardedHeaders(),
-      ...(init.headers ?? {}),
+      ...init.headers,
     },
   })
   if (!res.ok) {

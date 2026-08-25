@@ -63,8 +63,6 @@ For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also call
 
 Every run re-applies `git config --global user.name/email` for the bot identity, because reused/reconnected sandboxes can lose `--global` config and Vercel preview deploys reject commits whose author email doesn't resolve to a GitHub account.
 
-`PrepareAgentRunMiddleware` also snapshots the worktree into `refs/open-swe/turns/<user-message-id>` at run start (`utils/turn_checkpoint.py`), recording the refs in thread metadata. `GET /threads/{id}/run-diff` reads them back so the dashboard's changed-files views come from git rather than from replaying edit tool calls — which is the only way to catch edits made through `execute` and to drop files that were later reverted.
-
 ### Middleware stack (order matters)
 
 Configured in `agent/server.py:get_agent`, runs around every model call (in this order):
@@ -84,8 +82,6 @@ Configured in `agent/server.py:get_agent`, runs around every model call (in this
 The system prompt instructs the agent to call a tool every turn, and `ensure_no_empty_msg` re-injects a tool call when it doesn't — together these keep runs from stopping partway through a task.
 
 Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SanitizeThinkingBlocksMiddleware`.
-
-There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `gh` and `slack_thread_reply` / `linear_comment`.
 
 ### Tools
 

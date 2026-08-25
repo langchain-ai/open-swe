@@ -239,6 +239,11 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["agent_effort"] == "medium"
     assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
     assert configurable["prepare_run_id"]
+    messages = enriched["params"]["input"]["messages"]
+    assert messages[-1]["content"].startswith(
+        '<input-message sender="github:octocat" surface="web" kind="human">'
+    )
+    assert "<content>Fix the flaky test</content>" in messages[-1]["content"]
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
@@ -2358,50 +2363,11 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] in model_ids
 
 
-async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
-    metadata = {
-        "sandbox_id": "sandbox-1",
-        "turn_checkpoints": [
-            {"key": "msg-1", "ref": "refs/open-swe/turns/msg-1", "started_at": "t0"}
-        ],
-    }
-    stored = {
-        "status": "ready",
-        "files": [
-            {
-                "path": f"{index}.py",
-                "originalContent": "before",
-                "modifiedContent": "after",
-            }
-            for index in range(3)
-        ],
-        "truncated": False,
-        "summary": {"files": 3, "additions": 3, "deletions": 0},
-    }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", AsyncMock(return_value=stored))
-    create_sandbox = AsyncMock()
-    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
-
-    result = await thread_api.get_dashboard_thread_run_diff(
-        "thread-1", "owner", turn_key="msg-1", max_files=2, include_content=False
-    )
-
-    assert result == {
-        **stored,
-        "files": [
-            {**file, "originalContent": None, "modifiedContent": None}
-            for file in stored["files"][:2]
-        ],
-        "truncated": True,
-    }
-    create_sandbox.assert_not_awaited()
-
-
 async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) -> None:
     metadata = {
         "sandbox_id": "sandbox-1",
-        "turn_checkpoints": [{"repo_path": "/work/repo"}],
+        "repo_owner": "acme",
+        "repo_name": "repo",
     }
     live = {
         "status": "ready",
@@ -2425,7 +2391,9 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     read_diff.assert_awaited_once_with(sandbox, "/work", "HEAD", None, repo_path="/work/repo")
 
 
-async def test_working_tree_diff_does_not_fall_back_to_persisted_artifact(monkeypatch) -> None:
+async def test_working_tree_diff_returns_missing_when_the_sandbox_is_unreachable(
+    monkeypatch,
+) -> None:
     metadata = {"sandbox_id": "sandbox-1"}
     monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
     monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(side_effect=RuntimeError))
@@ -2438,138 +2406,6 @@ async def test_working_tree_diff_does_not_fall_back_to_persisted_artifact(monkey
         "truncated": False,
         "summary": {"files": 0, "additions": 0, "deletions": 0},
     }
-
-
-async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
-    metadata = {
-        "sandbox_id": "sandbox-1",
-        "turn_checkpoints": [
-            {
-                "key": "msg-1",
-                "ref": "refs/open-swe/turns/msg-1",
-                "started_at": "t0",
-                "repo_path": "/workspace/repo",
-                "plan_mode": True,
-                "plan_ref": "refs/open-swe/turns/msg-1",
-            }
-        ],
-    }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    create_sandbox = AsyncMock()
-    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
-
-    result = await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
-
-    assert result == {
-        "status": "ready",
-        "files": [],
-        "truncated": False,
-        "summary": {"files": 0, "additions": 0, "deletions": 0},
-    }
-    create_sandbox.assert_not_awaited()
-
-
-async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch) -> None:
-    metadata = {
-        "sandbox_id": "sandbox-1",
-        "turn_checkpoints": [
-            {
-                "key": "msg-1",
-                "ref": "refs/open-swe/turns/msg-1",
-                "started_at": "t0",
-                "repo_path": "/workspace/repo",
-                "plan_mode": True,
-                "plan_ref": "refs/open-swe/turns/msg-1-plan",
-            }
-        ],
-    }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    sandbox = object()
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
-    read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
-    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
-
-    await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
-
-    read_diff.assert_awaited_once_with(
-        sandbox,
-        None,
-        "refs/open-swe/turns/msg-1",
-        "refs/open-swe/turns/msg-1-plan",
-        max_files=200,
-        include_content=True,
-        repo_path="/workspace/repo",
-    )
-
-
-async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
-    metadata = {
-        "sandbox_id": "sandbox-1",
-        "turn_checkpoints": [
-            {
-                "key": "msg-1",
-                "ref": "refs/open-swe/turns/msg-1",
-                "started_at": "t0",
-                "repo_path": "/workspace/repo",
-            },
-            {
-                "key": "msg-2",
-                "ref": "refs/open-swe/turns/msg-2",
-                "started_at": "t1",
-                "repo_path": "/workspace/repo",
-            },
-        ],
-    }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    sandbox = object()
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
-    read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
-    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
-
-    await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
-
-    read_diff.assert_awaited_once_with(
-        sandbox,
-        None,
-        "refs/open-swe/turns/msg-1",
-        "refs/open-swe/turns/msg-2",
-        max_files=200,
-        include_content=True,
-        repo_path="/workspace/repo",
-    )
-
-
-async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeypatch) -> None:
-    metadata = {
-        "sandbox_id": "sandbox-1",
-        "turn_checkpoints": [
-            {
-                "key": "msg-1",
-                "ref": "refs/open-swe/turns/msg-1",
-                "started_at": "t0",
-                "repo_path": "/workspace/one",
-            },
-            {
-                "key": "msg-2",
-                "ref": "refs/open-swe/turns/msg-2",
-                "started_at": "t1",
-                "repo_path": "/workspace/two",
-            },
-        ],
-    }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    create_sandbox = AsyncMock()
-    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
-
-    result = await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
-
-    assert result == {
-        "status": "missing",
-        "files": [],
-        "truncated": False,
-        "summary": {"files": 0, "additions": 0, "deletions": 0},
-    }
-    create_sandbox.assert_not_awaited()
 
 
 async def test_branch_diff_uses_repository_from_pr_url(monkeypatch) -> None:
@@ -2669,9 +2505,14 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))
 
+    class FakeStore:
+        async def get_item(self, namespace: tuple[str, str], key: str) -> None:
+            return None
+
     class FakeClient:
         threads = FakeThreads()
         runs = FakeRuns()
+        store = FakeStore()
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 

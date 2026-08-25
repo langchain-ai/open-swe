@@ -26,7 +26,6 @@ const {
   readDiff,
   repoRoot,
   repositoryMetadata,
-  staleRefs,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -863,10 +862,10 @@ function createWindow() {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const protocol = new URL(url).protocol;
+    const scheme = new URL(url).protocol;
     if (isAppLoginUrl(url)) {
       void startExternalLogin();
-    } else if (["http:", "https:", "mailto:"].includes(protocol)) {
+    } else if (["http:", "https:", "mailto:"].includes(scheme)) {
       void shell.openExternal(url);
     }
     return { action: "deny" };
