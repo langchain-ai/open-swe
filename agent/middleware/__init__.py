@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
-    "CorridorCommitScanMiddleware": ".corridor_commit_scan",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
@@ -34,7 +33,6 @@ _MIDDLEWARE_MODULES = {
 }
 
 __all__ = [
-    "CorridorCommitScanMiddleware",
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
@@ -66,7 +64,6 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
-    from .corridor_commit_scan import CorridorCommitScanMiddleware
     from .dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware

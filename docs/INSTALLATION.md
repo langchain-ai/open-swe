@@ -567,9 +567,9 @@ SLACK_TEAM_ID=""                       # Optional; restrict linking to one works
 EXA_API_KEY=""                         # From https://dashboard.exa.ai
 
 # === Corridor (optional) ===
-CORRIDOR_API_KEY=""                    # Enables analyzePlan; kept in the server process
-CORRIDOR_COMMIT_SCANNING_ENABLED="false"  # Also enforce corridor scan --staged before commits
-# Commit scanning requires SANDBOX_TYPE=langsmith and the Corridor CLI in the snapshot.
+CORRIDOR_API_KEY=""                    # Enables analyzePlan; also used by commit scanning
+CORRIDOR_COMMIT_SCANNING_ENABLED="false"  # Also run corridor scan --staged before commits
+# Commit scanning requires the Corridor CLI and API key in the sandbox runtime.
 
 # === Reviewer / Analyzer (optional) ===
 # LangSmith dataset where reviewer finding outcomes are recorded and read back by

@@ -326,7 +326,7 @@ CORRIDOR_COMMIT_SCAN_PROMPT = """---
 
 ### Corridor Commit Scanning
 
-A deployment-managed Git pre-commit hook runs Corridor against staged changes. Never remove, replace, disable, or bypass it; never use `git commit --no-verify`. If it blocks a commit, fix the reported findings and retry the normal commit."""
+This deployment may install a Git pre-commit hook that runs Corridor against staged changes. When present, never remove, replace, disable, or bypass it; never use `git commit --no-verify`. If it reports a finding, fix the finding and retry the normal commit."""
 
 
 DEPENDENCY_SECTION = """---

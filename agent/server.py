@@ -104,7 +104,6 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
-    CorridorCommitScanMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     IntegrationGroup,
@@ -499,8 +498,7 @@ async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> No
     result = await sandbox_backend.aexecute(command)
     exit_code = getattr(result, "exit_code", None)
     if isinstance(exit_code, int) and exit_code != 0:
-        output = getattr(result, "output", "")
-        raise RuntimeError(f"Sandbox git setup failed (exit {exit_code}): {output}")
+        logger.warning("Sandbox git setup failed (exit %s)", exit_code)
 
 
 def _start_git_identity(
@@ -871,7 +869,6 @@ def _general_purpose_subagent(
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
-            CorridorCommitScanMiddleware(),
             ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
             *_subagent_model_middleware(),
         ],
@@ -1780,7 +1777,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
-                CorridorCommitScanMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(

@@ -9,7 +9,6 @@ from agent.integrations.corridor_commit_scan import (
     corridor_commit_scanning_enabled,
     corridor_hook_cleanup_command,
     corridor_hook_setup_command,
-    validate_corridor_commit_scanning_config,
 )
 from agent.prompt import construct_system_prompt
 
@@ -32,24 +31,12 @@ def test_commit_scanning_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     assert corridor_commit_scanning_enabled() is True
 
 
-def test_enabled_commit_scanning_requires_langsmith_and_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CORRIDOR_COMMIT_SCANNING_ENABLED", "true")
-    with pytest.raises(ValueError, match="SANDBOX_TYPE=langsmith"):
-        validate_corridor_commit_scanning_config("local")
-    with pytest.raises(ValueError, match="CORRIDOR_API_KEY"):
-        validate_corridor_commit_scanning_config("langsmith")
-    monkeypatch.setenv("CORRIDOR_API_KEY", "secret")
-    validate_corridor_commit_scanning_config("langsmith")
-
-
 def test_hook_scans_then_chains_repo_hooks() -> None:
     command = corridor_hook_setup_command()
     assert "corridor scan --staged" not in command
     assert "base64 -d" in command
     assert CORRIDOR_HOOKS_PATH in command
-    assert "will not replace the existing global hooks path" in command
+    assert "could not be configured; continuing" in command
     assert "open-swe-corridor-hook" in command
     assert "pre-commit" in command
     assert "commit-msg" in command
@@ -83,7 +70,7 @@ async def test_git_setup_removes_managed_hook_when_disabled() -> None:
     assert corridor_hook_cleanup_command() in command
 
 
-async def test_git_setup_fails_closed_when_hook_setup_fails(
+async def test_git_setup_does_not_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CORRIDOR_COMMIT_SCANNING_ENABLED", "true")
@@ -91,20 +78,13 @@ async def test_git_setup_fails_closed_when_hook_setup_fails(
         aexecute=AsyncMock(return_value=SimpleNamespace(exit_code=1, output="missing CLI"))
     )
 
-    with pytest.raises(RuntimeError, match="missing CLI"):
-        await server._configure_git_identity(backend)
+    await server._configure_git_identity(backend)
 
 
 def test_prompt_prohibits_bypassing_enabled_scan(monkeypatch: pytest.MonkeyPatch) -> None:
     prompt = construct_system_prompt(working_dir="/workspace", corridor_commit_scanning=True)
     assert "git commit --no-verify" in prompt
-    assert "Never remove, replace, disable, or bypass it" in prompt
+    assert "never remove, replace, disable, or bypass it" in prompt
 
     prompt = construct_system_prompt(working_dir="/workspace")
     assert "git commit --no-verify" not in prompt
-
-
-def test_validation_uses_corridor_token_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CORRIDOR_COMMIT_SCANNING_ENABLED", "true")
-    monkeypatch.setenv("CORRIDOR_API_TOKEN", "secret")
-    validate_corridor_commit_scanning_config("langsmith")

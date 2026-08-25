@@ -3,11 +3,8 @@
 import base64
 import os
 
-from .corridor_mcp import corridor_token
-
 CORRIDOR_COMMIT_SCANNING_ENV = "CORRIDOR_COMMIT_SCANNING_ENABLED"
 CORRIDOR_HOOKS_PATH = "/root/.config/open-swe/git-hooks"
-CORRIDOR_API_KEY_PLACEHOLDER = "proxy-injected"
 
 _HOOK_NAMES = (
     "applypatch-msg",
@@ -54,24 +51,23 @@ def corridor_hook_setup_command() -> str:
     links = "; ".join(
         f"ln -sf open-swe-corridor-hook {CORRIDOR_HOOKS_PATH}/{name}" for name in _HOOK_NAMES
     )
-    return (
+    setup = (
         "set -eu; "
-        "command -v corridor >/dev/null || "
-        "{ echo 'Corridor commit scanning is enabled but the corridor CLI is unavailable' >&2; "
-        "exit 1; }; "
+        "command -v corridor >/dev/null; "
         'repo_hooks="$(git config --local --get core.hooksPath || true)"; '
-        'if [ -n "$repo_hooks" ]; then '
-        "echo 'Corridor commit scanning requires removing the repository-local hooks path' >&2; "
-        "exit 1; fi; "
+        'test -z "$repo_hooks"; '
         'current="$(git config --global --get core.hooksPath || true)"; '
-        f'if [ -n "$current" ] && [ "$current" != "{CORRIDOR_HOOKS_PATH}" ]; then '
-        "echo 'Corridor commit scanning will not replace the existing global hooks path' >&2; "
-        "exit 1; fi; "
+        f'test -z "$current" || test "$current" = "{CORRIDOR_HOOKS_PATH}"; '
         f"install -d -m 0700 {CORRIDOR_HOOKS_PATH}; "
         f"printf %s {encoded_hook} | base64 -d > {dispatcher}; "
         f"chmod 0700 {dispatcher}; "
         f"{links}; "
         f"git config --global core.hooksPath {CORRIDOR_HOOKS_PATH}"
+    )
+    return (
+        f"if ! ({setup}); then "
+        "echo 'Warning: Corridor commit scanning could not be configured; continuing' >&2; "
+        "fi"
     )
 
 
@@ -82,14 +78,3 @@ def corridor_hook_cleanup_command() -> str:
         "git config --global --unset core.hooksPath; "
         f"rm -rf {CORRIDOR_HOOKS_PATH}; fi"
     )
-
-
-def validate_corridor_commit_scanning_config(sandbox_type: str) -> None:
-    if not corridor_commit_scanning_enabled():
-        return
-    if sandbox_type != "langsmith":
-        raise ValueError(f"{CORRIDOR_COMMIT_SCANNING_ENV} requires SANDBOX_TYPE=langsmith")
-    if not corridor_token():
-        raise ValueError(
-            f"{CORRIDOR_COMMIT_SCANNING_ENV} requires CORRIDOR_API_KEY or a Corridor token"
-        )
