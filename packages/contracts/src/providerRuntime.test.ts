@@ -23,6 +23,24 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.providerInstanceId).toBe("ollama_local");
   });
 
+  it("decodes bounded LangGraph SSE diagnostics", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "thread.metadata.updated",
+      eventId: "event-langgraph-raw",
+      provider: "langgraph",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      payload: { metadata: { runId: "run-1" } },
+      raw: {
+        source: "langgraph.sse",
+        method: "metadata",
+        payload: { id: "1", payload: { run_id: "run-1" } },
+      },
+    });
+
+    expect(parsed.raw?.source).toBe("langgraph.sse");
+  });
+
   it("decodes turn.plan.updated for plan rendering", () => {
     const parsed = decodeRuntimeEvent({
       type: "turn.plan.updated",
