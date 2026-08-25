@@ -10,8 +10,9 @@ from typing import Any, TypedDict, cast
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 
+from agent.thread_ids import baby_sit_lock_thread_id
+
 from .dispatch import dispatch_agent_run
-from .thread_ids import baby_sit_lock_thread_id
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_ci import (
     FAILING_CONCLUSIONS,

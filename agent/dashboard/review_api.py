@@ -17,8 +17,9 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
+from agent.thread_ids import reviewer_thread_id
+
 from ..review.findings import REVIEWER_THREAD_KIND
-from ..thread_ids import reviewer_thread_id
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata

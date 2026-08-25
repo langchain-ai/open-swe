@@ -17,9 +17,10 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from agent.thread_ids import reviewer_thread_id
+
 from ..review.diff import fetch_pr_diff
 from ..review.findings import REVIEWER_THREAD_KIND
-from ..thread_ids import reviewer_thread_id
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.json_types import as_json_object
 from ..utils.thread_ops import langgraph_client, langgraph_url

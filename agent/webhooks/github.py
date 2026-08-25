@@ -6,6 +6,13 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from typing import Any
 
+from agent.thread_ids import (
+    github_issue_thread_id,
+    pr_comment_thread_id,
+    reviewer_thread_id,
+    thread_id_from_branch,
+)
+
 from ..baby_sit import handle_ci_webhook
 from ..input_messages import (
     PersonIdentity,
@@ -17,12 +24,6 @@ from ..input_messages import (
     system_introduction,
 )
 from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
-from ..thread_ids import (
-    github_issue_thread_id,
-    pr_comment_thread_id,
-    reviewer_thread_id,
-    thread_id_from_branch,
-)
 from ..utils.github_comments import GitHubAuthError
 from ..utils.slack import GitHubPrRef
 from . import common

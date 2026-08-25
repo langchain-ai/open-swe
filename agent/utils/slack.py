@@ -19,11 +19,11 @@ import httpx
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 
+from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.run_usage import RunUsageSummary
 
-from ..thread_ids import slack_thread_id
 from .http import DEFAULT_HTTP_TIMEOUT
 from .user_messages import WARNING_ICON
 
