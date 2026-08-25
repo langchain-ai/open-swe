@@ -405,8 +405,8 @@ class TestConfigureGithubProxyWaitsOutProvisioning:
 
             await _configure_github_proxy("sandbox-abc", "token")
 
-            assert mock_sleep.await_args.args[0] == pytest.approx(
-                PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS, abs=0.01
+            mock_sleep.assert_awaited_once_with(
+                pytest.approx(PROXY_CONFIG_PROVISIONING_BUDGET_SECONDS, abs=0.01)
             )
 
 
