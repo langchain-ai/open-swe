@@ -567,10 +567,11 @@ SLACK_TEAM_ID=""                       # Optional; restrict linking to one works
 EXA_API_KEY=""                         # From https://dashboard.exa.ai
 
 # === Corridor (optional) ===
-CORRIDOR_API_KEY=""                    # Enables server-side analyzePlan
+CORRIDOR_API_KEY=""                    # Enables analyzePlan and LangSmith proxy auth
 CORRIDOR_COMMIT_SCANNING_ENABLED="false"  # Also run corridor scan --staged before commits
-# Separately include the Corridor CLI and CORRIDOR_API_KEY in the sandbox runtime.
-# A repository-local core.hooksPath overrides Open SWE's best-effort global hook.
+# Include the Corridor CLI in the sandbox image. LangSmith sandboxes receive opaque
+# proxy auth; other providers must provision CLI auth themselves. A repository-local
+# core.hooksPath overrides Open SWE's best-effort global hook.
 
 # === Reviewer / Analyzer (optional) ===
 # LangSmith dataset where reviewer finding outcomes are recorded and read back by

@@ -5,6 +5,7 @@ import os
 
 CORRIDOR_COMMIT_SCANNING_ENV = "CORRIDOR_COMMIT_SCANNING_ENABLED"
 CORRIDOR_HOOKS_PATH = "/root/.config/open-swe/git-hooks"
+CORRIDOR_API_KEY_PLACEHOLDER = "proxy-injected"
 
 _HOOK_NAMES = (
     "applypatch-msg",
