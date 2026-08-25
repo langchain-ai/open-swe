@@ -1,4 +1,4 @@
-import { verifyDpopProof } from "@t3tools/shared/dpop";
+import { verifyDpopProof } from "@openswe/shared/dpop";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

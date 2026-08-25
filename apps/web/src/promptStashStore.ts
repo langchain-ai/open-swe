@@ -4,14 +4,14 @@ import { create } from "zustand";
 import { PersistedComposerImageAttachment } from "./composerDraftStore";
 import { createMemoryStorage, type StateStorage } from "./lib/storage";
 
-export const PROMPT_STASH_STORAGE_KEY = "t3code:prompt-stash:v2";
+export const PROMPT_STASH_STORAGE_KEY = "openswe:prompt-stash:v2";
 /**
  * v1 bucketed entries into per-provider-instance queues and stored a model
  * selection with each prompt. The stash is provider-agnostic now, so the old
  * payload is deleted at startup rather than migrated — left behind it would
  * silently hold megabytes of the origin's ~5MB localStorage quota forever.
  */
-const LEGACY_PROMPT_STASH_STORAGE_KEY = "t3code:prompt-stash:v1";
+const LEGACY_PROMPT_STASH_STORAGE_KEY = "openswe:prompt-stash:v1";
 const PROMPT_STASH_STORAGE_VERSION = 2;
 
 export const MAX_STASH_ENTRIES = 20;

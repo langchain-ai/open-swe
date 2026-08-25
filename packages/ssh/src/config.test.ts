@@ -13,7 +13,7 @@ import {
 function makeTempHomeDir() {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    return yield* fs.makeTempDirectoryScoped({ prefix: "t3-ssh-test-" });
+    return yield* fs.makeTempDirectoryScoped({ prefix: "openswe-ssh-test-" });
   });
 }
 

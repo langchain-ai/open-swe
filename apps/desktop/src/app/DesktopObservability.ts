@@ -1,6 +1,6 @@
-import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
-import { makeLocalFileTracer, makeTraceSink } from "@t3tools/shared/observability";
-import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@openswe/contracts";
+import { makeLocalFileTracer, makeTraceSink } from "@openswe/shared/observability";
+import { parsePersistedServerObservabilitySettings } from "@openswe/shared/serverSettings";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -58,7 +58,7 @@ export class DesktopBackendOutputLogFactory extends Context.Service<
   {
     readonly forInstance: (id: string) => Effect.Effect<DesktopBackendOutputLogShape>;
   }
->()("@t3tools/desktop/app/DesktopObservability/DesktopBackendOutputLogFactory") {}
+>()("@openswe/desktop/app/DesktopObservability/DesktopBackendOutputLogFactory") {}
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();

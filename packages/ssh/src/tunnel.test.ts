@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NetService from "@t3tools/shared/Net";
+import * as NetService from "@openswe/shared/Net";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -17,7 +17,7 @@ import {
   buildRemoteLaunchScript,
   buildRemotePairingScript,
   buildRemoteStopScript,
-  buildRemoteT3RunnerScript,
+  buildRemoteOpenSWERunnerScript,
   describeReadinessCause,
   issueRemotePairingToken,
   launchOrReuseRemoteServer,
@@ -100,19 +100,22 @@ function commandArgs(command: ChildProcess.Command): ReadonlyArray<string> {
 }
 
 describe("ssh tunnel scripts", () => {
-  it("builds the remote t3 runner with npx and npm fallbacks", () => {
-    const script = buildRemoteT3RunnerScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE });
+  it("builds the remote openswe runner with npx and npm fallbacks", () => {
+    const script = buildRemoteOpenSWERunnerScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE });
 
-    assert.include(script, "T3_NODE_SCRIPT_PATH=''");
-    assert.include(script, 'exec t3 "$@"');
-    assert.include(script, "exec npx --yes 't3@latest' \"$@\"");
-    assert.include(script, "exec npm exec --yes 't3@latest' -- \"$@\"");
-    assert.include(script, "could not install 't3@latest'");
-    assert.include(script, "require_installed_t3_cli npx --yes --package 't3@latest'");
-    assert.include(script, "require_installed_t3_cli npm exec --yes --package 't3@latest'");
-    assert.include(script, "npm produced no t3 executable");
+    assert.include(script, "OPEN_SWE_NODE_SCRIPT_PATH=''");
+    assert.include(script, 'exec openswe "$@"');
+    assert.include(script, "exec npx --yes 'openswe@latest' \"$@\"");
+    assert.include(script, "exec npm exec --yes 'openswe@latest' -- \"$@\"");
+    assert.include(script, "could not install 'openswe@latest'");
+    assert.include(script, "require_installed_openswe_cli npx --yes --package 'openswe@latest'");
+    assert.include(
+      script,
+      "require_installed_openswe_cli npm exec --yes --package 'openswe@latest'",
+    );
+    assert.include(script, "npm produced no openswe executable");
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"');
-    assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
+    assert.include(script, `OPEN_SWE_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
     assert.include(script, "remote_node_satisfies_engine()");
     assert.include(script, "function satisfiesSemverRange");
     assert.include(script, "satisfiesSemverRange(rawVersion, range)");
@@ -125,44 +128,47 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, 'prepend_path_if_dir "$HOME/.nodenv/shims"');
     assert.include(script, 'NVM_DIR="$HOME/.nvm"');
     assert.include(script, "nvm use --silent default");
-    assert.include(script, 'for T3_NODE_BIN in "$NVM_DIR"/versions/node/*/bin');
+    assert.include(script, 'for OPEN_SWE_NODE_BIN in "$NVM_DIR"/versions/node/*/bin');
     assert.notInclude(script, "ensure $NVM_DIR/nvm.sh is available");
   });
 
   it("does not hard-code a remote node engine range", () => {
-    const script = buildRemoteT3RunnerScript();
+    const script = buildRemoteOpenSWERunnerScript();
 
-    assert.include(script, "T3_NODE_ENGINE_RANGE=''");
+    assert.include(script, "OPEN_SWE_NODE_ENGINE_RANGE=''");
     assert.notInclude(script, TEST_NODE_ENGINE_RANGE);
   });
 
-  it("shell-quotes package specs in the remote t3 runner", () => {
-    const script = buildRemoteT3RunnerScript({
-      packageSpec: "t3@nightly; touch /tmp/t3-owned",
+  it("shell-quotes package specs in the remote openswe runner", () => {
+    const script = buildRemoteOpenSWERunnerScript({
+      packageSpec: "openswe@nightly; touch /tmp/openswe-owned",
     });
 
-    assert.include(script, "exec npx --yes 't3@nightly; touch /tmp/t3-owned' \"$@\"");
-    assert.include(script, "exec npm exec --yes 't3@nightly; touch /tmp/t3-owned' -- \"$@\"");
+    assert.include(script, "exec npx --yes 'openswe@nightly; touch /tmp/openswe-owned' \"$@\"");
     assert.include(
       script,
-      "require_installed_t3_cli npx --yes --package 't3@nightly; touch /tmp/t3-owned'",
+      "exec npm exec --yes 'openswe@nightly; touch /tmp/openswe-owned' -- \"$@\"",
     );
-    assert.notInclude(script, "exec npx --yes t3@nightly; touch /tmp/t3-owned");
+    assert.include(
+      script,
+      "require_installed_openswe_cli npx --yes --package 'openswe@nightly; touch /tmp/openswe-owned'",
+    );
+    assert.notInclude(script, "exec npx --yes openswe@nightly; touch /tmp/openswe-owned");
   });
 
-  it("builds the remote t3 runner with a node script override", () => {
-    const script = buildRemoteT3RunnerScript({
+  it("builds the remote openswe runner with a node script override", () => {
+    const script = buildRemoteOpenSWERunnerScript({
       nodeScriptPath: "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs",
     });
 
     assert.include(
       script,
-      "T3_NODE_SCRIPT_PATH='/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs'",
+      "OPEN_SWE_NODE_SCRIPT_PATH='/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs'",
     );
-    assert.include(script, 'exec node "$T3_NODE_SCRIPT_PATH" "$@"');
+    assert.include(script, 'exec node "$OPEN_SWE_NODE_SCRIPT_PATH" "$@"');
   });
 
-  it("uses the remote t3 runner for launch and pairing scripts", () => {
+  it("uses the remote openswe runner for launch and pairing scripts", () => {
     const target = {
       alias: "devbox",
       hostname: "devbox.example.com",
@@ -179,7 +185,7 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), "if ! ensure_remote_node_path; then");
     assert.include(
       buildRemoteLaunchScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE }),
-      `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`,
+      `OPEN_SWE_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`,
     );
     assert.include(
       buildRemoteLaunchScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE }),
@@ -190,18 +196,21 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
     assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemoteLaunchScript(), "server-home");
-    assert.include(buildRemoteLaunchScript(), "Remote T3 server did not become ready");
+    assert.include(buildRemoteLaunchScript(), "Remote Open SWE server did not become ready");
     assert.include(buildRemoteLaunchScript(), 'wait_ready "60000"');
     assert.include(buildRemoteLaunchScript(), 'if [ -s "$LOG_FILE" ]; then');
     assert.include(buildRemoteLaunchScript(), "It wrote nothing to %s");
-    assert.include(buildRemoteLaunchScript({ packageSpec: "t3@nightly" }), "t3@nightly");
+    assert.include(buildRemoteLaunchScript({ packageSpec: "openswe@nightly" }), "openswe@nightly");
     assert.include(
       buildRemotePairingScript(target),
       '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json',
     );
     assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemotePairingScript(target), "server-home");
-    assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");
+    assert.include(
+      buildRemotePairingScript(target, { packageSpec: "openswe@nightly" }),
+      "openswe@nightly",
+    );
     assert.include(
       buildRemoteStopScript(target),
       'if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ]',

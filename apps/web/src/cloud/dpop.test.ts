@@ -1,4 +1,4 @@
-import { verifyDpopProof } from "@t3tools/shared/dpop";
+import { verifyDpopProof } from "@openswe/shared/dpop";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { decodeJwt } from "jose";

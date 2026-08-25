@@ -1,4 +1,4 @@
-import { AuthStandardClientScopes, EnvironmentId } from "@t3tools/contracts";
+import { AuthStandardClientScopes, EnvironmentId } from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -131,7 +131,7 @@ const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (
           ClientCapabilities.ClientPresentation,
           ClientCapabilities.ClientPresentation.of({
             metadata: {
-              label: "T3 Code Test",
+              label: "Open SWE Test",
               deviceType: "mobile",
               os: "test",
             },
@@ -181,7 +181,9 @@ describe("RemoteEnvironmentAuthorization", () => {
       expect(first.socketUrl).toContain("wsTicket=first-ticket");
       expect(second.socketUrl).toContain("wsTicket=second-ticket");
       expect(
-        harness.fetch.calls.filter(([url]) => String(url).endsWith("/.well-known/t3/environment")),
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/.well-known/openswe/environment"),
+        ),
       ).toHaveLength(1);
       expect(
         harness.fetch.calls.filter(([url]) => String(url).endsWith("/api/auth/websocket-ticket")),
@@ -226,7 +228,9 @@ describe("RemoteEnvironmentAuthorization", () => {
         }),
       );
       expect(
-        harness.fetch.calls.filter(([url]) => String(url).endsWith("/.well-known/t3/environment")),
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/.well-known/openswe/environment"),
+        ),
       ).toHaveLength(2);
     }),
   );

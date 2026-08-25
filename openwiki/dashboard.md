@@ -5,6 +5,7 @@ description: The Open SWE Vite/TanStack dashboard, its FastAPI API boundary, aut
 resource: /ui/src
 tags: [open-swe, dashboard, ui, fastapi, administration]
 ---
+
 # Dashboard and workspace management
 
 ## Client and API boundary

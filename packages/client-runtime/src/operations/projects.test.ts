@@ -4,7 +4,7 @@ import {
   ProjectId,
   CommandId,
   SourceControlDiscoveryResult,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Option from "effect/Option";
 
 import {
@@ -52,8 +52,8 @@ describe("add project shared logic", () => {
     expect(normalizePastedCloneUrl("imputnet/helium")).toBe(
       "https://github.com/imputnet/helium.git",
     );
-    expect(normalizePastedCloneUrl("  pingdotgg/t3code  ")).toBe(
-      "https://github.com/pingdotgg/t3code.git",
+    expect(normalizePastedCloneUrl("  langchain-ai/open-swe  ")).toBe(
+      "https://github.com/langchain-ai/open-swe.git",
     );
   });
 

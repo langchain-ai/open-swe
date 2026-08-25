@@ -22,8 +22,8 @@ import type {
   ProjectSearchContentsInput,
   ProjectSearchContentsResult,
   ProjectSearchEntriesResult,
-} from "@t3tools/contracts";
-import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+} from "@openswe/contracts";
+import { isWorkspaceImagePreviewPath } from "@openswe/shared/filePreview";
 
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
@@ -122,7 +122,7 @@ export class WorkspaceSearchIndex extends Context.Service<
       WorkspaceSearchIndexRefreshFailed | WorkspaceSearchIndexScanTimedOut
     >;
   }
->()("t3/workspace/WorkspaceSearchIndex") {}
+>()("openswe/workspace/WorkspaceSearchIndex") {}
 
 function toPosixPath(input: string): string {
   return input.replaceAll("\\", "/");
@@ -558,7 +558,7 @@ export const layer = (key: string) => {
 };
 
 export class WorkspaceSearchIndexMap extends LayerMap.Service<WorkspaceSearchIndexMap>()(
-  "t3/workspace/WorkspaceSearchIndexMap",
+  "openswe/workspace/WorkspaceSearchIndexMap",
   {
     lookup: layer,
     idleTimeToLive: WORKSPACE_INDEX_IDLE_TTL,

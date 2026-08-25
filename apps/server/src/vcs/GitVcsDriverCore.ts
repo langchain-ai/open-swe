@@ -25,10 +25,10 @@ import {
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewSource,
   type VcsRef,
-} from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@t3tools/shared/git";
-import { compactTraceAttributes } from "@t3tools/shared/observability";
-import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+} from "@openswe/contracts";
+import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@openswe/shared/git";
+import { compactTraceAttributes } from "@openswe/shared/observability";
+import { decodeJsonResult } from "@openswe/shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import {
@@ -494,7 +494,7 @@ const createTrace2Monitor = Effect.fn("createTrace2Monitor")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const traceFilePath = yield* fs.makeTempFileScoped({
-    prefix: `t3code-git-trace2-${process.pid}-`,
+    prefix: `openswe-git-trace2-${process.pid}-`,
     suffix: ".json",
   });
   const hookStartByChildKey = new Map<string, { hookName: string; startedAtMs: number }>();
@@ -2917,7 +2917,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         yield* executeGit(
           "GitVcsDriver.refreshCheckedOutBranch.keepPrevious",
           input.cwd,
-          ["update-ref", "refs/t3code/pre-refresh", headCommit],
+          ["update-ref", "refs/openswe/pre-refresh", headCommit],
           { fallbackErrorDetail: "git failed to record the previous checkout commit" },
         );
       }

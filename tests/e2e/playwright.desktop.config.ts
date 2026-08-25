@@ -10,10 +10,7 @@ export default defineConfig({
   outputDir: "test-results/desktop",
   timeout: 180_000,
   expect: { timeout: 120_000 },
-  reporter: [
-    ["list"],
-    ["html", { outputFolder: "playwright-report/desktop", open: "never" }],
-  ],
+  reporter: [["list"], ["html", { outputFolder: "playwright-report/desktop", open: "never" }]],
   use: {
     ...baseConfig.use,
     trace: "off",

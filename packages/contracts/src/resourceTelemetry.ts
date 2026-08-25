@@ -23,7 +23,7 @@ export const ResourceTelemetryProcessCategory = Schema.Literals([
   "electron-gpu",
   "electron-utility",
   "resource-monitor",
-  "unknown-t3",
+  "unknown-openswe",
 ]);
 export type ResourceTelemetryProcessCategory = typeof ResourceTelemetryProcessCategory.Type;
 
@@ -319,7 +319,7 @@ export const ResourceTelemetryGroups = Schema.Struct({
   backend: ResourceTelemetryAggregate,
   electron: ResourceTelemetryAggregate,
   monitor: ResourceTelemetryAggregate,
-  allT3: ResourceTelemetryAggregate,
+  allOpenSWE: ResourceTelemetryAggregate,
 });
 export type ResourceTelemetryGroups = typeof ResourceTelemetryGroups.Type;
 

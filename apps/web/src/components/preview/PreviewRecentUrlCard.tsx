@@ -1,4 +1,4 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@openswe/contracts";
 import { X } from "lucide-react";
 
 import { isValidHistoryTimestamp, type BrowserHistoryEntry } from "~/browserHistoryStore";

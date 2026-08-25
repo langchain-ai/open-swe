@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as Electron from "electron";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@openswe/shared/hostProcess";
 
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -44,7 +44,7 @@ export class DesktopPreReadyElectronOptions extends Context.Service<
     readonly linux: DesktopEarlyElectronStartup.EarlyLinuxElectronOptions | null;
     readonly linuxPasswordStoreCommandLine: string | null;
   }
->()("@t3tools/desktop/app/DesktopPreReadyPlatform/DesktopPreReadyElectronOptions") {}
+>()("@openswe/desktop/app/DesktopPreReadyPlatform/DesktopPreReadyElectronOptions") {}
 
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcessPlatform;

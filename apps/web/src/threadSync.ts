@@ -1,4 +1,4 @@
-import type { EnvironmentThreadStatus } from "@t3tools/client-runtime/state/threads";
+import type { EnvironmentThreadStatus } from "@openswe/client-runtime/state/threads";
 
 export type ThreadSyncPhase = "loading" | "syncing";
 

@@ -6,10 +6,10 @@ import {
   type ServerLifecycleWelcomePayload,
   type ServerProvider,
   type ServerSettings,
-} from "@t3tools/contracts";
-import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
-import { createEnvironmentServerConfigsAtom } from "@t3tools/client-runtime/state/shell";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+} from "@openswe/contracts";
+import { createServerEnvironmentAtoms } from "@openswe/client-runtime/state/server";
+import { createEnvironmentServerConfigsAtom } from "@openswe/client-runtime/state/shell";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@openswe/shared/keybindings";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 

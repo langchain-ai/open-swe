@@ -4,7 +4,7 @@ import {
   ServerConfig,
   type ServerConfig as ServerConfigType,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -116,7 +116,7 @@ const SERVER_CONFIG: ServerConfigType = {
     policy: "loopback-browser",
     bootstrapMethods: ["one-time-token"],
     sessionMethods: ["browser-session-cookie", "bearer-access-token"],
-    sessionCookieName: "t3_session",
+    sessionCookieName: "openswe_session",
   },
   cwd: "/tmp/workspace",
   keybindingsConfigPath: "/tmp/workspace/keybindings.json",

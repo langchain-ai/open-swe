@@ -12,4 +12,4 @@ export class PlatformConnectionSource extends Context.Service<
     // both additions and removals by re-emitting.
     readonly registrations: Stream.Stream<ReadonlyArray<PlatformConnectionRegistration>>;
   }
->()("@t3tools/client-runtime/platform/source/PlatformConnectionSource") {}
+>()("@openswe/client-runtime/platform/source/PlatformConnectionSource") {}

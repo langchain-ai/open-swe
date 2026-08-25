@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS } from "@openswe/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -74,14 +74,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_requests_total", {
           method: "rpc.instrumentation.success",
           outcome: "success",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_request_duration", {
           method: "rpc.instrumentation.success",
         }),
         true,
@@ -100,14 +100,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_requests_total", {
           method: "rpc.instrumentation.failure",
           outcome: "failure",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_request_duration", {
           method: "rpc.instrumentation.failure",
         }),
         true,
@@ -130,14 +130,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_requests_total", {
           method: "rpc.instrumentation.stream",
           outcome: "success",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_request_duration", {
           method: "rpc.instrumentation.stream",
         }),
         true,
@@ -160,14 +160,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_requests_total", {
           method: "rpc.instrumentation.stream.failure",
           outcome: "failure",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_request_duration", {
           method: "rpc.instrumentation.stream.failure",
         }),
         true,
@@ -197,7 +197,7 @@ describe("RpcInstrumentation", () => {
       assert.deepStrictEqual(Array.from(events), ["ok"]);
 
       const snapshots = yield* Metric.snapshot;
-      const snapshot = findHistogramSnapshot(snapshots, "t3_rpc_request_duration", {
+      const snapshot = findHistogramSnapshot(snapshots, "openswe_rpc_request_duration", {
         method: WS_METHODS.serverGetProcessDiagnostics,
       });
 
@@ -221,14 +221,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_requests_total", {
           method: "rpc.instrumentation.stream.effect.failure",
           outcome: "failure",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, "openswe_rpc_request_duration", {
           method: "rpc.instrumentation.stream.effect.failure",
         }),
         true,

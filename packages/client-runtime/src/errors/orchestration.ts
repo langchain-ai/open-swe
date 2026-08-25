@@ -1,4 +1,4 @@
-import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError } from "@openswe/contracts";
 import * as Schema from "effect/Schema";
 
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);

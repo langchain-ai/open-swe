@@ -1,9 +1,9 @@
-import { EDITORS, EditorId, EnvironmentId } from "@t3tools/contracts";
+import { EDITORS, EditorId, EnvironmentId } from "@openswe/contracts";
 import {
   mapAtomCommandResult,
   type AtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -12,7 +12,7 @@ import { useCallback, useMemo } from "react";
 import { shellEnvironment } from "./state/shell";
 import { useAtomCommand } from "./state/use-atom-command";
 
-const LAST_EDITOR_KEY = "t3code:last-editor";
+const LAST_EDITOR_KEY = "openswe:last-editor";
 
 export class PreferredEditorEnvironmentRequiredError extends Schema.TaggedErrorClass<PreferredEditorEnvironmentRequiredError>()(
   "PreferredEditorEnvironmentRequiredError",

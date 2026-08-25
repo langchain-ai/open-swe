@@ -7,20 +7,27 @@ import {
   GROVE_THEME,
   IRIS_THEME,
   OCEAN_THEME,
-  T3_CHAT_THEME,
+  OPEN_SWE_CHAT_THEME,
   THEME_COLOR_ROLES,
   type ThemeAppearance,
   type ThemeColorRole,
   type ThemeColors,
   type ThemeDefinition,
   type ThemeVariants,
-} from "@t3tools/shared/themePalettes";
+} from "@openswe/shared/themePalettes";
 
-export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, T3_CHAT_THEME, THEME_COLOR_ROLES };
+export {
+  EMBER_THEME,
+  GROVE_THEME,
+  IRIS_THEME,
+  OCEAN_THEME,
+  OPEN_SWE_CHAT_THEME,
+  THEME_COLOR_ROLES,
+};
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
-export const T3_CHAT_THEME_ID = "t3-chat" as const;
-export const T3_CHAT_THEME_LABEL = "T3 Chat";
+export const OPEN_SWE_CHAT_THEME_ID = "openswe-chat" as const;
+export const OPEN_SWE_CHAT_THEME_LABEL = "Open SWE Chat";
 export const GROVE_THEME_ID = "grove" as const;
 export const GROVE_THEME_LABEL = "Grove";
 export const OCEAN_THEME_ID = "ocean" as const;
@@ -30,12 +37,12 @@ export const EMBER_THEME_LABEL = "Ember";
 export const IRIS_THEME_ID = "iris" as const;
 export const IRIS_THEME_LABEL = "Iris";
 export const THEME_FILE_VERSION = 1 as const;
-export const CUSTOM_THEMES_STORAGE_KEY = "t3code:themes:v1";
-export const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "t3code:theme-follow-system";
-export const THEME_APPEARANCE_MODE_STORAGE_KEY = "t3code:theme-appearance-mode";
-export const THEME_HALVES_STORAGE_KEY = "t3code:theme-halves:v1";
+export const CUSTOM_THEMES_STORAGE_KEY = "openswe:themes:v1";
+export const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "openswe:theme-follow-system";
+export const THEME_APPEARANCE_MODE_STORAGE_KEY = "openswe:theme-appearance-mode";
+export const THEME_HALVES_STORAGE_KEY = "openswe:theme-halves:v1";
 
-const LEGACY_T3_CHAT_DARK_THEME_ID = "t3-chat-dark";
+const LEGACY_OPEN_SWE_CHAT_DARK_THEME_ID = "openswe-chat-dark";
 
 export const ThemePreference = Schema.String;
 export type ThemePreference = typeof ThemePreference.Type;
@@ -60,16 +67,16 @@ const RESERVED_THEME_IDS = new Set([
   "system",
   "light",
   "dark",
-  T3_CHAT_THEME_ID,
+  OPEN_SWE_CHAT_THEME_ID,
   GROVE_THEME_ID,
   OCEAN_THEME_ID,
   EMBER_THEME_ID,
   IRIS_THEME_ID,
-  LEGACY_T3_CHAT_DARK_THEME_ID,
-  "t3-grove",
-  "t3-ocean",
-  "t3-ember",
-  "t3-iris",
+  LEGACY_OPEN_SWE_CHAT_DARK_THEME_ID,
+  "openswe-grove",
+  "openswe-ocean",
+  "openswe-ember",
+  "openswe-iris",
 ]);
 
 const customThemeListeners = new Set<() => void>();
@@ -270,15 +277,15 @@ export function subscribeToCustomThemes(listener: () => void): () => void {
   };
 }
 
-// Earlier builds shipped every maintainer theme under a t3- prefix; only the
-// genuinely T3-branded palette keeps it. Stored preferences and mixes with the
+// Earlier builds shipped every maintainer theme under a openswe- prefix; only the
+// genuinely OpenSWE-branded palette keeps it. Stored preferences and mixes with the
 // old ids stay readable through this alias table.
 const LEGACY_THEME_ID_ALIASES: Readonly<Record<string, string>> = {
-  [LEGACY_T3_CHAT_DARK_THEME_ID]: T3_CHAT_THEME_ID,
-  "t3-grove": GROVE_THEME_ID,
-  "t3-ocean": OCEAN_THEME_ID,
-  "t3-ember": EMBER_THEME_ID,
-  "t3-iris": IRIS_THEME_ID,
+  [LEGACY_OPEN_SWE_CHAT_DARK_THEME_ID]: OPEN_SWE_CHAT_THEME_ID,
+  "openswe-grove": GROVE_THEME_ID,
+  "openswe-ocean": OCEAN_THEME_ID,
+  "openswe-ember": EMBER_THEME_ID,
+  "openswe-iris": IRIS_THEME_ID,
 };
 
 function normalizeThemeId(themeId: string): string {
@@ -291,27 +298,27 @@ function normalizeThemeId(themeId: string): string {
  * still carries the appearance hint getThemePreferenceMode reads.
  */
 export function canonicalThemePreference(theme: string): string {
-  return theme === LEGACY_T3_CHAT_DARK_THEME_ID ? theme : normalizeThemeId(theme);
+  return theme === LEGACY_OPEN_SWE_CHAT_DARK_THEME_ID ? theme : normalizeThemeId(theme);
 }
 
 function themeIdFromPreference(theme: ThemePreference): string {
   return normalizeThemeId(theme);
 }
 
-// Older builds stored the dark T3 Chat palette as a separate theme. Keep
+// Older builds stored the dark Open SWE Chat palette as a separate theme. Keep
 // those preferences readable while mapping them to the dark variant.
 function legacyThemeMode(theme: ThemePreference): ThemeAppearance | null {
-  return theme === LEGACY_T3_CHAT_DARK_THEME_ID ? "dark" : null;
+  return theme === LEGACY_OPEN_SWE_CHAT_DARK_THEME_ID ? "dark" : null;
 }
 
 /**
- * The palette T3 Code wears with no theme installed, captured from the app's
+ * The palette Open SWE wears with no theme installed, captured from the app's
  * stock tokens (index.css) so a draft seeded from the default look paints the
  * pixels the user is already seeing. Alpha-bearing tokens are flattened over
  * their real backdrops (canvas, or the sidebar for its rows) because theme
  * colors are stored as opaque OKLCH tokens.
  */
-const T3_CODE_LIGHT_THEME_COLORS: ThemeColors = {
+const OPEN_SWE_CODE_LIGHT_THEME_COLORS: ThemeColors = {
   canvas: "#fcfcfc",
   chrome: "#fcfcfc",
   toolbar: "#fcfcfc",
@@ -371,7 +378,7 @@ const T3_CODE_LIGHT_THEME_COLORS: ThemeColors = {
   terminalScrollbarHover: "#bdbdbd",
 };
 
-const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
+const OPEN_SWE_CODE_DARK_THEME_COLORS: ThemeColors = {
   canvas: "#0a0a0a",
   chrome: "#0a0a0a",
   toolbar: "#0a0a0a",
@@ -432,16 +439,16 @@ const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
 };
 
 /**
- * The standard T3 Code look as a theme palette, for seeding a new theme when
+ * The standard Open SWE look as a theme palette, for seeding a new theme when
  * no theme is installed. Distinct from {@link getDefaultThemeColors}, which
- * carries the flagship T3 Chat palette used to fill roles omitted by theme
+ * carries the flagship Open SWE Chat palette used to fill roles omitted by theme
  * files.
  */
 export function getStandardThemeColors(appearance: ThemeAppearance): ThemeColors {
   if (appearance === "dark") {
-    return (standardDarkThemeColors ??= decodeThemeColors(T3_CODE_DARK_THEME_COLORS));
+    return (standardDarkThemeColors ??= decodeThemeColors(OPEN_SWE_CODE_DARK_THEME_COLORS));
   }
-  return (standardLightThemeColors ??= decodeThemeColors(T3_CODE_LIGHT_THEME_COLORS));
+  return (standardLightThemeColors ??= decodeThemeColors(OPEN_SWE_CODE_LIGHT_THEME_COLORS));
 }
 
 type ThemeRgbColor = {
@@ -745,7 +752,7 @@ function solveOklchLightness(
 }
 
 /**
- * The status colors T3 Code shows without a theme, read from the app's own
+ * The status colors Open SWE shows without a theme, read from the app's own
  * tokens (red-500 / amber-500 families). Generated palettes fall back to
  * these instead of the flagship theme's, so an imported or created theme
  * never inherits a brand tint on destructive buttons and warnings.
@@ -1222,7 +1229,7 @@ export function createManagedThemeColors(
 
 /** Theme-file defaults follow the flagship palette for the requested mode. */
 export function getDefaultThemeColors(appearance: ThemeAppearance): ThemeColors {
-  return appearance === "dark" ? T3_CHAT_THEME.variants!.dark! : T3_CHAT_THEME.colors;
+  return appearance === "dark" ? OPEN_SWE_CHAT_THEME.variants!.dark! : OPEN_SWE_CHAT_THEME.colors;
 }
 
 /**

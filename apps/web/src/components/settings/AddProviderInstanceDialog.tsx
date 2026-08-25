@@ -8,7 +8,7 @@ import {
   ProviderDriverKind,
   type EnvironmentId,
   type ProviderInstanceConfig,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -51,7 +51,7 @@ const PROVIDER_ACCENT_SWATCHES = [
  * The full id is formed by prefixing the driver slug — e.g. label "Work" on
  * driver "codex" becomes `codex_work`. Output is trimmed to 48 chars so the
  * final composed id stays under the 64-char slug cap enforced by
- * `ProviderInstanceId` in `@t3tools/contracts`.
+ * `ProviderInstanceId` in `@openswe/contracts`.
  */
 function slugifyLabel(value: string): string {
   return value

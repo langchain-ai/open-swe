@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

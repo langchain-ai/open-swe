@@ -66,7 +66,7 @@ export class DesktopShellEnvironment extends Context.Service<
   {
     readonly installIntoProcess: Effect.Effect<void>;
   }
->()("@t3tools/desktop/shell/DesktopShellEnvironment") {}
+>()("@openswe/desktop/shell/DesktopShellEnvironment") {}
 
 export const MODEL_PROVIDER_ENV_NAMES = [
   "OPENAI_API_KEY",
@@ -235,8 +235,8 @@ const knownWindowsCliDirs = (env: NodeJS.ProcessEnv): ReadonlyArray<string> => [
   ),
 ];
 
-const startMarker = (name: string) => `__T3CODE_ENV_${name}_START__`;
-const endMarker = (name: string) => `__T3CODE_ENV_${name}_END__`;
+const startMarker = (name: string) => `__OPENSWE_ENV_${name}_START__`;
+const endMarker = (name: string) => `__OPENSWE_ENV_${name}_END__`;
 
 const executableName = (command: string): string => command.split(/[\\/]/u).at(-1) ?? command;
 
@@ -470,10 +470,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       if (shellEnvironment.PATH) break;
     }
     applyModelProviderEnvironment(config.env, shellEnvironment);
-    if (
-      config.platform === "darwin" &&
-      config.env.LANGSMITH_GATEWAY_API_KEY === undefined
-    ) {
+    if (config.platform === "darwin" && config.env.LANGSMITH_GATEWAY_API_KEY === undefined) {
       const gatewayKey = yield* readLaunchctlGatewayKey;
       if (Option.isSome(gatewayKey)) {
         config.env.LANGSMITH_GATEWAY_API_KEY = gatewayKey.value;

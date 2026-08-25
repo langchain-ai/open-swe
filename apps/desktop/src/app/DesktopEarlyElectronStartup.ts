@@ -1,4 +1,4 @@
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import { fromLenientJson } from "@openswe/shared/schemaJson";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -49,17 +49,17 @@ function resolveEarlyDesktopSettingsPath(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
 }): string {
-  const t3Home = Option.fromUndefinedOr(input.env.T3CODE_HOME);
+  const opensweHome = Option.fromUndefinedOr(input.env.OPENSWE_HOME);
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: input.joinPath,
-    t3Home,
+    opensweHome,
   });
   const stateDir = resolveDesktopStateDir({
     baseDir,
     isDevelopment: isDevelopmentEnvironment(input.env),
     joinPath: input.joinPath,
-    t3Home,
+    opensweHome,
   });
   return input.joinPath(stateDir, "desktop-settings.json");
 }

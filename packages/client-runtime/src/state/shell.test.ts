@@ -1,5 +1,5 @@
-import type { ServerConfig } from "@t3tools/contracts";
-import { EnvironmentId } from "@t3tools/contracts";
+import type { ServerConfig } from "@openswe/contracts";
+import { EnvironmentId } from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";

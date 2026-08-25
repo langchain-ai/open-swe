@@ -12,11 +12,11 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("reads the persisted linux password-store preference before Electron is ready", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { T3CODE_HOME: "/home/user/.t3-test" },
+      env: { OPENSWE_HOME: "/home/user/.openswe-test" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
-        assert.equal(path, "/home/user/.t3-test/userdata/desktop-settings.json");
+        assert.equal(path, "/home/user/.openswe-test/userdata/desktop-settings.json");
         return JSON.stringify({ linuxPasswordStore: "kwallet6" });
       },
     });
@@ -26,7 +26,7 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("accepts JSONC in the early desktop settings file", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { T3CODE_HOME: "/home/user/.t3-test" },
+      env: { OPENSWE_HOME: "/home/user/.openswe-test" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: () => `{
@@ -53,7 +53,7 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("preserves absolute root paths when resolving early settings", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { T3CODE_HOME: "/" },
+      env: { OPENSWE_HOME: "/" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
@@ -68,14 +68,14 @@ describe("DesktopEarlyElectronStartup", () => {
   it("resolves the early linux Electron switches", () => {
     const options = resolveEarlyLinuxElectronOptions({
       env: {
-        T3CODE_HOME: "/home/user/.t3-test",
+        OPENSWE_HOME: "/home/user/.openswe-test",
         XDG_CURRENT_DESKTOP: "niri",
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
       },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
-        assert.equal(path, "/home/user/.t3-test/userdata/desktop-settings.json");
+        assert.equal(path, "/home/user/.openswe-test/userdata/desktop-settings.json");
         return JSON.stringify({ linuxPasswordStore: "auto" });
       },
     });
@@ -86,7 +86,7 @@ describe("DesktopEarlyElectronStartup", () => {
     });
   });
 
-  it("keeps implicit development state under ~/.open-swe/dev when T3CODE_HOME is unset", () => {
+  it("keeps implicit development state under ~/.open-swe/dev when OPENSWE_HOME is unset", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
       env: {
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
@@ -102,10 +102,10 @@ describe("DesktopEarlyElectronStartup", () => {
     assert.equal(preference, "kwallet");
   });
 
-  it("treats whitespace-only T3CODE_HOME as unconfigured in development", () => {
+  it("treats whitespace-only OPENSWE_HOME as unconfigured in development", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
       env: {
-        T3CODE_HOME: "   ",
+        OPENSWE_HOME: "   ",
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
       },
       homeDirectory: "/home/user",

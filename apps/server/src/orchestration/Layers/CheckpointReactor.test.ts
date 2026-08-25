@@ -9,7 +9,7 @@ import {
   ProviderRuntimeEvent,
   ProviderSession,
   ProviderInstanceId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -18,7 +18,7 @@ import {
   ProjectId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -209,7 +209,7 @@ function runGit(cwd: string, args: ReadonlyArray<string>) {
 }
 
 function createGitRepository() {
-  const cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-checkpoint-handler-"));
+  const cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "openswe-checkpoint-handler-"));
   runGit(cwd, ["init", "--initial-branch=main"]);
   runGit(cwd, ["config", "user.email", "test@example.com"]);
   runGit(cwd, ["config", "user.name", "Test User"]);
@@ -313,7 +313,7 @@ describe("CheckpointReactor", () => {
     );
 
     const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
-      prefix: "t3-checkpoint-reactor-test-",
+      prefix: "openswe-checkpoint-reactor-test-",
     });
     const vcsStatusBroadcasterLayer = Layer.succeed(VcsStatusBroadcaster, {
       getStatus: () => Effect.die("getStatus should not be called in this test"),
@@ -555,8 +555,8 @@ describe("CheckpointReactor", () => {
   it("adopts a drifted checkout as the thread branch on a dedicated worktree", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/renamed-by-agent",
+      threadBranch: "openswe/original-branch",
+      localStatusRefName: "openswe/renamed-by-agent",
     });
 
     harness.provider.emit({
@@ -575,19 +575,19 @@ describe("CheckpointReactor", () => {
       (event) =>
         event.type === "thread.meta-updated" &&
         (event as unknown as { payload: { branch?: string } }).payload.branch ===
-          "t3code/renamed-by-agent",
+          "openswe/renamed-by-agent",
     );
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/renamed-by-agent");
+    expect(thread?.branch).toBe("openswe/renamed-by-agent");
   });
 
   it("does not adopt a drifted checkout when the worktree is shared by another thread", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/renamed-by-agent",
+      threadBranch: "openswe/original-branch",
+      localStatusRefName: "openswe/renamed-by-agent",
       secondThreadSharingWorktree: true,
     });
 
@@ -605,14 +605,14 @@ describe("CheckpointReactor", () => {
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/original-branch");
+    expect(thread?.branch).toBe("openswe/original-branch");
   });
 
   it("does not adopt a temporary placeholder checkout as the thread branch", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/0a1b2c3d",
+      threadBranch: "openswe/original-branch",
+      localStatusRefName: "openswe/0a1b2c3d",
     });
 
     harness.provider.emit({
@@ -629,7 +629,7 @@ describe("CheckpointReactor", () => {
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/original-branch");
+    expect(thread?.branch).toBe("openswe/original-branch");
   });
 
   it("ignores auxiliary thread turn completion while primary turn is active", async () => {
@@ -944,7 +944,7 @@ describe("CheckpointReactor", () => {
 
   it("continues processing runtime events after a single checkpoint runtime failure", async () => {
     const nonRepositorySessionCwd = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3-checkpoint-runtime-non-repo-"),
+      NodePath.join(NodeOS.tmpdir(), "openswe-checkpoint-runtime-non-repo-"),
     );
     tempDirs.push(nonRepositorySessionCwd);
 

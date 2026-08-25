@@ -1,4 +1,4 @@
-import type { UsageProviderKind } from "@t3tools/contracts";
+import type { UsageProviderKind } from "@openswe/contracts";
 
 import { ClaudeAI, type Icon, OpenAI } from "../Icons";
 

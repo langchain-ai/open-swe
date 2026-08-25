@@ -6,7 +6,7 @@ import {
   LangGraphSettings,
   OpenCodeSettings,
   ProviderDriverKind,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import type * as Schema from "effect/Schema";
 import {
   ClaudeAI,

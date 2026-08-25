@@ -1,7 +1,7 @@
 import {
   type ComposerPathSearchState,
   type ComposerPathSearchTarget,
-} from "@t3tools/client-runtime/state/threads";
+} from "@openswe/client-runtime/state/threads";
 
 import { useComposerPathSearch as useComposerPathSearchQuery } from "../state/queries";
 

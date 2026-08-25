@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment } from "@openswe/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 

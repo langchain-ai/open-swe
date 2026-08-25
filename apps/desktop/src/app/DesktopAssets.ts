@@ -34,7 +34,7 @@ export class DesktopAssets extends Context.Service<
       fileName: string,
     ) => Effect.Effect<Option.Option<string>, DesktopAssetProbeError>;
   }
->()("@t3tools/desktop/app/DesktopAssets") {}
+>()("@openswe/desktop/app/DesktopAssets") {}
 
 const resolveResourcePath = Effect.fn("desktop.assets.resolveResourcePath")(function* (
   fileName: string,
@@ -68,7 +68,7 @@ const sourceTreeIconFileNames = {
     universalPng: "blueprint-universal-1024.png",
   },
   prod: {
-    ico: "t3-black-windows.ico",
+    ico: "openswe-black-windows.ico",
     macPng: "black-macos-1024.png",
     universalPng: "black-universal-1024.png",
   },

@@ -6,7 +6,7 @@
  * hosts that have no pending review of their own. That also means a draft lives only as long
  * as the tab does, which is why this is deliberately not persisted.
  */
-import type { ProjectId, PullRequestRef, PullRequestReviewCommentDraft } from "@t3tools/contracts";
+import type { ProjectId, PullRequestRef, PullRequestReviewCommentDraft } from "@openswe/contracts";
 import { create } from "zustand";
 
 export type PendingReviewComment = PullRequestReviewCommentDraft & { readonly id: string };

@@ -22,20 +22,12 @@ async function send(
   return (await response.json()) as SendResult;
 }
 
-async function messages(
-  request: APIRequestContext,
-  channel: string,
-): Promise<SlackMessage[]> {
-  const response = await request.get(
-    `/mock/slack/messages?channel=${encodeURIComponent(channel)}`,
-  );
+async function messages(request: APIRequestContext, channel: string): Promise<SlackMessage[]> {
+  const response = await request.get(`/mock/slack/messages?channel=${encodeURIComponent(channel)}`);
   return (await response.json()) as SlackMessage[];
 }
 
-async function stateText(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<string> {
+async function stateText(request: APIRequestContext, threadId: string): Promise<string> {
   const response = await request.get(`/threads/${threadId}/state`);
   if (!response.ok()) return "";
   const state = (await response.json()) as {
@@ -43,9 +35,7 @@ async function stateText(
   };
   return (state.values?.messages ?? [])
     .map((message) =>
-      typeof message.content === "string"
-        ? message.content
-        : JSON.stringify(message.content),
+      typeof message.content === "string" ? message.content : JSON.stringify(message.content),
     )
     .join("\n");
 }
@@ -55,9 +45,7 @@ async function movedRoot(
   channel: string,
 ): Promise<SlackMessage | undefined> {
   return (await messages(request, channel)).find(
-    (message) =>
-      message.is_bot &&
-      message.text.includes("Continue the existing Open SWE task"),
+    (message) => message.is_bot && message.text.includes("Continue the existing Open SWE task"),
   );
 }
 
@@ -73,9 +61,7 @@ test.describe("Slack thread moves", () => {
     });
     expect(source.webhook.status).toBe("accepted");
 
-    await expect
-      .poll(() => movedRoot(request, "C_TARGET"), { timeout: 60_000 })
-      .toBeTruthy();
+    await expect.poll(() => movedRoot(request, "C_TARGET"), { timeout: 60_000 }).toBeTruthy();
     const destination = await movedRoot(request, "C_TARGET");
     expect(destination).toBeTruthy();
 
@@ -102,8 +88,6 @@ test.describe("Slack thread moves", () => {
         timeout: 60_000,
       })
       .toContain("E2E_MOVE_THREAD");
-    expect(await stateText(request, sourceRetag.thread_id)).toContain(
-      "E2E_SOURCE_RETAG",
-    );
+    expect(await stateText(request, sourceRetag.thread_id)).toContain("E2E_SOURCE_RETAG");
   });
 });

@@ -4,9 +4,7 @@ import { test, expect } from "@playwright/test";
 // config regression that breaks server rendering falls back to the client and
 // still looks correct in a browser, so only the response body catches it.
 test.describe("server rendering", () => {
-  test("an unauthenticated app route redirects before any HTML is sent", async ({
-    request,
-  }) => {
+  test("an unauthenticated app route redirects before any HTML is sent", async ({ request }) => {
     const res = await request.get("/agents", { maxRedirects: 0 });
     expect(res.status()).toBe(307);
     expect(res.headers()["location"]).toBe("/login?redirect=%2Fagents");

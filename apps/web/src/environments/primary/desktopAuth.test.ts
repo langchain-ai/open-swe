@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge } from "@openswe/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "@effect/vitest";
 
 import { __resetDesktopPrimaryAuthForTests, readDesktopPrimaryBearerToken } from "./desktopAuth";

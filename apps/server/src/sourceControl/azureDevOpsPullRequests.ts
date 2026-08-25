@@ -4,8 +4,8 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { PositiveInt, TrimmedNonEmptyString } from "@t3tools/contracts";
-import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { PositiveInt, TrimmedNonEmptyString } from "@openswe/contracts";
+import { decodeJsonResult, formatSchemaError } from "@openswe/shared/schemaJson";
 
 export interface NormalizedAzureDevOpsPullRequestRecord {
   readonly number: number;

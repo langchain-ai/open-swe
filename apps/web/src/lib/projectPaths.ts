@@ -14,4 +14,4 @@ export {
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
   resolveProjectPathForDispatch,
-} from "@t3tools/client-runtime/state/projects";
+} from "@openswe/client-runtime/state/projects";

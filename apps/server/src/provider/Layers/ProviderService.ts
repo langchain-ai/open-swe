@@ -24,8 +24,8 @@ import {
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
-} from "@t3tools/contracts";
-import { causeErrorTag } from "@t3tools/shared/observability";
+} from "@openswe/contracts";
+import { causeErrorTag } from "@openswe/shared/observability";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -234,7 +234,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /**
-   * Attach the `t3-code` MCP server to the session that is about to start.
+   * Attach the `openswe` MCP server to the session that is about to start.
    *
    * This is the only place a credential is minted, so withholding one here is
    * what disables agent browser access everywhere: every adapter already
@@ -615,7 +615,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (!instanceInfo.enabled) {
           return yield* toValidationError(
             "ProviderService.startSession",
-            `Provider instance '${resolvedInstanceId}' is disabled in T3 Code settings.`,
+            `Provider instance '${resolvedInstanceId}' is disabled in Open SWE settings.`,
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));

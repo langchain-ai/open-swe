@@ -13,7 +13,7 @@ import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 
 const makeServerConfigLayer = () =>
-  ServerConfig.layerTest(process.cwd(), { prefix: "t3-secret-store-test-" });
+  ServerConfig.layerTest(process.cwd(), { prefix: "openswe-secret-store-test-" });
 
 const makeServerSecretStoreLayer = () =>
   Layer.provide(ServerSecretStore.layer, makeServerConfigLayer());

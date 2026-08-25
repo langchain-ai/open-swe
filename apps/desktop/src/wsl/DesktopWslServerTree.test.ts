@@ -37,8 +37,8 @@ const environmentLayer = (input: {
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_HOME: input.baseDir,
-          T3CODE_MODE: "desktop",
+          OPENSWE_HOME: input.baseDir,
+          OPENSWE_MODE: "desktop",
         }),
       ),
     ),
@@ -54,7 +54,7 @@ const withTempDir = <A, E, R>(
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const tempDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-wsl-server-tree-test-",
+      prefix: "openswe-wsl-server-tree-test-",
     });
     return yield* run(tempDir);
   }).pipe(Effect.scoped);
@@ -154,7 +154,7 @@ describe("DesktopWslServerTree", () => {
         const dep = yield* fileSystem.exists(path.join(root, "node_modules/effect/package.json"));
         assert.isTrue(dep);
         const marker = yield* fileSystem.readFileString(
-          path.join(root, "t3code-wsl-server-tree.json"),
+          path.join(root, "openswe-wsl-server-tree.json"),
         );
         assert.include(marker, '"version":"1.2.3"');
       }),
@@ -243,8 +243,8 @@ describe("DesktopWslServerTree", () => {
         });
         yield* fileSystem.writeFileString(path.join(serverRoot, "apps/server/dist/bin.mjs"), "x");
 
-        // T3CODE_HOME is set to tempDir, so the desktop state dir resolves to
-        // <tempDir>/userdata (no .t3 segment).
+        // OPENSWE_HOME is set to tempDir, so the desktop state dir resolves to
+        // <tempDir>/userdata (no .openswe segment).
         const treeRoot = path.join(tempDir, "userdata", "wsl-server-tree");
         yield* fileSystem.makeDirectory(path.join(treeRoot, "1.0.0"), { recursive: true });
         yield* fileSystem.makeDirectory(path.join(treeRoot, "1.2.3.partial"), { recursive: true });

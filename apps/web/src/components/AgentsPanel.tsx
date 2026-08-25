@@ -16,12 +16,12 @@ import type {
   AgentPanelModel,
   AgentPanelWorkflowGroup,
   RuntimeSubagent,
-} from "@t3tools/client-runtime/state/subagentRuntime";
+} from "@openswe/client-runtime/state/subagentRuntime";
 import {
   formatSubagentModelLabel,
   formatSubagentTokenCount,
-} from "@t3tools/client-runtime/state/subagentRuntime";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+} from "@openswe/client-runtime/state/subagentRuntime";
+import type { EnvironmentId, ThreadId } from "@openswe/contracts";
 import { Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 

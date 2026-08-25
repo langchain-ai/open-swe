@@ -33,14 +33,14 @@ import {
 
 const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const MOBILE_ROOT = NodePath.join(REPO_ROOT, "apps/mobile");
-const ANDROID_PACKAGE = "com.t3tools.t3code";
-const APP_SCHEME = "t3code";
-const IOS_READY_FILENAME = "T3ShowcaseReadyScene";
+const ANDROID_PACKAGE = "com.openswe.openswe";
+const APP_SCHEME = "openswe";
+const IOS_READY_FILENAME = "OpenSWEShowcaseReadyScene";
 const SERVER_HOST = "0.0.0.0";
 const IOS_SIMULATOR_ARCH = NodeProcess.arch === "arm64" ? "arm64" : "x86_64";
 const IOS_APP_PATH = NodePath.join(
   MOBILE_ROOT,
-  ".showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app",
+  ".showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/OpenSWE.app",
 );
 const ANDROID_APK_PATH = NodePath.join(
   MOBILE_ROOT,
@@ -64,7 +64,7 @@ const MOBILE_BUILD_ENV = {
   EXPO_NO_GIT_STATUS: "1",
   // Lets the capture build require full screen on iPad so the app can rotate
   // itself to landscape (see app.config.ts).
-  T3_SHOWCASE_CAPTURE_BUILD: "1",
+  OPEN_SWE_SHOWCASE_CAPTURE_BUILD: "1",
   JAVA_HOME:
     NodeProcess.env.JAVA_HOME ??
     (NodeProcess.platform === "darwin"
@@ -414,7 +414,7 @@ function printUsage(config: ShowcaseConfig): void {
   NodeProcess.stdout.write(`App screenshot showcase
 
 Usage:
-  pnpm --filter @t3tools/mobile screenshots [options]
+  pnpm --filter @openswe/mobile screenshots [options]
 
 Options:
   --platform ios|android|all  Capture one platform (repeatable)
@@ -715,9 +715,9 @@ async function buildIos(): Promise<string> {
     "xcodebuild",
     [
       "-workspace",
-      NodePath.join(MOBILE_ROOT, "ios/T3Code.xcworkspace"),
+      NodePath.join(MOBILE_ROOT, "ios/OpenSWE.xcworkspace"),
       "-scheme",
-      "T3Code",
+      "OpenSWE",
       "-configuration",
       "Debug",
       "-sdk",
@@ -956,7 +956,7 @@ async function captureIos(
   const metroUrl = `http://${metroHost}:${config.metroPort}?disableOnboarding=1`;
   const scenePath = NodePath.join(
     await iosAppContainer(simulator.udid),
-    "Library/Caches/T3ShowcaseScene",
+    "Library/Caches/OpenSWEShowcaseScene",
   );
   const readyPath = NodePath.join(
     await iosAppContainer(simulator.udid),
@@ -1146,7 +1146,7 @@ async function waitForAndroidShowcaseScene(
       "run-as",
       ANDROID_PACKAGE,
       "cat",
-      "files/t3-showcase-ready",
+      "files/openswe-showcase-ready",
     ]).catch(() => "");
     if (readyScene.trim() === scene) return;
     await delay(500);
@@ -1157,7 +1157,7 @@ async function waitForAndroidShowcaseScene(
 async function writeAndroidShowcaseScene(serial: string, scene: ShowcaseScene): Promise<void> {
   await runAdb(serial, [
     "shell",
-    `run-as ${ANDROID_PACKAGE} sh -c 'mkdir -p files && rm -f files/t3-showcase-ready && printf %s ${scene} > files/t3-showcase-scene'`,
+    `run-as ${ANDROID_PACKAGE} sh -c 'mkdir -p files && rm -f files/openswe-showcase-ready && printf %s ${scene} > files/openswe-showcase-scene'`,
   ]);
 }
 
@@ -1316,7 +1316,7 @@ async function main(): Promise<void> {
   }
 
   const showcaseRootDir = await NodeFSP.mkdtemp(
-    NodePath.join(NodeOS.tmpdir(), "t3-mobile-showcase-"),
+    NodePath.join(NodeOS.tmpdir(), "openswe-mobile-showcase-"),
   );
   const showcaseServers: NodeChildProcess.ChildProcess[] = [];
   const showcaseEnvironments: Array<{

@@ -2,11 +2,11 @@ import { assert, describe } from "@effect/vitest";
 
 import { createOxlintRuleHarness } from "../test/utils.ts";
 
-const rule = createOxlintRuleHarness("t3code/no-native-title-tooltip", {
+const rule = createOxlintRuleHarness("openswe/no-native-title-tooltip", {
   filename: "fixture.tsx",
 });
 
-describe("t3code/no-native-title-tooltip", () => {
+describe("openswe/no-native-title-tooltip", () => {
   rule.valid(
     "allows intrinsic elements without a title attribute",
     `const el = <span className="truncate">Truncated text</span>;`,
@@ -29,7 +29,7 @@ describe("t3code/no-native-title-tooltip", () => {
 
   rule.valid("allows the svg title child element", `const el = <svg><title>QR code</title></svg>;`);
 
-  rule.valid("allows document.title assignments", `document.title = "Thread · T3 Code";`);
+  rule.valid("allows document.title assignments", `document.title = "Thread · Open SWE";`);
 
   rule.invalid(
     "reports title on a truncating span",

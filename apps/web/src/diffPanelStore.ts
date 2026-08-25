@@ -1,5 +1,5 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import { scopedThreadKey } from "@openswe/client-runtime/environment";
+import type { ScopedThreadRef, TurnId } from "@openswe/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -124,7 +124,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
         }),
     }),
     {
-      name: "t3code:diff-panel-state:v1",
+      name: "openswe:diff-panel-state:v1",
       version: 1,
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),

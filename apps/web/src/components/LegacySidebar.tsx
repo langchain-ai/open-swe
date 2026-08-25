@@ -48,20 +48,20 @@ import {
   type ResolvedKeybindingsConfig,
   type SidebarProjectGroupingMode,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   parseScopedThreadKey,
   scopedProjectKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+} from "@openswe/client-runtime/environment";
+import { safeErrorLogAttributes } from "@openswe/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/client-runtime/state/runtime";
 import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -69,7 +69,7 @@ import {
   type SidebarProjectSortOrder,
   type SidebarThreadPreviewCount,
   type SidebarThreadSortOrder,
-} from "@t3tools/contracts/settings";
+} from "@openswe/contracts/settings";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";

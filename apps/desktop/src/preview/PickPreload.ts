@@ -12,7 +12,7 @@ import type {
   PreviewAnnotationStrokeTarget,
   PreviewAnnotationStyleChange,
   PreviewAnnotationSubmission,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import { resolveAnnotationSubmission } from "./AnnotationKeyboard.ts";
 import { previewAnnotationStyles } from "./AnnotationStyles.generated.ts";
@@ -25,10 +25,10 @@ import {
   MOUSE_NAVIGATE_CHANNEL,
   START_PICK_CHANNEL,
 } from "./GuestProtocol.ts";
-const OVERLAY_ATTRIBUTE = "data-t3code-annotation-ui";
+const OVERLAY_ATTRIBUTE = "data-openswe-annotation-ui";
 const Z_INDEX_OVERLAY = 2147483646;
-const PRIMARY = "var(--t3-primary)";
-const PRIMARY_FILL = "color-mix(in srgb, var(--t3-primary) 10%, transparent)";
+const PRIMARY = "var(--openswe-primary)";
+const PRIMARY_FILL = "color-mix(in srgb, var(--openswe-primary) 10%, transparent)";
 const MAX_MARQUEE_ELEMENTS = 20;
 const CONTENT_LAYER_Z_INDEX = 1;
 const CHROME_LAYER_Z_INDEX = 10;
@@ -59,22 +59,22 @@ const applyAnnotationTheme = (
   if (!theme) return;
   host.style.colorScheme = theme.colorScheme;
   const variables = {
-    "--t3-radius": theme.radius,
-    "--t3-background": theme.background,
-    "--t3-foreground": theme.foreground,
-    "--t3-popover": theme.popover,
-    "--t3-popover-foreground": theme.popoverForeground,
-    "--t3-primary": theme.primary,
-    "--t3-primary-foreground": theme.primaryForeground,
-    "--t3-muted": theme.muted,
-    "--t3-muted-foreground": theme.mutedForeground,
-    "--t3-accent": theme.accent,
-    "--t3-accent-foreground": theme.accentForeground,
-    "--t3-border": theme.border,
-    "--t3-input": theme.input,
-    "--t3-ring": theme.ring,
-    "--t3-font-sans": theme.fontSans,
-    "--t3-font-mono": theme.fontMono,
+    "--openswe-radius": theme.radius,
+    "--openswe-background": theme.background,
+    "--openswe-foreground": theme.foreground,
+    "--openswe-popover": theme.popover,
+    "--openswe-popover-foreground": theme.popoverForeground,
+    "--openswe-primary": theme.primary,
+    "--openswe-primary-foreground": theme.primaryForeground,
+    "--openswe-muted": theme.muted,
+    "--openswe-muted-foreground": theme.mutedForeground,
+    "--openswe-accent": theme.accent,
+    "--openswe-accent-foreground": theme.accentForeground,
+    "--openswe-border": theme.border,
+    "--openswe-input": theme.input,
+    "--openswe-ring": theme.ring,
+    "--openswe-font-sans": theme.fontSans,
+    "--openswe-font-mono": theme.fontMono,
   };
   for (const [name, value] of Object.entries(variables)) {
     host.style.setProperty(name, value);
@@ -405,7 +405,7 @@ function startAnnotation(): void {
   root.style.cssText = "pointer-events:none";
   const cursorStyle = document.createElement("style");
   cursorStyle.setAttribute(OVERLAY_ATTRIBUTE, "");
-  cursorStyle.textContent = `html[data-t3code-annotation-tool] body, html[data-t3code-annotation-tool] body * { cursor: crosshair !important; } [${OVERLAY_ATTRIBUTE}], [${OVERLAY_ATTRIBUTE}] * { cursor: default !important; } [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-inner-spin-button, [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-outer-spin-button { appearance:none; margin:0; }`;
+  cursorStyle.textContent = `html[data-openswe-annotation-tool] body, html[data-openswe-annotation-tool] body * { cursor: crosshair !important; } [${OVERLAY_ATTRIBUTE}], [${OVERLAY_ATTRIBUTE}] * { cursor: default !important; } [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-inner-spin-button, [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-outer-spin-button { appearance:none; margin:0; }`;
   document.documentElement.appendChild(cursorStyle);
   shadowRoot.appendChild(root);
 
@@ -522,7 +522,7 @@ function startAnnotation(): void {
     }
     if (tool !== "select") hoverOutline.style.display = "none";
     if (tool !== "marquee") marqueeBox.style.display = "none";
-    document.documentElement.setAttribute("data-t3code-annotation-tool", tool);
+    document.documentElement.setAttribute("data-openswe-annotation-tool", tool);
   };
 
   const removeSelected = (target: SelectedElement): void => {
@@ -1133,7 +1133,7 @@ function startAnnotation(): void {
           regions.push(region);
           const regionBox = createBox(
             PRIMARY,
-            "color-mix(in srgb, var(--t3-primary) 6%, transparent)",
+            "color-mix(in srgb, var(--openswe-primary) 6%, transparent)",
           );
           regionBox.setAttribute("data-region-id", region.id);
           positionBox(regionBox, rect);
@@ -1194,7 +1194,7 @@ function startAnnotation(): void {
     if (editorLayoutFrame !== null) window.cancelAnimationFrame(editorLayoutFrame);
     ipcRenderer.off(CANCEL_PICK_CHANNEL, onCancel);
     ipcRenderer.off(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
-    document.documentElement.removeAttribute("data-t3code-annotation-tool");
+    document.documentElement.removeAttribute("data-openswe-annotation-tool");
     cursorStyle.remove();
     host.remove();
     activeSession = null;

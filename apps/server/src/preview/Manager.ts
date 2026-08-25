@@ -25,12 +25,12 @@ import {
   PreviewSessionLookupError,
   type PreviewSessionSnapshot,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   isPreviewUrlNormalizationError,
   newPreviewTabId,
   normalizePreviewUrl,
-} from "@t3tools/shared/preview";
+} from "@openswe/shared/preview";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -58,7 +58,7 @@ export class PreviewManager extends Context.Service<
     readonly events: Stream.Stream<PreviewEvent>;
     readonly subscribeEvents: Effect.Effect<PubSub.Subscription<PreviewEvent>, never, Scope.Scope>;
   }
->()("t3/preview/Manager/PreviewManager") {}
+>()("openswe/preview/Manager/PreviewManager") {}
 
 interface PreviewSessionState {
   readonly threadId: string;

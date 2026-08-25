@@ -1,4 +1,4 @@
-import type { HostPowerSnapshot } from "@t3tools/contracts";
+import type { HostPowerSnapshot } from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";

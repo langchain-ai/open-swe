@@ -4,8 +4,8 @@ import type {
   PreviewSessionSnapshot,
   PreviewViewportSetting,
   ScopedThreadRef,
-} from "@t3tools/contracts";
-import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/contracts";
+import type { AtomCommandResult } from "@openswe/client-runtime/state/runtime";
 
 import { browserDefaultOpenViewport, resolveBrowserDefaults } from "~/browser/browserDefaults";
 import { applyPreviewServerSnapshot, rememberPreviewUrl } from "~/previewStateStore";

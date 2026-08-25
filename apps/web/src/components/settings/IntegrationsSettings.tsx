@@ -1,5 +1,5 @@
 /**
- * Integrations settings - preferences for surfaces T3 Code embeds rather than
+ * Integrations settings - preferences for surfaces Open SWE embeds rather than
  * owns. Browser is the first section: the defaults a preview tab opens at,
  * applied to both hand-opened tabs and agent `preview_open` calls that don't
  * state their own size.
@@ -19,8 +19,8 @@ import {
   PREVIEW_ZOOM_LEVELS,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
-import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
+} from "@openswe/contracts";
+import { PREVIEW_VIEWPORT_PRESETS } from "@openswe/shared/previewViewport";
 import { InfoIcon } from "lucide-react";
 import type { ReactNode } from "react";
 

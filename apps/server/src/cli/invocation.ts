@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 
-import { HostProcessArguments } from "@t3tools/shared/hostProcess";
+import { HostProcessArguments } from "@openswe/shared/hostProcess";
 
 import packageJson from "../../package.json" with { type: "json" };
 
@@ -16,7 +16,7 @@ export type CliRunner = "npx" | "pnpm dlx" | "bunx";
  *   bunx     ~/.bun/install/cache/... or $TMPDIR/bunx-<uid>-<spec>/...
  *
  * Global installs and repo checkouts match none of these and return null.
- * Detection is best-effort; callers must fail closed to a plain `t3` command.
+ * Detection is best-effort; callers must fail closed to a plain `openswe` command.
  */
 export function detectCliRunner(entryPath: string): CliRunner | null {
   const path = entryPath.replaceAll("\\", "/");
@@ -37,19 +37,19 @@ export function detectCliRunner(entryPath: string): CliRunner | null {
 }
 
 /**
- * The `t3` package spec to suggest. The literal spec the user typed (e.g.
- * `t3@nightly`) is resolved away before our process starts, so re-derive it
+ * The `openswe` package spec to suggest. The literal spec the user typed (e.g.
+ * `openswe@nightly`) is resolved away before our process starts, so re-derive it
  * from the running version: nightly builds re-suggest the nightly channel,
  * anything else suggests the bare package.
  */
 export function suggestedPackageSpec(version: string): string {
-  return version.includes("-nightly.") ? "t3@nightly" : "t3";
+  return version.includes("-nightly.") ? "openswe@nightly" : "openswe";
 }
 
 /**
- * Render a `t3 <subcommand>` suggestion that matches how this process was
- * launched, so copy/pasting it actually works: `npx t3 connect` suggests
- * `npx t3 serve`, a global install suggests `t3 serve`, and a nightly build
+ * Render a `openswe <subcommand>` suggestion that matches how this process was
+ * launched, so copy/pasting it actually works: `npx openswe connect` suggests
+ * `npx openswe serve`, a global install suggests `openswe serve`, and a nightly build
  * keeps the `@nightly` tag.
  */
 export function formatCliCommand(input: {
@@ -59,7 +59,7 @@ export function formatCliCommand(input: {
 }): string {
   const runner = detectCliRunner(input.entryPath);
   if (runner === null) {
-    return `t3 ${input.subcommand}`;
+    return `openswe ${input.subcommand}`;
   }
   return `${runner} ${suggestedPackageSpec(input.version)} ${input.subcommand}`;
 }

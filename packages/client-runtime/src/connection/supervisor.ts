@@ -1,4 +1,4 @@
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+import { withRelayClientTracing } from "@openswe/shared/relayTracing";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -206,7 +206,7 @@ export class EnvironmentSupervisor extends Context.Service<
     readonly disconnect: Effect.Effect<void>;
     readonly retryNow: Effect.Effect<void>;
   }
->()("@t3tools/client-runtime/connection/supervisor/EnvironmentSupervisor") {}
+>()("@openswe/client-runtime/connection/supervisor/EnvironmentSupervisor") {}
 
 export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   entry: ConnectionCatalogEntry,

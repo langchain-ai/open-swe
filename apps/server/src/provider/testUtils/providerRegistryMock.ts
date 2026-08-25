@@ -1,5 +1,5 @@
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
-import type { ServerProvider } from "@t3tools/contracts";
+import type { ServerProvider } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";

@@ -147,7 +147,7 @@ export function CodeFontPreview() {
 // A zsh-style prompt: green arrow, cyan project, blue/red git segment,
 // yellow dirty marker. It doubles as the echo loop's fresh-line prompt.
 const TERMINAL_PROMPT =
-  "\x1b[1;32m→\x1b[0m \x1b[1;36mt3code\x1b[0m \x1b[1;34mgit:(\x1b[1;31mmain\x1b[1;34m)\x1b[0m \x1b[1;33m✗\x1b[0m ";
+  "\x1b[1;32m→\x1b[0m \x1b[1;36mopenswe\x1b[0m \x1b[1;34mgit:(\x1b[1;31mmain\x1b[1;34m)\x1b[0m \x1b[1;33m✗\x1b[0m ";
 // A dev-server startup: brand line, addresses, a test summary, and a READY
 // badge. Together the lines cover bold, dim, underline, the six accent
 // colors, and a background cell, so a font choice shows every SGR the

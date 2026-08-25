@@ -2,7 +2,7 @@ import {
   CommandId,
   ORCHESTRATION_WS_METHODS,
   type ClientOrchestrationCommand,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

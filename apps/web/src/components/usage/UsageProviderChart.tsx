@@ -1,14 +1,14 @@
-import type { UsageProviderKind } from "@t3tools/contracts";
+import type { UsageProviderKind } from "@openswe/contracts";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
+import type { DailyTotals, HourlyTotals } from "@openswe/shared/usageMerge";
 import {
   formatDayShort,
   formatHourShort,
   formatRelativeHourShort,
   formatTokens,
   formatUsd,
-} from "@t3tools/shared/usageFormat";
+} from "@openswe/shared/usageFormat";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION } from "./usageProviders";
 
 const VIEW_WIDTH = 960;

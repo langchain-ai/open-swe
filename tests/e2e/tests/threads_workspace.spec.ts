@@ -1,10 +1,4 @@
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Locator,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 const USER = {
   login: "threads-workspace-e2e",
@@ -265,10 +259,7 @@ function paginationThreads(): Array<ThreadSeed> {
 // Earlier specs leave their own threads behind for this user, and the sidebar
 // counts every one of them — so start from an empty workspace.
 async function purgeOwnedThreads(request: APIRequestContext) {
-  for (const owner of [
-    { github_login: USER.login },
-    { triggering_user_email: USER.email },
-  ]) {
+  for (const owner of [{ github_login: USER.login }, { triggering_user_email: USER.email }]) {
     for (let page = 0; page < 20; page += 1) {
       const searchResponse = await request.post("/threads/search", {
         data: { metadata: owner, limit: 100, offset: 0 },
@@ -286,10 +277,7 @@ async function purgeOwnedThreads(request: APIRequestContext) {
   }
 }
 
-async function seedThreads(
-  request: APIRequestContext,
-  threads: Array<ThreadSeed>,
-) {
+async function seedThreads(request: APIRequestContext, threads: Array<ThreadSeed>) {
   await purgeOwnedThreads(request);
   for (const thread of threads) {
     const resetResponse = await request.delete(`/threads/${thread.id}`);
@@ -358,10 +346,7 @@ async function seedSchedules(request: APIRequestContext) {
   }
 }
 
-async function deleteScheduleThreads(
-  request: APIRequestContext,
-  scheduleId: string,
-) {
+async function deleteScheduleThreads(request: APIRequestContext, scheduleId: string) {
   for (;;) {
     const searchResponse = await request.post("/threads/search", {
       data: { metadata: { schedule_id: scheduleId }, limit: 100, offset: 0 },
@@ -399,9 +384,7 @@ function waitForThreadsPage(page: Page, expected: Record<string, string>) {
     return (
       response.request().method() === "GET" &&
       url.pathname === "/dashboard/api/threads/page" &&
-      Object.entries(expected).every(
-        ([key, value]) => url.searchParams.get(key) === value,
-      )
+      Object.entries(expected).every(([key, value]) => url.searchParams.get(key) === value)
     );
   });
 }
@@ -466,25 +449,19 @@ test.describe("threads workspace", () => {
 
     const threadChunkGate = deferred();
     const threadChunkStarted = deferred();
-    await page.route(
-      /\/assets\/_threadId-(?!pendingComponent-)[^/]+\.js$/,
-      async (route) => {
-        threadChunkStarted.resolve();
-        await threadChunkGate.promise;
-        await route.continue();
-      },
-    );
+    await page.route(/\/assets\/_threadId-(?!pendingComponent-)[^/]+\.js$/, async (route) => {
+      threadChunkStarted.resolve();
+      await threadChunkGate.promise;
+      await route.continue();
+    });
 
     await page.goto("/agents");
-    await expect(
-      page.getByText("Ask Open SWE to build, fix bugs, explore"),
-    ).toBeVisible();
+    await expect(page.getByText("Ask Open SWE to build, fix bugs, explore")).toBeVisible();
     await profileStarted.promise;
 
     await page.evaluate(() => {
       const seen = { value: false };
-      (window as unknown as Record<string, unknown>).__newThreadDialogSeen =
-        seen;
+      (window as unknown as Record<string, unknown>).__newThreadDialogSeen = seen;
       const detect = () => {
         if (document.body.textContent?.includes("Choose your default model")) {
           seen.value = true;
@@ -509,23 +486,16 @@ test.describe("threads workspace", () => {
     threadChunkGate.resolve();
 
     await expect(page).toHaveURL(`/agents/${threadId}`);
-    await expect(
-      page.getByText("This thread has no messages yet."),
-    ).toBeVisible();
+    await expect(page.getByText("This thread has no messages yet.")).toBeVisible();
     const flashed = await page.evaluate(
       () =>
-        (
-          (window as unknown as Record<string, unknown>)
-            .__newThreadDialogSeen as { value: boolean }
-        ).value,
+        ((window as unknown as Record<string, unknown>).__newThreadDialogSeen as { value: boolean })
+          .value,
     );
     expect(flashed).toBe(false);
   });
 
-  test("uses real thread metadata for focus and alternate groupings", async ({
-    page,
-    request,
-  }) => {
+  test("uses real thread metadata for focus and alternate groupings", async ({ page, request }) => {
     await seedThreads(request, [...workspaceThreads(), ...automationThreads()]);
     await loginAs(page);
 
@@ -534,9 +504,7 @@ test.describe("threads workspace", () => {
     expect((await initialResponse).ok()).toBeTruthy();
 
     const main = page.getByRole("main").last();
-    await expect(
-      main.getByRole("heading", { name: "Threads", level: 1 }),
-    ).toBeVisible();
+    await expect(main.getByRole("heading", { name: "Threads", level: 1 })).toBeVisible();
 
     const searchResponse = waitForThreadsPage(page, {
       scope: "interactive",
@@ -568,9 +536,7 @@ test.describe("threads workspace", () => {
     await expect(page).toHaveURL(/group=status/);
     await expect(boardColumn(main, "Finished")).toContainText(TITLES.ready);
     await expect(boardColumn(main, "Running")).toContainText(TITLES.running);
-    await expect(boardColumn(main, "Interrupted")).toContainText(
-      TITLES.interrupted,
-    );
+    await expect(boardColumn(main, "Interrupted")).toContainText(TITLES.interrupted);
     await expect(boardColumn(main, "Error")).toContainText(TITLES.error);
 
     await grouping.selectOption("source");
@@ -581,23 +547,17 @@ test.describe("threads workspace", () => {
     await expect(boardColumn(main, "Dashboard")).toContainText(TITLES.ready);
 
     await grouping.selectOption("repo");
-    await expect(boardColumn(main, "acme/alpha")).toContainText(
-      TITLES.attention,
-    );
+    await expect(boardColumn(main, "acme/alpha")).toContainText(TITLES.attention);
     await expect(boardColumn(main, "acme/beta")).toContainText(TITLES.running);
     await expect(boardColumn(main, "acme/delta")).toContainText(TITLES.error);
-    await expect(boardColumn(main, "acme/epsilon")).toContainText(
-      TITLES.interrupted,
-    );
+    await expect(boardColumn(main, "acme/epsilon")).toContainText(TITLES.interrupted);
     await expect(boardColumn(main, "acme/gamma")).toContainText(TITLES.ready);
 
     await grouping.selectOption("pr");
     await expect(boardColumn(main, "Draft")).toContainText(TITLES.attention);
     await expect(boardColumn(main, "Open")).toContainText(TITLES.ready);
     await expect(boardColumn(main, "Merged")).toContainText(TITLES.done);
-    await expect(boardColumn(main, "No pull request")).toContainText(
-      TITLES.running,
-    );
+    await expect(boardColumn(main, "No pull request")).toContainText(TITLES.running);
 
     const sourceResponse = waitForThreadsPage(page, {
       scope: "interactive",
@@ -616,9 +576,7 @@ test.describe("threads workspace", () => {
       source: "github",
       resolved: "false",
     });
-    await triFilter(main, "Resolved")
-      .getByRole("button", { name: "No", exact: true })
-      .click();
+    await triFilter(main, "Resolved").getByRole("button", { name: "No", exact: true }).click();
     expect((await resolvedResponse).ok()).toBeTruthy();
     await expect(main).not.toContainText(TITLES.done);
 
@@ -652,21 +610,15 @@ test.describe("threads workspace", () => {
     await statusFilter(main).selectOption("any");
     expect((await resetStatusResponse).ok()).toBeTruthy();
 
-    await triFilter(main, "Resolved")
-      .getByRole("button", { name: "Any", exact: true })
-      .click();
-    await expect
-      .poll(() => new URL(page.url()).searchParams.has("resolved"))
-      .toBe(false);
+    await triFilter(main, "Resolved").getByRole("button", { name: "Any", exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.has("resolved")).toBe(false);
 
     const viewedResponse = waitForThreadsPage(page, {
       scope: "interactive",
       q: WORKSPACE_QUERY,
       viewed: "true",
     });
-    await triFilter(main, "Viewed")
-      .getByRole("button", { name: "Yes", exact: true })
-      .click();
+    await triFilter(main, "Viewed").getByRole("button", { name: "Yes", exact: true }).click();
     expect((await viewedResponse).ok()).toBeTruthy();
     await expect(main).toContainText(TITLES.ready);
     await expect(main).toContainText(TITLES.done);
@@ -674,29 +626,17 @@ test.describe("threads workspace", () => {
     await expect(main).not.toContainText(TITLES.running);
   });
 
-  test("shows the board focus groups in the sidebar", async ({
-    page,
-    request,
-  }, testInfo) => {
-    await seedThreads(request, [
-      ...workspaceThreads(),
-      ...resolvedOverflowThreads(),
-    ]);
+  test("shows the board focus groups in the sidebar", async ({ page, request }, testInfo) => {
+    await seedThreads(request, [...workspaceThreads(), ...resolvedOverflowThreads()]);
     await loginAs(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents/threads");
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    await sidebar
-      .getByRole("button", { name: "Group and filter threads" })
-      .click();
-    await page
-      .getByRole("menuitemradio", { name: "Focus", exact: true })
-      .click();
+    await sidebar.getByRole("button", { name: "Group and filter threads" }).click();
+    await page.getByRole("menuitemradio", { name: "Focus", exact: true }).click();
     await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-    await page
-      .getByRole("menuitemcheckbox", { name: "Include resolved", exact: true })
-      .click();
+    await page.getByRole("menuitemcheckbox", { name: "Include resolved", exact: true }).click();
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
 
@@ -732,10 +672,7 @@ test.describe("threads workspace", () => {
     });
   });
 
-  test("persists layout and column order and resolves threads", async ({
-    page,
-    request,
-  }) => {
+  test("persists layout and column order and resolves threads", async ({ page, request }) => {
     await seedThreads(request, workspaceThreads());
     await loginAs(page);
 
@@ -743,9 +680,7 @@ test.describe("threads workspace", () => {
       scope: "interactive",
       q: WORKSPACE_QUERY,
     });
-    await page.goto(
-      `/agents/threads?q=${encodeURIComponent(WORKSPACE_QUERY)}&group=focus`,
-    );
+    await page.goto(`/agents/threads?q=${encodeURIComponent(WORKSPACE_QUERY)}&group=focus`);
     expect((await pageResponse).ok()).toBeTruthy();
 
     const main = page.getByRole("main").last();
@@ -764,79 +699,42 @@ test.describe("threads workspace", () => {
 
     await page.reload();
     await expect(main.locator("article")).toHaveCount(0);
-    const slackGroup = main.locator(
-      'section:has(> div > span:text-is("Slack"))',
-    );
-    const githubGroup = main.locator(
-      'section:has(> div > span:text-is("GitHub"))',
-    );
+    const slackGroup = main.locator('section:has(> div > span:text-is("Slack"))');
+    const githubGroup = main.locator('section:has(> div > span:text-is("GitHub"))');
     await expect(slackGroup).toContainText(TITLES.running);
     await expect(githubGroup).toContainText(TITLES.attention);
     await expect(githubGroup).toContainText(TITLES.interrupted);
     await expect(slackGroup).not.toContainText(TITLES.attention);
 
     await main.getByRole("button", { name: "Board" }).click();
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("layout"))
-      .toBe("board");
+    await expect.poll(() => new URL(page.url()).searchParams.get("layout")).toBe("board");
     await main.getByLabel("Group by").selectOption("focus");
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("group"))
-      .toBe("focus");
-    await expectBoardOrder(main, [
-      "Needs attention",
-      "In progress",
-      "Ready",
-      "Done",
-    ]);
-    await main
-      .getByRole("button", { name: "Move Needs attention right" })
-      .click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("group")).toBe("focus");
+    await expectBoardOrder(main, ["Needs attention", "In progress", "Ready", "Done"]);
+    await main.getByRole("button", { name: "Move Needs attention right" }).click();
 
     await expect
       .poll(() => new URL(page.url()).searchParams.get("order"))
       .toBe("progress|attention|ready|done");
-    await expectBoardOrder(main, [
-      "In progress",
-      "Needs attention",
-      "Ready",
-      "Done",
-    ]);
+    await expectBoardOrder(main, ["In progress", "Needs attention", "Ready", "Done"]);
 
     const doneHeader = boardColumn(main, "Done").locator('[draggable="true"]');
     await doneHeader.dragTo(boardColumn(main, "Needs attention"));
-    await expectBoardOrder(main, [
-      "In progress",
-      "Done",
-      "Needs attention",
-      "Ready",
-    ]);
+    await expectBoardOrder(main, ["In progress", "Done", "Needs attention", "Ready"]);
     await expect
       .poll(() => new URL(page.url()).searchParams.get("order"))
       .toBe("progress|done|attention|ready");
 
     await page.reload();
-    await expectBoardOrder(main, [
-      "In progress",
-      "Done",
-      "Needs attention",
-      "Ready",
-    ]);
+    await expectBoardOrder(main, ["In progress", "Done", "Needs attention", "Ready"]);
     expect(
-      await page.evaluate(() =>
-        window.localStorage.getItem("open-swe:thread-board-order:focus"),
-      ),
+      await page.evaluate(() => window.localStorage.getItem("open-swe:thread-board-order:focus")),
     ).toBe("progress|done|attention|ready");
 
     await page.goto(
       `/agents/threads?q=${encodeURIComponent(WORKSPACE_QUERY)}&layout=board&group=focus`,
     );
-    await expectBoardOrder(main, [
-      "In progress",
-      "Done",
-      "Needs attention",
-      "Ready",
-    ]);
+    await expectBoardOrder(main, ["In progress", "Done", "Needs attention", "Ready"]);
 
     const readyCard = boardColumn(main, "Ready")
       .locator("article")
@@ -844,8 +742,7 @@ test.describe("threads workspace", () => {
     const resolveResponse = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
+        new URL(response.url()).pathname === `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
     );
     await readyCard.getByRole("button", { name: "Resolve thread" }).click();
     expect((await resolveResponse).ok()).toBeTruthy();
@@ -858,8 +755,7 @@ test.describe("threads workspace", () => {
     const reopenResponse = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
+        new URL(response.url()).pathname === `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
     );
     await resolvedCard.getByRole("button", { name: "Reopen thread" }).click();
     expect((await reopenResponse).ok()).toBeTruthy();
@@ -876,9 +772,7 @@ test.describe("threads workspace", () => {
       limit: "25",
       offset: "0",
     });
-    await page.goto(
-      "/agents/threads?layout=list&group=none&q=E2E%20Pagination",
-    );
+    await page.goto("/agents/threads?layout=list&group=none&q=E2E%20Pagination");
     expect((await firstPageResponse).ok()).toBeTruthy();
 
     const main = page.getByRole("main").last();
@@ -906,10 +800,7 @@ test.describe("threads workspace", () => {
 });
 
 test.describe("automation run history", () => {
-  test("retries failures and scopes global and per-automation runs", async ({
-    page,
-    request,
-  }) => {
+  test("retries failures and scopes global and per-automation runs", async ({ page, request }) => {
     await deleteScheduleThreads(request, SCHEDULE_IDS.daily);
     await deleteScheduleThreads(request, SCHEDULE_IDS.weekly);
     await seedThreads(request, [...workspaceThreads(), ...automationThreads()]);
@@ -932,10 +823,7 @@ test.describe("automation run history", () => {
     const producedHistoryResponse = await page.request.get(
       `/dashboard/api/threads/page?scope=automation&automation_id=${SCHEDULE_IDS.daily}&limit=100&offset=0`,
     );
-    expect(
-      producedHistoryResponse.ok(),
-      await producedHistoryResponse.text(),
-    ).toBeTruthy();
+    expect(producedHistoryResponse.ok(), await producedHistoryResponse.text()).toBeTruthy();
     const producedHistory = (await producedHistoryResponse.json()) as {
       items: Array<{
         id: string;
@@ -956,10 +844,7 @@ test.describe("automation run history", () => {
     let failAutomationRuns = true;
     await page.route("**/dashboard/api/threads/page?*", async (route) => {
       const url = new URL(route.request().url());
-      if (
-        failAutomationRuns &&
-        url.searchParams.get("scope") === "automation"
-      ) {
+      if (failAutomationRuns && url.searchParams.get("scope") === "automation") {
         await route.fulfill({
           status: 500,
           contentType: "application/json",
@@ -971,12 +856,10 @@ test.describe("automation run history", () => {
     });
 
     await page.goto("/agents/automations?tab=runs");
-    const automations = page
-      .getByRole("heading", { name: "Automations", level: 1 })
-      .locator("..");
-    await expect(
-      automations.getByText("Automation runs could not be loaded."),
-    ).toBeVisible({ timeout: 20_000 });
+    const automations = page.getByRole("heading", { name: "Automations", level: 1 }).locator("..");
+    await expect(automations.getByText("Automation runs could not be loaded.")).toBeVisible({
+      timeout: 20_000,
+    });
 
     failAutomationRuns = false;
     const retryResponse = waitForThreadsPage(page, {
@@ -987,17 +870,11 @@ test.describe("automation run history", () => {
     await automations.getByRole("button", { name: "Retry" }).click();
     expect((await retryResponse).ok()).toBeTruthy();
 
-    const daily = automations.locator(
-      'section:has(h2:text-is("E2E Daily Health"))',
-    );
-    const weekly = automations.locator(
-      'section:has(h2:text-is("E2E Weekly Cleanup"))',
-    );
+    const daily = automations.locator('section:has(h2:text-is("E2E Daily Health"))');
+    const weekly = automations.locator('section:has(h2:text-is("E2E Weekly Cleanup"))');
     await expect(daily.getByRole("link")).toHaveCount(3);
     await expect(weekly.getByRole("link")).toHaveCount(1);
-    const producedRun = daily.locator(
-      `a[href="/agents/${triggered.thread_id}"]`,
-    );
+    const producedRun = daily.locator(`a[href="/agents/${triggered.thread_id}"]`);
     await expect(producedRun).toContainText("Test: E2E Daily Health");
     await expect(producedRun).toContainText("Test run");
 
@@ -1031,18 +908,12 @@ test.describe("automation run history", () => {
     });
     await scheduleLink.click();
     expect((await recentRunsResponse).ok()).toBeTruthy();
-    await expect(page).toHaveURL(
-      new RegExp(`/agents/automations/${SCHEDULE_IDS.daily}$`),
-    );
-    await expect(
-      page.getByRole("heading", { name: "Recent runs", level: 2 }),
-    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/agents/automations/${SCHEDULE_IDS.daily}$`));
+    await expect(page.getByRole("heading", { name: "Recent runs", level: 2 })).toBeVisible();
     await expect(page.getByText(TITLES.dailyScheduled)).toBeVisible();
     await expect(page.getByText(TITLES.dailyTest)).toBeVisible();
     await expect(page.getByText(TITLES.weeklyRunning)).toHaveCount(0);
-    const recentProducedRun = page.locator(
-      `a[href="/agents/${triggered.thread_id}"]`,
-    );
+    const recentProducedRun = page.locator(`a[href="/agents/${triggered.thread_id}"]`);
     await expect(recentProducedRun).toContainText("Test: E2E Daily Health");
 
     await recentProducedRun.click();

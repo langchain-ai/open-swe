@@ -1,5 +1,5 @@
 import { getFiletypeFromFileName } from "@pierre/diffs";
-import type { ProjectContentMatch } from "@t3tools/contracts";
+import type { ProjectContentMatch } from "@openswe/contracts";
 import { memo, Suspense, use, useMemo, type CSSProperties } from "react";
 
 import { resolveDiffThemeName } from "~/lib/diffRendering";

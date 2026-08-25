@@ -26,12 +26,12 @@ make typecheck          # basedpyright agent tests
 
 `langgraph.json` declares three graph entrypoints and the FastAPI app, all served together by `langgraph dev`:
 
-| Graph | Entrypoint | Purpose |
-|---|---|---|
-| `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
-| `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
-| `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
-| `scheduler` | `agent.scheduler:get_scheduler` | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
+| Graph       | Entrypoint                          | Purpose                                                                                             |
+| ----------- | ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `agent`     | `agent.server:get_agent`            | Main coding agent (Slack/Linear/GitHub-triggered).                                                  |
+| `reviewer`  | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`.                                           |
+| `analyzer`  | `agent.analyzer:get_analyzer`       | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes.        |
+| `scheduler` | `agent.scheduler:get_scheduler`     | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
 
 The FastAPI app is `agent.webapp:app`.
 
@@ -131,7 +131,7 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 - Async-only: this app runs exclusively async, so do not add sync/async dual implementations. Implement only the async variant (`awrap_*`, `_arun`, etc.); the sync counterpart is never invoked. Omit the sync method entirely when the interface allows it (e.g. `AgentMiddleware` already raises `NotImplementedError` on the sync path). Only when a type/ABC requires the sync method to exist (e.g. `BaseTool._run` is abstract), define it with a bare `raise NotImplementedError` rather than a real sync implementation.
 - New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
-- Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+- Minimal-to-no code comments — only when the _why_ isn't obvious from the code.
 
 <!-- OPENWIKI:START -->
 

@@ -1,4 +1,4 @@
-import type { VcsListRefsResult } from "@t3tools/contracts";
+import type { VcsListRefsResult } from "@openswe/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 

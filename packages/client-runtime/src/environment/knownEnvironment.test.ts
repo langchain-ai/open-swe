@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createKnownEnvironment } from "./knownEnvironment.ts";

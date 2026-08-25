@@ -1,4 +1,4 @@
-import { createSourceControlEnvironmentAtoms } from "@t3tools/client-runtime/state/source-control";
+import { createSourceControlEnvironmentAtoms } from "@openswe/client-runtime/state/source-control";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

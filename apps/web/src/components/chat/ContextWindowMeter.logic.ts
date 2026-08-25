@@ -1,4 +1,4 @@
-import type { ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
+import type { ModelSelection, ProviderInstanceId } from "@openswe/contracts";
 import { getTriggerDisplayModelName, type ModelEsque } from "./providerIconUtils";
 
 export function resolveContextWindowModelDisplayName(

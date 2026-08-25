@@ -5,19 +5,20 @@ description: How Open SWE composes LangGraph graphs, FastAPI routers, durable di
 resource: /langgraph.json
 tags: [open-swe, langgraph, deepagents, backend, runtime]
 ---
+
 # LangGraph runtime and agent assembly
 
 ## Deployed units
 
 `langgraph.json` is the runtime manifest. It registers five graphs and an HTTP application:
 
-| ID | Entrypoint | Role |
-|---|---|---|
-| `agent` | `agent.graphs.agent:traced_agent` | Main coding agent. |
-| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | Read-only PR reviewer. |
-| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | Repository review-style analysis. |
-| `chat` | `agent.graphs.chat:traced_chat_agent` | Dashboard chat assistant. |
-| `scheduler` | `agent.graphs.scheduler:get_scheduler` | Scheduled work. |
+| ID          | Entrypoint                                    | Role                              |
+| ----------- | --------------------------------------------- | --------------------------------- |
+| `agent`     | `agent.graphs.agent:traced_agent`             | Main coding agent.                |
+| `reviewer`  | `agent.graphs.reviewer:traced_reviewer_agent` | Read-only PR reviewer.            |
+| `analyzer`  | `agent.graphs.analyzer:traced_analyzer`       | Repository review-style analysis. |
+| `chat`      | `agent.graphs.chat:traced_chat_agent`         | Dashboard chat assistant.         |
+| `scheduler` | `agent.graphs.scheduler:get_scheduler`        | Scheduled work.                   |
 
 The same manifest mounts `agent.webapp:app`, which re-exports the FastAPI app assembled in `agent/api/app.py`. That application mounts dashboard, plan, workflow-approval, GitHub, Linear, Slack, and health routers. It validates sandbox and local-model configuration at startup, and only enables credentialed CORS for explicit `DASHBOARD_ALLOWED_ORIGINS`—wildcard origins are rejected.
 

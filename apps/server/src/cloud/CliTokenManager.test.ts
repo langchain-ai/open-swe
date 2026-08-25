@@ -1,4 +1,4 @@
-import { readConnectAuthorizeRequest } from "@t3tools/shared/connectAuth";
+import { readConnectAuthorizeRequest } from "@openswe/shared/connectAuth";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -19,9 +19,9 @@ import type { OutOfBandOAuthPromptInput } from "./CliTokenManager.ts";
 
 // pk_test_<base64 of "clerk.example.test$">
 const TEST_ENV = {
-  T3CODE_CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
-  T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_client_test",
-  T3CODE_HOSTED_APP_URL: "https://hosted.example.test",
+  OPENSWE_CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
+  OPENSWE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_client_test",
+  OPENSWE_HOSTED_APP_URL: "https://hosted.example.test",
 };
 
 interface RecordedTokenRequest {
@@ -97,7 +97,7 @@ it("formats loopback authorization with a headless-host fallback", () => {
   assert.equal(
     CliTokenManager.formatLoopbackAuthorizationPrompt("https://clerk.example.test/authorize"),
     [
-      "Open this URL to authorize T3 Connect:",
+      "Open this URL to authorize Open SWE Connect:",
       "  https://clerk.example.test/authorize",
       "",
       "Press \u001b[1mEnter\u001b[22m to open it in your browser.",

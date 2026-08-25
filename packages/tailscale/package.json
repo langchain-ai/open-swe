@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/tailscale",
+  "name": "@openswe/tailscale",
   "private": true,
   "type": "module",
   "exports": {
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
-    "@t3tools/shared": "workspace:*",
+    "@openswe/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -20,7 +20,7 @@ import {
   type PullRequestReviewerKind,
   type PullRequestThreadCommentsResult,
   type PullRequestUpdateMethod,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as GitHubGraphQlBudget from "../sourceControl/githubGraphQlBudget.ts";
@@ -562,7 +562,7 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly body: string;
     }) => Effect.Effect<void, GitHubPullRequestCliError>;
   }
->()("t3/pullRequest/GitHubPullRequestCli") {}
+>()("openswe/pullRequest/GitHubPullRequestCli") {}
 
 /**
  * The GraphQL API takes owner and name as separate arguments, so `owner/repo` is split here.

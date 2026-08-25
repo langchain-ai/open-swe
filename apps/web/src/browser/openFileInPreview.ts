@@ -5,11 +5,11 @@ import type {
   PreviewOpenInput,
   PreviewSessionSnapshot,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   type AtomCommandResult,
   mapAtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import { AsyncResult } from "effect/unstable/reactivity";

@@ -45,7 +45,7 @@ describe("external chat link context menu", () => {
     const harness = createHarness(null);
 
     await showExternalLinkContextMenu({
-      href: "https://github.com/pingdotgg/t3code/pull/6169",
+      href: "https://github.com/langchain-ai/open-swe/pull/6169",
       canOpenInPreview: false,
       position: { x: 4, y: 8 },
       ...harness,

@@ -1,5 +1,5 @@
 import { useAuth } from "@clerk/react";
-import { AuthAdministrativeScopes, AuthRelayWriteScope } from "@t3tools/contracts";
+import { AuthAdministrativeScopes, AuthRelayWriteScope } from "@openswe/contracts";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -30,12 +30,12 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 
 /**
- * Post-sign-in onboarding wizard for T3 Connect. Opens on every in-session
+ * Post-sign-in onboarding wizard for Open SWE Connect. Opens on every in-session
  * sign-in — sign-out removes the connected relay environments, so each new
  * session starts with no devices to reach. It first prompts to publish this
  * environment (managed tunnel + agent activity, both defaulting on) when the
  * current session is authorized to manage the relay link, then lists the
- * account's T3 Connect environments so every device can be connected right
+ * account's Open SWE Connect environments so every device can be connected right
  * away. A cold load with a restored session does not count as a sign-in.
  */
 export function ConnectOnboardingDialog() {
@@ -200,9 +200,9 @@ function ConfiguredConnectOnboardingDialog() {
     if (!ok) return;
     toastManager.add({
       type: "success",
-      title: "T3 Connect enabled",
+      title: "Open SWE Connect enabled",
       description: exposeEnvironment
-        ? "This environment is available to your other devices through T3 Connect."
+        ? "This environment is available to your other devices through Open SWE Connect."
         : "This environment publishes agent activity to your mobile clients.",
     });
     setStep("devices");
@@ -219,7 +219,7 @@ function ConfiguredConnectOnboardingDialog() {
     >
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Set up T3 Connect</DialogTitle>
+          <DialogTitle>Set up Open SWE Connect</DialogTitle>
           <DialogDescription>
             Mesh your devices together — publish this environment and connect the rest, all in one
             place.
@@ -361,7 +361,7 @@ function PublishStep({
       <div className="rounded-lg border">
         <OnboardingToggleRow
           title="Publish this environment"
-          description="Make this environment available to your other devices through T3 Connect."
+          description="Make this environment available to your other devices through Open SWE Connect."
           checked={exposeEnvironment}
           disabled={disabled}
           onCheckedChange={onExposeEnvironmentChange}

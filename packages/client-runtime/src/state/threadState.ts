@@ -1,4 +1,4 @@
-import type { OrchestrationThread } from "@t3tools/contracts";
+import type { OrchestrationThread } from "@openswe/contracts";
 import * as Option from "effect/Option";
 
 export type EnvironmentThreadStatus = "empty" | "cached" | "synchronizing" | "live" | "deleted";

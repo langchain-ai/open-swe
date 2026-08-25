@@ -37,14 +37,10 @@ async function loginAs(page: Page, user: { login: string; email: string }) {
 async function listEnvironments(page: Page): Promise<Array<Environment>> {
   const res = await page.request.get("/dashboard/api/environments");
   expect(res.ok()).toBeTruthy();
-  return ((await res.json()) as { environments: Array<Environment> })
-    .environments;
+  return ((await res.json()) as { environments: Array<Environment> }).environments;
 }
 
-async function findEnvironment(
-  page: Page,
-  slug: string,
-): Promise<Environment | undefined> {
+async function findEnvironment(page: Page, slug: string): Promise<Environment | undefined> {
   return (await listEnvironments(page)).find((env) => env.slug === slug);
 }
 
@@ -63,9 +59,7 @@ async function deleteEnvironment(page: Page, slug: string) {
 // Saving a default model retires the first-run onboarding modal, which otherwise
 // covers the composer on the new-agent page.
 async function saveDefaultModel(page: Page) {
-  const options = (await (
-    await page.request.get("/dashboard/api/options")
-  ).json()) as {
+  const options = (await (await page.request.get("/dashboard/api/options")).json()) as {
     default_agent_model: string;
     default_agent_reasoning_effort: string;
   };
@@ -108,11 +102,7 @@ async function openNewAgentHome(page: Page) {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
 
-async function createEnvironment(
-  page: Page,
-  name: string,
-  prompt: string,
-): Promise<string> {
+async function createEnvironment(page: Page, name: string, prompt: string): Promise<string> {
   const created = await page.request.post("/dashboard/api/environments", {
     headers: SAME_ORIGIN_HEADERS,
     data: { name, prompt },
@@ -131,9 +121,7 @@ async function typeIntoComposer(page: Page, text: string) {
 }
 
 test.describe("Environments", () => {
-  test("an admin views environments and editing instructions in Settings", async ({
-    page,
-  }) => {
+  test("an admin views environments and editing instructions in Settings", async ({ page }) => {
     await loginAs(page, ADMIN);
     await deleteEnvironment(page, DRAFT_SLUG);
     await createEnvironment(page, DRAFT_NAME, "");
@@ -147,16 +135,12 @@ test.describe("Environments", () => {
     await expect(section.getByText("No snapshot").first()).toBeVisible();
     await expect(section.getByText(/enable admin mode/)).toBeVisible();
     await expect(section.getByRole("button", { name: "Save" })).toHaveCount(0);
-    await expect(section.getByRole("button", { name: "Delete" })).toHaveCount(
-      0,
-    );
+    await expect(section.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     await deleteEnvironment(page, DRAFT_SLUG);
   });
 
-  test("a non-admin cannot reach the environments page or API", async ({
-    page,
-  }) => {
+  test("a non-admin cannot reach the environments page or API", async ({ page }) => {
     await loginAs(page, MEMBER);
 
     const res = await page.request.get("/dashboard/api/environments");
@@ -164,17 +148,13 @@ test.describe("Environments", () => {
 
     await page.goto("/agents/environments");
     await expect(page).toHaveURL(/\/my-settings/);
-    await expect(
-      page.getByRole("heading", { name: "Environments" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Environments" })).toBeVisible();
     await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
 
     // No Admin toggle in the composer, so they cannot start an admin thread.
     await openNewAgentHome(page);
     await expect(page.getByTestId("composer-editor")).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Admin mode", exact: true }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Admin mode", exact: true })).toHaveCount(0);
   });
 
   test("the composer picker appears only with several environments, and the pick reaches the run", async ({
@@ -187,9 +167,7 @@ test.describe("Environments", () => {
 
     // One environment: the choice is already made, so no control is rendered.
     await openNewAgentHome(page);
-    await expect(page.getByRole("button", { name: "Environment" })).toHaveCount(
-      0,
-    );
+    await expect(page.getByRole("button", { name: "Environment" })).toHaveCount(0);
 
     await createEnvironment(page, ALT_NAME, ALT_ENV_PROMPT);
     await page.reload();
@@ -210,26 +188,20 @@ test.describe("Environments", () => {
     // environment's instructions — not the default's.
     await expect
       .poll(async () => {
-        const res = await page.request.get(
-          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
-        );
+        const res = await page.request.get(`/dashboard/api/threads/${threadId}?mark_viewed=false`);
         return res.ok()
           ? ((await res.json()) as { environment?: string | null }).environment
           : undefined;
       })
       .toBe(ALT_SLUG);
-    await expect
-      .poll(() => lastSystemPrompt(page), { timeout: 30_000 })
-      .toContain(ALT_ENV_PROMPT);
+    await expect.poll(() => lastSystemPrompt(page), { timeout: 30_000 }).toContain(ALT_ENV_PROMPT);
     expect(await lastSystemPrompt(page)).not.toContain(DEFAULT_ENV_PROMPT);
 
     await deleteEnvironment(page, ALT_SLUG);
     await deleteEnvironment(page, DEFAULT_SLUG);
   });
 
-  test("an env: tag on the opening Slack message selects the environment", async ({
-    page,
-  }) => {
+  test("an env: tag on the opening Slack message selects the environment", async ({ page }) => {
     await loginAs(page, ADMIN);
     await deleteEnvironment(page, ALT_SLUG);
     await createEnvironment(page, ALT_NAME, ALT_ENV_PROMPT);
@@ -239,14 +211,10 @@ test.describe("Environments", () => {
     await expect(page.locator("#thread")).toContainText("No messages yet");
     await page
       .locator("#text")
-      .fill(
-        `<@U0BOT> env:${ALT_SLUG} please add a greet() helper and open a PR`,
-      );
+      .fill(`<@U0BOT> env:${ALT_SLUG} please add a greet() helper and open a PR`);
     await page.locator("#send").click();
 
-    await expect(
-      page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }),
-    ).toBeVisible();
+    await expect(page.locator(".msg.bot").filter({ hasText: "Add greet() helper" })).toBeVisible();
 
     const systemPrompt = await lastSystemPrompt(page);
     expect(systemPrompt).toContain(ALT_ENV_PROMPT);
@@ -282,9 +250,7 @@ test.describe("Environments", () => {
     expect(threadId).not.toBe("");
 
     // The agent's own summary, after the real save + capture tools ran.
-    await expect(
-      page.getByText(/environment is captured and live/),
-    ).toBeVisible();
+    await expect(page.getByText(/environment is captured and live/)).toBeVisible();
 
     // The record the real tools wrote: prompt, repos, and a ready snapshot.
     const record = await findEnvironment(page, DEFAULT_SLUG);
@@ -307,9 +273,7 @@ test.describe("Environments", () => {
 
     // A later run is told about the environment: the prompt is appended verbatim.
     await typeIntoComposer(page, "Thanks — anything else needed?");
-    await expect(
-      page.getByText(/anything else you'd like changed/),
-    ).toBeVisible();
+    await expect(page.getByText(/anything else you'd like changed/)).toBeVisible();
     const systemPrompt = await lastSystemPrompt(page);
     expect(systemPrompt).toContain("### Environment Instructions (default)");
     expect(systemPrompt).toContain(ENVIRONMENT_PROMPT);
@@ -323,8 +287,6 @@ test.describe("Environments", () => {
 
     // Leave no default behind: later specs' runs would boot from it.
     await deleteEnvironment(page, DEFAULT_SLUG);
-    await expect
-      .poll(() => findEnvironment(page, DEFAULT_SLUG))
-      .toBeUndefined();
+    await expect.poll(() => findEnvironment(page, DEFAULT_SLUG)).toBeUndefined();
   });
 });

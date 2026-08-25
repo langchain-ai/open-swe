@@ -1,4 +1,4 @@
-import type { ProviderDriverKind, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
+import type { ProviderDriverKind, ProviderInstanceId, ServerProvider } from "@openswe/contracts";
 import type * as Stream from "effect/Stream";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 

@@ -7,7 +7,7 @@
  *
  * @module usagePricing
  */
-import type { UsageCostSource, UsageTokenTotals } from "@t3tools/contracts";
+import type { UsageCostSource, UsageTokenTotals } from "@openswe/contracts";
 
 /**
  * The subset of a LiteLLM entry we price against. All values are USD per token.

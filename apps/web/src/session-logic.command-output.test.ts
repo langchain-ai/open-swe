@@ -1,4 +1,4 @@
-import { EventId, TurnId, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import { EventId, TurnId, type OrchestrationThreadActivity } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { deriveWorkLogEntries } from "./session-logic";

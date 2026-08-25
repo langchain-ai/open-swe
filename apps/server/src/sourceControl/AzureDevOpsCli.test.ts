@@ -6,7 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { VcsProcessExitError, VcsProcessSpawnError } from "@t3tools/contracts";
+import { VcsProcessExitError, VcsProcessSpawnError } from "@openswe/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
@@ -277,7 +277,7 @@ describe("AzureDevOpsCli.layer", () => {
   it.effect("creates pull requests using the body file as the Azure description", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const bodyFile = `/tmp/t3code-azure-devops-cli-.md`;
+      const bodyFile = `/tmp/openswe-azure-devops-cli-.md`;
       yield* fileSystem.writeFileString(bodyFile, "Generated body");
       mockRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
 

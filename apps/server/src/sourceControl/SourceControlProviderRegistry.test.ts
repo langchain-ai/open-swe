@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { VcsRepositoryDetectionError } from "@t3tools/contracts";
+import { VcsRepositoryDetectionError } from "@openswe/contracts";
 
 import * as ServerConfig from "../config.ts";
 import type * as VcsDriver from "../vcs/VcsDriver.ts";
@@ -93,7 +93,7 @@ function makeRegistry(input: {
         Layer.mock(GitHubCli.GitHubCli)({}),
         Layer.mock(GitLabCli.GitLabCli)({}),
         ServerConfig.layerTest(process.cwd(), {
-          prefix: "t3-source-control-registry-test-",
+          prefix: "openswe-source-control-registry-test-",
         }).pipe(Layer.provide(NodeServices.layer)),
       ),
     ),
@@ -103,7 +103,7 @@ function makeRegistry(input: {
 it.effect("routes GitHub remotes to the GitHub provider", () =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry({
-      remotes: [{ name: "origin", url: "git@github.com:pingdotgg/t3code.git" }],
+      remotes: [{ name: "origin", url: "git@github.com:langchain-ai/open-swe.git" }],
     });
 
     const provider = yield* registry.resolve({ cwd: "/repo" });
@@ -261,7 +261,7 @@ it.effect("routes authenticated self-hosted GitLab remotes on non-standard ports
 it.effect("routes Bitbucket remotes to the Bitbucket provider", () =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry({
-      remotes: [{ name: "origin", url: "git@bitbucket.org:pingdotgg/t3code.git" }],
+      remotes: [{ name: "origin", url: "git@bitbucket.org:langchain-ai/open-swe.git" }],
     });
 
     const provider = yield* registry.resolve({ cwd: "/repo" });

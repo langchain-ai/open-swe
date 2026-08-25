@@ -5,7 +5,7 @@ import {
   ProviderInstanceId,
   type ProviderRuntimeEvent,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

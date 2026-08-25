@@ -21,7 +21,7 @@ import type {
   ThreadId,
   ProviderTurnStartResult,
   TurnId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 

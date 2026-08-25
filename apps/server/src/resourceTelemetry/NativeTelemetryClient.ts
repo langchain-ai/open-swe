@@ -7,12 +7,12 @@ import type {
   ResourceMonitorHelloEvent,
   ResourceMonitorSnapshotEvent,
   ResourceTelemetrySourceStatus,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   RESOURCE_MONITOR_PROTOCOL_VERSION,
   ResourceMonitorCommand as ResourceMonitorCommandSchema,
   ResourceMonitorEvent as ResourceMonitorEventSchema,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -203,7 +203,7 @@ export class NativeTelemetryClient extends Context.Service<
       Scope.Scope
     >;
   }
->()("t3/resourceTelemetry/NativeTelemetryClient") {}
+>()("openswe/resourceTelemetry/NativeTelemetryClient") {}
 
 interface ClientState {
   readonly status: ResourceTelemetrySourceStatus;

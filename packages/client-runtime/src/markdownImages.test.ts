@@ -7,7 +7,7 @@ describe("classifyMarkdownImageSource", () => {
     "https://example.com/image.png",
     "HTTP://example.com/image.png",
     "data:image/png;base64,AAAA",
-    "blob:https://app.t3.codes/image-id",
+    "blob:https://app.openswe.codes/image-id",
     "//cdn.example.com/image.png",
   ])("keeps %s directly loadable", (uri) => {
     expect(classifyMarkdownImageSource(uri, "/workspace/project")).toEqual({

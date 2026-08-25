@@ -9,7 +9,7 @@ import {
   ThreadId,
   TurnId,
   ProviderDriverKind,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";

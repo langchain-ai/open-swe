@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopBridge, DesktopUpdateState } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";

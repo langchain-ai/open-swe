@@ -52,7 +52,7 @@ describe("AcpSessionRuntime", () => {
               parameterizedModelPicker: true,
             },
           },
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
           requestLogger: (event) =>
             Effect.sync(() => {
@@ -107,7 +107,7 @@ describe("AcpSessionRuntime", () => {
             args: mockAgentArgs,
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -138,7 +138,7 @@ describe("AcpSessionRuntime", () => {
             args: mockAgentArgs,
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -184,11 +184,11 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_EMIT_FOREIGN_SESSION_UPDATES: "1",
+              OPEN_SWE_ACP_EMIT_FOREIGN_SESSION_UPDATES: "1",
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -219,7 +219,7 @@ describe("AcpSessionRuntime", () => {
             args: mockAgentArgs,
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -256,11 +256,11 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_HANG_FIRST_PROMPT_FOREVER: "1",
+              OPEN_SWE_ACP_HANG_FIRST_PROMPT_FOREVER: "1",
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -317,11 +317,11 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
+              OPEN_SWE_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -355,11 +355,11 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS: "1",
+              OPEN_SWE_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS: "1",
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -408,7 +408,7 @@ describe("AcpSessionRuntime", () => {
             args: mockAgentArgs,
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           requestLogger: (event) =>
             Effect.sync(() => {
               requestEvents.push(event);
@@ -443,7 +443,7 @@ describe("AcpSessionRuntime", () => {
             args: mockAgentArgs,
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           requestLogger: (event) =>
             Effect.sync(() => {
               requestEvents.push(event);
@@ -486,7 +486,7 @@ describe("AcpSessionRuntime", () => {
             args: mockAgentArgs,
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
           protocolLogging: {
             logIncoming: true,
             logOutgoing: true,
@@ -516,12 +516,12 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_FAIL_LOAD_SESSION: "1",
+              OPEN_SWE_ACP_FAIL_LOAD_SESSION: "1",
             },
           },
           cwd: process.cwd(),
           resumeSessionId: "stale-session-id",
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
         }),
       ),
       Effect.scoped,
@@ -553,12 +553,12 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_EMIT_LOAD_REPLAY: "1",
+              OPEN_SWE_ACP_EMIT_LOAD_REPLAY: "1",
             },
           },
           cwd: process.cwd(),
           resumeSessionId: "mock-session-1",
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
         }),
       ),
       Effect.scoped,
@@ -573,7 +573,7 @@ describe("AcpSessionRuntime", () => {
 
       expect(started.sessionId).toBe("mock-session-1");
       expect(started.sessionSetupResult._meta).toMatchObject({
-        t3SessionLoadReady: "replay_idle",
+        opensweSessionLoadReady: "replay_idle",
       });
 
       const unexpectedReplayEvent = yield* Stream.runHead(runtime.getEvents()).pipe(
@@ -588,15 +588,15 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_HANG_LOAD_SESSION_AFTER_REPLAY: "1",
-              T3_ACP_LOAD_SESSION_DELAY_MS: "10000",
+              OPEN_SWE_ACP_HANG_LOAD_SESSION_AFTER_REPLAY: "1",
+              OPEN_SWE_ACP_LOAD_SESSION_DELAY_MS: "10000",
             },
           },
           cwd: process.cwd(),
           resumeSessionId: "mock-session-1",
           sessionLoadReplayIdleGap: "50 millis",
           sessionLoadTimeout: "1 second",
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
         }),
       ),
       Effect.scoped,
@@ -642,11 +642,11 @@ describe("AcpSessionRuntime", () => {
             command: mockAgentCommand,
             args: mockAgentArgs,
             env: {
-              T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+              OPEN_SWE_ACP_REQUEST_LOG_PATH: requestLogPath,
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "t3-test", version: "0.0.0" },
+          clientInfo: { name: "openswe-test", version: "0.0.0" },
         }),
       ),
       Effect.scoped,

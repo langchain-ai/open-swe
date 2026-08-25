@@ -2,7 +2,7 @@ import {
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { memo, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { buttonVariants } from "../ui/button";

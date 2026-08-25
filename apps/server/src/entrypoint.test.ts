@@ -8,7 +8,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { isEntrypoint } from "./entrypoint.ts";
 
-const makeTempDir = () => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-entrypoint-test-"));
+const makeTempDir = () =>
+  NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "openswe-entrypoint-test-"));
 
 describe("isEntrypoint", () => {
   it("uses the runtime answer when Node provides one", () => {
@@ -47,7 +48,7 @@ describe("isEntrypoint", () => {
   it("matches through a symlinked entrypoint, as npm and npx install it", () => {
     const dir = makeTempDir();
     const real = NodePath.join(dir, "bin.mjs");
-    const link = NodePath.join(dir, "t3");
+    const link = NodePath.join(dir, "openswe");
     NodeFS.writeFileSync(real, "");
     NodeFS.symlinkSync(real, link);
 

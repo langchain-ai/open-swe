@@ -55,7 +55,7 @@ const makeEnvironmentLayer = (baseDir: string, isDevelopment = true) =>
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_HOME: baseDir,
+          OPENSWE_HOME: baseDir,
           VITE_DEV_SERVER_URL: isDevelopment ? "http://127.0.0.1:5733" : undefined,
         }),
       ),
@@ -88,7 +88,7 @@ describe("DesktopObservability", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-observability-test-",
+        prefix: "openswe-desktop-observability-test-",
       });
       const environmentLayer = makeEnvironmentLayer(baseDir);
       const tracePath = yield* Effect.gen(function* () {
@@ -137,7 +137,7 @@ describe("DesktopObservability", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-output-log-test-",
+        prefix: "openswe-desktop-backend-output-log-test-",
       });
       const environmentLayer = makeEnvironmentLayer(baseDir, false);
       const logPath = yield* Effect.gen(function* () {
@@ -215,7 +215,7 @@ describe("DesktopObservability", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-output-snapshot-test-",
+        prefix: "openswe-desktop-backend-output-snapshot-test-",
       });
       const environmentLayer = makeEnvironmentLayer(baseDir, false);
       const logPath = yield* Effect.gen(function* () {
@@ -255,7 +255,7 @@ describe("DesktopObservability", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-output-bound-test-",
+        prefix: "openswe-desktop-backend-output-bound-test-",
       });
       const environmentLayer = makeEnvironmentLayer(baseDir, false);
       const logPath = yield* Effect.gen(function* () {
@@ -299,7 +299,7 @@ describe("DesktopObservability", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-output-chunks-test-",
+        prefix: "openswe-desktop-backend-output-chunks-test-",
       });
       const environmentLayer = makeEnvironmentLayer(baseDir, false);
       const logPath = yield* Effect.gen(function* () {

@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@openswe/contracts";
 
 /** The little of a project this needs: who holds it, and which repository it is a copy of. */
 export interface AssignableProject {

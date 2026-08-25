@@ -3,7 +3,7 @@ import type {
   PreviewAutomationRequest,
   PreviewAutomationResponse,
   PreviewAutomationStreamEvent,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import {

@@ -1,4 +1,4 @@
-import { EnvironmentId, type OrchestrationShellSnapshot } from "@t3tools/contracts";
+import { EnvironmentId, type OrchestrationShellSnapshot } from "@openswe/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { expect, it } from "vite-plus/test";

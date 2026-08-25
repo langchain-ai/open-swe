@@ -1,5 +1,5 @@
-import { CheckpointRef, EnvironmentId, MessageId, TurnId } from "@t3tools/contracts";
-import { codexFeedbackMessage } from "@t3tools/client-runtime/state/threads";
+import { CheckpointRef, EnvironmentId, MessageId, TurnId } from "@openswe/contracts";
+import { codexFeedbackMessage } from "@openswe/client-runtime/state/threads";
 import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
@@ -758,15 +758,15 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
-            '<script>globalThis.__t3Xss = 1</script><img src="x" onerror="globalThis.__t3Xss = 2">',
+            '<script>globalThis.__opensweXss = 1</script><img src="x" onerror="globalThis.__opensweXss = 2">',
           ),
         ]}
       />,
     );
 
-    expect(markup).toContain("&lt;script&gt;globalThis.__t3Xss = 1&lt;/script&gt;");
+    expect(markup).toContain("&lt;script&gt;globalThis.__opensweXss = 1&lt;/script&gt;");
     expect(markup).toContain(
-      "&lt;img src=&quot;x&quot; onerror=&quot;globalThis.__t3Xss = 2&quot;&gt;",
+      "&lt;img src=&quot;x&quot; onerror=&quot;globalThis.__opensweXss = 2&quot;&gt;",
     );
     expect(markup).not.toMatch(/<script(?:\s|>)/i);
     expect(markup).not.toMatch(/<img(?:\s|>)/i);
@@ -796,11 +796,11 @@ describe("MessagesTimeline", () => {
         timelineEntries={[
           buildAssistantTimelineEntry(
             [
-              '<details open onclick="globalThis.__t3Xss = 1">',
+              '<details open onclick="globalThis.__opensweXss = 1">',
               "<summary>Safe details</summary>",
-              "<script>globalThis.__t3Xss = 2</script>",
-              '<img src="x" onerror="globalThis.__t3Xss = 3">',
-              '<a href="javascript:globalThis.__t3Xss = 4">Unsafe link</a>',
+              "<script>globalThis.__opensweXss = 2</script>",
+              '<img src="x" onerror="globalThis.__opensweXss = 3">',
+              '<a href="javascript:globalThis.__opensweXss = 4">Unsafe link</a>',
               "</details>",
             ].join(""),
           ),
@@ -814,7 +814,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("onclick=");
     expect(markup).not.toContain("onerror=");
     expect(markup).not.toContain("javascript:");
-    expect(markup).not.toContain("globalThis.__t3Xss");
+    expect(markup).not.toContain("globalThis.__opensweXss");
   });
 
   it("renders inline terminal labels with the composer chip UI", async () => {
@@ -922,16 +922,16 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:28.000Z",
               label: "Updated files",
               tone: "tool",
-              changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
+              changedFiles: ["C:/Users/mike/dev-stuff/openswe/apps/web/src/session-logic.ts"],
             },
           },
         ]}
-        workspaceRoot="C:/Users/mike/dev-stuff/t3code"
+        workspaceRoot="C:/Users/mike/dev-stuff/openswe"
       />,
     );
 
     expect(markup).toContain("Changed 1 file");
-    expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+    expect(markup).not.toContain("C:/Users/mike/dev-stuff/openswe/apps/web/src/session-logic.ts");
   });
 
   it("keeps mixed-success tool groups neutral", () => {

@@ -1,6 +1,6 @@
-import { effectiveSettled } from "@t3tools/client-runtime/state/thread-settled";
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
-import { ProjectId, ProviderInstanceId, ThreadId, type VcsStatusResult } from "@t3tools/contracts";
+import { effectiveSettled } from "@openswe/client-runtime/state/thread-settled";
+import type { OrchestrationThreadShell } from "@openswe/contracts";
+import { ProjectId, ProviderInstanceId, ThreadId, type VcsStatusResult } from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/unstable/reactivity";
@@ -30,7 +30,7 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
     pr: {
       number: 42,
       title: "PR branch",
-      url: "https://github.com/pingdotgg/t3code/pull/42",
+      url: "https://github.com/langchain-ai/open-swe/pull/42",
       baseRef: "main",
       headRef: "feature/current",
       state: "open",
@@ -43,7 +43,7 @@ function mergedFeaturePr(): NonNullable<VcsStatusResult["pr"]> {
   return {
     number: 42,
     title: "Feature PR",
-    url: "https://github.com/pingdotgg/t3code/pull/42",
+    url: "https://github.com/langchain-ai/open-swe/pull/42",
     baseRef: "main",
     headRef: "feature/current",
     state: "merged",
@@ -152,7 +152,7 @@ describe("resolveDisplayedThreadPr + nextThreadChangeRequestSnapshot", () => {
       pr: {
         number: 99,
         title: "Unrelated main PR",
-        url: "https://github.com/pingdotgg/t3code/pull/99",
+        url: "https://github.com/langchain-ai/open-swe/pull/99",
         baseRef: "main",
         headRef: "main",
         state: "open",
@@ -182,7 +182,7 @@ describe("resolveDisplayedThreadPr + nextThreadChangeRequestSnapshot", () => {
     const mainPr = {
       number: 99,
       title: "Unrelated main PR",
-      url: "https://github.com/pingdotgg/t3code/pull/99",
+      url: "https://github.com/langchain-ai/open-swe/pull/99",
       baseRef: "develop",
       headRef: "main",
       state: "merged" as const,

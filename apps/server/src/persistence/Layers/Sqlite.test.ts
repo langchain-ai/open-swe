@@ -41,7 +41,7 @@ const spawnWriteLockHolder = (dbPath: string, holdMs: number) =>
   );
 
 it.effect("waits out a concurrent writer instead of failing with SQLITE_BUSY", () => {
-  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-busy-"));
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "openswe-sqlite-busy-"));
   const dbPath = NodePath.join(tempDir, "state.sqlite");
 
   return Effect.gen(function* () {

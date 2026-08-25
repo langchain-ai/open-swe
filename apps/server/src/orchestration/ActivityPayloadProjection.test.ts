@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { OrchestrationThreadActivity } from "@t3tools/contracts";
+import type { OrchestrationThreadActivity } from "@openswe/contracts";
 import { projectActivityPayload } from "./ActivityPayloadProjection.ts";
 
 function activity(payload: Record<string, unknown>): OrchestrationThreadActivity {

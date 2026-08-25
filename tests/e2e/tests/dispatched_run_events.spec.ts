@@ -36,27 +36,22 @@ async function replayEvents(page: Page, threadId: string) {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 60_000);
     try {
-      const response = await fetch(
-        `/dashboard/api/threads/${id}/stream/events`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            accept: "text/event-stream",
-          },
-          body: JSON.stringify({
-            channels: ["values", "lifecycle", "tools"],
-            namespaces: [[]],
-            depth: 5,
-            since: 0,
-          }),
-          signal: controller.signal,
+      const response = await fetch(`/dashboard/api/threads/${id}/stream/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "text/event-stream",
         },
-      );
+        body: JSON.stringify({
+          channels: ["values", "lifecycle", "tools"],
+          namespaces: [[]],
+          depth: 5,
+          since: 0,
+        }),
+        signal: controller.signal,
+      });
       if (!response.ok) {
-        throw new Error(
-          `events stream failed: ${response.status} ${await response.text()}`,
-        );
+        throw new Error(`events stream failed: ${response.status} ${await response.text()}`);
       }
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
@@ -126,38 +121,23 @@ test.describe("dispatched run events", () => {
         .map((event) => event.params?.data?.tool_call_id);
 
     // The root agent's two `task` calls, started and finished.
-    const rootTools = toolEvents.filter(
-      (event) => namespaceOf(event).length === 0,
-    );
+    const rootTools = toolEvents.filter((event) => namespaceOf(event).length === 0);
     expect(startedNames(rootTools)).toEqual(["task", "task"]);
-    expect(finishedIds(rootTools).sort()).toEqual([
-      "call-subagent-files",
-      "call-subagent-layout",
-    ]);
+    expect(finishedIds(rootTools).sort()).toEqual(["call-subagent-files", "call-subagent-layout"]);
 
     // Each subagent runs under its own namespace and reports its own shell
     // steps there — the events the dashboard's subagent cards subscribe to.
     const nested = toolEvents.filter((event) => namespaceOf(event).length > 0);
-    const nestedNamespaces = new Set(
-      nested.map((event) => namespaceOf(event).join("/")),
-    );
+    const nestedNamespaces = new Set(nested.map((event) => namespaceOf(event).join("/")));
     expect(nestedNamespaces.size).toBe(2);
     for (const namespace of nestedNamespaces) {
-      const scope = nested.filter(
-        (event) => namespaceOf(event).join("/") === namespace,
-      );
+      const scope = nested.filter((event) => namespaceOf(event).join("/") === namespace);
       expect(startedNames(scope)).toEqual(["execute", "execute"]);
-      expect(finishedIds(scope).sort()).toEqual([
-        "call-subagent-echo",
-        "call-subagent-ls",
-      ]);
+      expect(finishedIds(scope).sort()).toEqual(["call-subagent-echo", "call-subagent-ls"]);
     }
 
     const subagentLifecycle = events
-      .filter(
-        (event) =>
-          event.method === "lifecycle" && namespaceOf(event).length > 0,
-      )
+      .filter((event) => event.method === "lifecycle" && namespaceOf(event).length > 0)
       .map((event) => event.params?.data?.graph_name);
     expect(subagentLifecycle).toContain("general-purpose");
   });

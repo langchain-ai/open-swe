@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { isCurrentPreviewRuntimeTab, previewRuntimeTabId } from "./previewRuntimeTabId";

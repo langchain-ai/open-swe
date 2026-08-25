@@ -5,7 +5,7 @@ import {
   type KeybindingShortcut,
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   formatShortcutLabel,
   isChatNewShortcut,

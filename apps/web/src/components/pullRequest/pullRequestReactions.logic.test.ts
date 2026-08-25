@@ -1,4 +1,4 @@
-import type { PullRequestReaction, PullRequestReactionContent } from "@t3tools/contracts";
+import type { PullRequestReaction, PullRequestReactionContent } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

@@ -1,4 +1,4 @@
-import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { ProviderInstanceId, ThreadId } from "@openswe/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -39,7 +39,7 @@ export interface McpSessionRegistryShape {
 export class McpSessionRegistry extends Context.Service<
   McpSessionRegistry,
   McpSessionRegistryShape
->()("t3/mcp/McpSessionRegistry") {}
+>()("openswe/mcp/McpSessionRegistry") {}
 
 interface CredentialRecord {
   readonly tokenHash: string;

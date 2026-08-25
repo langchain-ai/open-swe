@@ -1,4 +1,4 @@
-import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
+import { collectComposerInlineTokens } from "@openswe/shared/composerInlineTokens";
 import {
   $createLineBreakNode,
   $createTextNode,

@@ -6,7 +6,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
   type UnifiedSettings,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { visitElements } from "../../test/reactElementTree";

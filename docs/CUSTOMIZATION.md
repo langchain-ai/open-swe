@@ -60,14 +60,14 @@ The proxy token is minted at runtime from the GitHub App installation credential
 
 Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
 
-| `SANDBOX_TYPE` | Integration file | Required env vars |
-|---|---|---|
-| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+| `SANDBOX_TYPE`        | Integration file                  | Required env vars                                                                |
+| --------------------- | --------------------------------- | -------------------------------------------------------------------------------- |
+| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"`                             |
+| `daytona`             | `agent/integrations/daytona.py`   | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
+| `runloop`             | `agent/integrations/runloop.py`   | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"`                                      |
+| `e2b`                 | `agent/integrations/e2b.py`       | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE`                     |
+| `modal`               | `agent/integrations/modal.py`     | Modal credentials, `SANDBOX_TYPE="modal"`                                        |
+| `local`               | `agent/integrations/local.py`     | None (no isolation — development only), `SANDBOX_TYPE="local"`                   |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
@@ -186,14 +186,14 @@ You can route to different models based on task complexity, repo, or trigger sou
 ```python
 async def get_agent(config: RunnableConfig) -> Pregel:
     source = config["configurable"].get("source")
-    
+
     if source == "slack":
         # Faster model for Slack Q&A
         model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
         model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
-    
+
     return create_deep_agent(model=model, ...)
 ```
 
@@ -203,12 +203,12 @@ Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.lang
 
 Routing is opt-in and off by default. Enable it either way:
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
-| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
-| `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
-| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
+| Env var                                  | Default                               | Purpose                                                                                                                                                                                                                   |
+| ---------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LANGSMITH_GATEWAY_ENABLED`              | `false`                               | Deployment-level default for gateway routing.                                                                                                                                                                             |
+| `LANGSMITH_GATEWAY_API_KEY`              | unset                                 | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
+| `LANGSMITH_GATEWAY_BASE_URL`             | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host.                                                                                                                                                                      |
+| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true`                                | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models.                                                                                                        |
 
 The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
 
@@ -222,12 +222,12 @@ Routing is applied centrally in `make_model` (`agent/utils/model.py`), which res
 
 Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `gh` inside the sandbox.
 
-| Tool | File | Purpose |
-|---|---|---|
-| `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
-| `http_request` | `agent/tools/http_request.py` | HTTP API calls |
-| `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
-| `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
+| Tool                 | File                                | Purpose                         |
+| -------------------- | ----------------------------------- | ------------------------------- |
+| `fetch_url`          | `agent/tools/fetch_url.py`          | Fetch web pages as markdown     |
+| `http_request`       | `agent/tools/http_request.py`       | HTTP API calls                  |
+| `linear_comment`     | `agent/tools/linear_comment.py`     | Post comments on Linear tickets |
+| `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads          |
 
 ### Adding a tool
 
@@ -302,14 +302,14 @@ A `browser` subagent drives a real Chromium via the [Stagehand](https://github.c
 
 The tools are added in `agent/server.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `STAGEHAND_ENV` | `LOCAL` | `LOCAL` runs a local Chromium in-process; `BROWSERBASE` runs the browser on Browserbase cloud. |
-| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | LLM key Stagehand uses for `act`/`observe`/`extract`. Required for `LOCAL`; optional for `BROWSERBASE` (the hosted Stagehand API ships with model support). |
-| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Model Stagehand uses. |
-| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | — | `BROWSERBASE_API_KEY` is required when `STAGEHAND_ENV=BROWSERBASE`; `BROWSERBASE_PROJECT_ID` is forwarded when set. |
-| `STAGEHAND_LOCAL_CHROME_PATH` | `/usr/bin/chromium` in Docker | Path to the Chrome/Chromium binary for `LOCAL` mode. |
-| `STAGEHAND_HEADLESS` | `true` | Run the local browser headless. |
+| Variable                                         | Default                                                 | Purpose                                                                                                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STAGEHAND_ENV`                                  | `LOCAL`                                                 | `LOCAL` runs a local Chromium in-process; `BROWSERBASE` runs the browser on Browserbase cloud.                                                              |
+| `STAGEHAND_MODEL_API_KEY`                        | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | LLM key Stagehand uses for `act`/`observe`/`extract`. Required for `LOCAL`; optional for `BROWSERBASE` (the hosted Stagehand API ships with model support). |
+| `STAGEHAND_MODEL`                                | `anthropic/claude-sonnet-4-5`                           | Model Stagehand uses.                                                                                                                                       |
+| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | —                                                       | `BROWSERBASE_API_KEY` is required when `STAGEHAND_ENV=BROWSERBASE`; `BROWSERBASE_PROJECT_ID` is forwarded when set.                                         |
+| `STAGEHAND_LOCAL_CHROME_PATH`                    | `/usr/bin/chromium` in Docker                           | Path to the Chrome/Chromium binary for `LOCAL` mode.                                                                                                        |
+| `STAGEHAND_HEADLESS`                             | `true`                                                  | Run the local browser headless.                                                                                                                             |
 
 For `LOCAL` mode the sandbox image in `Dockerfile.sandbox` installs `chromium`; for `BROWSERBASE` mode no browser binary is needed in the image.
 
@@ -338,6 +338,7 @@ DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
 ```
 
 These are used as the fallback when:
+
 - A Slack message doesn't specify a repo (and no thread metadata exists)
 - A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
 - A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
@@ -394,11 +395,11 @@ To add a new invocation surface (e.g. Jira, Discord, a custom API):
 async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks):
     # Parse the incoming event
     payload = await request.json()
-    
+
     # Extract task description and repo info
     task_description = payload["description"]
     repo_config = {"owner": "my-org", "name": "my-repo"}
-    
+
     # Create a LangGraph run
     background_tasks.add_task(process_my_trigger, task_description, repo_config)
     return {"status": "accepted"}
@@ -437,6 +438,7 @@ def my_trigger_reply(message: str) -> dict:
 ```
 
 The key fields in `config.configurable` are:
+
 - `repo`: `{"owner": "...", "name": "..."}` — which GitHub repo to work on
 - `source`: string identifying the trigger (used for auth routing and communication)
 - `user_email`: the triggering user's email (for GitHub OAuth resolution)
@@ -447,14 +449,14 @@ The key fields in `config.configurable` are:
 
 The system prompt is assembled in `agent/prompt.py` from modular sections. You can customize behavior by editing individual sections:
 
-| Section | What it controls |
-|---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
-| `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
-| `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
-| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
-| `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+| Section                          | What it controls                                          |
+| -------------------------------- | --------------------------------------------------------- |
+| `WORKING_ENV_SECTION`            | Sandbox paths and execution constraints                   |
+| `TASK_EXECUTION_SECTION`         | Workflow steps (understand → implement → verify → submit) |
+| `CODING_STANDARDS_SECTION`       | Code style, testing, and quality rules                    |
+| `COMMIT_PR_SECTION`              | PR title/body format and commit conventions               |
+| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes                        |
+| `COMMUNICATION_SECTION`          | Formatting and messaging guidelines                       |
 
 ### Default prompt file
 
@@ -489,11 +491,11 @@ When no repository is specified, work on the **my-app** repository under **my-or
 
 **When to use `default_prompt.md` vs `AGENTS.md`:**
 
-| | `default_prompt.md` | `AGENTS.md` |
-|---|---|---|
-| Scope | All tasks, all repos | Single repository |
-| Location | Open SWE project root | Target repo root |
-| Use for | Default repo, org conventions | Repo-specific coding standards |
+|          | `default_prompt.md`           | `AGENTS.md`                    |
+| -------- | ----------------------------- | ------------------------------ |
+| Scope    | All tasks, all repos          | Single repository              |
+| Location | Open SWE project root         | Target repo root               |
+| Use for  | Default repo, org conventions | Repo-specific coding standards |
 
 ### Using AGENTS.md
 
@@ -505,12 +507,12 @@ Drop an `AGENTS.md` file in the root of any repository to add repo-specific inst
 
 Middleware hooks run around the agent loop. Open SWE includes:
 
-| Middleware | Type | Purpose |
-|---|---|---|
-| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
-| `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
-| `ensure_no_empty_msg` | After model | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
-| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+| Middleware                         | Type               | Purpose                                                                                |
+| ---------------------------------- | ------------------ | -------------------------------------------------------------------------------------- |
+| `ToolErrorMiddleware`              | Tool error handler | Catches and formats tool errors                                                        |
+| `check_message_queue_before_model` | Before model       | Injects follow-up messages that arrived mid-run                                        |
+| `ensure_no_empty_msg`              | After model        | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
+| `notify_step_limit_reached`        | After agent        | Posts a Slack reply when the agent hits the model-call limit                           |
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 

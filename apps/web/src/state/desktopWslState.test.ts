@@ -1,4 +1,4 @@
-import type { DesktopWslState } from "@t3tools/contracts";
+import type { DesktopWslState } from "@openswe/contracts";
 import * as Cause from "effect/Cause";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { AtomRegistry } from "effect/unstable/reactivity";

@@ -1,4 +1,4 @@
-import { EnvironmentId, type EnvironmentId as EnvironmentIdType } from "@t3tools/contracts";
+import { EnvironmentId, type EnvironmentId as EnvironmentIdType } from "@openswe/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";

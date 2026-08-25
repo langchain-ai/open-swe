@@ -101,7 +101,7 @@ export class ElectronDialog extends Context.Service<
     ) => Effect.Effect<Electron.MessageBoxReturnValue, ElectronDialogShowMessageBoxError>;
     readonly showErrorBox: (title: string, content: string) => Effect.Effect<void>;
   }
->()("@t3tools/desktop/electron/ElectronDialog") {}
+>()("@openswe/desktop/electron/ElectronDialog") {}
 
 export const make = ElectronDialog.of({
   pickFolder: Effect.fn("desktop.electron.dialog.pickFolder")(function* (input) {

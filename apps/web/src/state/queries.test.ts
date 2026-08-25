@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { areProjectPathSearchTargetsEqual } from "./queries";

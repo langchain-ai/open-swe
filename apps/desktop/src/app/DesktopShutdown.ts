@@ -13,7 +13,7 @@ export class DesktopShutdown extends Context.Service<
     readonly awaitComplete: Effect.Effect<void>;
     readonly isComplete: Effect.Effect<boolean>;
   }
->()("@t3tools/desktop/app/DesktopShutdown") {}
+>()("@openswe/desktop/app/DesktopShutdown") {}
 
 const make = Effect.gen(function* () {
   const requested = yield* Deferred.make<void>();

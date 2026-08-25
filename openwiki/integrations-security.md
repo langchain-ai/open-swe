@@ -5,6 +5,7 @@ description: Security and integration model for Open SWE sandboxes, GitHub ident
 resource: /agent/integrations
 tags: [open-swe, security, integrations, sandbox, authentication]
 ---
+
 # Integrations, execution boundaries, and security controls
 
 ## Isolation boundary: per-thread sandboxes

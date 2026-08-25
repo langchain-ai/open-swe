@@ -1,4 +1,4 @@
-import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedProjectRef, ScopedThreadRef } from "@openswe/contracts";
 
 import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { releaseAttachmentUploads } from "./attachmentUploadQueue";

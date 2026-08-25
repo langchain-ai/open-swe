@@ -1,5 +1,5 @@
-import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
-import * as RelayClient from "@t3tools/shared/relayClient";
+import type { RelayManagedEndpointRuntimeConfig } from "@openswe/contracts/relay";
+import * as RelayClient from "@openswe/shared/relayClient";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -59,7 +59,7 @@ export class CloudManagedEndpointRuntime extends Context.Service<
       config: RelayManagedEndpointRuntimeConfig | null,
     ) => Effect.Effect<CloudManagedEndpointRuntimeStatus>;
   }
->()("t3/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
+>()("openswe/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
 
 interface ActiveConnector {
   readonly child: ChildProcessSpawner.ChildProcessHandle;

@@ -20,7 +20,7 @@ export * from "./vcs.ts";
 export * from "./sourceControl.ts";
 export * from "./pullRequest.ts";
 export * from "./orchestration.ts";
-export * from "./t3ProjectFile.ts";
+export * from "./opensweProjectFile.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";

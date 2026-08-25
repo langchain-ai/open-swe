@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@openswe/shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

@@ -100,9 +100,9 @@ async def test_thread_summary_includes_trace_url(monkeypatch: pytest.MonkeyPatch
         _fake_trace_url,
     )
     summary = await thread_api._thread_summary(
-        {"thread_id": "t3", "metadata": {"source": "dashboard", "title": "traced run"}}
+        {"thread_id": "openswe", "metadata": {"source": "dashboard", "title": "traced run"}}
     )
-    assert summary["traceUrl"] == "https://smith.example/t/t3"
+    assert summary["traceUrl"] == "https://smith.example/t/openswe"
 
 
 class _FakeThreadsClient:

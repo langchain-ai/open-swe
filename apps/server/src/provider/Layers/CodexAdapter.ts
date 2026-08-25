@@ -25,7 +25,7 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
 import * as Exit from "effect/Exit";
@@ -39,7 +39,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { getModelSelectionStringOptionValue } from "@openswe/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 
@@ -1698,13 +1698,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? {
                 environment: {
                   ...(options?.environment ?? process.env),
-                  T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
+                  OPEN_SWE_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(
+                    /^Bearer\s+/,
+                    "",
+                  ),
                 },
                 appServerArgs: [
                   "-c",
-                  `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
+                  `mcp_servers.openswe.url=${mcpSession.endpoint}`,
                   "-c",
-                  'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
+                  'mcp_servers.openswe.bearer_token_env_var="OPEN_SWE_MCP_BEARER_TOKEN"',
                 ],
               }
             : {}),

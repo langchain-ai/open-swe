@@ -11,7 +11,9 @@ import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.
 
 const makeServerSecretStoreLayer = () =>
   ServerSecretStore.layer.pipe(
-    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-environment-keys-test-" })),
+    Layer.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "openswe-environment-keys-test-" }),
+    ),
   );
 
 const unusedSecretStoreOperation = () => Effect.die("unused secret-store operation");

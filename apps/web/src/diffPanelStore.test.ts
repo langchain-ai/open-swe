@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ThreadId, TurnId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@openswe/client-runtime/environment";
+import { EnvironmentId, ThreadId, TurnId } from "@openswe/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "./diffPanelStore";

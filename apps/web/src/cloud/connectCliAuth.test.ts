@@ -17,8 +17,8 @@ describe("connectCliAuth", () => {
 
   it("requires both the publishable key and the CLI OAuth client id", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
-    vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "t3-relay");
-    vi.stubEnv("VITE_T3CODE_RELAY_URL", "https://relay.example.com");
+    vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "openswe-relay");
+    vi.stubEnv("VITE_OPENSWE_RELAY_URL", "https://relay.example.com");
     expect(hasConnectCliAuthConfig()).toBe(false);
 
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
@@ -28,7 +28,7 @@ describe("connectCliAuth", () => {
   it("builds the Clerk authorize URL with the configured hosted origin's callback", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
-    vi.stubEnv("VITE_HOSTED_APP_URL", "https://nightly.app.t3.codes");
+    vi.stubEnv("VITE_HOSTED_APP_URL", "https://nightly.app.openswe.codes");
 
     const authorizeUrl = buildConnectCliClerkAuthorizeUrl({
       state: "state-1",
@@ -40,7 +40,7 @@ describe("connectCliAuth", () => {
     expect(url.hostname).toBe("witty-mole-42.clerk.accounts.dev");
     expect(url.pathname).toBe("/oauth/authorize");
     expect(url.searchParams.get("redirect_uri")).toBe(
-      "https://nightly.app.t3.codes/connect/callback",
+      "https://nightly.app.openswe.codes/connect/callback",
     );
     expect(url.searchParams.get("state")).toBe("state-1");
     expect(url.searchParams.get("code_challenge")).toBe("challenge-1");
@@ -74,7 +74,7 @@ describe("connectCliAuth", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
 
-    const connectUrl = "https://app.t3.codes/connect#state=state-1&challenge=challenge-1";
+    const connectUrl = "https://app.openswe.codes/connect#state=state-1&challenge=challenge-1";
     const redirectUrl = connectCliSignInRedirectUrl(
       { state: "state-1", challenge: "challenge-1" },
       connectUrl,
@@ -87,7 +87,7 @@ describe("connectCliAuth", () => {
   it("falls back to the current URL when the authorize URL cannot be built", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
 
-    const connectUrl = "https://app.t3.codes/connect#state=state-1&challenge=challenge-1";
+    const connectUrl = "https://app.openswe.codes/connect#state=state-1&challenge=challenge-1";
     expect(
       connectCliSignInRedirectUrl({ state: "state-1", challenge: "challenge-1" }, connectUrl),
     ).toBe(connectUrl);
@@ -96,14 +96,14 @@ describe("connectCliAuth", () => {
   it("reads the code and state Clerk echoes back to the callback", () => {
     expect(
       readConnectCliCallbackResult(
-        new URL("https://app.t3.codes/connect/callback?code=abc&state=state-1"),
+        new URL("https://app.openswe.codes/connect/callback?code=abc&state=state-1"),
       ),
     ).toEqual({ code: "abc", state: "state-1" });
     expect(
-      readConnectCliCallbackResult(new URL("https://app.t3.codes/connect/callback?code=abc")),
+      readConnectCliCallbackResult(new URL("https://app.openswe.codes/connect/callback?code=abc")),
     ).toBeNull();
     expect(
-      readConnectCliCallbackResult(new URL("https://app.t3.codes/connect/callback?state=s")),
+      readConnectCliCallbackResult(new URL("https://app.openswe.codes/connect/callback?state=s")),
     ).toBeNull();
   });
 });

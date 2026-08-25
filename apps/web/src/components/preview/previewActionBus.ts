@@ -13,7 +13,7 @@ export type PreviewAction =
   | "zoom-out"
   | "reset-zoom";
 
-const EVENT_NAME = "t3code:preview-action";
+const EVENT_NAME = "openswe:preview-action";
 
 export function dispatchPreviewAction(action: PreviewAction): void {
   if (typeof window === "undefined") return;

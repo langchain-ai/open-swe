@@ -64,7 +64,7 @@ describe("DesktopTelemetryReceiver", () => {
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const directory = NodeFS.mkdtempSync(
-          NodePath.join(NodeOS.tmpdir(), "t3-desktop-telemetry-control-test-"),
+          NodePath.join(NodeOS.tmpdir(), "openswe-desktop-telemetry-control-test-"),
         );
         const path = NodePath.join(directory, "control.ndjson");
         return {

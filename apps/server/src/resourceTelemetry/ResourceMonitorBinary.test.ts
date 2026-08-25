@@ -3,7 +3,7 @@ import {
   HostProcessArchitecture,
   HostProcessEnvironment,
   HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+} from "@openswe/shared/hostProcess";
 import { afterEach, assert, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -23,9 +23,9 @@ describe("ResourceMonitorBinary", () => {
       });
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-resource-monitor-binary-",
+        prefix: "openswe-resource-monitor-binary-",
       });
-      const binaryPath = `${baseDir}/t3-resource-monitor.exe`;
+      const binaryPath = `${baseDir}/openswe-resource-monitor.exe`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
 
       const service = yield* ResourceMonitorBinary.make().pipe(
@@ -33,7 +33,7 @@ describe("ResourceMonitorBinary", () => {
         Effect.provideService(HostProcessPlatform, "win32"),
         Effect.provideService(HostProcessArchitecture, "arm64"),
         Effect.provideService(HostProcessEnvironment, {
-          T3CODE_RESOURCE_MONITOR_PATH: binaryPath,
+          OPENSWE_RESOURCE_MONITOR_PATH: binaryPath,
         }),
       );
 
@@ -46,9 +46,9 @@ describe("ResourceMonitorBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-resource-monitor-binary-",
+        prefix: "openswe-resource-monitor-binary-",
       });
-      const binaryPath = `${baseDir}/t3-resource-monitor`;
+      const binaryPath = `${baseDir}/openswe-resource-monitor`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
       yield* fileSystem.chmod(binaryPath, 0o755);
 
@@ -58,7 +58,7 @@ describe("ResourceMonitorBinary", () => {
         Effect.provideService(HostProcessArchitecture, "x64"),
         Effect.provideService(ResourceMonitorBinary.ResourceMonitorHostLinuxLibc, "musl"),
         Effect.provideService(HostProcessEnvironment, {
-          T3CODE_RESOURCE_MONITOR_PATH: binaryPath,
+          OPENSWE_RESOURCE_MONITOR_PATH: binaryPath,
         }),
       );
 
@@ -70,7 +70,7 @@ describe("ResourceMonitorBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-resource-monitor-binary-",
+        prefix: "openswe-resource-monitor-binary-",
       });
       const binaryPath = `${baseDir}/custom-resource-monitor`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
@@ -81,7 +81,7 @@ describe("ResourceMonitorBinary", () => {
         Effect.provideService(HostProcessPlatform, "freebsd"),
         Effect.provideService(HostProcessArchitecture, "ia32"),
         Effect.provideService(HostProcessEnvironment, {
-          T3CODE_RESOURCE_MONITOR_PATH: binaryPath,
+          OPENSWE_RESOURCE_MONITOR_PATH: binaryPath,
         }),
       );
 
@@ -93,9 +93,9 @@ describe("ResourceMonitorBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-resource-monitor-binary-",
+        prefix: "openswe-resource-monitor-binary-",
       });
-      const binaryPath = `${baseDir}/t3-resource-monitor`;
+      const binaryPath = `${baseDir}/openswe-resource-monitor`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
       yield* fileSystem.chmod(binaryPath, 0o644);
 
@@ -105,7 +105,7 @@ describe("ResourceMonitorBinary", () => {
         Effect.provideService(HostProcessArchitecture, "x64"),
         Effect.provideService(ResourceMonitorBinary.ResourceMonitorHostLinuxLibc, "gnu"),
         Effect.provideService(HostProcessEnvironment, {
-          T3CODE_RESOURCE_MONITOR_PATH: binaryPath,
+          OPENSWE_RESOURCE_MONITOR_PATH: binaryPath,
         }),
       );
       const error = yield* Effect.flip(service.resolve);
@@ -119,7 +119,7 @@ describe("ResourceMonitorBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-resource-monitor-binary-",
+        prefix: "openswe-resource-monitor-binary-",
       });
       const service = yield* ResourceMonitorBinary.make().pipe(
         Effect.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
@@ -137,7 +137,7 @@ describe("ResourceMonitorBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-resource-monitor-binary-",
+        prefix: "openswe-resource-monitor-binary-",
       });
       const service = yield* ResourceMonitorBinary.make().pipe(
         Effect.provide(ServerConfig.layerTest(process.cwd(), baseDir)),

@@ -1,4 +1,4 @@
-import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import type { AtomCommandResult } from "@openswe/client-runtime/state/runtime";
 
 export interface FileSaveCoordinatorOptions<A, E> {
   readonly debounceMs: number;

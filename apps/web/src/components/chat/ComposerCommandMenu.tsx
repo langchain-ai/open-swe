@@ -2,13 +2,13 @@ import {
   formatProviderSkillDisplayName,
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
-} from "@t3tools/client-runtime/providerSkills";
+} from "@openswe/client-runtime/providerSkills";
 import {
   type ProjectEntry,
   type ProviderDriverKind,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   BlocksIcon,
   FolderIcon,

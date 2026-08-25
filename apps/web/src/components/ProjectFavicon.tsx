@@ -1,8 +1,8 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@openswe/contracts";
 import {
   getProjectFaviconCacheKey,
   isProjectFaviconFallbackUrl,
-} from "@t3tools/shared/projectFavicon";
+} from "@openswe/shared/projectFavicon";
 import { FolderIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { useState } from "react";

@@ -11,7 +11,7 @@ import * as Scope from "effect/Scope";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import * as NetService from "@t3tools/shared/Net";
+import * as NetService from "@openswe/shared/Net";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 
@@ -91,7 +91,7 @@ export class DesktopManagedOpenSWE extends Context.Service<
   {
     readonly start: Effect.Effect<void, DesktopManagedOpenSWEError, Scope.Scope>;
   }
->()("@t3tools/desktop/backend/DesktopManagedOpenSWE") {}
+>()("@openswe/desktop/backend/DesktopManagedOpenSWE") {}
 
 function stageError(stage: string) {
   return (cause: unknown) => new DesktopManagedOpenSWEError({ stage, cause });

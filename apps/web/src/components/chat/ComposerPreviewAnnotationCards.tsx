@@ -1,4 +1,4 @@
-import type { PreviewAnnotationPayload } from "@t3tools/contracts";
+import type { PreviewAnnotationPayload } from "@openswe/contracts";
 import { Frame, MousePointerClick, Paintbrush, PenLine, RotateCcw, X } from "lucide-react";
 import type { ReactNode } from "react";
 

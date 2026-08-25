@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 
-import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@openswe/contracts";
+import { HostProcessPlatform } from "@openswe/shared/hostProcess";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,7 +14,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { buildSshChildEnvironment, type SshAuthOptions } from "./auth.ts";
 import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
 
-const PUBLISHABLE_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+const PUBLISHABLE_OPEN_SWE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
 const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000;
 
@@ -364,19 +364,19 @@ export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(functi
   );
 });
 
-export function resolveRemoteT3CliPackageSpec(input: {
+export function resolveRemoteOpenSWECliPackageSpec(input: {
   readonly appVersion: string;
   readonly updateChannel: DesktopUpdateChannel;
   readonly isDevelopment?: boolean;
 }): string {
   const appVersion = input.appVersion.trim();
-  if (!input.isDevelopment && PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion)) {
-    return `t3@${appVersion}`;
+  if (!input.isDevelopment && PUBLISHABLE_OPEN_SWE_VERSION_PATTERN.test(appVersion)) {
+    return `openswe@${appVersion}`;
   }
 
   if (input.isDevelopment) {
-    return "t3@nightly";
+    return "openswe@nightly";
   }
 
-  return input.updateChannel === "nightly" ? "t3@nightly" : "t3@latest";
+  return input.updateChannel === "nightly" ? "openswe@nightly" : "openswe@latest";
 }

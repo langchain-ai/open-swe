@@ -1,8 +1,8 @@
-import type { RepositoryIdentity } from "@t3tools/contracts";
+import type { RepositoryIdentity } from "@openswe/contracts";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   normalizeGitRemoteUrl,
-} from "@t3tools/shared/git";
+} from "@openswe/shared/git";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -27,7 +27,7 @@ export class RepositoryIdentityResolver extends Context.Service<
   {
     readonly resolve: (cwd: string) => Effect.Effect<RepositoryIdentity | null>;
   }
->()("t3/project/RepositoryIdentityResolver") {}
+>()("openswe/project/RepositoryIdentityResolver") {}
 
 function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   const remotes = new Map<string, string>();

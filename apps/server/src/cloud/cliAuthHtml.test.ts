@@ -25,7 +25,7 @@ it("renders the matching header treatment for each release channel", () => {
 
   expect(nightly).toContain("Open SWE (Nightly)");
   expect(nightly).toContain('class="stage stage-nightly"');
-  expect(latest).toContain('<p class="brand">T3 Code</p>');
+  expect(latest).toContain('<p class="brand">Open SWE</p>');
   expect(latest).not.toContain("(Latest)");
   expect(latest).toContain('class="stage stage-latest"');
 });

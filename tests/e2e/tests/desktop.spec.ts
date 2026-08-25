@@ -19,21 +19,15 @@ const e2eRoot = join(repoRoot, "tests", "e2e");
 const baseURL = `http://127.0.0.1:${process.env.E2E_PORT ?? "2024"}`;
 const e2eTmp = resolve(process.env.E2E_TMP ?? join(e2eRoot, ".e2e-tmp"));
 const fakeRemote = join(e2eTmp, "github", "fakeorg__demo.git");
-const electronPath = createRequire(join(desktopRoot, "package.json"))(
-  "electron",
-) as string;
+const electronPath = createRequire(join(desktopRoot, "package.json"))("electron") as string;
 
 function sessionCookie(setCookie: string): string {
   const match = setCookie.match(/(?:^|,\s*)osw_session=([^;]+)/);
-  if (!match)
-    throw new Error("Harness login did not return an osw_session cookie");
+  if (!match) throw new Error("Harness login did not return an osw_session cookie");
   return match[1];
 }
 
-async function typeIntoComposer(
-  page: import("@playwright/test").Page,
-  text: string,
-) {
+async function typeIntoComposer(page: import("@playwright/test").Page, text: string) {
   const editor = page.getByTestId("composer-editor");
   await editor.click();
   await editor.pressSequentially(text);
@@ -107,9 +101,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
   let page: Awaited<ReturnType<typeof electronApp.firstWindow>> | null = null;
   try {
     page = await electronApp.firstWindow();
-    const userData = await electronApp.evaluate(({ app }) =>
-      app.getPath("userData"),
-    );
+    const userData = await electronApp.evaluate(({ app }) => app.getPath("userData"));
     mkdirSync(userData, { recursive: true });
     writeFileSync(
       join(userData, "desktop-projects.json"),
@@ -134,8 +126,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
     );
 
     const profileResponse = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/dashboard/api/profile",
+      (response) => new URL(response.url()).pathname === "/dashboard/api/profile",
     );
     await page.goto("open-swe://app/agents");
     const profile = (await (await profileResponse).json()) as {
@@ -157,9 +148,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
 
     await cloudSource.click();
     await expect(cloudSource).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      page.getByRole("button", { name: "Cloud", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Cloud", exact: true })).toBeVisible();
     const cloudScreenshot = testInfo.outputPath("desktop-cloud-threads.png");
     await page.screenshot({ path: cloudScreenshot, fullPage: true });
     await testInfo.attach("desktop-cloud-threads", {
@@ -169,12 +158,8 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
 
     await localSource.click();
     await expect(localSource).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      page.getByRole("button", { name: "demo", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "main", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "demo", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "main", exact: true })).toBeVisible();
     const localScreenshot = testInfo.outputPath("desktop-local-threads.png");
     await page.screenshot({ path: localScreenshot, fullPage: true });
     await testInfo.attach("desktop-local-threads", {
@@ -182,10 +167,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       contentType: "image/png",
     });
 
-    await typeIntoComposer(
-      page,
-      "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR",
-    );
+    await typeIntoComposer(page, "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR");
 
     await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
     await expect(page.getByText(/Done! I added/)).toBeVisible();
@@ -193,15 +175,10 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       name: "Add greet() helper",
       exact: true,
     });
-    await expect(prLink).toHaveAttribute(
-      "href",
-      `${baseURL}/mock/github/fakeorg/demo/pull/1`,
-    );
+    await expect(prLink).toHaveAttribute("href", `${baseURL}/mock/github/fakeorg/demo/pull/1`);
 
     await expect.poll(() => existsSync(join(project, "greet.py"))).toBe(true);
-    expect(readFileSync(join(project, "greet.py"), "utf8")).toContain(
-      'return f"Hello, {name}!"',
-    );
+    expect(readFileSync(join(project, "greet.py"), "utf8")).toContain('return f"Hello, {name}!"');
 
     await expect
       .poll(async () => {
@@ -234,7 +211,6 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       });
     }
     await electronApp.close().catch(() => {});
-    if (!process.env.E2E_KEEP_TMP)
-      rmSync(stateRoot, { recursive: true, force: true });
+    if (!process.env.E2E_KEEP_TMP) rmSync(stateRoot, { recursive: true, force: true });
   }
 });

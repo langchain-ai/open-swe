@@ -23,7 +23,7 @@ export interface RelayClientTracingResource {
 }
 
 export class RelayClientTracer extends Context.Reference(
-  "@t3tools/shared/relayTracing/RelayClientTracer",
+  "@openswe/shared/relayTracing/RelayClientTracer",
   {
     defaultValue: () => Option.none<Tracer.Tracer>(),
   },
@@ -144,7 +144,7 @@ export function makeRelayClientTracingLayer(
       attributes: {
         "service.runtime": resource.runtime,
         "service.component": resource.component ?? "relay-client",
-        "t3.client.surface": resource.client,
+        "openswe.client.surface": resource.client,
       },
     },
   }).pipe(Layer.provide(OtlpSerialization.layerJson));

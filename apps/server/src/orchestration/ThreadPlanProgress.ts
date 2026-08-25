@@ -40,7 +40,7 @@ export class ThreadPlanProgressService extends Context.Service<
 
     readonly getThreadPlanProgress: (threadId: string) => ThreadPlanProgress | null;
   }
->()("t3/orchestration/ThreadPlanProgress/ThreadPlanProgressService") {}
+>()("openswe/orchestration/ThreadPlanProgress/ThreadPlanProgressService") {}
 
 export function make(): ThreadPlanProgressService["Service"] {
   const progressByThreadId = new Map<string, ThreadPlanProgress>();

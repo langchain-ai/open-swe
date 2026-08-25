@@ -5,17 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mock Slack — #demo</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 680px; margin: 1.5rem auto; padding: 0 1rem; }
-      h1 { font-size: 1.1rem; }
-      .msg { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
-      .msg.bot { background: #f0f7ff; }
-      .who { font-weight: 700; font-size: 0.8rem; color: #444; }
-      .text { white-space: pre-wrap; }
-      .context { color: #4b5563; font-size: 0.8rem; margin-top: 0.35rem; }
-      .compose { display: flex; gap: 0.5rem; margin-top: 1rem; }
-      .compose input { flex: 1; padding: 0.5rem; font: inherit; }
-      button { padding: 0.5rem 0.9rem; font: inherit; cursor: pointer; }
-      a { color: #1264a3; }
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 680px;
+        margin: 1.5rem auto;
+        padding: 0 1rem;
+      }
+      h1 {
+        font-size: 1.1rem;
+      }
+      .msg {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        margin: 0.5rem 0;
+      }
+      .msg.bot {
+        background: #f0f7ff;
+      }
+      .who {
+        font-weight: 700;
+        font-size: 0.8rem;
+        color: #444;
+      }
+      .text {
+        white-space: pre-wrap;
+      }
+      .context {
+        color: #4b5563;
+        font-size: 0.8rem;
+        margin-top: 0.35rem;
+      }
+      .compose {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+      .compose input {
+        flex: 1;
+        padding: 0.5rem;
+        font: inherit;
+      }
+      button {
+        padding: 0.5rem 0.9rem;
+        font: inherit;
+        cursor: pointer;
+      }
+      a {
+        color: #1264a3;
+      }
     </style>
   </head>
   <body>
@@ -26,7 +64,9 @@
       <button id="send">Send</button>
       <button id="reset">Reset</button>
     </div>
-    <label style="font-size:0.8rem"><input type="checkbox" id="mention" checked /> mention the bot (app_mention)</label>
+    <label style="font-size: 0.8rem"
+      ><input type="checkbox" id="mention" checked /> mention the bot (app_mention)</label
+    >
     <div id="thread"></div>
 
     <script>
@@ -69,7 +109,9 @@
           .join("");
         $("thread").innerHTML = html || "<p style='color:#888'>No messages yet.</p>";
         messages.forEach((message, index) => {
-          const contextContainer = document.querySelector(`[data-message-index="${index}"] .contexts`);
+          const contextContainer = document.querySelector(
+            `[data-message-index="${index}"] .contexts`,
+          );
           const contexts = (message.blocks || [])
             .filter((block) => block.type === "context")
             .flatMap((block) => block.elements || [])

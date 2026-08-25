@@ -9,7 +9,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import * as RelayClient from "@t3tools/shared/relayClient";
+import * as RelayClient from "@openswe/shared/relayClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
@@ -136,19 +136,19 @@ describe("CloudManagedEndpointRuntime", () => {
         providerKind: "cloudflare_tunnel",
         connectorToken: "token-1",
         tunnelId: "tunnel-1",
-        tunnelName: "t3-code-env-1",
+        tunnelName: "openswe-env-1",
       });
       yield* runtime.applyConfig({
         providerKind: "cloudflare_tunnel",
         connectorToken: "token-1",
         tunnelId: "tunnel-1",
-        tunnelName: "t3-code-env-1",
+        tunnelName: "openswe-env-1",
       });
       yield* runtime.applyConfig({
         providerKind: "cloudflare_tunnel",
         connectorToken: "token-2",
         tunnelId: "tunnel-1",
-        tunnelName: "t3-code-env-1",
+        tunnelName: "openswe-env-1",
       });
       const stopped = yield* runtime.applyConfig(null);
 

@@ -1,12 +1,12 @@
-import { createAdvertisedEndpoint } from "@t3tools/shared/advertisedEndpoint";
-import type { AdvertisedEndpoint, AdvertisedEndpointProvider } from "@t3tools/contracts";
+import { createAdvertisedEndpoint } from "@openswe/shared/advertisedEndpoint";
+import type { AdvertisedEndpoint, AdvertisedEndpointProvider } from "@openswe/contracts";
 import {
   buildTailscaleHttpsBaseUrl,
   isTailscaleIpv4Address,
   parseTailscaleMagicDnsName,
   probeTailscaleHttpsEndpoint,
   readTailscaleStatus,
-} from "@t3tools/tailscale";
+} from "@openswe/tailscale";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as HttpClient from "effect/unstable/http/HttpClient";
@@ -14,7 +14,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import type { NetworkInterfaces } from "./DesktopNetworkInterfaces.ts";
 
-export { isTailscaleIpv4Address, parseTailscaleMagicDnsName } from "@t3tools/tailscale";
+export { isTailscaleIpv4Address, parseTailscaleMagicDnsName } from "@openswe/tailscale";
 
 const TAILSCALE_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
   id: "tailscale",

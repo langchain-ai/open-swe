@@ -1,8 +1,8 @@
-import type { ThreadEnvMode } from "@t3tools/contracts";
+import type { ThreadEnvMode } from "@openswe/contracts";
 
 /**
  * Canonical priority order for a project's default thread env mode:
- * per-project setting > checked-in t3.json > global server setting.
+ * per-project setting > checked-in openswe.json > global server setting.
  *
  * An explicit composer pick outranks all of these; callers apply it before
  * consulting the defaults. Web resolves the sources imperatively at draft
@@ -19,7 +19,7 @@ export function resolveDefaultThreadEnvMode(sources: {
 
 /**
  * True once the resolved default can no longer change: an explicit pick or a
- * source that outranks t3.json decided, or the file read settled. While
+ * source that outranks openswe.json decided, or the file read settled. While
  * false, nothing may persist the provisional default (for example into a
  * draft's workspace selection) — it could differ from the final value.
  */

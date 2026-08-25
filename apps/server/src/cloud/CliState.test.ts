@@ -31,7 +31,7 @@ const makeTestLayer = () =>
   ServerSecretStore.layer.pipe(
     Layer.provide(
       ServerConfig.layerTest(process.cwd(), {
-        prefix: "t3-cloud-cli-state-test-",
+        prefix: "openswe-cloud-cli-state-test-",
       }),
     ),
   );

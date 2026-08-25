@@ -27,7 +27,7 @@ export class GitHubGraphQlBudget extends Context.Service<
     ) => Effect.Effect<string, SourceControlRateLimit.SourceControlRateLimitPausedError>;
     readonly observe: (host: string, raw: string) => Effect.Effect<void>;
   }
->()("t3/sourceControl/githubGraphQlBudget") {}
+>()("openswe/sourceControl/githubGraphQlBudget") {}
 
 function hostKey(host: string): string {
   return host.trim().toLowerCase();

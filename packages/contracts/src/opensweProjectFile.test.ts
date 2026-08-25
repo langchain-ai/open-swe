@@ -1,14 +1,14 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { T3ProjectFile } from "./t3ProjectFile.ts";
+import { OpenSWEProjectFile } from "./opensweProjectFile.ts";
 
-const decode = Schema.decodeUnknownSync(T3ProjectFile);
+const decode = Schema.decodeUnknownSync(OpenSWEProjectFile);
 
-describe("T3ProjectFile", () => {
+describe("OpenSWEProjectFile", () => {
   it("decodes a full project file", () => {
     const decoded = decode({
-      $schema: "https://t3.codes/schema/t3.json",
+      $schema: "https://openswe.codes/schema/openswe.json",
       iconPath: "assets/logo.svg",
       scripts: [
         {

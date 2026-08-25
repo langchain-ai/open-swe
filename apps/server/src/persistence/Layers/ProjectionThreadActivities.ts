@@ -1,6 +1,6 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { NonNegativeInt } from "@t3tools/contracts";
+import { NonNegativeInt } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";

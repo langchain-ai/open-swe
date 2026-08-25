@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { SshHttpBridgeError } from "@t3tools/ssh/errors";
+import { SshHttpBridgeError } from "@openswe/ssh/errors";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -61,7 +61,7 @@ describe("SSH environment IPC", () => {
         serverVersion: "1.2.3",
         capabilities: { repositoryIdentity: true },
       });
-      assert.deepEqual(requestUrls, ["http://127.0.0.1:41773/.well-known/t3/environment"]);
+      assert.deepEqual(requestUrls, ["http://127.0.0.1:41773/.well-known/openswe/environment"]);
     }).pipe(Effect.provide(layer));
   });
 

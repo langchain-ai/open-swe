@@ -2,7 +2,7 @@
 // @effect-diagnostics globalDate:off
 // @effect-diagnostics globalTimers:off
 // This file is shipped as a standalone bundle and copied to a stable path by
-// `t3 service update`. Keep runtime imports limited to Node built-ins.
+// `openswe service update`. Keep runtime imports limited to Node built-ins.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -46,7 +46,7 @@ const runtimePaths = (baseDir: string, version: string) => {
   const versionDir = NodePath.join(baseDir, "runtime", "versions", version);
   return {
     versionDir,
-    entryPath: NodePath.join(versionDir, "node_modules", "t3", "dist", "bin.mjs"),
+    entryPath: NodePath.join(versionDir, "node_modules", "openswe", "dist", "bin.mjs"),
     sentinelPath: NodePath.join(versionDir, ".install-complete"),
   };
 };
@@ -393,7 +393,7 @@ export class Launcher {
   async #startChild(version: string, role: ChildRole, update?: ServiceUpdateRecord): Promise<void> {
     if (this.#stopping) return;
     if (!(await runtimeExists(this.#baseDir, version))) {
-      throw new Error(`Selected t3@${version} runtime is missing or incomplete.`);
+      throw new Error(`Selected openswe@${version} runtime is missing or incomplete.`);
     }
     if (this.#stopping) return;
     const paths = runtimePaths(this.#baseDir, version);
@@ -603,9 +603,9 @@ export class Launcher {
 }
 
 async function main(): Promise<void> {
-  const baseDir = process.env.T3CODE_HOME?.trim();
+  const baseDir = process.env.OPENSWE_HOME?.trim();
   if (baseDir === undefined || baseDir === "") {
-    throw new Error("T3CODE_HOME is required by the T3 Code service launcher.");
+    throw new Error("OPENSWE_HOME is required by the Open SWE service launcher.");
   }
   const statePath = NodePath.join(baseDir, "runtime", SERVICE_STATE_FILE);
   const state = await readServiceState(statePath);

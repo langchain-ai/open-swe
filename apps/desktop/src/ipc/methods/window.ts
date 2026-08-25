@@ -11,9 +11,9 @@ import {
   REMOTE_CAPABLE_EDITOR_IDS,
   type DesktopEnvironmentBootstrap,
   type PickedThemeFile,
-} from "@t3tools/contracts";
-import { WORKSPACE_IMAGE_PREVIEW_EXTENSIONS } from "@t3tools/shared/filePreview";
-import { isCommandAvailable } from "@t3tools/shared/shell";
+} from "@openswe/contracts";
+import { WORKSPACE_IMAGE_PREVIEW_EXTENSIONS } from "@openswe/shared/filePreview";
+import { isCommandAvailable } from "@openswe/shared/shell";
 import * as NodeOS from "node:os";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

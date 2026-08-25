@@ -1,4 +1,4 @@
-import { MAX_KEYBINDING_VALUE_LENGTH, type KeybindingCommand } from "@t3tools/contracts";
+import { MAX_KEYBINDING_VALUE_LENGTH, type KeybindingCommand } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { commandForProjectScript } from "../projectScripts";

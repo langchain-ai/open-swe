@@ -1,7 +1,7 @@
 import {
   createAtomCommandScheduler,
   createRuntimeCommand,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/client-runtime/state/runtime";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import {

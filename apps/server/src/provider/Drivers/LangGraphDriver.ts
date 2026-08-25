@@ -1,5 +1,5 @@
 /**
- * LangGraphDriver — Open SWE's LangGraph agent as a T3 Code provider.
+ * LangGraphDriver — Open SWE's LangGraph agent as a Open SWE provider.
  *
  * Attaches to either an externally configured LangGraph server or the
  * desktop-managed Open SWE runtime advertised through the process environment.
@@ -7,7 +7,7 @@
  *
  * @module provider/Drivers/LangGraphDriver
  */
-import { LangGraphSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { LangGraphSettings, ProviderDriverKind, type ServerProvider } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

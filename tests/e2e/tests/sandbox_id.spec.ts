@@ -18,13 +18,9 @@ async function createThreadWithSandbox(page: Page): Promise<string> {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
   await expect(page.locator("#thread")).toContainText("No messages yet");
-  await page
-    .locator("#text")
-    .fill("<@U0BOT> please add a greet() helper and open a PR");
+  await page.locator("#text").fill("<@U0BOT> please add a greet() helper and open a PR");
   await page.locator("#send").click();
-  await expect(
-    page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }),
-  ).toBeVisible();
+  await expect(page.locator(".msg.bot").filter({ hasText: "Add greet() helper" })).toBeVisible();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
   await expect(webLink).toBeVisible();
@@ -36,19 +32,13 @@ async function createThreadWithSandbox(page: Page): Promise<string> {
   return id as string;
 }
 
-const copyItem = (page: Page) =>
-  page.getByRole("menuitem", { name: "Copy sandbox ID" });
+const copyItem = (page: Page) => page.getByRole("menuitem", { name: "Copy sandbox ID" });
 
 test.describe("thread sandbox id (real dashboard UI)", () => {
-  test("desktop: context menu copies the real sandbox id", async ({
-    page,
-    baseURL,
-  }) => {
-    await page
-      .context()
-      .grantPermissions(["clipboard-read", "clipboard-write"], {
-        origin: baseURL,
-      });
+  test("desktop: context menu copies the real sandbox id", async ({ page, baseURL }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: baseURL,
+    });
     await loginAs(page, SAME_USER);
     const threadId = await createThreadWithSandbox(page);
 
@@ -148,9 +138,7 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     await row.press("Shift+F10");
     await expect(copyItem(bobPage)).toBeEnabled();
 
-    const screenshotPath = testInfo.outputPath(
-      "shared-thread-sidebar-sandbox-menu.png",
-    );
+    const screenshotPath = testInfo.outputPath("shared-thread-sidebar-sandbox-menu.png");
     await bobPage.screenshot({ path: screenshotPath, fullPage: true });
     await testInfo.attach("shared-thread-sidebar-sandbox-menu", {
       path: screenshotPath,

@@ -2,7 +2,7 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment } from "@openswe/shared/hostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -647,7 +647,7 @@ const writeAtomically = Effect.fn("iconExport.writeAtomically")(function* (
   const temporaryPath = yield* fs
     .makeTempFileScoped({
       directory: targetDirectory,
-      prefix: ".t3-icon-export-",
+      prefix: ".openswe-icon-export-",
       suffix: ".tmp",
     })
     .pipe(
@@ -721,7 +721,7 @@ export const exportBrandIcons = Effect.fn("exportBrandIcons")(function* (checkOn
   const tool = yield* resolveIconComposerTool();
   const temporaryDirectory = yield* fs
     .makeTempDirectoryScoped({
-      prefix: "t3-icon-export-",
+      prefix: "openswe-icon-export-",
     })
     .pipe(
       Effect.mapError(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@openswe/contracts";
 
 import { LangChainIcon } from "../Icons";
 import { PROVIDER_ICON_BY_PROVIDER } from "../chat/providerIconUtils";

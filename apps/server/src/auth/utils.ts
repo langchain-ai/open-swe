@@ -2,13 +2,13 @@ import type {
   AuthClientMetadata,
   AuthClientMetadataDeviceType,
   AuthClientPresentationMetadata,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as NodeCrypto from "node:crypto";
 import * as Encoding from "effect/Encoding";
 import * as Result from "effect/Result";
 
-const SESSION_COOKIE_NAME = "t3_session";
+const SESSION_COOKIE_NAME = "openswe_session";
 
 /**
  * Cookies are scoped by host but *not* by port, so any two servers that can be

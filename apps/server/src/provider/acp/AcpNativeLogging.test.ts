@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderDriverKind, ThreadId } from "@t3tools/contracts";
+import { ProviderDriverKind, ThreadId } from "@openswe/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";

@@ -4,8 +4,8 @@ import {
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
   type AuthEnvironmentScope,
-} from "@t3tools/contracts";
-import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
+} from "@openswe/contracts";
+import { encodeOAuthScope } from "@openswe/shared/oauthScope";
 import * as Effect from "effect/Effect";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import {

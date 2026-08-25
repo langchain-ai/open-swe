@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/oxlint-plugin-t3code",
+  "name": "@openswe/oxlint-plugin-openswe",
   "private": true,
   "type": "module",
   "scripts": {

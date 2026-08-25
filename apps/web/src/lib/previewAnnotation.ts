@@ -1,4 +1,4 @@
-import type { PreviewAnnotationPayload } from "@t3tools/contracts";
+import type { PreviewAnnotationPayload } from "@openswe/contracts";
 import { buildElementContextBlock, normalizeElementContextSelection } from "./elementContext";
 
 const TRAILING_PREVIEW_ANNOTATION_BLOCK_PATTERN =

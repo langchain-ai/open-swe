@@ -2,8 +2,8 @@ import type {
   GitRunStackedActionResult,
   GitStackedAction,
   VcsStatusResult,
-} from "@t3tools/contracts";
-import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+} from "@openswe/contracts";
+import { isTemporaryWorktreeBranch } from "@openswe/shared/git";
 import {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
   getChangeRequestTerminology,
@@ -414,4 +414,4 @@ export function resolveLiveThreadBranchUpdate(input: {
 }
 
 // Re-export from shared for backwards compatibility in this module's exports
-export { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
+export { resolveAutoFeatureBranchName } from "@openswe/shared/git";

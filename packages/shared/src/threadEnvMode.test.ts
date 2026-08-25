@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { isDefaultThreadEnvModeSettled, resolveDefaultThreadEnvMode } from "./threadEnvMode.ts";
 
 describe("resolveDefaultThreadEnvMode", () => {
-  it("prefers the project setting over t3.json over the global default", () => {
+  it("prefers the project setting over openswe.json over the global default", () => {
     expect(
       resolveDefaultThreadEnvMode({
         projectSetting: "local",

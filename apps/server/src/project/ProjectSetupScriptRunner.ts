@@ -1,5 +1,5 @@
-import { ProjectId } from "@t3tools/contracts";
-import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
+import { ProjectId } from "@openswe/contracts";
+import { projectScriptRuntimeEnv, setupProjectScript } from "@openswe/shared/projectScripts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -76,7 +76,7 @@ export class ProjectSetupScriptRunner extends Context.Service<
       input: ProjectSetupScriptRunnerInput,
     ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>;
   }
->()("t3/project/ProjectSetupScriptRunner") {}
+>()("openswe/project/ProjectSetupScriptRunner") {}
 
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;

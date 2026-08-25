@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
+import { SourceControlProviderError, type ChangeRequest } from "@openswe/contracts";
 
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";

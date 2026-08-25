@@ -81,7 +81,7 @@ test-results/
 playwright-report/
 blob-report/
 
-# --- t3code client (apps/, packages/, native/, scripts/) ---
+# --- openswe client (apps/, packages/, native/, scripts/) ---
 .bun
 *.log
 *.tsbuildinfo
@@ -91,7 +91,7 @@ packages/*/dist
 .logs/
 release/
 release-mock/
-.t3
+.openswe
 .idea/
 apps/web/.playwright
 apps/web/playwright-report

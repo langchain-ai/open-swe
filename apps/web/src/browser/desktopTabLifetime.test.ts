@@ -3,7 +3,7 @@ import {
   DEFAULT_PREVIEW_ZOOM_FACTOR,
   EnvironmentId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { closeTab, createTab, stopBrowserRecording } = vi.hoisted(() => ({

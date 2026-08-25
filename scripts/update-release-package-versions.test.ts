@@ -10,7 +10,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { Command, CliError } from "effect/unstable/cli";
 import * as TestConsole from "effect/testing/TestConsole";
-import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
+import { fromJsonStringPretty } from "@openswe/shared/schemaJson";
 
 import {
   ReleaseGitHubOutputConfigurationError,

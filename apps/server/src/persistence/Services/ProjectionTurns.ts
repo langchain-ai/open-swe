@@ -16,7 +16,7 @@ import {
   OrchestrationCheckpointStatus,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -167,4 +167,4 @@ export interface ProjectionTurnRepositoryShape {
 export class ProjectionTurnRepository extends Context.Service<
   ProjectionTurnRepository,
   ProjectionTurnRepositoryShape
->()("t3/persistence/Services/ProjectionTurns/ProjectionTurnRepository") {}
+>()("openswe/persistence/Services/ProjectionTurns/ProjectionTurnRepository") {}

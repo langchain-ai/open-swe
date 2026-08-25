@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import { scopeThreadRef } from "@openswe/client-runtime/environment";
+import type { EnvironmentId, ScopedThreadRef } from "@openswe/contracts";
 
 import { useProjects } from "~/state/entities";
 

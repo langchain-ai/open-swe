@@ -1,5 +1,5 @@
-import { EnvironmentId } from "@t3tools/contracts";
-import { RelayClientTracer } from "@t3tools/shared/relayTracing";
+import { EnvironmentId } from "@openswe/contracts";
+import { RelayClientTracer } from "@openswe/shared/relayTracing";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

@@ -71,7 +71,7 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
     }).pipe(
       Effect.provide(
         ServerConfig.layerTest(process.cwd(), {
-          prefix: "t3-telemetry-identify-anonymous-",
+          prefix: "openswe-telemetry-identify-anonymous-",
         }),
       ),
     ),
@@ -121,7 +121,7 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
       Effect.provide(
         Layer.merge(
           ServerConfig.layerTest(process.cwd(), {
-            prefix: "t3-telemetry-identify-decode-",
+            prefix: "openswe-telemetry-identify-decode-",
           }),
           Logger.layer([logger], { mergeWithExisting: false }),
         ),
@@ -162,7 +162,7 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
       Effect.provide(
         Layer.merge(
           ServerConfig.layerTest(process.cwd(), {
-            prefix: "t3-telemetry-identify-read-",
+            prefix: "openswe-telemetry-identify-read-",
           }),
           Logger.layer([logger], { mergeWithExisting: false }),
         ),

@@ -2,7 +2,7 @@ import type {
   ResourceTelemetryProcessCategory,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,7 +17,7 @@ export class ProcessResourceMonitor extends Context.Service<
       input: ServerProcessResourceHistoryInput,
     ) => Effect.Effect<ServerProcessResourceHistoryResult>;
   }
->()("t3/diagnostics/ProcessResourceMonitor") {}
+>()("openswe/diagnostics/ProcessResourceMonitor") {}
 
 function isLegacyBackendCategory(category: ResourceTelemetryProcessCategory): boolean {
   return (

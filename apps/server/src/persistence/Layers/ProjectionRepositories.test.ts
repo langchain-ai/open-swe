@@ -1,4 +1,4 @@
-import { ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import { ProjectId, ThreadId, ProviderInstanceId } from "@openswe/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

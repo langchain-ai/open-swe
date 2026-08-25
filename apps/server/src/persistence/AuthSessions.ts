@@ -12,7 +12,7 @@ import {
   AuthSessionId,
   ClientSurface,
   ServerAuthSessionMethod,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import {
   type AuthSessionRepositoryError,
@@ -115,7 +115,7 @@ export class AuthSessionRepository extends Context.Service<
       input: SetAuthSessionClientConnectionInput,
     ) => Effect.Effect<void, AuthSessionRepositoryError>;
   }
->()("t3/persistence/AuthSessions/AuthSessionRepository") {}
+>()("openswe/persistence/AuthSessions/AuthSessionRepository") {}
 
 const AuthSessionDbRow = Schema.Struct({
   sessionId: AuthSessionId,

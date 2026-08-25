@@ -5,9 +5,7 @@
   "graphs": {
     "agent": "agent.graphs.agent:traced_agent"
   },
-  "dependencies": [
-    "."
-  ],
+  "dependencies": ["."],
   "auth": {
     "path": "agent.local_auth:auth",
     "disable_studio_auth": true

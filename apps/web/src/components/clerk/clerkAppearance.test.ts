@@ -5,7 +5,7 @@ import {
   GROVE_THEME,
   IRIS_THEME,
   OCEAN_THEME,
-  T3_CHAT_THEME,
+  OPEN_SWE_CHAT_THEME,
   themeColorToHex,
   type ThemeColors,
 } from "../../themePalette";
@@ -41,7 +41,7 @@ function mixThemeColors(first: string, second: string, firstWeight: number): str
 }
 
 const builtInThemeModes = [
-  T3_CHAT_THEME,
+  OPEN_SWE_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,
   EMBER_THEME,

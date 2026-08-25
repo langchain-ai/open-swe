@@ -2,7 +2,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderDriverKind,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Schema from "effect/Schema";
 import * as EffectAcpErrors from "effect-acp/errors";
 

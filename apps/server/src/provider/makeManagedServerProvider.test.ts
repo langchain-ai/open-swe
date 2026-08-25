@@ -4,8 +4,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-} from "@t3tools/contracts";
-import { createModelCapabilities } from "@t3tools/shared/model";
+} from "@openswe/contracts";
+import { createModelCapabilities } from "@openswe/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";

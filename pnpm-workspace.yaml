@@ -1,6 +1,6 @@
 packages:
   - apps/*
-  - oxlint-plugin-t3code
+  - oxlint-plugin-openswe
   - packages/*
   - scripts
 

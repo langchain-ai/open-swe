@@ -2,7 +2,7 @@ import {
   type ApprovalRequestId,
   type ProviderApprovalDecision,
   type ProviderApprovalOption,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { memo } from "react";
 import { Button } from "../ui/button";
 

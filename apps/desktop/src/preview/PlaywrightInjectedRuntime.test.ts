@@ -23,7 +23,7 @@ describe("playwright injected runtime", () => {
   effectIt.effect("builds an idempotent install expression", () =>
     Effect.gen(function* () {
       const expression = yield* playwrightInjectedRuntimeInstallExpression();
-      expect(expression).toContain("__t3PlaywrightInjected");
+      expect(expression).toContain("__openswePlaywrightInjected");
       expect(expression).toContain('testIdAttributeName":"data-testid');
     }),
   );

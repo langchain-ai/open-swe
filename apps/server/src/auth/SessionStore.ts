@@ -7,7 +7,7 @@ import {
   type AuthEnvironmentScope,
   type ClientSurface,
   type ServerAuthSessionMethod,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -405,7 +405,7 @@ export class SessionStore extends Context.Service<
       },
     ) => Effect.Effect<void, never>;
   }
->()("t3/auth/SessionStore") {}
+>()("openswe/auth/SessionStore") {}
 
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);

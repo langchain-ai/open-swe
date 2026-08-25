@@ -10,13 +10,13 @@ import {
   removeCatalogValue,
   removeConnectionFromCatalog,
   replaceCatalogValue,
-} from "@t3tools/client-runtime/platform";
-import { TokenStore } from "@t3tools/client-runtime/authorization";
+} from "@openswe/client-runtime/platform";
+import { TokenStore } from "@openswe/client-runtime/authorization";
 import {
   ConnectionTransientError,
   CredentialStore,
   ProfileStore,
-} from "@t3tools/client-runtime/connection";
+} from "@openswe/client-runtime/connection";
 import {
   EnvironmentId,
   OrchestrationShellSnapshot,
@@ -24,7 +24,7 @@ import {
   ServerConfig,
   ThreadId,
   VcsListRefsResult,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -33,7 +33,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
-const DATABASE_NAME = "t3code:connection-runtime";
+const DATABASE_NAME = "openswe:connection-runtime";
 const DATABASE_VERSION = 4;
 const CATALOG_STORE_NAME = "catalog";
 const SHELL_STORE_NAME = "shell";

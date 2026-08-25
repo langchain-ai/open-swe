@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/shared",
+  "name": "@openswe/shared",
   "private": true,
   "type": "module",
   "exports": {
@@ -103,9 +103,9 @@
       "types": "./src/threadEnvMode.ts",
       "import": "./src/threadEnvMode.ts"
     },
-    "./t3ProjectFile": {
-      "types": "./src/t3ProjectFile.ts",
-      "import": "./src/t3ProjectFile.ts"
+    "./opensweProjectFile": {
+      "types": "./src/opensweProjectFile.ts",
+      "import": "./src/opensweProjectFile.ts"
     },
     "./orchestrationTiming": {
       "types": "./src/orchestrationTiming.ts",
@@ -235,7 +235,7 @@
   "dependencies": {
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "@t3tools/contracts": "workspace:*",
+    "@openswe/contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
     "yaml": "catalog:"

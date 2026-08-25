@@ -1,5 +1,5 @@
 import type { FileDiffMetadata, SelectedLineRange, SelectionSide } from "@pierre/diffs";
-import type { PullRequestReviewPosition } from "@t3tools/contracts";
+import type { PullRequestReviewPosition } from "@openswe/contracts";
 import * as Schema from "effect/Schema";
 
 const ReviewCommentSelectionSchema = Schema.Struct({

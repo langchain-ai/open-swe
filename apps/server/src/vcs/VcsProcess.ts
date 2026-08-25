@@ -14,7 +14,7 @@ import {
   VcsProcessSpawnError,
   VcsProcessStdinWriteError,
   VcsProcessTimeoutError,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as ProcessRunner from "../processRunner.ts";
 
 export interface VcsProcessInput {
@@ -47,7 +47,7 @@ export class VcsProcess extends Context.Service<
   {
     readonly run: (input: VcsProcessInput) => Effect.Effect<VcsProcessOutput, VcsError>;
   }
->()("t3/vcs/VcsProcess") {}
+>()("openswe/vcs/VcsProcess") {}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;

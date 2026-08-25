@@ -1,4 +1,4 @@
-import type { PullRequestComment, PullRequestDetail } from "@t3tools/contracts";
+import type { PullRequestComment, PullRequestDetail } from "@openswe/contracts";
 
 /** Only the parts of a detail either answer reads, so a caller can pass a whole detail view. */
 type EditingSubject = Pick<

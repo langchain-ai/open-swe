@@ -1,5 +1,5 @@
-import { ConnectionTransientError } from "@t3tools/client-runtime/connection";
-import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
+import { ConnectionTransientError } from "@openswe/client-runtime/connection";
+import { ConnectionCatalogDocument } from "@openswe/client-runtime/platform";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

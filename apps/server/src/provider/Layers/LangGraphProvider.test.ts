@@ -1,4 +1,4 @@
-import { LangGraphSettings } from "@t3tools/contracts";
+import { LangGraphSettings } from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

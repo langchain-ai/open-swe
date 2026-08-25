@@ -30,8 +30,8 @@ import {
   RuntimeItemId,
   type ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+} from "@openswe/contracts";
+import { getModelSelectionStringOptionValue } from "@openswe/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -889,7 +889,7 @@ export function makeLangGraphAdapter(
             type: "turn.aborted",
             threadId,
             turnId: requestedTurnId,
-            payload: { reason: "Queued Open SWE turn cancelled from T3 Code." },
+            payload: { reason: "Queued Open SWE turn cancelled from Open SWE." },
           });
           return;
         }
@@ -914,7 +914,7 @@ export function makeLangGraphAdapter(
           type: "turn.aborted",
           threadId,
           turnId,
-          payload: { reason: "Interrupted from T3 Code." },
+          payload: { reason: "Interrupted from Open SWE." },
         });
         yield* emit({
           type: "session.state.changed",

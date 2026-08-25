@@ -1,5 +1,5 @@
 [package]
-name = "t3-resource-monitor"
+name = "openswe-resource-monitor"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"

@@ -28,7 +28,7 @@
  *
  * @module provider/Services/ProviderInstanceRegistryMutator
  */
-import type { ProviderInstanceConfigMap } from "@t3tools/contracts";
+import type { ProviderInstanceConfigMap } from "@openswe/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 
@@ -49,4 +49,4 @@ export interface ProviderInstanceRegistryMutatorShape {
 export class ProviderInstanceRegistryMutator extends Context.Service<
   ProviderInstanceRegistryMutator,
   ProviderInstanceRegistryMutatorShape
->()("t3/provider/Services/ProviderInstanceRegistryMutator") {}
+>()("openswe/provider/Services/ProviderInstanceRegistryMutator") {}

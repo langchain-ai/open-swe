@@ -2,7 +2,7 @@ import {
   type PreviewAutomationNavigateInput,
   type PreviewAutomationRequest,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import { isCurrentPreviewRuntimeTab } from "~/browser/previewRuntimeTabId";
 import { readThreadPreviewState } from "~/previewStateStore";

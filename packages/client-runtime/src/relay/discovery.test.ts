@@ -1,8 +1,8 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@openswe/contracts";
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
-} from "@t3tools/contracts/relay";
+} from "@openswe/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

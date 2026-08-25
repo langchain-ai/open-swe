@@ -8,7 +8,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 
 import type { TurnProcessingQuiescedReceipt } from "../src/orchestration/Services/RuntimeReceiptBus.ts";

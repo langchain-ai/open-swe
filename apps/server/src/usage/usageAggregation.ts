@@ -12,7 +12,7 @@
  *
  * @module usageAggregation
  */
-import type { UsageBucket, UsageDay, UsageResolution, UsageTokenTotals } from "@t3tools/contracts";
+import type { UsageBucket, UsageDay, UsageResolution, UsageTokenTotals } from "@openswe/contracts";
 
 import { addTotals, EMPTY_TOTALS, type UsageRecord } from "./usageTranscripts.ts";
 import { cacheSavingsUsd, priceUsage, type RateTable } from "./usagePricing.ts";

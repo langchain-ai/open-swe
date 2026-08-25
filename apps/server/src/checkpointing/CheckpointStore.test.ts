@@ -3,7 +3,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ThreadId, type VcsError } from "@t3tools/contracts";
+import { ThreadId, type VcsError } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -18,7 +18,7 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as ServerConfig from "../config.ts";
 
 const ServerConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3-checkpoint-store-test-",
+  prefix: "openswe-checkpoint-store-test-",
 });
 const VcsProcessTestLayer = VcsProcess.layer.pipe(Layer.provide(NodeServices.layer));
 const VcsDriverTestLayer = VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcessTestLayer));

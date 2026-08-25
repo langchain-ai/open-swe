@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProviderDriverKind } from "@t3tools/contracts";
+import type { EnvironmentId, ProviderDriverKind } from "@openswe/contracts";
 import { FolderGit2Icon, FolderIcon, GitBranchIcon } from "lucide-react";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";

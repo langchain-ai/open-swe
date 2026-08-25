@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { ResourceTelemetryProcess } from "@t3tools/contracts";
+import type { ResourceTelemetryProcess } from "@openswe/contracts";
 import * as DateTime from "effect/DateTime";
 
 import {

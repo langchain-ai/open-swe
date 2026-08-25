@@ -2,7 +2,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "node:crypto";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@openswe/shared/hostProcess";
 
 import {
   AuthAccessTokenType,
@@ -32,14 +32,14 @@ import {
   WS_METHODS,
   WsRpcGroup,
   EditorId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
   type DpopPublicJwk,
-} from "@t3tools/shared/dpop";
-import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@t3tools/shared/relayJwt";
-import * as RelayClient from "@t3tools/shared/relayClient";
+} from "@openswe/shared/dpop";
+import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@openswe/shared/relayJwt";
+import * as RelayClient from "@openswe/shared/relayClient";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -126,7 +126,7 @@ import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
+import * as OpenSWEProjectFileLoader from "./project/OpenSWEProjectFileLoader.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -358,9 +358,9 @@ const makeBrowserOtlpPayload = (spanName: string) =>
         url: collector.url,
         exportInterval: "10 millis",
         resource: {
-          serviceName: "t3-web",
+          serviceName: "openswe-web",
           attributes: {
-            "service.runtime": "t3-web",
+            "service.runtime": "openswe-web",
             "service.mode": "browser",
             "service.version": "test",
           },
@@ -429,7 +429,9 @@ const buildAppUnderTest = (options?: {
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-test-" });
+    const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "openswe-router-test-",
+    });
     const baseDir = options?.config?.baseDir ?? tempBaseDir;
     const devUrl = options?.config?.devUrl;
     const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl);
@@ -443,7 +445,7 @@ const buildAppUnderTest = (options?: {
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
-      otlpServiceName: "t3-server",
+      otlpServiceName: "openswe-server",
       mode: "desktop",
       port: 0,
       host: "127.0.0.1",
@@ -577,7 +579,7 @@ const buildAppUnderTest = (options?: {
       ),
       ProjectFaviconResolver.layer.pipe(
         Layer.provide(WorkspacePaths.layer),
-        Layer.provide(T3ProjectFileLoader.layer),
+        Layer.provide(OpenSWEProjectFileLoader.layer),
       ),
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(
@@ -963,7 +965,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mock(CloudCliTokenManager.CloudCliTokenManager)({
-          get: Effect.die(new Error("Unexpected T3 Connect CLI authorization request.")),
+          get: Effect.die(new Error("Unexpected Open SWE Connect CLI authorization request.")),
           getExisting: Effect.succeed(Option.none()),
           hasCredential: Effect.succeed(false),
           clear: Effect.void,
@@ -1179,7 +1181,7 @@ const makeCloudMintCredentialRequest = (input: {
 }) => {
   const payload = {
     iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
+    aud: input.audience ?? `openswe-env:${input.environmentId}`,
     sub: input.subject ?? "user_123",
     jti: input.jti ?? "cloud-mint-jti-1",
     environmentId: input.environmentId,
@@ -1216,7 +1218,7 @@ const makeCloudEnvironmentHealthRequest = (input: {
 }) => {
   const payload = {
     iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
+    aud: input.audience ?? `openswe-env:${input.environmentId}`,
     sub: input.subject ?? "user_123",
     jti: input.jti ?? "cloud-health-jti-1",
     environmentId: input.environmentId,
@@ -1429,7 +1431,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-gate-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "openswe-router-gate-",
+      });
       yield* fileSystem.writeFileString(path.join(staticDir, "index.html"), "ready");
       const entered = yield* Deferred.make<void>();
       const ready = yield* Deferred.make<void>();
@@ -1462,7 +1466,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-static-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "openswe-router-static-",
+      });
       const indexPath = path.join(staticDir, "index.html");
       yield* fileSystem.writeFileString(indexPath, "<html>router-static-ok</html>");
 
@@ -1492,7 +1498,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/openswe/environment");
       const response = yield* fetchEffect(url);
       const body = yield* responseJsonEffect<typeof testEnvironmentDescriptor>(response);
 
@@ -1515,7 +1521,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       });
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/openswe/environment");
       const response = yield* fetchEffect(url, {
         headers: {
           "accept-encoding": "gzip",
@@ -1534,7 +1540,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/openswe/environment");
       const response = yield* fetchEffect(url, {
         headers: {
           origin: crossOriginClientOrigin,
@@ -1575,7 +1581,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       ]);
       // Desktop, so port-scoped: instances scan for a free port and share
       // 127.0.0.1, and cookies are not scoped by port.
-      assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
+      assert.isTrue(body.auth.sessionCookieName.startsWith("openswe_session_"));
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1680,7 +1686,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
         scope: "orchestration:read orchestration:operate terminal:operate review:write",
         clientMetadata: {
-          label: "T3 Code Mobile",
+          label: "Open SWE Mobile",
           deviceType: "mobile",
           os: "iOS",
         },
@@ -1707,7 +1713,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 200);
       assert.equal(clientsResponse.status, 200);
       assert.deepInclude(mobileClient?.client, {
-        label: "T3 Code Mobile",
+        label: "Open SWE Mobile",
         deviceType: "mobile",
         os: "iOS",
         ipAddress: "127.0.0.1",
@@ -1745,7 +1751,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           body: new URLSearchParams({
             grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
             subject_token: credential.credential,
-            subject_token_type: "urn:t3:params:oauth:token-type:environment-bootstrap",
+            subject_token_type: "urn:openswe:params:oauth:token-type:environment-bootstrap",
             requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
             scope: "orchestration:read orchestration:operate terminal:operate review:write",
           }).toString(),
@@ -1978,8 +1984,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             wsBaseUrl: linkProofUrl
               .replace("http://", "ws://")
               .replace("/api/connect/link-proof", "/ws"),
-            // "manual" and "cloudflare_tunnel" are supported; "t3_relay" is not.
-            providerKind: "t3_relay",
+            // "manual" and "cloudflare_tunnel" are supported; "openswe_relay" is not.
+            providerKind: "openswe_relay",
           },
           origin: {
             localHttpHost: "127.0.0.1",
@@ -2196,7 +2202,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       Effect.gen(function* () {
         const installedRelayClient = {
           status: "available" as const,
-          executablePath: "/tmp/t3/tools/cloudflared",
+          executablePath: "/tmp/openswe/tools/cloudflared",
           source: "managed" as const,
           version: RelayClient.CLOUDFLARED_VERSION,
         };
@@ -2295,7 +2301,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: "not-a-public-key",
           endpointRuntime: null,
         }),
@@ -2343,18 +2349,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const insecureRelayUrl = yield* postRelayConfig({
         relayUrl: "http://relay.example.test",
         cloudUserId: "user_123",
-        environmentCredential: "t3env_test_credential",
+        environmentCredential: "opensweenv_test_credential",
       });
       const insecureRelayIssuer = yield* postRelayConfig({
         relayUrl: "https://relay.example.test",
         cloudUserId: "user_123",
         relayIssuer: "http://relay.example.test",
-        environmentCredential: "t3env_test_credential",
+        environmentCredential: "opensweenv_test_credential",
       });
       const nonOriginRelayUrl = yield* postRelayConfig({
         relayUrl: "https://relay.example.test/path",
         cloudUserId: "user_123",
-        environmentCredential: "t3env_test_credential",
+        environmentCredential: "opensweenv_test_credential",
       });
       const emptyCredential = yield* postRelayConfig({
         relayUrl: "https://relay.example.test",
@@ -2414,8 +2420,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           }),
         });
 
-      const firstResponse = yield* postRelayConfig("user_123", "t3env_first_credential");
-      const replacementResponse = yield* postRelayConfig("user_456", "t3env_second_credential");
+      const firstResponse = yield* postRelayConfig("user_123", "opensweenv_first_credential");
+      const replacementResponse = yield* postRelayConfig(
+        "user_456",
+        "opensweenv_second_credential",
+      );
       const replacementBody = yield* responseJsonEffect<{
         readonly _tag?: string;
         readonly message?: string;
@@ -2466,7 +2475,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           relayUrl: "https://transport.example.test",
           relayIssuer: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -2548,7 +2557,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           relayUrl: "https://transport.example.test",
           relayIssuer: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: {
             providerKind: "cloudflare_tunnel",
@@ -2621,7 +2630,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -2661,7 +2670,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("serves the documented T3 Connect mint credential endpoint", () =>
+  it.effect("serves the documented Open SWE Connect mint credential endpoint", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
@@ -2680,7 +2689,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -2697,7 +2706,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/openswe-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -2720,7 +2729,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("serves signed T3 Connect environment health checks", () =>
+  it.effect("serves signed Open SWE Connect environment health checks", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
@@ -2739,7 +2748,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -2755,7 +2764,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/openswe-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -2799,7 +2808,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -2815,7 +2824,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/openswe-connect/health");
       const postHealth = () =>
         fetchEffect(healthUrl, {
           method: "POST",
@@ -2861,7 +2870,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             relayUrl: "https://transport.example.test",
             cloudUserId: "user_123",
             relayIssuer: "https://relay.example.test",
-            environmentCredential: "t3env_test_credential",
+            environmentCredential: "opensweenv_test_credential",
             cloudMintPublicKey: cloudKeyPair.publicKey,
             endpointRuntime: null,
           }),
@@ -2869,7 +2878,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(relayConfigResponse.status, 200);
 
         const now = yield* DateTime.now;
-        const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+        const mintUrl = yield* getHttpServerUrl("/api/openswe-connect/mint-credential");
         const postMint = (request: ReturnType<typeof makeCloudMintCredentialRequest>) =>
           fetchEffect(mintUrl, {
             method: "POST",
@@ -2940,7 +2949,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: {
             providerKind: "cloudflare_tunnel",
@@ -2969,7 +2978,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/openswe-connect/health");
       const healthResponse = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -3009,7 +3018,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3044,7 +3053,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           privateKey: cloudKeyPair.privateKey,
           environmentId: testEnvironmentDescriptor.environmentId,
           clientProofKeyThumbprint: "client-proof-key-thumbprint",
-          audience: "t3-env:other-environment",
+          audience: "openswe-env:other-environment",
           jti: "cloud-mint-jti-wrong-audience",
           nonce: "cloud-mint-nonce-wrong-audience",
           issuedAt: DateTime.formatIso(now),
@@ -3076,7 +3085,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3084,7 +3093,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/openswe-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -3127,7 +3136,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3135,7 +3144,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/openswe-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -3178,7 +3187,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3186,7 +3195,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/openswe-connect/health");
       const postHealth = (request: ReturnType<typeof makeCloudEnvironmentHealthRequest>) =>
         fetchEffect(healthUrl, {
           method: "POST",
@@ -3211,7 +3220,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         makeCloudEnvironmentHealthRequest({
           privateKey: cloudKeyPair.privateKey,
           environmentId: testEnvironmentDescriptor.environmentId,
-          audience: "t3-env:other-environment",
+          audience: "openswe-env:other-environment",
           jti: "cloud-health-jti-wrong-audience",
           nonce: "cloud-health-nonce-wrong-audience",
           issuedAt: DateTime.formatIso(now),
@@ -3243,7 +3252,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3251,7 +3260,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/openswe-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -3293,7 +3302,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "opensweenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3301,7 +3310,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/openswe-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -4114,7 +4123,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               attributes: [
                 {
                   key: "service.name",
-                  value: { stringValue: "t3-web" },
+                  value: { stringValue: "openswe-web" },
                 },
               ],
             },
@@ -4256,7 +4265,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             "rpc.method": "server.getSettings",
           },
           resourceAttributes: {
-            "service.name": "t3-web",
+            "service.name": "openswe-web",
           },
           scope: {
             name: "effect",
@@ -4384,7 +4393,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(record.links, []);
         assert.equal(record.scope.name, scopeSpan.scope.name);
         assert.deepEqual(record.scope.attributes, {});
-        assert.equal(record.resourceAttributes["service.name"], "t3-web");
+        assert.equal(record.resourceAttributes["service.name"], "openswe-web");
         assert.equal(record.status?.code, String(span.status.code));
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -4613,7 +4622,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-auth-required-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "openswe-ws-auth-required-",
+      });
       yield* fs.writeFileString(
         path.join(workspaceDir, "needle-file.ts"),
         "export const needle = 1;",
@@ -4840,7 +4851,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-search-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "openswe-ws-project-search-",
+      });
       yield* fs.writeFileString(
         path.join(workspaceDir, "needle-file.ts"),
         "export const needle = 1;",
@@ -4869,7 +4882,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-files-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "openswe-ws-project-files-",
+      });
       yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
       yield* fs.writeFileString(
         path.join(workspaceDir, "src", "index.ts"),
@@ -4906,7 +4921,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-project-search-gitignored-",
+        prefix: "openswe-ws-project-search-gitignored-",
       });
       yield* fs.writeFileString(path.join(workspaceDir, ".gitignore"), ".venv/\n");
       yield* fs.makeDirectory(path.join(workspaceDir, ".venv", "lib"), { recursive: true });
@@ -4963,10 +4978,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-errors-",
+        prefix: "openswe-ws-workspace-errors-",
       });
       const outsideDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-errors-outside-",
+        prefix: "openswe-ws-workspace-errors-outside-",
       });
       const outsideFile = path.join(outsideDir, "outside.txt");
       yield* fs.writeFileString(outsideFile, "outside\n");
@@ -5076,7 +5091,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const blockedRoot = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-stat-error-",
+        prefix: "openswe-ws-workspace-stat-error-",
       });
       const workspaceRoot = path.join(blockedRoot, "workspace");
       yield* fs.makeDirectory(workspaceRoot);
@@ -5106,7 +5121,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-write-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "openswe-ws-project-write-",
+      });
 
       yield* buildAppUnderTest();
 
@@ -5131,7 +5148,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const parentDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-create-" });
+      const parentDir = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-ws-project-create-" });
       const missingWorkspaceRoot = path.join(parentDir, "nested", "new-project");
 
       yield* buildAppUnderTest();
@@ -5251,7 +5268,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("routes websocket rpc projects.writeFile errors", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-write-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "openswe-ws-project-write-",
+      });
 
       yield* buildAppUnderTest();
 
@@ -7520,7 +7539,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             isRepo: true,
             hasPrimaryRemote: true,
             isDefaultRef: false,
-            refName: "t3code/bootstrap-refName",
+            refName: "openswe/bootstrap-refName",
             hasWorkingTreeChanges: false,
             workingTree: {
               files: [],
@@ -7563,7 +7582,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               bootstrapGitOperations.push("create-worktree");
               return {
                 worktree: {
-                  refName: "t3code/bootstrap-refName",
+                  refName: "openswe/bootstrap-refName",
                   path: "/tmp/bootstrap-worktree",
                 },
               };
@@ -7640,7 +7659,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
+                  branch: "openswe/bootstrap-refName",
                   startFromOrigin: true,
                 },
                 runSetupScript: true,
@@ -7664,7 +7683,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           refName: fetchedOriginCommit,
-          newRefName: "t3code/bootstrap-refName",
+          newRefName: "openswe/bootstrap-refName",
           baseRefName: "main",
           path: null,
         });
@@ -7730,7 +7749,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
             Effect.succeed({
               worktree: {
-                refName: "t3code/bootstrap-refName",
+                refName: "openswe/bootstrap-refName",
                 path: "/tmp/bootstrap-worktree",
               },
             }),
@@ -7786,7 +7805,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
+                  branch: "openswe/bootstrap-refName",
                   startFromOrigin: true,
                 },
               },
@@ -7804,7 +7823,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           refName: "main",
-          newRefName: "t3code/bootstrap-refName",
+          newRefName: "openswe/bootstrap-refName",
           baseRefName: "main",
           path: null,
         });
@@ -7818,7 +7837,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "t3code/bootstrap-refName",
+              refName: "openswe/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -7889,7 +7908,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "openswe/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -7923,7 +7942,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "t3code/bootstrap-refName",
+              refName: "openswe/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -8010,7 +8029,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "openswe/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -8117,7 +8136,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
+                  branch: "openswe/bootstrap-refName",
                 },
                 runSetupScript: false,
               },
@@ -8207,7 +8226,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "openswe/bootstrap-refName",
               },
               runSetupScript: false,
             },
@@ -8498,14 +8517,14 @@ it.live(
 
       const report = formatTransferBudgetReport(runs);
       yield* Effect.logInfo(`\n${report}`);
-      const reportPath = yield* Config.string("T3CODE_TRANSFER_BUDGET_REPORT_PATH").pipe(
+      const reportPath = yield* Config.string("OPENSWE_TRANSFER_BUDGET_REPORT_PATH").pipe(
         Config.option,
       );
       if (Option.isSome(reportPath)) {
         const fileSystem = yield* FileSystem.FileSystem;
         yield* fileSystem.writeFileString(reportPath.value, report);
       }
-      const resultPath = yield* Config.string("T3CODE_TRANSFER_BUDGET_RESULT_PATH").pipe(
+      const resultPath = yield* Config.string("OPENSWE_TRANSFER_BUDGET_RESULT_PATH").pipe(
         Config.option,
       );
       if (Option.isSome(resultPath)) {

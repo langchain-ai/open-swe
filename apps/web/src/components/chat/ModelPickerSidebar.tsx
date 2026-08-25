@@ -1,4 +1,4 @@
-import { type ProviderInstanceId } from "@t3tools/contracts";
+import { type ProviderInstanceId } from "@openswe/contracts";
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { SparklesIcon, StarIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";

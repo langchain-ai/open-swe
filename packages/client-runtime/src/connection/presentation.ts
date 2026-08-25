@@ -1,4 +1,4 @@
-import type { ServerConfig } from "@t3tools/contracts";
+import type { ServerConfig } from "@openswe/contracts";
 import * as Option from "effect/Option";
 
 import type { ConnectionCatalogEntry } from "./catalog.ts";

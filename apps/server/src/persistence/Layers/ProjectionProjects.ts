@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { ModelSelection, ProjectScript } from "@t3tools/contracts";
+import { ModelSelection, ProjectScript } from "@openswe/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   DeleteProjectionProjectInput,

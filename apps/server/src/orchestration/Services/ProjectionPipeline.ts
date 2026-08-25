@@ -6,7 +6,7 @@
  *
  * @module OrchestrationProjectionPipeline
  */
-import type { OrchestrationEvent } from "@t3tools/contracts";
+import type { OrchestrationEvent } from "@openswe/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 
@@ -39,4 +39,4 @@ export interface OrchestrationProjectionPipelineShape {
 export class OrchestrationProjectionPipeline extends Context.Service<
   OrchestrationProjectionPipeline,
   OrchestrationProjectionPipelineShape
->()("t3/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}
+>()("openswe/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}

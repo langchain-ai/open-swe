@@ -2,8 +2,8 @@ import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,
   type KnownEnvironment,
-} from "@t3tools/client-runtime/environment";
-import type { ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+} from "@openswe/client-runtime/environment";
+import type { ExecutionEnvironmentDescriptor } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 
 import { PrimaryEnvironmentRequestError, retryTransientBootstrap } from "./auth";

@@ -29,9 +29,7 @@ describe("resolveLangGraphDriverConfig", () => {
       serverUrl: "https://external.example.test",
     };
 
-    expect(
-      resolveLangGraphDriverConfig({ enabled: true, config, environment: {} }),
-    ).toEqual({
+    expect(resolveLangGraphDriverConfig({ enabled: true, config, environment: {} })).toEqual({
       ...config,
       enabled: true,
     });

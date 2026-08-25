@@ -8,7 +8,7 @@ import type * as Scope from "effect/Scope";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
-import type { VcsDriverKind } from "@t3tools/contracts";
+import type { VcsDriverKind } from "@openswe/contracts";
 import * as VcsDriver from "../VcsDriver.ts";
 
 function normalizePathForComparison(value: string): string {
@@ -43,7 +43,7 @@ export interface VcsDriverContractSuiteInput<R, E> {
 
 export function runVcsDriverContractSuite<R, E>(input: VcsDriverContractSuiteInput<R, E>) {
   const makeTmpDir = (
-    prefix = `t3-${input.kind}-vcs-contract-`,
+    prefix = `openswe-${input.kind}-vcs-contract-`,
   ): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem | Scope.Scope> =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

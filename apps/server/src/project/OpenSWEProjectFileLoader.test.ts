@@ -6,31 +6,31 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
-import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
+import * as OpenSWEProjectFileLoader from "./OpenSWEProjectFileLoader.ts";
 
 const TestLayer = Layer.empty.pipe(
-  Layer.provideMerge(T3ProjectFileLoader.layer),
+  Layer.provideMerge(OpenSWEProjectFileLoader.layer),
   Layer.provideMerge(NodeServices.layer),
 );
 
 const makeTempDir = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   return yield* fileSystem.makeTempDirectoryScoped({
-    prefix: "t3code-project-file-",
+    prefix: "openswe-project-file-",
   });
 });
 
 const writeProjectFile = Effect.fn("writeProjectFile")(function* (cwd: string, contents: string) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  yield* fileSystem.writeFileString(path.join(cwd, "t3.json"), contents).pipe(Effect.orDie);
+  yield* fileSystem.writeFileString(path.join(cwd, "openswe.json"), contents).pipe(Effect.orDie);
 });
 
-it.layer(TestLayer)("T3ProjectFileLoader", (it) => {
+it.layer(TestLayer)("OpenSWEProjectFileLoader", (it) => {
   describe("load", () => {
-    it.effect("loads and decodes a valid t3.json", () =>
+    it.effect("loads and decodes a valid openswe.json", () =>
       Effect.gen(function* () {
-        const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
+        const loader = yield* OpenSWEProjectFileLoader.OpenSWEProjectFileLoader;
         const cwd = yield* makeTempDir;
         yield* writeProjectFile(
           cwd,
@@ -51,9 +51,9 @@ it.layer(TestLayer)("T3ProjectFileLoader", (it) => {
       }),
     );
 
-    it.effect("returns none when t3.json is missing", () =>
+    it.effect("returns none when openswe.json is missing", () =>
       Effect.gen(function* () {
-        const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
+        const loader = yield* OpenSWEProjectFileLoader.OpenSWEProjectFileLoader;
         const cwd = yield* makeTempDir;
 
         const loaded = yield* loader.load(cwd);
@@ -64,7 +64,7 @@ it.layer(TestLayer)("T3ProjectFileLoader", (it) => {
 
     it.effect("returns none for malformed JSON without failing", () =>
       Effect.gen(function* () {
-        const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
+        const loader = yield* OpenSWEProjectFileLoader.OpenSWEProjectFileLoader;
         const cwd = yield* makeTempDir;
         yield* writeProjectFile(cwd, "{ not json");
 
@@ -76,7 +76,7 @@ it.layer(TestLayer)("T3ProjectFileLoader", (it) => {
 
     it.effect("returns none for schema-invalid files without failing", () =>
       Effect.gen(function* () {
-        const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
+        const loader = yield* OpenSWEProjectFileLoader.OpenSWEProjectFileLoader;
         const cwd = yield* makeTempDir;
         yield* writeProjectFile(cwd, '{ "scripts": [{ "name": "Dev" }] }');
 

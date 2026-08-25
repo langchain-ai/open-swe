@@ -1,4 +1,4 @@
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+import { withRelayClientTracing } from "@openswe/shared/relayTracing";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { HttpServerRequest, HttpTraceContext } from "effect/unstable/http";

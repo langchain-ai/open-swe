@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { classifyTaskAgentKind, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import { classifyTaskAgentKind, type OrchestrationThreadActivity } from "@openswe/contracts";
 import {
   deriveAgentPanelModel,
   foldSubagentActivities,
@@ -739,10 +739,10 @@ describe("terminal robustness", () => {
 
   it("provider endedAt wins over ingestion time on the settling transition", () => {
     const agents = fold([
-      activity("task.started", { taskId: "t3", taskType: "local_agent" }),
+      activity("task.started", { taskId: "openswe", taskType: "local_agent" }),
       activity(
         "task.updated",
-        { taskId: "t3", status: "failed", endedAt: "2026-08-01T09:59:59.000Z" },
+        { taskId: "openswe", status: "failed", endedAt: "2026-08-01T09:59:59.000Z" },
         "2026-08-01T10:00:30.000Z",
       ),
     ]);

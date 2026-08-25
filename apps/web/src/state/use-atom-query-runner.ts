@@ -3,7 +3,7 @@ import {
   executeAtomQuery,
   type AtomCommandOptions,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/client-runtime/state/runtime";
 import { AsyncResult, type Atom } from "effect/unstable/reactivity";
 import { useCallback, useContext } from "react";
 

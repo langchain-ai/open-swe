@@ -1,4 +1,4 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@openswe/client-runtime/environment";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -161,7 +161,7 @@ function HostedStaticOnboardingState() {
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm leading-relaxed text-muted-foreground/78">
                 {cloudEnabled
-                  ? "Sign in to T3 Connect to connect a linked environment through its managed tunnel, or add a reachable backend manually."
+                  ? "Sign in to Open SWE Connect to connect a linked environment through its managed tunnel, or add a reachable backend manually."
                   : "Add a reachable backend manually to start working from this browser."}
               </EmptyDescription>
               <div className="mt-6 flex justify-center">

@@ -1,8 +1,8 @@
-import type { UsageProviderKind } from "@t3tools/contracts";
+import type { UsageProviderKind } from "@openswe/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
+import type { DailyTotals, HourlyTotals } from "@openswe/shared/usageMerge";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
@@ -18,7 +18,7 @@ import {
   formatTokens,
   formatUsd,
   makeWindow,
-} from "@t3tools/shared/usageFormat";
+} from "@openswe/shared/usageFormat";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";

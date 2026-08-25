@@ -4,7 +4,7 @@ import type {
   ServerProcessDiagnosticsResult,
   ServerProcessSignal,
   ServerSignalProcessResult,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -36,7 +36,7 @@ export class ProcessDiagnostics extends Context.Service<
       readonly signal: ServerProcessSignal;
     }) => Effect.Effect<ServerSignalProcessResult>;
   }
->()("t3/diagnostics/ProcessDiagnostics") {}
+>()("openswe/diagnostics/ProcessDiagnostics") {}
 
 function formatElapsed(runTimeMs: number): string {
   const totalSeconds = Math.max(0, Math.floor(runTimeMs / 1_000));
@@ -95,7 +95,7 @@ export const make = Effect.fn("makeProcessDiagnostics")(function* () {
           pid: input.pid,
           signal: input.signal,
           signaled: false,
-          message: Option.some("Refusing to signal the T3 server process."),
+          message: Option.some("Refusing to signal the Open SWE server process."),
         };
       }
       const current = yield* telemetry.refresh.pipe(Effect.option);
@@ -128,7 +128,9 @@ export const make = Effect.fn("makeProcessDiagnostics")(function* () {
           pid: input.pid,
           signal: input.signal,
           signaled: false,
-          message: Option.some(`Process ${input.pid} is not a signalable T3 backend descendant.`),
+          message: Option.some(
+            `Process ${input.pid} is not a signalable Open SWE backend descendant.`,
+          ),
         };
       }
       return yield* Effect.try({

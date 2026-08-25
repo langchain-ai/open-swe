@@ -4,8 +4,8 @@ import {
   issueRemoteWebSocketTicket,
   RemoteEnvironmentAuthUndeclaredStatusError,
   type RemoteEnvironmentAuthError,
-} from "@t3tools/client-runtime/authorization";
-import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
+} from "@openswe/client-runtime/authorization";
+import { fetchRemoteEnvironmentDescriptor } from "@openswe/client-runtime/environment";
 import {
   EnvironmentAuthInvalidError,
   DesktopDiscoveredSshHostSchema,
@@ -25,9 +25,9 @@ import {
   AuthAccessTokenResult,
   AuthSessionState,
   AuthWebSocketTicketResult,
-} from "@t3tools/contracts";
-import { SshHttpBridgeError } from "@t3tools/ssh/errors";
-import { resolveLoopbackSshHttpBaseUrl } from "@t3tools/ssh/tunnel";
+} from "@openswe/contracts";
+import { SshHttpBridgeError } from "@openswe/ssh/errors";
+import { resolveLoopbackSshHttpBaseUrl } from "@openswe/ssh/tunnel";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

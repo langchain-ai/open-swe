@@ -1,10 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { connectionStatusText } from "@openswe/client-runtime/connection";
+import { safeErrorLogAttributes } from "@openswe/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/client-runtime/state/runtime";
 import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -13,12 +13,12 @@ import {
   type ProviderInstanceConfig,
   type ProviderInstanceId,
   resolveProviderInstanceEnabled,
-} from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+} from "@openswe/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@openswe/contracts/settings";
 import {
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
-} from "@t3tools/shared/backgroundActivitySettings";
+} from "@openswe/shared/backgroundActivitySettings";
 import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
@@ -156,7 +156,7 @@ function providerEnvironmentIcon(environment: EnvironmentPresentation) {
 
 function providerEnvironmentDetail(environment: EnvironmentPresentation): string {
   if (environment.entry.target._tag === "PrimaryConnectionTarget") return "Primary device";
-  if (environment.relayManaged) return "T3 Connect";
+  if (environment.relayManaged) return "Open SWE Connect";
   if (environment.entry.target._tag === "SshConnectionTarget") return "SSH";
   if (isDesktopLocalConnectionTarget(environment.entry.target)) return "Local device";
   return environment.displayUrl ?? "Remote device";

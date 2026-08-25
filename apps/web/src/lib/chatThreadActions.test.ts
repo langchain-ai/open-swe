@@ -1,5 +1,5 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { scopeProjectRef } from "@openswe/client-runtime/environment";
+import { EnvironmentId, ProjectId } from "@openswe/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,

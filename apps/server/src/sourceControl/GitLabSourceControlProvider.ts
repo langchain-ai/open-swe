@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
+import { SourceControlProviderError, type ChangeRequest } from "@openswe/contracts";
 
 import * as GitLabCli from "./GitLabCli.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";

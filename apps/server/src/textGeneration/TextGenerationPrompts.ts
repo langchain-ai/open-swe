@@ -7,7 +7,7 @@
  * @module textGenerationPrompts
  */
 import * as Schema from "effect/Schema";
-import type { ChatAttachment } from "@t3tools/contracts";
+import type { ChatAttachment } from "@openswe/contracts";
 
 import { limitSection } from "./TextGenerationUtils.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
@@ -216,7 +216,7 @@ export interface ThreadTitlePromptInput {
 
 // Keep shared editorial rules in these two prompts in sync. Regeneration
 // intentionally adds guidance for thread history and the previous title.
-const INITIAL_THREAD_TITLE_PROMPT = `Generate a title that will help the user recognize this T3 Code thread weeks later.
+const INITIAL_THREAD_TITLE_PROMPT = `Generate a title that will help the user recognize this Open SWE thread weeks later.
 Return JSON with exactly one key: title.
 
 Before answering, silently reduce the request to:
@@ -241,7 +241,7 @@ Editorial rules:
 - When a URL or attachment is the only source of the subject, use available tools to inspect it. If it cannot be resolved, remain accurate rather than guessing.`;
 
 function regenerateThreadTitlePrompt(previousTitle: string): string {
-  return `Regenerate the title for an existing T3 Code thread so the user can recognize it weeks later.
+  return `Regenerate the title for an existing Open SWE thread so the user can recognize it weeks later.
 The previous title was ${JSON.stringify(previousTitle)}.
 Return JSON with exactly one key: title.
 

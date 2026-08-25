@@ -1,6 +1,6 @@
 "use client";
 
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@openswe/contracts";
 import { PanelRightIcon, PictureInPicture2, XIcon } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 

@@ -1,6 +1,6 @@
 // Tiny event bus allowing components to programmatically open the command palette
 // without owning its React state.
-const COMMAND_PALETTE_OPEN_EVENT = "t3code:open-command-palette";
+const COMMAND_PALETTE_OPEN_EVENT = "openswe:open-command-palette";
 
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";

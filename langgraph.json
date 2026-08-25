@@ -9,9 +9,7 @@
     "chat": "agent.graphs.chat:traced_chat_agent",
     "scheduler": "agent.graphs.scheduler:get_scheduler"
   },
-  "dependencies": [
-    "."
-  ],
+  "dependencies": ["."],
   "http": {
     "app": "agent.webapp:app"
   },

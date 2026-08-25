@@ -1,6 +1,6 @@
 import type { ComponentType, Dispatch, ReactElement, SetStateAction } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@openswe/contracts";
 
 const testState = vi.hoisted(() => ({
   faviconUrl: "https://environment.test/api/assets/token-a/v1-20-favicon.svg",

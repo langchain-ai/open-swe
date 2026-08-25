@@ -1,4 +1,4 @@
-import type { ServerProviderSkill, ServerProviderSlashCommand } from "@t3tools/contracts";
+import type { ServerProviderSkill, ServerProviderSlashCommand } from "@openswe/contracts";
 
 export type ProviderSkillSourceKind = "app" | "repo" | "project" | "personal" | "system" | "other";
 

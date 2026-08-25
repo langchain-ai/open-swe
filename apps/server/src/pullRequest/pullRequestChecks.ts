@@ -1,4 +1,4 @@
-import type { PullRequestCheck } from "@t3tools/contracts";
+import type { PullRequestCheck } from "@openswe/contracts";
 
 /** ISO-8601 timestamps in UTC compare correctly as plain text, which is all the ordering needs. */
 function isAtLeastAsNew(candidate: string | null, kept: string | null): boolean {

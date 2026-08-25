@@ -1,7 +1,7 @@
 import {
   type CheckpointDiffState,
   type CheckpointDiffTarget,
-} from "@t3tools/client-runtime/state/threads";
+} from "@openswe/client-runtime/state/threads";
 
 import { useCheckpointDiff as useCheckpointDiffQuery } from "../state/queries";
 

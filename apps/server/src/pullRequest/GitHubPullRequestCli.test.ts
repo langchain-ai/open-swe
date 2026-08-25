@@ -295,7 +295,7 @@ layer("GitHubPullRequestCli.layer", (it) => {
       yield* cli.searchPullRequests({
         cwd: "/w",
         host: "github.com",
-        repositories: ["acme/web", "pingdotgg/t3code"],
+        repositories: ["acme/web", "langchain-ai/open-swe"],
         state: "closed",
         involvement: "reviewing",
         viewer: "bilal",
@@ -311,7 +311,7 @@ layer("GitHubPullRequestCli.layer", (it) => {
       assert.strictEqual(
         searchQueryOfCall(0),
         'is:pr is:closed is:unmerged review-requested:bilal "pull requests page" ' +
-          "updated:<=2026-07-02T00:00:00Z sort:updated-desc repo:acme/web repo:pingdotgg/t3code",
+          "updated:<=2026-07-02T00:00:00Z sort:updated-desc repo:acme/web repo:langchain-ai/open-swe",
       );
     }),
   );
@@ -392,7 +392,7 @@ layer("GitHubPullRequestCli.layer", (it) => {
         Effect.succeed(
           searchPage([
             searchItem(7, "acme/web", "2026-07-03T00:00:00Z"),
-            searchItem(9, "pingdotgg/t3code", "2026-07-02T00:00:00Z"),
+            searchItem(9, "langchain-ai/open-swe", "2026-07-02T00:00:00Z"),
             // Not a pull request, which `is:pr` excludes and a decode skips rather than fails on.
             {},
           ]),
@@ -403,7 +403,7 @@ layer("GitHubPullRequestCli.layer", (it) => {
       const batch = yield* cli.searchPullRequests({
         cwd: "/w",
         host: "github.com",
-        repositories: ["acme/web", "pingdotgg/t3code"],
+        repositories: ["acme/web", "langchain-ai/open-swe"],
         state: "open",
         involvement: "all",
         viewer: "bilal",
@@ -414,7 +414,7 @@ layer("GitHubPullRequestCli.layer", (it) => {
         batch.items.map((item) => [item.repository, item.number, item.author?.avatarUrl]),
         [
           ["acme/web", 7, "https://avatars/octocat"],
-          ["pingdotgg/t3code", 9, "https://avatars/octocat"],
+          ["langchain-ai/open-swe", 9, "https://avatars/octocat"],
         ],
       );
       // The listing leaves the line counts to a read of their own.

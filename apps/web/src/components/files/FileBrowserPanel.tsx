@@ -2,9 +2,9 @@ import type {
   ContextMenuItem as TreeContextMenuItem,
   ContextMenuOpenContext as TreeContextMenuOpenContext,
 } from "@pierre/trees";
-import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectEntry } from "@openswe/contracts";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { serializeComposerFileLink } from "@openswe/shared/composerTrigger";
 import { RotateCw } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
@@ -17,7 +17,7 @@ import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
-import { T3_PIERRE_ICONS } from "~/pierre-icons";
+import { OPEN_SWE_PIERRE_ICONS } from "~/pierre-icons";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { useProjectEntriesQuery } from "./projectFilesQueryState";
@@ -225,7 +225,7 @@ export default function FileBrowserPanel({
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: true,
     initialExpansion: 1,
-    icons: T3_PIERRE_ICONS,
+    icons: OPEN_SWE_PIERRE_ICONS,
     onSelectionChange: (selectedPaths) => {
       // The drag controller's selection cache must track every change,
       // including reveal-driven ones, or drags act on a stale selection.

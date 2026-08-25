@@ -11,7 +11,7 @@ import {
   TrimmedNonEmptyString,
   type SourceControlRepositoryVisibility,
   type VcsError,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
@@ -314,7 +314,7 @@ export class GitLabCli extends Context.Service<
       readonly force?: boolean;
     }) => Effect.Effect<void, GitLabCliError>;
   }
->()("t3/sourceControl/GitLabCli") {}
+>()("openswe/sourceControl/GitLabCli") {}
 
 const RawGitLabRepositoryCloneUrlsSchema = Schema.Struct({
   path_with_namespace: TrimmedNonEmptyString,

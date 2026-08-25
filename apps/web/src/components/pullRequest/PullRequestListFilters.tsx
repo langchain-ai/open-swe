@@ -5,7 +5,7 @@ import type {
   PullRequestListFilters,
   PullRequestListState,
   SourceControlProviderKind,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   CircleCheckIcon,
   CircleDashedIcon,

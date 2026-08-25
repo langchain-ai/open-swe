@@ -5,7 +5,7 @@ import {
   HostProcessExecutablePath,
   HostProcessPlatform,
   HostProcessUserId,
-} from "@t3tools/shared/hostProcess";
+} from "@openswe/shared/hostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -26,13 +26,15 @@ import {
 it("keeps systemd pinned to the stable launcher rather than a versioned server", () => {
   const unit = BootService.renderBootServiceUnit({
     nodePath: "/usr/bin/node",
-    launcherPath: "/home/theo/.t3/runtime/service-launcher.mjs",
-    baseDir: "/home/theo/.t3",
-    logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
+    launcherPath: "/home/theo/.openswe/runtime/service-launcher.mjs",
+    baseDir: "/home/theo/.openswe",
+    logPath: "/home/theo/.openswe/userdata/logs/boot-service.log",
     unitPath: "/home/theo/.config/systemd/user/open-swe.service",
   });
 
-  expect(unit).toContain("ExecStart=/usr/bin/node /home/theo/.t3/runtime/service-launcher.mjs");
+  expect(unit).toContain(
+    "ExecStart=/usr/bin/node /home/theo/.openswe/runtime/service-launcher.mjs",
+  );
   expect(unit).toContain("KillMode=mixed");
   expect(unit).not.toContain("versions/1.2.3");
 });
@@ -40,9 +42,9 @@ it("keeps systemd pinned to the stable launcher rather than a versioned server",
 it("survives the kernel OOM-killing a greedy agent child", () => {
   const unit = BootService.renderBootServiceUnit({
     nodePath: "/usr/bin/node",
-    launcherPath: "/home/theo/.t3/runtime/service-launcher.mjs",
-    baseDir: "/home/theo/.t3",
-    logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
+    launcherPath: "/home/theo/.openswe/runtime/service-launcher.mjs",
+    baseDir: "/home/theo/.openswe",
+    logPath: "/home/theo/.openswe/userdata/logs/boot-service.log",
     unitPath: "/home/theo/.config/systemd/user/open-swe.service",
   });
 
@@ -51,9 +53,9 @@ it("survives the kernel OOM-killing a greedy agent child", () => {
 
 const macPlan = {
   nodePath: "/opt/homebrew/bin/node",
-  launcherPath: "/Users/theo/.t3/runtime/service-launcher.mjs",
-  baseDir: "/Users/theo/.t3",
-  logPath: "/Users/theo/.t3/userdata/logs/boot-service.log",
+  launcherPath: "/Users/theo/.openswe/runtime/service-launcher.mjs",
+  baseDir: "/Users/theo/.openswe",
+  logPath: "/Users/theo/.openswe/userdata/logs/boot-service.log",
   unitPath: "/Users/theo/Library/LaunchAgents/com.langchain.openswe.service.plist",
 };
 
@@ -61,7 +63,7 @@ it("keeps launchd pinned to the stable launcher rather than a versioned server",
   const plist = BootService.renderBootServicePlist(macPlan, { homeDir: "/Users/theo" });
 
   expect(plist).toContain("<string>/opt/homebrew/bin/node</string>");
-  expect(plist).toContain("<string>/Users/theo/.t3/runtime/service-launcher.mjs</string>");
+  expect(plist).toContain("<string>/Users/theo/.openswe/runtime/service-launcher.mjs</string>");
   expect(plist).not.toContain("versions/1.2.3");
 });
 
@@ -78,20 +80,20 @@ it("appends both stdio streams to the boot service log", () => {
   const plist = BootService.renderBootServicePlist(macPlan, { homeDir: "/Users/theo" });
 
   expect(plist).toContain(
-    "<key>StandardOutPath</key>\n  <string>/Users/theo/.t3/userdata/logs/boot-service.log</string>",
+    "<key>StandardOutPath</key>\n  <string>/Users/theo/.openswe/userdata/logs/boot-service.log</string>",
   );
   expect(plist).toContain(
-    "<key>StandardErrorPath</key>\n  <string>/Users/theo/.t3/userdata/logs/boot-service.log</string>",
+    "<key>StandardErrorPath</key>\n  <string>/Users/theo/.openswe/userdata/logs/boot-service.log</string>",
   );
 });
 
 it("escapes XML in host paths", () => {
   const plist = BootService.renderBootServicePlist(
-    { ...macPlan, baseDir: "/Users/theo/T3 & <Co>" },
+    { ...macPlan, baseDir: "/Users/theo/Open SWE & <Co>" },
     { homeDir: "/Users/theo" },
   );
 
-  expect(plist).toContain("<string>/Users/theo/T3 &amp; &lt;Co&gt;</string>");
+  expect(plist).toContain("<string>/Users/theo/Open SWE &amp; &lt;Co&gt;</string>");
 });
 
 const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
@@ -100,8 +102,8 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-boot-service-test-" });
-  const baseDir = path.join(home, ".t3");
+  const home = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-boot-service-test-" });
+  const baseDir = path.join(home, ".openswe");
   const sourceLauncher = path.join(home, "service-launcher.mjs");
   const statePath = path.join(baseDir, "runtime", "service-state.json");
   yield* fs.writeFileString(sourceLauncher, "export {};\n");
@@ -124,7 +126,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
         commands.push(command);
         timeouts.set(command, input.timeout);
         return {
-          stdout: input.args[1] === "--version" ? "t3 v1.2.3\n" : "",
+          stdout: input.args[1] === "--version" ? "openswe v1.2.3\n" : "",
           stderr: "",
           code: ChildProcessSpawner.ExitCode(command === control.failCommand ? 1 : 0),
           timedOut: false,

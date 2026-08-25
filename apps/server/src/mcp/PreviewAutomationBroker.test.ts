@@ -13,7 +13,7 @@ import {
   type PreviewAutomationHost,
   type PreviewAutomationRequest,
   type PreviewAutomationStreamEvent,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";

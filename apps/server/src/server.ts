@@ -1,4 +1,4 @@
-import { EnvironmentHttpApi } from "@t3tools/contracts";
+import { EnvironmentHttpApi } from "@openswe/contracts";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -65,7 +65,7 @@ import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
+import * as OpenSWEProjectFileLoader from "./project/OpenSWEProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -116,13 +116,13 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
-import * as NetService from "@t3tools/shared/Net";
-import * as RelayClient from "@t3tools/shared/relayClient";
-import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import * as NetService from "@openswe/shared/Net";
+import * as RelayClient from "@openswe/shared/relayClient";
+import { disableTailscaleServe, ensureTailscaleServe } from "@openswe/tailscale";
 import { forkParked, ServerActivation } from "./serverActivation.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
-// T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
+// Open SWE's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
 // already closes the websocket gracefully. Do not add an artificial drain before
 // those finalizers get a chance to run.
 const HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS = 0;
@@ -348,7 +348,7 @@ const WorkspaceLayerLive = Layer.mergeAll(
 
 const ProjectFaviconResolverLayerLive = ProjectFaviconResolver.layer.pipe(
   Layer.provide(WorkspacePaths.layer),
-  Layer.provide(T3ProjectFileLoader.layer),
+  Layer.provide(OpenSWEProjectFileLoader.layer),
 );
 
 const AuthLayerLive = EnvironmentAuth.layer.pipe(
@@ -636,9 +636,11 @@ export const makeServerLayer = Layer.unwrap(
                   Schedule.upTo({ duration: "10 minutes" }),
                 ),
               }),
-              Effect.tap(() => Effect.logInfo("T3 Connect desired link reconciled on startup")),
+              Effect.tap(() =>
+                Effect.logInfo("Open SWE Connect desired link reconciled on startup"),
+              ),
               Effect.catch((cause) =>
-                Effect.logWarning("Failed to reconcile T3 Connect desired link on startup", {
+                Effect.logWarning("Failed to reconcile Open SWE Connect desired link on startup", {
                   cause,
                 }),
               ),

@@ -3,8 +3,8 @@ import {
   type ProviderInstanceId,
   type ServerProvider,
   ServerProvider as ServerProviderSchema,
-} from "@t3tools/contracts";
-import { causeErrorTag } from "@t3tools/shared/observability";
+} from "@openswe/contracts";
+import { causeErrorTag } from "@openswe/shared/observability";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

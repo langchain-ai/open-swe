@@ -4,7 +4,7 @@
  * review. The glass card frame belongs to the caller (PullRequestCodeTab), which is why this
  * only contributes its own padding.
  */
-import type { EnvironmentId, PullRequestRef, PullRequestReviewVerdict } from "@t3tools/contracts";
+import type { EnvironmentId, PullRequestRef, PullRequestReviewVerdict } from "@openswe/contracts";
 import { CheckIcon, MessageSquareIcon, XCircleIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 

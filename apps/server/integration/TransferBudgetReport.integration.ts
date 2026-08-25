@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind } from "@openswe/contracts";
 
 import type {
   HttpTransferMeasurement,
@@ -143,7 +143,7 @@ export function transferBudgetViolations(runs: ReadonlyArray<TransferBudgetRun>)
 
 export function formatTransferBudgetReport(runs: ReadonlyArray<TransferBudgetRun>): string {
   const lines = [
-    "# T3 Code thread transfer budget",
+    "# Open SWE thread transfer budget",
     "",
     "Wire values are thread data bytes read from local HTTP and WebSocket sockets. HTTP includes response headers; WebSocket measurement starts after the resumed thread subscription synchronizes. TCP/IP, TLS framing, and the WebSocket upgrade are excluded. WebSocket permessage-deflate is negotiated.",
     `Scenario: ${TRANSFER_HISTORY_TURN_COUNT} historical turns with ${TRANSFER_HISTORY_TOOLS_PER_TURN} command tools and one retained ${formatBytes(TRANSFER_HISTORY_MCP_RESULT_BYTES)} MCP result each, followed by one measured turn with ${TRANSFER_MEASURED_TOOLS} command tools and a retained ${formatBytes(TRANSFER_MEASURED_MCP_RESULT_BYTES)} MCP result. Payload sizes are calibrated from heavy local Codex and Claude histories and contain no user data.`,

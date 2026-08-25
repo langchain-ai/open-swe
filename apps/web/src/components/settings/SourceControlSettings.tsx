@@ -10,12 +10,12 @@ import type {
   SourceControlProviderDiscoveryItem,
   VcsDriverKind,
   VcsDiscoveryItem,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   getBackgroundActivityBaseProfile,
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
-} from "@t3tools/shared/backgroundActivitySettings";
+} from "@openswe/shared/backgroundActivitySettings";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";

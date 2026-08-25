@@ -25,7 +25,7 @@ interface RecoveredMarkdown {
   readonly source: string;
 }
 
-const INLINE_PARSE_PREFIX = "t3-markdown-inline-prefix:";
+const INLINE_PARSE_PREFIX = "openswe-markdown-inline-prefix:";
 
 function isSameLineOverIndentedCode(
   node: MarkdownAstNode,

@@ -1,4 +1,4 @@
-import type { ProviderUserInputAnswers, UserInputQuestion } from "@t3tools/contracts";
+import type { ProviderUserInputAnswers, UserInputQuestion } from "@openswe/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
@@ -208,7 +208,7 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
     let nextPromptFallbackId = 0;
     const allocatePromptFallbackId = Effect.sync(() => {
       nextPromptFallbackId += 1;
-      return `t3-xai-prompt-${nextPromptFallbackId}`;
+      return `openswe-xai-prompt-${nextPromptFallbackId}`;
     });
 
     yield* runtime.handleExtNotification(

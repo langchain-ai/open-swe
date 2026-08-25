@@ -4,22 +4,22 @@ import { LogInIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
-import { T3ConnectUserProfilePage } from "./T3ConnectUserProfilePage";
+import { OpenSWEConnectUserProfilePage } from "./OpenSWEConnectUserProfilePage";
 import { useT3ConnectAuthPrompt } from "./useT3ConnectAuthPrompt";
 
-export function T3ConnectSidebarSignIn() {
+export function OpenSWEConnectSidebarSignIn() {
   if (!hasCloudPublicConfig()) return null;
 
-  return <ConfiguredT3ConnectSidebarSignIn />;
+  return <ConfiguredOpenSWEConnectSidebarSignIn />;
 }
 
-export function T3ConnectSidebarAvatar() {
+export function OpenSWEConnectSidebarAvatar() {
   if (!hasCloudPublicConfig()) return null;
 
-  return <ConfiguredT3ConnectSidebarAvatar />;
+  return <ConfiguredOpenSWEConnectSidebarAvatar />;
 }
 
-function ConfiguredT3ConnectSidebarAvatar() {
+function ConfiguredOpenSWEConnectSidebarAvatar() {
   const { isLoaded, isSignedIn } = useAuth();
 
   if (!isLoaded || !isSignedIn) return null;
@@ -41,17 +41,17 @@ function ConfiguredT3ConnectSidebarAvatar() {
         <MobileClientsUserProfilePage />
       </UserButton.UserProfilePage>
       <UserButton.UserProfilePage
-        label="T3 Connect"
+        label="Open SWE Connect"
         labelIcon={<ServerIcon className="size-4" />}
-        url="t3-connect"
+        url="openswe-connect"
       >
-        <T3ConnectUserProfilePage />
+        <OpenSWEConnectUserProfilePage />
       </UserButton.UserProfilePage>
     </UserButton>
   );
 }
 
-function ConfiguredT3ConnectSidebarSignIn() {
+function ConfiguredOpenSWEConnectSidebarSignIn() {
   const { isLoaded, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useT3ConnectAuthPrompt();
 
@@ -63,7 +63,7 @@ function ConfiguredT3ConnectSidebarSignIn() {
         <SidebarMenuItem>
           <SidebarMenuButton onClick={openAuthPrompt}>
             <LogInIcon />
-            <span>Sign in to T3 Connect</span>
+            <span>Sign in to Open SWE Connect</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

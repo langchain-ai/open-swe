@@ -1,4 +1,4 @@
-import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@t3tools/contracts";
+import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@openswe/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { submitComposerDraft } from "./composerSubmission";

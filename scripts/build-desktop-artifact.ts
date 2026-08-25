@@ -12,10 +12,10 @@ import {
   type DirectoryRecord,
 } from "@electron/asar";
 
-import { fromYaml } from "@t3tools/shared/schemaYaml";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { fromYaml } from "@openswe/shared/schemaYaml";
+import { HostProcessArchitecture, HostProcessPlatform } from "@openswe/shared/hostProcess";
+import { clerkFrontendApiHostnameFromPublishableKey } from "@openswe/shared/relayAuth";
+import { resolveSpawnCommand } from "@openswe/shared/shell";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
@@ -129,7 +129,7 @@ export function resolveResourceMonitorRustTargets(
 }
 
 export function resourceMonitorExecutableName(platform: typeof BuildPlatform.Type): string {
-  return platform === "win" ? "t3-resource-monitor.exe" : "t3-resource-monitor";
+  return platform === "win" ? "openswe-resource-monitor.exe" : "openswe-resource-monitor";
 }
 
 const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
@@ -782,7 +782,7 @@ interface StagePackageJson {
   readonly name: string;
   readonly version: string;
   readonly buildVersion: string;
-  readonly t3codeCommitHash: string;
+  readonly opensweCommitHash: string;
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -798,7 +798,7 @@ interface StagePackageJson {
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
 export const DESKTOP_ELECTRON_LANGUAGES = ["en-US"] as const;
 export const DESKTOP_FILE_EXCLUSIONS = [
-  // T3 Code always passes the user's installed Claude executable to the SDK,
+  // Open SWE always passes the user's installed Claude executable to the SDK,
   // so the SDK's optional platform packages (each a ~200MB bundled executable)
   // are dead weight. The trailing dash keeps the SDK's own JS package.
   "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
@@ -916,7 +916,7 @@ export class InvalidAppleTeamIdError extends Schema.TaggedErrorClass<InvalidAppl
   },
 ) {
   override get message(): string {
-    return `T3CODE_APPLE_TEAM_ID '${this.teamId}' must be a 10-character Apple Developer Team ID.`;
+    return `OPENSWE_APPLE_TEAM_ID '${this.teamId}' must be a 10-character Apple Developer Team ID.`;
   }
 }
 
@@ -925,7 +925,7 @@ export class MissingMacPasskeyProvisioningProfileError extends Schema.TaggedErro
   {},
 ) {
   override get message(): string {
-    return "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.";
+    return "OPENSWE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.";
   }
 }
 
@@ -934,7 +934,7 @@ export class MissingMacPasskeyDomainConfigurationError extends Schema.TaggedErro
   {},
 ) {
   override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY or T3CODE_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
+    return "OPENSWE_CLERK_PUBLISHABLE_KEY or OPENSWE_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
   }
 }
 
@@ -945,7 +945,7 @@ export class InvalidMacPasskeyPublishableKeyError extends Schema.TaggedErrorClas
   },
 ) {
   override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.";
+    return "OPENSWE_CLERK_PUBLISHABLE_KEY is invalid.";
   }
 }
 
@@ -1013,22 +1013,22 @@ function normalizePasskeyRpDomain(value: string): string {
 export function resolveMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
 ): MacPasskeySigningConfiguration {
-  const teamId = env.T3CODE_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
+  const teamId = env.OPENSWE_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
   if (!APPLE_TEAM_ID_PATTERN.test(teamId)) {
     throw new InvalidAppleTeamIdError({ teamId });
   }
 
-  const provisioningProfilePath = env.T3CODE_MACOS_PROVISIONING_PROFILE?.trim() ?? "";
+  const provisioningProfilePath = env.OPENSWE_MACOS_PROVISIONING_PROFILE?.trim() ?? "";
   if (provisioningProfilePath.length === 0) {
     throw new MissingMacPasskeyProvisioningProfileError();
   }
 
-  const configuredRpDomains = env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim();
+  const configuredRpDomains = env.OPENSWE_CLERK_PASSKEY_RP_DOMAINS?.trim();
   let rpDomains: readonly string[];
   if (configuredRpDomains) {
     rpDomains = configuredRpDomains.split(",").map(normalizePasskeyRpDomain);
   } else {
-    const publishableKey = env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim();
+    const publishableKey = env.OPENSWE_CLERK_PUBLISHABLE_KEY?.trim();
     if (!publishableKey) {
       throw new MissingMacPasskeyDomainConfigurationError();
     }
@@ -1260,22 +1260,24 @@ const AzureTrustedSigningOptionsConfig = Config.all({
 });
 
 const BuildEnvConfig = Config.all({
-  platform: Config.schema(BuildPlatform, "T3CODE_DESKTOP_PLATFORM").pipe(Config.option),
-  target: Config.string("T3CODE_DESKTOP_TARGET").pipe(Config.option),
-  arch: Config.schema(BuildArch, "T3CODE_DESKTOP_ARCH").pipe(Config.option),
-  version: Config.string("T3CODE_DESKTOP_VERSION").pipe(Config.option),
-  outputDir: Config.string("T3CODE_DESKTOP_OUTPUT_DIR").pipe(Config.option),
-  skipBuild: Config.boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
-  keepStage: Config.boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
-  signed: Config.boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
-  verbose: Config.boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
-  mockUpdates: Config.boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
-  mockUpdateServerPort: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
+  platform: Config.schema(BuildPlatform, "OPENSWE_DESKTOP_PLATFORM").pipe(Config.option),
+  target: Config.string("OPENSWE_DESKTOP_TARGET").pipe(Config.option),
+  arch: Config.schema(BuildArch, "OPENSWE_DESKTOP_ARCH").pipe(Config.option),
+  version: Config.string("OPENSWE_DESKTOP_VERSION").pipe(Config.option),
+  outputDir: Config.string("OPENSWE_DESKTOP_OUTPUT_DIR").pipe(Config.option),
+  skipBuild: Config.boolean("OPENSWE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
+  keepStage: Config.boolean("OPENSWE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
+  signed: Config.boolean("OPENSWE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
+  verbose: Config.boolean("OPENSWE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
+  mockUpdates: Config.boolean("OPENSWE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
+  mockUpdateServerPort: Config.string("OPENSWE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
+    Config.option,
+  ),
   // Path to a prebuilt Linux node-pty binary (pty.node) for the target arch,
   // produced by the Linux CI job and handed to the Windows packaging job. Placed
   // into the staged node-pty so the WSL backend ships a ready binary and never
   // compiles on the user's machine.
-  wslPrebuild: Config.string("T3CODE_DESKTOP_WSL_PREBUILD").pipe(Config.option),
+  wslPrebuild: Config.string("OPENSWE_DESKTOP_WSL_PREBUILD").pipe(Config.option),
 });
 
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
@@ -1599,7 +1601,7 @@ const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBundleIsSel
     const path = yield* Path.Path;
 
     const probeRoot = yield* fs.makeTempDirectoryScoped({
-      prefix: "t3code-bundle-selfcheck-",
+      prefix: "openswe-bundle-selfcheck-",
     });
     const extractedApp = path.join(probeRoot, "extracted");
     const probeApp = path.join(probeRoot, "app");
@@ -1734,7 +1736,7 @@ export const stageOpenSweRuntime = Effect.fn("stageOpenSweRuntime")(function* (i
   const path = yield* Path.Path;
   const runtimeDir = path.join(input.stageResourcesDir, "open-swe-runtime");
   const pythonDir = path.join(runtimeDir, "python");
-  const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-open-swe-runtime-" });
+  const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-open-swe-runtime-" });
   const requirementsPath = path.join(tempDir, "requirements.txt");
   const wheelDir = path.join(tempDir, "wheel");
 
@@ -1861,7 +1863,7 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   const manifestPath = path.join(input.repoRoot, "native/resource-monitor/Cargo.toml");
   const executableName = resourceMonitorExecutableName(input.platform);
   const rustTargets = resolveResourceMonitorRustTargets(input.platform, input.arch);
-  const reuseResourceMonitor = yield* Config.boolean("T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
+  const reuseResourceMonitor = yield* Config.boolean("OPENSWE_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
     Config.withDefault(false),
   );
   const builtBinaries: string[] = [];
@@ -1981,7 +1983,7 @@ function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: bo
     }
 
     const tmpRoot = yield* fs.makeTempDirectoryScoped({
-      prefix: "t3code-icon-build-",
+      prefix: "openswe-icon-build-",
     });
 
     const iconPngPath = path.join(stageResourcesDir, "icon.png");
@@ -2164,7 +2166,7 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   updateChannel: "latest" | "nightly",
 ) {
   const env = yield* Config.all({
-    updateRepository: Config.string("T3CODE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
+    updateRepository: Config.string("OPENSWE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
     githubRepository: Config.string("GITHUB_REPOSITORY").pipe(Config.option),
   });
   const rawRepo = (
@@ -2393,7 +2395,7 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
 // backend never compiles on the user's machine. node-pty publishes no Linux
 // prebuilt and the WSL Linux Node can't load the Windows/Electron binary, so the
 // Linux CI job builds pty.node and hands it here. We drop it into the staged
-// node-pty's prebuilds/linux-<arch>/ with a t3code marker the WSL preflight
+// node-pty's prebuilds/linux-<arch>/ with a openswe marker the WSL preflight
 // checks (arch + node-pty version; the binary is N-API, hence ABI-stable across
 // Node versions). A missing prebuild is a warning, not an error, so local and
 // non-Windows builds still succeed — they just won't ship a working WSL backend.
@@ -2407,7 +2409,7 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
 
   if (input.prebuildPath === undefined) {
     yield* Effect.logWarning(
-      "[desktop-artifact] No WSL node-pty prebuild provided (--wsl-prebuild / T3CODE_DESKTOP_WSL_PREBUILD); the packaged WSL backend will not start until a Linux pty.node is bundled.",
+      "[desktop-artifact] No WSL node-pty prebuild provided (--wsl-prebuild / OPENSWE_DESKTOP_WSL_PREBUILD); the packaged WSL backend will not start until a Linux pty.node is bundled.",
     );
     return;
   }
@@ -2452,7 +2454,7 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
   yield* fs.makeDirectory(prebuildDir, { recursive: true });
   yield* fs.copyFile(input.prebuildPath, path.join(prebuildDir, "pty.node"));
   const markerJson = yield* encodeJsonString({ arch: linuxArch, nodePtyVersion });
-  yield* fs.writeFileString(path.join(prebuildDir, "t3code-wsl-node-pty.json"), `${markerJson}\n`);
+  yield* fs.writeFileString(path.join(prebuildDir, "openswe-wsl-node-pty.json"), `${markerJson}\n`);
 
   yield* Effect.log(
     `[desktop-artifact] Staged WSL node-pty prebuild (linux-${linuxArch}, node-pty ${nodePtyVersion}).`,
@@ -2524,7 +2526,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
     sidecarDependencies,
   );
   const sidecarPackageJson = {
-    name: "t3code-server",
+    name: "openswe-server",
     version: input.appVersion,
     private: true,
     packageManager: rootPackageJson.packageManager,
@@ -2646,7 +2648,7 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
   if (hostPlatform !== "win32" || hostArchitecture !== input.targetArch) return;
 
   const probeRoot = yield* fs.makeTempDirectoryScoped({
-    prefix: "t3code-windows-primary-native-probe-",
+    prefix: "openswe-windows-primary-native-probe-",
   });
   const fffEntryPath = path.join(
     input.asarPath,
@@ -2806,7 +2808,7 @@ export const validateWindowsPackagedPayload = Effect.fn(
     return yield* new WindowsPackagedPayloadValidationError({
       reason: "resource-monitor-missing",
       packagedAppDir,
-      missingFiles: ["resource-monitor/t3-resource-monitor.exe"],
+      missingFiles: ["resource-monitor/openswe-resource-monitor.exe"],
     });
   }
 
@@ -2905,7 +2907,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
-    prefix: `t3code-desktop-${options.platform}-stage-`,
+    prefix: `openswe-desktop-${options.platform}-stage-`,
   });
 
   const stageAppDir = path.join(stageRoot, "app");
@@ -3125,11 +3127,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     name: "open-swe",
     version: appVersion,
     buildVersion: appVersion,
-    t3codeCommitHash: commitHash,
+    opensweCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: "Open SWE desktop build",
+    author: "Open SWE Tools",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,
@@ -3245,7 +3247,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const builderArgs = [
     "exec",
     "--filter",
-    "@t3tools/desktop",
+    "@openswe/desktop",
     "--",
     "electron-builder",
     "--projectDir",
@@ -3263,7 +3265,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       shell: builderCommand.shell,
     }),
     {
-      label: `vp exec --filter @t3tools/desktop -- electron-builder --projectDir ${stageAppDir} ${platformConfig.cliFlag} --${options.arch} --publish never`,
+      label: `vp exec --filter @openswe/desktop -- electron-builder --projectDir ${stageAppDir} ${platformConfig.cliFlag} --${options.arch} --publish never`,
       verbose: options.verbose,
     },
   );
@@ -3327,59 +3329,61 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
 const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   platform: Flag.choice("platform", BuildPlatform.literals).pipe(
-    Flag.withDescription("Build platform (env: T3CODE_DESKTOP_PLATFORM)."),
+    Flag.withDescription("Build platform (env: OPENSWE_DESKTOP_PLATFORM)."),
     Flag.optional,
   ),
   target: Flag.string("target").pipe(
     Flag.withDescription(
-      "Artifact target, for example dmg/AppImage/nsis (env: T3CODE_DESKTOP_TARGET).",
+      "Artifact target, for example dmg/AppImage/nsis (env: OPENSWE_DESKTOP_TARGET).",
     ),
     Flag.optional,
   ),
   arch: Flag.choice("arch", BuildArch.literals).pipe(
-    Flag.withDescription("Build arch, for example arm64/x64/universal (env: T3CODE_DESKTOP_ARCH)."),
+    Flag.withDescription(
+      "Build arch, for example arm64/x64/universal (env: OPENSWE_DESKTOP_ARCH).",
+    ),
     Flag.optional,
   ),
   buildVersion: Flag.string("build-version").pipe(
-    Flag.withDescription("Artifact version metadata (env: T3CODE_DESKTOP_VERSION)."),
+    Flag.withDescription("Artifact version metadata (env: OPENSWE_DESKTOP_VERSION)."),
     Flag.optional,
   ),
   outputDir: Flag.string("output-dir").pipe(
-    Flag.withDescription("Output directory for artifacts (env: T3CODE_DESKTOP_OUTPUT_DIR)."),
+    Flag.withDescription("Output directory for artifacts (env: OPENSWE_DESKTOP_OUTPUT_DIR)."),
     Flag.optional,
   ),
   skipBuild: Flag.boolean("skip-build").pipe(
     Flag.withDescription(
-      "Skip `vp run build:desktop` and use existing dist artifacts (env: T3CODE_DESKTOP_SKIP_BUILD).",
+      "Skip `vp run build:desktop` and use existing dist artifacts (env: OPENSWE_DESKTOP_SKIP_BUILD).",
     ),
     Flag.optional,
   ),
   keepStage: Flag.boolean("keep-stage").pipe(
-    Flag.withDescription("Keep temporary staging files (env: T3CODE_DESKTOP_KEEP_STAGE)."),
+    Flag.withDescription("Keep temporary staging files (env: OPENSWE_DESKTOP_KEEP_STAGE)."),
     Flag.optional,
   ),
   signed: Flag.boolean("signed").pipe(
     Flag.withDescription(
-      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: T3CODE_DESKTOP_SIGNED).",
+      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: OPENSWE_DESKTOP_SIGNED).",
     ),
     Flag.optional,
   ),
   verbose: Flag.boolean("verbose").pipe(
-    Flag.withDescription("Stream subprocess stdout (env: T3CODE_DESKTOP_VERBOSE)."),
+    Flag.withDescription("Stream subprocess stdout (env: OPENSWE_DESKTOP_VERBOSE)."),
     Flag.optional,
   ),
   mockUpdates: Flag.boolean("mock-updates").pipe(
-    Flag.withDescription("Enable mock updates (env: T3CODE_DESKTOP_MOCK_UPDATES)."),
+    Flag.withDescription("Enable mock updates (env: OPENSWE_DESKTOP_MOCK_UPDATES)."),
     Flag.optional,
   ),
   mockUpdateServerPort: Flag.integer("mock-update-server-port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Mock update server port (env: T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
+    Flag.withDescription("Mock update server port (env: OPENSWE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
     Flag.optional,
   ),
   wslPrebuild: Flag.string("wsl-prebuild").pipe(
     Flag.withDescription(
-      "Path to a prebuilt Linux node-pty (pty.node) for the target arch, staged for the WSL backend (env: T3CODE_DESKTOP_WSL_PREBUILD).",
+      "Path to a prebuilt Linux node-pty (pty.node) for the target arch, staged for the WSL backend (env: OPENSWE_DESKTOP_WSL_PREBUILD).",
     ),
     Flag.optional,
   ),

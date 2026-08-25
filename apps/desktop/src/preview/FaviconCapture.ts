@@ -1,4 +1,4 @@
-import { FAVICON_DATA_URL_MAX_LENGTH } from "@t3tools/contracts";
+import { FAVICON_DATA_URL_MAX_LENGTH } from "@openswe/contracts";
 
 export const MAX_FAVICON_RESPONSE_BYTES = 100_000;
 export const MAX_FAVICON_CANDIDATES = 8;

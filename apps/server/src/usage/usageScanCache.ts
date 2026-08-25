@@ -14,7 +14,7 @@
  *
  * @module usageScanCache
  */
-import type { UsageProviderKind } from "@t3tools/contracts";
+import type { UsageProviderKind } from "@openswe/contracts";
 
 import type { UsageRecord } from "./usageTranscripts.ts";
 

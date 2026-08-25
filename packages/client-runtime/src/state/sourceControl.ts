@@ -1,4 +1,4 @@
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS } from "@openswe/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import {

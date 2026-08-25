@@ -13,7 +13,7 @@ import {
   type ReviewDiffPreviewError,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -29,7 +29,7 @@ export class ReviewService extends Context.Service<
       input: ReviewDiffFileContentsInput,
     ) => Effect.Effect<ReviewDiffFileContentsResult, ReviewDiffPreviewError>;
   }
->()("t3/review/ReviewService") {}
+>()("openswe/review/ReviewService") {}
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;

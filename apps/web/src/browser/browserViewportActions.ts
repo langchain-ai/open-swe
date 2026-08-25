@@ -1,4 +1,4 @@
-import type { PreviewViewportSetting } from "@t3tools/contracts";
+import type { PreviewViewportSetting } from "@openswe/contracts";
 
 type BrowserViewportHandler = (setting: PreviewViewportSetting) => Promise<void>;
 

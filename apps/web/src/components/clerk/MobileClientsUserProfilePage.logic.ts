@@ -1,4 +1,4 @@
-import type { RelayClientDeviceRecord } from "@t3tools/contracts/relay";
+import type { RelayClientDeviceRecord } from "@openswe/contracts/relay";
 
 const mobileClientUpdatedAtFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -15,7 +15,7 @@ const NOTIFICATION_PREFERENCES = [
 >;
 
 export function mobileClientPlatformLabel(device: RelayClientDeviceRecord): string {
-  return `iOS ${device.iosMajorVersion}${device.appVersion ? ` · T3 Code ${device.appVersion}` : ""}`;
+  return `iOS ${device.iosMajorVersion}${device.appVersion ? ` · Open SWE ${device.appVersion}` : ""}`;
 }
 
 export function mobileClientNotificationDetail(device: RelayClientDeviceRecord): string {

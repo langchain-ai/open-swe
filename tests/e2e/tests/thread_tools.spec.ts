@@ -1,9 +1,4 @@
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const USER = {
   login: "thread-tools-e2e",
@@ -47,9 +42,7 @@ async function purgeOwnedThreads(request: APIRequestContext) {
     }>;
     if (threads.length === 0) return;
     for (const thread of threads) {
-      const deleteResponse = await request.delete(
-        `/threads/${thread.thread_id}`,
-      );
+      const deleteResponse = await request.delete(`/threads/${thread.thread_id}`);
       expect([200, 204, 404]).toContain(deleteResponse.status());
     }
   }
@@ -130,9 +123,7 @@ async function successfulThreadTools(
       const items = Array.isArray(record.items) ? record.items : [];
       successes[message.name] = items.some(
         (item) =>
-          item &&
-          typeof item === "object" &&
-          (item as { id?: unknown }).id === TARGET_THREAD_ID,
+          item && typeof item === "object" && (item as { id?: unknown }).id === TARGET_THREAD_ID,
       );
     } else {
       const thread = record.thread;
@@ -142,8 +133,7 @@ async function successfulThreadTools(
         (thread as { id?: unknown }).id === TARGET_THREAD_ID;
       if (message.name === "manage_thread") {
         successes[message.name] =
-          successes[message.name] &&
-          (thread as { resolved?: unknown }).resolved === true;
+          successes[message.name] && (thread as { resolved?: unknown }).resolved === true;
       }
     }
   }
@@ -165,14 +155,10 @@ test("agent thread tools update the real threads UI", async ({ page }) => {
 
   await page.goto(threadsUrl(false));
   const activeMain = page.locator("main");
-  const activeTarget = activeMain
-    .getByRole("link", { name: new RegExp(TARGET_TITLE) })
-    .first();
+  const activeTarget = activeMain.getByRole("link", { name: new RegExp(TARGET_TITLE) }).first();
   await expect(activeTarget).toBeVisible();
   const activeRow = activeTarget.locator("..");
-  await expect(
-    activeRow.getByRole("button", { name: "Resolve thread" }),
-  ).toBeVisible();
+  await expect(activeRow.getByRole("button", { name: "Resolve thread" })).toBeVisible();
   await expect(activeRow).not.toContainText("Resolved");
 
   await page.goto("/agents");
@@ -181,25 +167,20 @@ test("agent thread tools update the real threads UI", async ({ page }) => {
     `E2E_THREAD_TOOLS:${TARGET_THREAD_ID} inspect and resolve the seeded fixture thread`,
   );
   await expect(page).toHaveURL(/\/agents\/[0-9a-f-]+$/);
-  const controllerThreadId =
-    new URL(page.url()).pathname.split("/").pop() ?? "";
+  const controllerThreadId = new URL(page.url()).pathname.split("/").pop() ?? "";
   expect(controllerThreadId).not.toBe("");
 
-  await expect(
-    page.getByText("Resolved the target thread through the thread tools."),
-  ).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("Resolved the target thread through the thread tools.")).toBeVisible({
+    timeout: 60_000,
+  });
   const worked = page.getByRole("button", {
     name: /^Worked(?: for .+| · \d+ actions?)?$/,
   });
   await expect(worked).toBeVisible();
   await worked.click();
-  await expect(
-    page.getByRole("button", { name: "Manage thread" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage thread" })).toBeVisible();
   await page.getByRole("button", { name: /previous tool calls$/ }).click();
-  await expect(
-    page.getByRole("button", { name: "List threads" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "List threads" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Get thread" })).toBeVisible();
   await expect
     .poll(() => successfulThreadTools(page.request, controllerThreadId), {
@@ -213,13 +194,9 @@ test("agent thread tools update the real threads UI", async ({ page }) => {
 
   await page.goto(threadsUrl(true));
   const resolvedMain = page.locator("main");
-  const resolvedTarget = resolvedMain
-    .getByRole("link", { name: new RegExp(TARGET_TITLE) })
-    .first();
+  const resolvedTarget = resolvedMain.getByRole("link", { name: new RegExp(TARGET_TITLE) }).first();
   await expect(resolvedTarget).toBeVisible();
   const resolvedRow = resolvedTarget.locator("..");
   await expect(resolvedRow).toContainText("Resolved");
-  await expect(
-    resolvedRow.getByRole("button", { name: "Reopen thread" }),
-  ).toBeVisible();
+  await expect(resolvedRow.getByRole("button", { name: "Reopen thread" })).toBeVisible();
 });

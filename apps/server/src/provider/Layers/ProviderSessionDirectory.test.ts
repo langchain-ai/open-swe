@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderDriverKind, ThreadId } from "@t3tools/contracts";
+import { ProviderDriverKind, ThreadId } from "@openswe/contracts";
 import { it, assert } from "@effect/vitest";
 import { assertSome } from "@effect/vitest/utils";
 import * as Effect from "effect/Effect";
@@ -229,7 +229,9 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
 
   it("rehydrates persisted mappings across layer restart", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-directory-"));
+      const tempDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "openswe-provider-directory-"),
+      );
       const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
       const directoryLayer = makeDirectoryLayer(makeSqlitePersistenceLive(dbPath));
 

@@ -18,10 +18,10 @@ import type {
   ProjectSearchContentsResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
-} from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
-import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
+} from "@openswe/contracts";
+import { HostProcessPlatform } from "@openswe/shared/hostProcess";
+import { isExplicitRelativePath, isWindowsAbsolutePath } from "@openswe/shared/path";
+import { normalizeSearchQuery } from "@openswe/shared/searchRanking";
 
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
@@ -101,7 +101,7 @@ export class WorkspaceEntries extends Context.Service<
     ) => Effect.Effect<ProjectSearchContentsResult, WorkspaceEntriesError>;
     readonly refresh: (cwd: string) => Effect.Effect<void>;
   }
->()("t3/workspace/WorkspaceEntries") {}
+>()("openswe/workspace/WorkspaceEntries") {}
 
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {

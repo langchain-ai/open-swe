@@ -28,7 +28,7 @@ const developmentMacIconPngPath = NodePath.join(
   "blueprint-macos-1024.png",
 );
 const productionMacIconPngPath = NodePath.join(repoRoot, "assets", "prod", "langchain-logo.png");
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
+// oxlint-disable-next-line openswe/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
 function setPlistString(plistPath, key, value) {
@@ -108,12 +108,12 @@ export function makeDevelopmentLauncherScript({
 }) {
   const envEntries = [
     ["VITE_DEV_SERVER_URL", environment.VITE_DEV_SERVER_URL],
-    ["T3CODE_PORT", environment.T3CODE_PORT],
-    ["T3CODE_HOME", environment.T3CODE_HOME],
-    ["T3CODE_COMMIT_HASH", environment.T3CODE_COMMIT_HASH],
-    ["T3CODE_OTLP_TRACES_URL", environment.T3CODE_OTLP_TRACES_URL],
-    ["T3CODE_OTLP_EXPORT_INTERVAL_MS", environment.T3CODE_OTLP_EXPORT_INTERVAL_MS],
-    ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
+    ["OPENSWE_PORT", environment.OPENSWE_PORT],
+    ["OPENSWE_HOME", environment.OPENSWE_HOME],
+    ["OPENSWE_COMMIT_HASH", environment.OPENSWE_COMMIT_HASH],
+    ["OPENSWE_OTLP_TRACES_URL", environment.OPENSWE_OTLP_TRACES_URL],
+    ["OPENSWE_OTLP_EXPORT_INTERVAL_MS", environment.OPENSWE_OTLP_EXPORT_INTERVAL_MS],
+    ["OPENSWE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   return [
     "#!/bin/sh",
@@ -347,7 +347,7 @@ function buildMacLauncher(electronBinaryPath) {
   if (isDevelopment) {
     // Keep Electron's native executable inside the branded bundle. Launching the
     // node_modules copy makes macOS associate the process (and Dock label) with
-    // Electron.app even though this bundle's Info.plist has the T3 Code name.
+    // Electron.app even though this bundle's Info.plist has the Open SWE name.
     // Its conventional executable name also keeps Electron's default-app runtime
     // in development mode instead of making app.isPackaged report true.
     writeDevelopmentLauncherScript(launcherBinaryPath, runtimeElectronBinaryPath);

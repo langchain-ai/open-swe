@@ -2,7 +2,7 @@ import {
   type SourceControlDiscoveryResult,
   type VcsDiscoveryItem,
   type VcsDriverKind,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -62,7 +62,7 @@ export class SourceControlDiscovery extends Context.Service<
   {
     readonly discover: Effect.Effect<SourceControlDiscoveryResult>;
   }
->()("t3/sourceControl/SourceControlDiscovery") {}
+>()("openswe/sourceControl/SourceControlDiscovery") {}
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;

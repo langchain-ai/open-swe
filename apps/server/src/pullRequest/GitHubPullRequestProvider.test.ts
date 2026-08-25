@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { PullRequestReaction } from "@t3tools/contracts";
+import type { PullRequestReaction } from "@openswe/contracts";
 
 import * as GitHubPullRequestCli from "./GitHubPullRequestCli.ts";
 import { gitHubViewerPermissions, loginAvatarUrl, make } from "./GitHubPullRequestProvider.ts";

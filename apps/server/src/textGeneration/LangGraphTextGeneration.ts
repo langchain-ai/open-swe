@@ -11,7 +11,7 @@
  *
  * @module textGeneration/LangGraphTextGeneration
  */
-import { TextGenerationError } from "@t3tools/contracts";
+import { TextGenerationError } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 
 import type { TextGeneration } from "./TextGeneration.ts";

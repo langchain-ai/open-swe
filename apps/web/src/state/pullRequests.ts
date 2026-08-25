@@ -1,10 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { createPullRequestEnvironmentAtoms } from "@t3tools/client-runtime/state/pull-requests";
+import { createPullRequestEnvironmentAtoms } from "@openswe/client-runtime/state/pull-requests";
 import type {
   EnvironmentId,
   PullRequestListInput,
   PullRequestListStatsInput,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo } from "react";

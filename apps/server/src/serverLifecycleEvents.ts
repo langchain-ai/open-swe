@@ -1,4 +1,4 @@
-import type { ServerLifecycleStreamEvent } from "@t3tools/contracts";
+import type { ServerLifecycleStreamEvent } from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,7 +22,7 @@ export class ServerLifecycleEvents extends Context.Service<
     readonly snapshot: Effect.Effect<SnapshotState>;
     readonly stream: Stream.Stream<ServerLifecycleStreamEvent>;
   }
->()("t3/serverLifecycleEvents") {}
+>()("openswe/serverLifecycleEvents") {}
 
 const make = Effect.gen(function* () {
   const pubsub = yield* PubSub.unbounded<ServerLifecycleStreamEvent>();

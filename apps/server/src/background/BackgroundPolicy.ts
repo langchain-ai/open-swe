@@ -6,12 +6,12 @@ import {
   type ClientActivityReportInput,
   type HostPowerSnapshot,
   type RpcClientId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
   type ResolvedBackgroundActivitySettings,
-} from "@t3tools/shared/backgroundActivitySettings";
+} from "@openswe/shared/backgroundActivitySettings";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -53,7 +53,7 @@ export class BackgroundPolicy extends Context.Service<
     readonly shouldRunScopeWork: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunOpportunisticWork: Effect.Effect<boolean>;
   }
->()("t3/background/BackgroundPolicy") {}
+>()("openswe/background/BackgroundPolicy") {}
 
 const DEFAULT_LEASE_TTL_MS = 45_000;
 const MAX_LEASE_TTL_MS = 120_000;

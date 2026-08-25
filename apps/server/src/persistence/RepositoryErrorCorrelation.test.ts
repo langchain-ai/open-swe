@@ -1,4 +1,4 @@
-import { AuthSessionId, ThreadId, type AuthEnvironmentScope } from "@t3tools/contracts";
+import { AuthSessionId, ThreadId, type AuthEnvironmentScope } from "@openswe/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

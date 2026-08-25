@@ -1,6 +1,6 @@
 import * as NodeOS from "node:os";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@openswe/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -37,7 +37,7 @@ export class DesktopNetworkInterfaces extends Context.Service<
   {
     readonly read: Effect.Effect<NetworkInterfaces>;
   }
->()("@t3tools/desktop/backend/DesktopNetworkInterfaces") {}
+>()("@openswe/desktop/backend/DesktopNetworkInterfaces") {}
 
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcessPlatform;

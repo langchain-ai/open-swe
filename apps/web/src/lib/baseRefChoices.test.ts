@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { VcsRef } from "@t3tools/contracts";
+import type { VcsRef } from "@openswe/contracts";
 import { buildBaseRefChoices, filterBaseRefChoices } from "./baseRefChoices";
 
 function ref(name: string, remoteName?: string): VcsRef {

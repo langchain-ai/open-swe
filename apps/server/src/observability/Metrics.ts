@@ -11,24 +11,24 @@ import {
   outcomeFromExit,
 } from "./Attributes.ts";
 
-export const rpcRequestsTotal = Metric.counter("t3_rpc_requests_total", {
+export const rpcRequestsTotal = Metric.counter("openswe_rpc_requests_total", {
   description: "Total RPC requests handled by the websocket RPC server.",
 });
 
-export const rpcRequestDuration = Metric.timer("t3_rpc_request_duration", {
+export const rpcRequestDuration = Metric.timer("openswe_rpc_request_duration", {
   description: "RPC request handling duration.",
 });
 
-export const orchestrationCommandsTotal = Metric.counter("t3_orchestration_commands_total", {
+export const orchestrationCommandsTotal = Metric.counter("openswe_orchestration_commands_total", {
   description: "Total orchestration commands dispatched.",
 });
 
-export const orchestrationCommandDuration = Metric.timer("t3_orchestration_command_duration", {
+export const orchestrationCommandDuration = Metric.timer("openswe_orchestration_command_duration", {
   description: "Orchestration command dispatch duration.",
 });
 
 export const orchestrationCommandAckDuration = Metric.timer(
-  "t3_orchestration_command_ack_duration",
+  "openswe_orchestration_command_ack_duration",
   {
     description:
       "Time from orchestration command dispatch to the first committed domain event emitted for that command.",
@@ -36,41 +36,41 @@ export const orchestrationCommandAckDuration = Metric.timer(
 );
 
 export const orchestrationEventsProcessedTotal = Metric.counter(
-  "t3_orchestration_events_processed_total",
+  "openswe_orchestration_events_processed_total",
   {
     description: "Total orchestration intent events processed by runtime reactors.",
   },
 );
 
-export const providerSessionsTotal = Metric.counter("t3_provider_sessions_total", {
+export const providerSessionsTotal = Metric.counter("openswe_provider_sessions_total", {
   description: "Total provider session lifecycle operations.",
 });
 
-export const providerTurnsTotal = Metric.counter("t3_provider_turns_total", {
+export const providerTurnsTotal = Metric.counter("openswe_provider_turns_total", {
   description: "Total provider turn lifecycle operations.",
 });
 
-export const providerTurnDuration = Metric.timer("t3_provider_turn_duration", {
+export const providerTurnDuration = Metric.timer("openswe_provider_turn_duration", {
   description: "Provider turn request duration.",
 });
 
-export const providerRuntimeEventsTotal = Metric.counter("t3_provider_runtime_events_total", {
+export const providerRuntimeEventsTotal = Metric.counter("openswe_provider_runtime_events_total", {
   description: "Total canonical provider runtime events processed.",
 });
 
-export const gitCommandsTotal = Metric.counter("t3_git_commands_total", {
+export const gitCommandsTotal = Metric.counter("openswe_git_commands_total", {
   description: "Total git commands executed by the server runtime.",
 });
 
-export const gitCommandDuration = Metric.timer("t3_git_command_duration", {
+export const gitCommandDuration = Metric.timer("openswe_git_command_duration", {
   description: "Git command execution duration.",
 });
 
-export const terminalSessionsTotal = Metric.counter("t3_terminal_sessions_total", {
+export const terminalSessionsTotal = Metric.counter("openswe_terminal_sessions_total", {
   description: "Total terminal sessions started.",
 });
 
-export const terminalRestartsTotal = Metric.counter("t3_terminal_restarts_total", {
+export const terminalRestartsTotal = Metric.counter("openswe_terminal_restarts_total", {
   description: "Total terminal restart requests handled.",
 });
 

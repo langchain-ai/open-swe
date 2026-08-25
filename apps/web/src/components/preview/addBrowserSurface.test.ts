@@ -3,7 +3,7 @@ import {
   type PreviewOpenInput,
   type PreviewSessionSnapshot,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 

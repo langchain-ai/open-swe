@@ -4,7 +4,7 @@ import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   type DesktopBridge,
   type DesktopSshEnvironmentTarget,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 

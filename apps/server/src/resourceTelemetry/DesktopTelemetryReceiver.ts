@@ -8,8 +8,8 @@ import {
   type DesktopHostTelemetrySnapshot,
   DesktopTelemetryControlMessage,
   type ResourceTelemetrySourceStatus,
-} from "@t3tools/contracts";
-import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+} from "@openswe/contracts";
+import { resolveServerBackgroundActivitySettings } from "@openswe/shared/backgroundActivitySettings";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -172,7 +172,7 @@ export class DesktopTelemetryReceiver extends Context.Service<
       enabled: boolean,
     ) => Effect.Effect<void, DesktopTelemetryControlError>;
   }
->()("t3/resourceTelemetry/DesktopTelemetryReceiver") {}
+>()("openswe/resourceTelemetry/DesktopTelemetryReceiver") {}
 
 const decodeMessage = Schema.decodeUnknownEffect(DesktopHostTelemetryMessage);
 const encodeControlMessage = Schema.encodeEffect(

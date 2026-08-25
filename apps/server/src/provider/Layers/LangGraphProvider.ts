@@ -13,13 +13,13 @@ import {
   type LangGraphSettings,
   type ModelCapabilities,
   type ServerProviderModel,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import { createModelCapabilities } from "@openswe/shared/model";
 
 import {
   buildServerProvider,
@@ -187,7 +187,7 @@ export function buildInitialLangGraphProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Open SWE is disabled in T3 Code settings.",
+          message: "Open SWE is disabled in Open SWE settings.",
         },
       });
     }
@@ -226,7 +226,7 @@ export function checkLangGraphProviderStatus(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Open SWE is disabled in T3 Code settings.",
+          message: "Open SWE is disabled in Open SWE settings.",
         },
       });
     }

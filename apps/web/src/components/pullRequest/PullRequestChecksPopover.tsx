@@ -3,7 +3,7 @@ import type {
   PullRequestCheck,
   PullRequestChecksState,
   PullRequestRef,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";

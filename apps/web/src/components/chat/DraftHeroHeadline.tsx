@@ -1,5 +1,5 @@
-import type { ScopedProjectRef } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import type { ScopedProjectRef } from "@openswe/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@openswe/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 

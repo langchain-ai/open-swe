@@ -17,7 +17,7 @@
   <path d="M32 28H64" stroke="#18181B" stroke-width="2"/>
 
   <g font-family="-apple-system, BlinkMacSystemFont, sans-serif" fill="#18181B">
-    <text x="32" y="50" font-size="12" font-weight="600" letter-spacing="1.4">T3 CODE</text>
+    <text x="32" y="50" font-size="12" font-weight="600" letter-spacing="1.4">Open SWE CODE</text>
     <text x="32" y="82" font-size="22" font-weight="600" letter-spacing="-0.45">Desktop</text>
     <text x="508" y="50" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="600" letter-spacing="1.2" fill="#71717A">LATEST RELEASE</text>
   </g>
@@ -27,7 +27,7 @@
   <path d="M176 204V227L182 221L187.5 232L192 229.8L186.5 219H194L176 204Z" fill="#71717A" stroke="#F7F7F5" stroke-width="1.5" stroke-linejoin="round"/>
 
   <g font-family="-apple-system, BlinkMacSystemFont, sans-serif" text-anchor="middle">
-    <text x="270" y="322" font-size="13" font-weight="600" letter-spacing="-0.1" fill="#18181B">Drag T3 Code to Applications</text>
+    <text x="270" y="322" font-size="13" font-weight="600" letter-spacing="-0.1" fill="#18181B">Drag Open SWE to Applications</text>
     <text x="270" y="345" font-size="9.5" fill="#71717A">Open it from Applications when the copy finishes.</text>
   </g>
 </svg>

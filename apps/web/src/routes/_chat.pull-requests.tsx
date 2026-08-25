@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { pullRequestHostOf, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@openswe/client-runtime/environment";
+import { pullRequestHostOf, ThreadId } from "@openswe/contracts";
 import type {
   EnvironmentId,
   ProjectId,
@@ -10,7 +10,7 @@ import type {
   PullRequestListResult,
   PullRequestListState,
   SourceControlProviderKind,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
@@ -1332,7 +1332,7 @@ function PullRequestsRouteView() {
       ) : !pullRequestsSupported ? (
         <PullRequestsUnavailableState
           title="Pull requests unavailable"
-          error="Update your T3 Code servers to browse pull requests."
+          error="Update your Open SWE servers to browse pull requests."
         />
       ) : firstLoad ? (
         <PullRequestListGhost rows={7} />
@@ -1556,7 +1556,7 @@ function PullRequestsRouteView() {
         {rightPanelState.isOpen && activePullRequestSurface && panelEnvironmentId !== null ? (
           <RightPanelTabs
             mode="inline"
-            widthStorageKey="t3code:pull-request-panel-width"
+            widthStorageKey="openswe:pull-request-panel-width"
             // Default to roughly half the viewport: the PR list needs more
             // room than a chat, so the 540px chat-preview default squashes
             // it. SSR has no window, so fall back to a reasonable width.

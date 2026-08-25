@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openswe.codes/schema/openswe.json",
+  "iconPath": "assets/dev/blueprint-web-apple-touch-180.png",
+  "scripts": [
+    {
+      "name": "Setup Worktree",
+      "command": "vp i && ln -sf $OPENSWE_PROJECT_ROOT/.env .env && ln -sf $OPENSWE_PROJECT_ROOT/infra/relay/.env infra/relay/.env && node apps/web/scripts/warm-dep-cache.ts",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    }
+  ]
+}

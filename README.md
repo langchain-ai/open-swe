@@ -29,6 +29,9 @@ Open SWE is the open-source version of this pattern. Built on [LangGraph](https:
 > [!NOTE]
 > 💬 Read the **announcement blog post [here](https://blog.langchain.com/open-swe-an-open-source-framework-for-internal-coding-agents/)**
 
+> [!NOTE]
+> The desktop and web experience is forked from [T3 Code](https://github.com/pingdotgg/t3code). We are grateful to its maintainers and contributors for their work.
+
 ---
 
 ## Architecture
@@ -63,20 +66,20 @@ This follows the principle all three companies converge on: **isolate first, the
 
 ### 3. Tools — Curated, Not Accumulated
 
-Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE follows this principle with a small, focused toolset:
+Stripe's key insight: _tool curation matters more than tool quantity._ Open SWE follows this principle with a small, focused toolset:
 
-| Tool | Purpose |
-|---|---|
-| `execute` | Shell commands in the sandbox |
-| `fetch_url` | Fetch web pages as markdown |
-| `http_request` | API calls (GET, POST, etc.) |
-| `list_threads` / `get_thread` | Discover and inspect readable Open SWE threads |
-| `manage_thread` | Perform authorization-checked dashboard thread actions |
-| `linear_comment` | Post updates to Linear tickets |
-| `linear_search_issues` | Search Linear issues by free text |
-| `output_iframe` | Render sandboxed HTML visualizations in the dashboard |
-| `slack_add_reaction` | React to Slack messages |
-| `slack_thread_reply` | Reply in Slack threads |
+| Tool                          | Purpose                                                |
+| ----------------------------- | ------------------------------------------------------ |
+| `execute`                     | Shell commands in the sandbox                          |
+| `fetch_url`                   | Fetch web pages as markdown                            |
+| `http_request`                | API calls (GET, POST, etc.)                            |
+| `list_threads` / `get_thread` | Discover and inspect readable Open SWE threads         |
+| `manage_thread`               | Perform authorization-checked dashboard thread actions |
+| `linear_comment`              | Post updates to Linear tickets                         |
+| `linear_search_issues`        | Search Linear issues by free text                      |
+| `output_iframe`               | Render sandboxed HTML visualizations in the dashboard  |
+| `slack_add_reaction`          | React to Slack messages                                |
+| `slack_thread_reply`          | Reply in Slack threads                                 |
 
 GitHub operations are performed with `gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `execute`, and `task` (subagent spawning). Content search uses `rg` through `execute`. Thread discovery and management tools run only on the parent agent, derive the actor from trusted run configuration plus application-generated follow-up attribution, recheck allowed-organization membership, and preserve the dashboard's owner, participant, and admin authorization checks.
 
@@ -122,15 +125,15 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 ## Comparison
 
-| Decision | Open SWE | Stripe (Minions) | Ramp (Inspect) | Coinbase (Cloudbot) |
-|---|---|---|---|---|
-| **Harness** | Composed (Deep Agents/LangGraph) | Forked (Goose) | Composed (OpenCode) | Built from scratch |
-| **Sandbox** | Pluggable (Modal, Daytona, Runloop, etc.) | AWS EC2 devboxes (pre-warmed) | Modal containers (pre-warmed) | In-house |
-| **Tools** | ~15, curated | ~500, curated per-agent | OpenCode SDK + extensions | MCPs + custom Skills |
-| **Context** | AGENTS.md + issue/thread | Rule files + pre-hydration | OpenCode built-in | Linear-first + MCPs |
-| **Orchestration** | Subagents + middleware | Blueprints (deterministic + agentic) | Sessions + child sessions | Three modes |
-| **Invocation** | Slack, Linear, GitHub | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
-| **Validation** | Prompt-driven | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
+| Decision          | Open SWE                                  | Stripe (Minions)                     | Ramp (Inspect)                 | Coinbase (Cloudbot)         |
+| ----------------- | ----------------------------------------- | ------------------------------------ | ------------------------------ | --------------------------- |
+| **Harness**       | Composed (Deep Agents/LangGraph)          | Forked (Goose)                       | Composed (OpenCode)            | Built from scratch          |
+| **Sandbox**       | Pluggable (Modal, Daytona, Runloop, etc.) | AWS EC2 devboxes (pre-warmed)        | Modal containers (pre-warmed)  | In-house                    |
+| **Tools**         | ~15, curated                              | ~500, curated per-agent              | OpenCode SDK + extensions      | MCPs + custom Skills        |
+| **Context**       | AGENTS.md + issue/thread                  | Rule files + pre-hydration           | OpenCode built-in              | Linear-first + MCPs         |
+| **Orchestration** | Subagents + middleware                    | Blueprints (deterministic + agentic) | Sessions + child sessions      | Three modes                 |
+| **Invocation**    | Slack, Linear, GitHub                     | Slack + embedded buttons             | Slack + web + Chrome extension | Slack-native                |
+| **Validation**    | Prompt-driven                             | 3-layer (local + CI + 1 retry)       | Visual DOM verification        | Agent councils + auto-merge |
 
 ---
 

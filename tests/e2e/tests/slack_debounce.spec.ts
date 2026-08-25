@@ -30,10 +30,7 @@ async function botTexts(request: APIRequestContext): Promise<string> {
     .join("\n");
 }
 
-async function threadStatus(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<string> {
+async function threadStatus(request: APIRequestContext, threadId: string): Promise<string> {
   const res = await request.get(`/threads/${threadId}`);
   if (!res.ok()) return "";
   const thread = (await res.json()) as { status?: string };
@@ -41,9 +38,7 @@ async function threadStatus(
 }
 
 test.describe("Slack busy-thread follow-up queueing", () => {
-  test("untagged follow-ups on a busy thread queue behind the active run", async ({
-    request,
-  }) => {
+  test("untagged follow-ups on a busy thread queue behind the active run", async ({ request }) => {
     await request.post("/control/reset");
 
     // Phase 1: open a two-party thread so Open SWE has participated (a
@@ -54,12 +49,8 @@ test.describe("Slack busy-thread follow-up queueing", () => {
     });
     const threadId = opened.thread_id;
     const threadTs = opened.thread_ts;
-    await expect
-      .poll(() => botTexts(request), { timeout: 60_000 })
-      .toContain("/pull/");
-    await expect
-      .poll(() => threadStatus(request, threadId), { timeout: 60_000 })
-      .not.toBe("busy");
+    await expect.poll(() => botTexts(request), { timeout: 60_000 }).toContain("/pull/");
+    await expect.poll(() => threadStatus(request, threadId), { timeout: 60_000 }).not.toBe("busy");
 
     // Phase 2: start a run that holds the thread busy (fake LLM sleeps on the
     // marker). This one IS tagged, so it dispatches immediately.
@@ -69,9 +60,7 @@ test.describe("Slack busy-thread follow-up queueing", () => {
       thread_ts: threadTs,
     });
     expect(busy.webhook.status).toBe("accepted");
-    await expect
-      .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
-      .toBe("busy");
+    await expect.poll(() => threadStatus(request, threadId), { timeout: 30_000 }).toBe("busy");
 
     const followUp = await send(request, {
       text: "also rename it to hello()",
@@ -79,8 +68,6 @@ test.describe("Slack busy-thread follow-up queueing", () => {
       thread_ts: threadTs,
     });
     expect(followUp.webhook.status).toBe("accepted");
-    await expect
-      .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
-      .toBe("busy");
+    await expect.poll(() => threadStatus(request, threadId), { timeout: 30_000 }).toBe("busy");
   });
 });

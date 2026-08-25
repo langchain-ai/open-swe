@@ -1,4 +1,4 @@
-import { type FilesystemBrowseEntry, WS_METHODS } from "@t3tools/contracts";
+import { type FilesystemBrowseEntry, WS_METHODS } from "@openswe/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";

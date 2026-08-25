@@ -9,7 +9,7 @@ CANONICAL_VENDOR_DIR="${REPO_DIR}/native/libghostty-vt"
 VENDOR_DIR="${WEB_DIR}/src/terminal/ghostty/vendor"
 
 GHOSTTY_REVISION="$(tr -d '[:space:]' < "${CANONICAL_VENDOR_DIR}/VERSION")"
-GHOSTTY_SOURCE_DIR="${GHOSTTY_SOURCE_DIR:-${HOME}/.cache/t3code/ghostty-${GHOSTTY_REVISION:0:8}}"
+GHOSTTY_SOURCE_DIR="${GHOSTTY_SOURCE_DIR:-${HOME}/.cache/openswe/ghostty-${GHOSTTY_REVISION:0:8}}"
 GHOSTTY_ZIG_VERSION="${GHOSTTY_ZIG_VERSION:-0.15.2}"
 GHOSTTY_ZIG="${GHOSTTY_ZIG:-}"
 
@@ -50,7 +50,7 @@ ensure_zig() {
     *) die "unsupported host architecture: ${host_arch}" ;;
   esac
 
-  cache_dir="${HOME}/.cache/t3code/zig-${GHOSTTY_ZIG_VERSION}"
+  cache_dir="${HOME}/.cache/openswe/zig-${GHOSTTY_ZIG_VERSION}"
   GHOSTTY_ZIG="${cache_dir}/zig"
   if [[ -x "${GHOSTTY_ZIG}" ]]; then
     return

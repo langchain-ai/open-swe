@@ -1,4 +1,4 @@
-import { HostProcessHostname, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessHostname, HostProcessPlatform } from "@openswe/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -192,5 +192,5 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
     return hostname;
   }
 
-  return normalizeLabel(input.cwdBaseName) ?? "T3 environment";
+  return normalizeLabel(input.cwdBaseName) ?? "Open SWE environment";
 });

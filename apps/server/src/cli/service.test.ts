@@ -6,18 +6,18 @@ const status = {
   supported: true,
   installed: true,
   current: true,
-  unitPath: "/home/me/.config/systemd/user/t3code.service",
-  logPath: "/home/me/.t3/userdata/logs/boot-service.log",
+  unitPath: "/home/me/.config/systemd/user/openswe.service",
+  logPath: "/home/me/.openswe/userdata/logs/boot-service.log",
 } as const;
 
 it("reports the installed service version and host paths", () => {
   assert.equal(
     formatServiceStatus(status, "0.0.29"),
     [
-      "T3 Code service",
-      "  Status: installed · t3@0.0.29",
-      "  Unit: /home/me/.config/systemd/user/t3code.service",
-      "  Logs: /home/me/.t3/userdata/logs/boot-service.log",
+      "Open SWE service",
+      "  Status: installed · openswe@0.0.29",
+      "  Unit: /home/me/.config/systemd/user/openswe.service",
+      "  Logs: /home/me/.openswe/userdata/logs/boot-service.log",
     ].join("\n"),
   );
 });
@@ -25,7 +25,7 @@ it("reports the installed service version and host paths", () => {
 it("gives a direct repair command for a stale service", () => {
   assert.include(
     formatServiceStatus({ ...status, current: false }, "0.0.29"),
-    "Next: Run `npx t3@latest service update`.",
+    "Next: Run `npx openswe@latest service update`.",
   );
 });
 

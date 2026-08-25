@@ -24,36 +24,26 @@ async function botTexts(request: APIRequestContext): Promise<string[]> {
   return msgs.filter((m) => m.is_bot).map((m) => m.text);
 }
 
-async function threadStatus(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<string> {
+async function threadStatus(request: APIRequestContext, threadId: string): Promise<string> {
   const res = await request.get(`/threads/${threadId}`);
   if (!res.ok()) return "";
   const thread = (await res.json()) as { status?: string };
   return thread.status ?? "";
 }
 
-async function stateText(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<string> {
+async function stateText(request: APIRequestContext, threadId: string): Promise<string> {
   const res = await request.get(`/threads/${threadId}/state`);
   const state = (await res.json()) as {
     values?: { messages?: Array<{ content?: unknown }> };
   };
   return (state.values?.messages ?? [])
-    .map((m) =>
-      typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-    )
+    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
     .join("\n");
 }
 
 // Open a two-party thread: Alice @-mentions the bot, the agent implements and
 // replies, so the thread now holds exactly Alice + Open SWE.
-async function openTwoPartyThread(
-  request: APIRequestContext,
-): Promise<SendResult> {
+async function openTwoPartyThread(request: APIRequestContext): Promise<SendResult> {
   await request.post("/control/reset");
   const opened = await send(request, {
     text: "<@U0BOT> please add a greet() helper and open a PR",
@@ -91,9 +81,7 @@ test.describe("Slack untagged two-party replies", () => {
       .toContain("anything else you'd like changed");
   });
 
-  test("an untagged message tagging another user is ignored", async ({
-    request,
-  }) => {
+  test("an untagged message tagging another user is ignored", async ({ request }) => {
     const { thread_ts } = await openTwoPartyThread(request);
 
     // Tagging Bob (a different, non-bot user) hands the turn to him, not the agent.
@@ -105,9 +93,7 @@ test.describe("Slack untagged two-party replies", () => {
     expect(toSomeoneElse.webhook.status).toBe("ignored");
   });
 
-  test("an untagged message in a brand-new thread is ignored", async ({
-    request,
-  }) => {
+  test("an untagged message in a brand-new thread is ignored", async ({ request }) => {
     await request.post("/control/reset");
     // No prior Open SWE participation → the bot must be @-mentioned to engage.
     const fresh = await send(request, {

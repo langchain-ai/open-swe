@@ -24,7 +24,7 @@ import {
   type ServerProviderModel,
   type ServerSettings,
   type ServerProviderState,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import { formatProviderDriverKindLabel } from "./providerModels";
 
@@ -34,7 +34,7 @@ import { formatProviderDriverKindLabel } from "./providerModels";
  * send until a live provider replaces it.
  */
 export const NO_PROVIDER_MODEL_SELECTION: ModelSelection = {
-  instanceId: ProviderInstanceId.make("t3code_no_provider"),
+  instanceId: ProviderInstanceId.make("openswe_no_provider"),
   model: "",
 };
 

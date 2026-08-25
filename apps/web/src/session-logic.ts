@@ -1,7 +1,7 @@
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
-import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
+import { isBackgroundTaskActivity } from "@openswe/client-runtime/state/subagentRuntime";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
@@ -15,7 +15,7 @@ import {
   type UserInputQuestion,
   type ThreadId,
   type TurnId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 import type {
   ChatMessage,

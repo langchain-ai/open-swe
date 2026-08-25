@@ -20,7 +20,7 @@ import {
   type RuntimeMode,
   type ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -538,13 +538,13 @@ export function makeCursorAdapter(
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
-            clientInfo: { name: "t3-code", version: "0.0.0" },
+            clientInfo: { name: "openswe", version: "0.0.0" },
             ...(mcpSession
               ? {
                   mcpServers: [
                     {
                       type: "http" as const,
-                      name: "t3-code",
+                      name: "openswe",
                       url: mcpSession.endpoint,
                       headers: [
                         {

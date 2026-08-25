@@ -52,7 +52,7 @@ function makeEnvironmentLayer(baseDir: string, appVersion = "0.0.17") {
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
-      Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir })),
+      Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ OPENSWE_HOME: baseDir })),
     ),
   );
 }
@@ -68,7 +68,7 @@ const withSettings = <A, E, R>(
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-desktop-settings-test-",
+      prefix: "openswe-desktop-settings-test-",
     });
     return yield* effect.pipe(
       Effect.provide(

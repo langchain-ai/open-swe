@@ -4,7 +4,7 @@ import {
   RpcClientId,
   type HostPowerSnapshot,
   type ClientActivityReportInput,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

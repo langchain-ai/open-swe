@@ -1,4 +1,4 @@
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopUpdateState } from "@openswe/contracts";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { AtomRegistry } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";

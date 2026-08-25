@@ -16,15 +16,15 @@ import {
   type EnvironmentId,
   ServerSettings,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   type ClientSettingsPatch,
   type ClientSettings,
   DEFAULT_CLIENT_SETTINGS,
   type EnvironmentIdentificationMode,
   type UnifiedSettings,
-} from "@t3tools/contracts/settings";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+} from "@openswe/contracts/settings";
+import { safeErrorLogAttributes } from "@openswe/client-runtime/errors";
 import { ensureLocalApi } from "~/localApi";
 import {
   getThemeDefinition,

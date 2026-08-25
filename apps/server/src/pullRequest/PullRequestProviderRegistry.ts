@@ -1,7 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { SourceControlProviderKind } from "@t3tools/contracts";
+import type { SourceControlProviderKind } from "@openswe/contracts";
 
 import * as AzureDevOpsCli from "../sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "../sourceControl/BitbucketApi.ts";
@@ -25,7 +25,7 @@ export class PullRequestProviderRegistry extends Context.Service<
     readonly get: (kind: SourceControlProviderKind) => PullRequestProviderApi | null;
     readonly kinds: ReadonlyArray<SourceControlProviderKind>;
   }
->()("t3/pullRequest/PullRequestProviderRegistry") {}
+>()("openswe/pullRequest/PullRequestProviderRegistry") {}
 
 /** Exported for tests, which stand a registry up from providers they supply themselves. */
 export function fromProviders(

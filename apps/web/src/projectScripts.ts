@@ -3,7 +3,7 @@ import {
   SCRIPT_RUN_COMMAND_PATTERN,
   type KeybindingCommand,
   type ProjectScript,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Schema from "effect/Schema";
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
 

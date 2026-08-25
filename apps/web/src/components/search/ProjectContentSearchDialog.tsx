@@ -1,4 +1,4 @@
-import type { ProjectContentMatch } from "@t3tools/contracts";
+import type { ProjectContentMatch } from "@openswe/contracts";
 import { LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 

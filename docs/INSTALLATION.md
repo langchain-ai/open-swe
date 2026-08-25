@@ -1,4 +1,3 @@
-
 # Installation Guide
 
 This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, the web dashboard, and production deployment.
@@ -125,6 +124,7 @@ After creating the app:
 ## 4. Set up LangSmith
 
 Open SWE uses [LangSmith](https://smith.langchain.com/) for:
+
 - **Tracing**: all agent runs are logged for debugging and observability
 - **Sandboxes**: each task runs in an isolated LangSmith cloud sandbox
 
@@ -143,6 +143,7 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 This is the **agent-runtime** OAuth provider: it lets each agent run authenticate with the triggering user's own GitHub account, brokered by LangSmith. (It is separate from the dashboard-login OAuth, which uses `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` directly — see step 3c.) Without it, all agent operations use the GitHub App's installation token (a shared bot identity).
 
 **What this affects:**
+
 - **With per-user OAuth**: PRs and commits show the triggering user's identity; each user's GitHub permissions are respected
 - **Without it (bot-token-only mode)**: all PRs and commits appear as the GitHub App bot; the app's installation-level permissions are used for everything
 
@@ -269,6 +270,7 @@ Open SWE can be triggered from GitHub, Linear, and/or Slack. **Configure whichev
 ### GitHub
 
 GitHub triggering works automatically once your GitHub App is set up (step 3). Users can:
+
 - Tag `@openswe` in issue titles or bodies to start a task
 - Tag `@openswe` in issue comments for follow-up instructions
 - Tag `@openswe` in PR review comments to have it address review feedback
@@ -353,64 +355,60 @@ Users can also override the team/project mapping per-comment by including `repo:
 
 ```json
 {
-    "display_information": {
-        "name": "Open SWE",
-        "description": "Enables Open SWE to interact with your workspace",
-        "background_color": "#000000"
+  "display_information": {
+    "name": "Open SWE",
+    "description": "Enables Open SWE to interact with your workspace",
+    "background_color": "#000000"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
     },
-    "features": {
-        "app_home": {
-            "home_tab_enabled": false,
-            "messages_tab_enabled": true,
-            "messages_tab_read_only_enabled": false
-        },
-        "bot_user": {
-            "display_name": "Open SWE",
-            "always_online": true
-        }
-    },
-    "oauth_config": {
-        "redirect_urls": [
-            "https://smith.langchain.com/host-oauth-callback/<your-provider-id>",
-            "http://localhost:2024/dashboard/api/slack/callback"
-        ],
-        "scopes": {
-            "bot": [
-                "reactions:write",
-                "app_mentions:read",
-                "channels:history",
-                "channels:read",
-                "chat:write",
-                "groups:history",
-                "groups:read",
-                "im:history",
-                "im:read",
-                "im:write",
-                "mpim:history",
-                "mpim:read",
-                "team:read",
-                "users:read",
-                "users:read.email"
-            ]
-        }
-    },
-    "settings": {
-        "event_subscriptions": {
-            "request_url": "https://<your-ngrok-url>/webhooks/slack",
-            "bot_events": [
-                "app_mention",
-                "message.im",
-                "message.mpim"
-            ]
-        },
-        "interactivity": {
-            "is_enabled": true,
-            "request_url": "https://<your-ngrok-url>/webhooks/slack/interactivity"
-        },
-        "org_deploy_enabled": false,
-        "socket_mode_enabled": false,
-        "token_rotation_enabled": false
+    "bot_user": {
+      "display_name": "Open SWE",
+      "always_online": true
     }
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "https://smith.langchain.com/host-oauth-callback/<your-provider-id>",
+      "http://localhost:2024/dashboard/api/slack/callback"
+    ],
+    "scopes": {
+      "bot": [
+        "reactions:write",
+        "app_mentions:read",
+        "channels:history",
+        "channels:read",
+        "chat:write",
+        "groups:history",
+        "groups:read",
+        "im:history",
+        "im:read",
+        "im:write",
+        "mpim:history",
+        "mpim:read",
+        "team:read",
+        "users:read",
+        "users:read.email"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://<your-ngrok-url>/webhooks/slack",
+      "bot_events": ["app_mention", "message.im", "message.mpim"]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://<your-ngrok-url>/webhooks/slack/interactivity"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
 }
 ```
 
@@ -457,9 +455,9 @@ Create a `.env` file in the project root. Below is the full list — only fill i
 LANGSMITH_API_KEY_PROD=""              # From step 4a
 LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
-LANGSMITH_TENANT_ID_PROD=""           
+LANGSMITH_TENANT_ID_PROD=""
 LANGSMITH_TRACING_PROJECT_ID_PROD=""   # Fallback project ID for "View trace" links; graphs trace into the open-swe-agent / open-swe-review projects by name
-LANGSMITH_URL_PROD="https://smith.langchain.com"                 
+LANGSMITH_URL_PROD="https://smith.langchain.com"
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key
@@ -622,20 +620,20 @@ make dev          # uv run langgraph dev
 # or: uv run langgraph dev --no-browser
 ```
 
-`langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
+`langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) _and_ the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /webhooks/github` | GitHub issue/PR/comment webhooks |
-| `POST /webhooks/linear` | Linear comment webhooks |
-| `GET /webhooks/linear` | Linear webhook verification |
-| `POST /webhooks/slack` | Slack event webhooks |
-| `POST /webhooks/slack/interactivity` | Slack Block Kit button interactions |
-| `GET /webhooks/slack` | Slack webhook verification |
-| `GET /dashboard/api/auth/login` | Dashboard GitHub OAuth login |
-| `GET /dashboard/api/auth/callback` | Dashboard GitHub OAuth callback (registered on the App in step 3b) |
-| `GET /dashboard/api/*` | Dashboard API (profiles, team settings, repos, review styles, threads, …) |
-| `GET /health` | Health check |
+| Endpoint                             | Purpose                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| `POST /webhooks/github`              | GitHub issue/PR/comment webhooks                                          |
+| `POST /webhooks/linear`              | Linear comment webhooks                                                   |
+| `GET /webhooks/linear`               | Linear webhook verification                                               |
+| `POST /webhooks/slack`               | Slack event webhooks                                                      |
+| `POST /webhooks/slack/interactivity` | Slack Block Kit button interactions                                       |
+| `GET /webhooks/slack`                | Slack webhook verification                                                |
+| `GET /dashboard/api/auth/login`      | Dashboard GitHub OAuth login                                              |
+| `GET /dashboard/api/auth/callback`   | Dashboard GitHub OAuth callback (registered on the App in step 3b)        |
+| `GET /dashboard/api/*`               | Dashboard API (profiles, team settings, repos, review styles, threads, …) |
+| `GET /health`                        | Health check                                                              |
 
 > `make run` (`uvicorn agent.webapp:app --port 8000`) serves the FastAPI app **without** the LangGraph runtime, on port 8000. The dashboard's Agents chat features call LangGraph, so for full local dev use `make dev` on `:2024`, not `make run`.
 

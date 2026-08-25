@@ -26,12 +26,12 @@ import {
   type KeybindingWhenNode,
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@openswe/client-runtime/state/runtime";
 
 import { isElectron } from "../../env";
 import { useOpenInPreferredEditor } from "../../editorPreferences";
@@ -258,7 +258,7 @@ function UnknownWhenVariableWarning({
         }
       />
       <TooltipPopup side="top" className="max-w-72 whitespace-normal leading-relaxed">
-        T3 Code does not recognize this condition yet. It can still be saved, but it may not match
+        Open SWE does not recognize this condition yet. It can still be saved, but it may not match
         unless the runtime provides it.
       </TooltipPopup>
     </Tooltip>
@@ -1248,8 +1248,8 @@ export function KeybindingsSettingsPanel() {
           <div className="flex items-start gap-2 border-b border-warning/20 bg-warning/5 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground sm:px-4">
             <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
             <p>
-              Some shortcuts may be claimed by the browser before T3 Code sees them. Use the desktop
-              app for better keybinding support.
+              Some shortcuts may be claimed by the browser before Open SWE sees them. Use the
+              desktop app for better keybinding support.
             </p>
           </div>
         ) : null}

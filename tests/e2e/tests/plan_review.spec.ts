@@ -1,9 +1,4 @@
-import {
-  test,
-  expect,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 
 // Full plan-review flow, driven through the mock Slack UI + the real dashboard:
 //   user asks Open SWE in Slack to PLAN something ->
@@ -21,10 +16,7 @@ const COLLABORATOR = { login: "bob", email: "bob@example.com" };
 // started by an earlier spec can still be in flight and post here after this
 // test's `/control/reset`, and an unscoped read lets that stale message satisfy
 // a poll — which then stops waiting for the message this test actually wants.
-async function botMessages(
-  request: APIRequestContext,
-  threadId?: string,
-): Promise<Array<string>> {
+async function botMessages(request: APIRequestContext, threadId?: string): Promise<Array<string>> {
   const res = await request.get("/mock/slack/messages");
   const msgs = (await res.json()) as Array<{ text: string; is_bot: boolean }>;
   return msgs
@@ -47,37 +39,27 @@ test.describe("Plan review", () => {
     await page.locator("#reset").click();
     await expect(page.locator("#thread")).toContainText("No messages yet");
 
-    await page
-      .locator("#text")
-      .fill("<@U0BOT> plan how to add a greet() helper");
+    await page.locator("#text").fill("<@U0BOT> plan how to add a greet() helper");
     await page.locator("#send").click();
 
-    const ready = page
-      .locator(".msg.bot")
-      .filter({ hasText: /plan is ready for review/i });
+    const ready = page.locator(".msg.bot").filter({ hasText: /plan is ready for review/i });
     await expect(ready).toBeVisible({ timeout: 60_000 });
     const approve = ready.getByRole("button", {
       name: "Approve & implement",
     });
     await expect(approve).toBeVisible();
-    await expect(
-      ready.getByRole("button", { name: "Request changes" }),
-    ).toBeVisible();
+    await expect(ready.getByRole("button", { name: "Request changes" })).toBeVisible();
 
     await approve.click();
     await expect(ready).toContainText("Selected: Approve & implement");
     await expect(ready.getByRole("button")).toHaveCount(0);
 
-    const reply = page
-      .locator(".msg.bot")
-      .filter({ has: page.locator('a[href*="/pull/"]') });
+    const reply = page.locator(".msg.bot").filter({ has: page.locator('a[href*="/pull/"]') });
     await expect(reply).toBeVisible({ timeout: 90_000 });
     await expect(reply).toContainText("Add greet() helper");
 
     await page.goto("/mock/github");
-    await expect(page.locator('.pr[data-pr="1"]')).toContainText(
-      "Add greet() helper",
-    );
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText("Add greet() helper");
   });
 
   test("Slack plan request → collaborator approves → PR", async ({
@@ -110,11 +92,7 @@ test.describe("Plan review", () => {
             values?: { messages?: Array<{ content?: unknown }> };
           };
           return (state.values?.messages ?? [])
-            .map((m) =>
-              typeof m.content === "string"
-                ? m.content
-                : JSON.stringify(m.content),
-            )
+            .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
             .some((c) => c.includes("Plan mode is active"));
         },
         { timeout: 60_000 },
@@ -140,9 +118,7 @@ test.describe("Plan review", () => {
     });
     const loggedOut = await loggedOutCtx.newPage();
     await loggedOut.goto(planPath);
-    await expect(loggedOut).toHaveURL(
-      new RegExp(`/login\\?redirect=.*${threadId}.*plan`),
-    );
+    await expect(loggedOut).toHaveURL(new RegExp(`/login\\?redirect=.*${threadId}.*plan`));
     await expect(loggedOut.getByText("Sign in to Open SWE")).toBeVisible({
       timeout: 30_000,
     });
@@ -156,26 +132,15 @@ test.describe("Plan review", () => {
       timeout: 30_000,
     });
     await expect(
-      loggedOut
-        .getByTestId("plan-artifact-frame")
-        .contentFrame()
-        .getByText("Add greet() helper"),
+      loggedOut.getByTestId("plan-artifact-frame").contentFrame().getByText("Add greet() helper"),
     ).toBeVisible({ timeout: 30_000 });
-    const summaryBox = await loggedOut
-      .getByTestId("plan-summary")
-      .boundingBox();
-    const actionsBox = await loggedOut
-      .getByTestId("plan-actions")
-      .boundingBox();
+    const summaryBox = await loggedOut.getByTestId("plan-summary").boundingBox();
+    const actionsBox = await loggedOut.getByTestId("plan-actions").boundingBox();
     expect(summaryBox).not.toBeNull();
     expect(actionsBox).not.toBeNull();
-    expect(actionsBox!.y).toBeGreaterThanOrEqual(
-      summaryBox!.y + summaryBox!.height,
-    );
+    expect(actionsBox!.y).toBeGreaterThanOrEqual(summaryBox!.y + summaryBox!.height);
     const screenshotPath = testInfo.outputPath("plan-review-tablet.png");
-    await loggedOut
-      .getByTestId("plan-review")
-      .screenshot({ path: screenshotPath });
+    await loggedOut.getByTestId("plan-review").screenshot({ path: screenshotPath });
     await testInfo.attach("plan-review-tablet", {
       path: screenshotPath,
       contentType: "image/png",
@@ -194,9 +159,7 @@ test.describe("Plan review", () => {
     await expect(reviewLink).toBeVisible({ timeout: 30_000 });
     await expect(reviewLink).toHaveCSS("height", "250px");
     await expect(owner.getByTestId("inline-plan-fade")).toBeVisible();
-    await expect(
-      owner.locator('button[aria-current="page"]', { hasText: "Plan" }),
-    ).toHaveCount(0);
+    await expect(owner.locator('button[aria-current="page"]', { hasText: "Plan" })).toHaveCount(0);
     await reviewLink.click();
     await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(owner.getByTestId("plan-review")).toBeVisible({
@@ -204,18 +167,12 @@ test.describe("Plan review", () => {
     });
     await expect(owner.getByText("Back to conversation")).toBeVisible();
     const ownerArtifact = owner.getByTestId("plan-artifact-frame");
-    await expect(
-      ownerArtifact.contentFrame().getByText("Add greet() helper"),
-    ).toBeVisible({
+    await expect(ownerArtifact.contentFrame().getByText("Add greet() helper")).toBeVisible({
       timeout: 30_000,
     });
     await expect(ownerArtifact).toHaveAttribute("sandbox", "");
-    const embeddedSummaryBox = await owner
-      .getByTestId("plan-summary")
-      .boundingBox();
-    const embeddedActionsBox = await owner
-      .getByTestId("plan-actions")
-      .boundingBox();
+    const embeddedSummaryBox = await owner.getByTestId("plan-summary").boundingBox();
+    const embeddedActionsBox = await owner.getByTestId("plan-actions").boundingBox();
     expect(embeddedSummaryBox).not.toBeNull();
     expect(embeddedActionsBox).not.toBeNull();
     // At the plan page's full width the header runs as a row, so the actions
@@ -232,9 +189,7 @@ test.describe("Plan review", () => {
     // Copy the whole plan as HTML.
     await owner.getByTestId("copy-plan").click();
     await expect(owner.getByTestId("copy-plan")).toContainText("Copied!");
-    const clipboard = await owner.evaluate(() =>
-      navigator.clipboard.readText(),
-    );
+    const clipboard = await owner.evaluate(() => navigator.clipboard.readText());
     expect(clipboard).toContain("<title>Greeting Blueprint</title>");
     expect(clipboard).toContain("<h2>Verification</h2>");
 
@@ -247,10 +202,7 @@ test.describe("Plan review", () => {
       timeout: 30_000,
     });
     await expect(
-      collab
-        .getByTestId("plan-artifact-frame")
-        .contentFrame()
-        .getByText("Add greet() helper"),
+      collab.getByTestId("plan-artifact-frame").contentFrame().getByText("Add greet() helper"),
     ).toBeVisible({ timeout: 30_000 });
     await expect(collab.getByTestId("plan-comments")).toHaveCount(0);
     await expect(collab.getByTestId("approve-plan")).toBeVisible();
@@ -268,19 +220,14 @@ test.describe("Plan review", () => {
       })
       .toMatch(/\/pull\//);
 
-    const prs = (await (
-      await request.get("/mock/github/data")
-    ).json()) as Array<unknown>;
+    const prs = (await (await request.get("/mock/github/data")).json()) as Array<unknown>;
     expect(prs.length).toBeGreaterThan(0);
 
     await ownerCtx.close();
     await collabCtx.close();
   });
 
-  test("plan decisions return to a connected conversation", async ({
-    browser,
-    request,
-  }) => {
+  test("plan decisions return to a connected conversation", async ({ browser, request }) => {
     test.setTimeout(180_000);
     await request.post("/control/reset");
     const send = await request.post("/mock/slack/send", {
@@ -313,23 +260,15 @@ test.describe("Plan review", () => {
     const hydrated = owner.waitForResponse((response) => {
       const path = new URL(response.url()).pathname;
       return (
-        response.request().method() === "GET" &&
-        path === `/dashboard/api/threads/${threadId}/state`
+        response.request().method() === "GET" && path === `/dashboard/api/threads/${threadId}/state`
       );
     });
     await owner.getByTestId("reject-plan").click();
-    await expect(owner).toHaveURL(
-      new RegExp(`/agents/${threadId}\\?feedback=true$`),
-    );
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}\\?feedback=true$`));
     expect((await hydrated).ok()).toBeTruthy();
-    await typeIntoComposer(
-      owner,
-      "The plan needs changes: revise the verification steps.",
-    );
+    await typeIntoComposer(owner, "The plan needs changes: revise the verification steps.");
     await expect(
-      owner.getByText(
-        "I'll wait for your review and approval before implementing.",
-      ),
+      owner.getByText("I'll wait for your review and approval before implementing."),
     ).toHaveCount(2, { timeout: 60_000 });
     await expect(owner.getByTestId("inline-plan-artifact")).toBeVisible({
       timeout: 60_000,
@@ -343,9 +282,7 @@ test.describe("Plan review", () => {
     await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
     await expect
       .poll(async () => {
-        const prs = (await (
-          await request.get("/mock/github/data")
-        ).json()) as Array<unknown>;
+        const prs = (await (await request.get("/mock/github/data")).json()) as Array<unknown>;
         return prs.length;
       })
       .toBeGreaterThan(0);

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@openswe/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -83,7 +83,7 @@ describe("DesktopPreReadyPlatform", () => {
     () =>
       Effect.gen(function* () {
         class ClerkShaped extends Context.Service<ClerkShaped, { readonly ready: true }>()(
-          "@t3tools/desktop/app/DesktopPreReadyPlatform.test/ClerkShaped",
+          "@openswe/desktop/app/DesktopPreReadyPlatform.test/ClerkShaped",
         ) {}
 
         const events: Array<string> = [];

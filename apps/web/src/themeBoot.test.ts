@@ -8,7 +8,7 @@ import {
   invalidateCustomThemes,
   isKnownThemePreference,
   resolveThemeAppearance,
-  T3_CHAT_THEME,
+  OPEN_SWE_CHAT_THEME,
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
@@ -18,7 +18,7 @@ import {
   toCanonicalThemeColor,
 } from "./themePalette";
 
-const THEME_STORAGE_KEY = "t3code:theme";
+const THEME_STORAGE_KEY = "openswe:theme";
 // A custom theme that omits chrome falls back to the runtime default, so the
 // boot copy of that default stays derived from the real palette.
 const DEFAULT_DARK_CHROME = getDefaultThemeColors("dark").chrome;
@@ -156,14 +156,14 @@ describe("index.html boot script", () => {
   }> = [
     { name: "no stored preference on a dark OS", storage: {}, prefersDark: true },
     {
-      name: "T3 Chat follows a dark OS",
-      storage: { [THEME_STORAGE_KEY]: "t3-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      name: "Open SWE Chat follows a dark OS",
+      storage: { [THEME_STORAGE_KEY]: "openswe-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
     },
     {
-      name: "an explicit global dark mode applies to T3 Chat",
+      name: "an explicit global dark mode applies to Open SWE Chat",
       storage: {
-        [THEME_STORAGE_KEY]: "t3-chat",
+        [THEME_STORAGE_KEY]: "openswe-chat",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "dark",
         [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "false",
       },
@@ -190,13 +190,13 @@ describe("index.html boot script", () => {
       prefersDark: true,
     },
     {
-      name: "a legacy t3-grove preference resolves through the alias",
-      storage: { [THEME_STORAGE_KEY]: "t3-grove", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      name: "a legacy openswe-grove preference resolves through the alias",
+      storage: { [THEME_STORAGE_KEY]: "openswe-grove", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
     },
     {
-      name: "legacy t3-chat-dark resolves to dark T3 Chat",
-      storage: { [THEME_STORAGE_KEY]: "t3-chat-dark" },
+      name: "legacy openswe-chat-dark resolves to dark Open SWE Chat",
+      storage: { [THEME_STORAGE_KEY]: "openswe-chat-dark" },
       prefersDark: true,
     },
     {
@@ -259,10 +259,10 @@ describe("index.html boot script", () => {
 
   it("marks built-in and custom themes on the document element", () => {
     const chat = runBootScript({
-      storage: { [THEME_STORAGE_KEY]: "t3-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      storage: { [THEME_STORAGE_KEY]: "openswe-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
     });
-    expect(chat.themeId).toBe("t3-chat");
+    expect(chat.themeId).toBe("openswe-chat");
     expect(chat.themeSelected).toBe("true");
     expect(chat.isDark).toBe(true);
 
@@ -342,7 +342,7 @@ describe("index.html boot script", () => {
   // boot script's hand-maintained copy into a CI-enforced contract: any
   // palette change breaks this test until the copy in index.html is updated.
   it("keeps every built-in boot splash in sync with the real palettes", () => {
-    for (const theme of [T3_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of [OPEN_SWE_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
       // The boot script resolves every built-in from a light base appearance.
       expect(theme.appearance).toBe("light");
       for (const mode of ["light", "dark"] as const) {
@@ -368,9 +368,9 @@ describe("index.html boot script", () => {
 
   it("applies the matching half of an automatic mix to the splash", () => {
     const storage = {
-      [THEME_STORAGE_KEY]: "t3-chat",
+      [THEME_STORAGE_KEY]: "openswe-chat",
       [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
-      "t3code:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
+      "openswe:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
     };
 
     const dark = runBootScript({ storage, prefersDark: true });
@@ -382,9 +382,9 @@ describe("index.html boot script", () => {
 
     const light = runBootScript({ storage, prefersDark: false });
     expect(light.isDark).toBe(false);
-    expect(light.themeId).toBe("t3-chat");
+    expect(light.themeId).toBe("openswe-chat");
     expect(light.bootVariables["--boot-background"]).toBe(
-      getThemeColorsForMode(T3_CHAT_THEME, "light")!.canvas,
+      getThemeColorsForMode(OPEN_SWE_CHAT_THEME, "light")!.canvas,
     );
   });
 
@@ -401,7 +401,7 @@ describe("index.html boot script", () => {
             colors: { canvas: "#f8fbff", text: "#10243d", accent: "#5b6cff" },
           },
         ]),
-        "t3code:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
+        "openswe:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
       },
       prefersDark: true,
     });
@@ -414,7 +414,7 @@ describe("index.html boot script", () => {
       storage: {
         [THEME_STORAGE_KEY]: "gone-theme",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
-        "t3code:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
+        "openswe:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
       },
       prefersDark: true,
     });
@@ -429,9 +429,9 @@ describe("index.html boot script", () => {
   it("resolves a legacy-prefixed mix half onto the renamed theme", () => {
     const boot = runBootScript({
       storage: {
-        [THEME_STORAGE_KEY]: "t3-chat",
+        [THEME_STORAGE_KEY]: "openswe-chat",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
-        "t3code:theme-halves:v1": JSON.stringify({ dark: "t3-grove" }),
+        "openswe:theme-halves:v1": JSON.stringify({ dark: "openswe-grove" }),
       },
       prefersDark: true,
     });
@@ -445,13 +445,13 @@ describe("index.html boot script", () => {
   it("ignores a mix half that names an unknown theme", () => {
     const boot = runBootScript({
       storage: {
-        [THEME_STORAGE_KEY]: "t3-chat",
+        [THEME_STORAGE_KEY]: "openswe-chat",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
-        "t3code:theme-halves:v1": JSON.stringify({ dark: "gone-theme" }),
+        "openswe:theme-halves:v1": JSON.stringify({ dark: "gone-theme" }),
       },
       prefersDark: true,
     });
-    expect(boot.themeId).toBe("t3-chat");
+    expect(boot.themeId).toBe("openswe-chat");
     expect(boot.isDark).toBe(true);
   });
 

@@ -3,7 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import type { ChatAttachment } from "@t3tools/contracts";
+import type { ChatAttachment } from "@openswe/contracts";
 
 import {
   normalizeAttachmentRelativePath,

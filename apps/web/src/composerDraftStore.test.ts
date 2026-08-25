@@ -3,7 +3,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+} from "@openswe/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
@@ -14,8 +14,8 @@ import {
   ThreadId,
   type ModelSelection,
   type ProviderOptionSelection,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@openswe/contracts";
+import { createModelSelection } from "@openswe/shared/model";
 
 // The composer draft's `modelSelectionByProvider` and
 // `stickyModelSelectionByProvider` maps are keyed by `ProviderInstanceId`

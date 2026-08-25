@@ -1,6 +1,6 @@
 /**
  * Optional integration check against a real `grok agent stdio` install.
- * Enable with: T3_GROK_ACP_PROBE=1 bun run test GrokAcpCliProbe
+ * Enable with: OPEN_SWE_GROK_ACP_PROBE=1 bun run test GrokAcpCliProbe
  *
  * The probe assumes either `XAI_API_KEY` is set in the environment or
  * the user has previously run `grok login`. Without credentials the
@@ -22,11 +22,11 @@ const makeProbeRuntime = Effect.gen(function* () {
     environment: process.env,
     childProcessSpawner,
     cwd: process.cwd(),
-    clientInfo: { name: "t3-grok-probe", version: "0.0.0" },
+    clientInfo: { name: "openswe-grok-probe", version: "0.0.0" },
   });
 });
 
-describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () => {
+describe.runIf(process.env.OPEN_SWE_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () => {
   it.effect("initialize and authenticate against real grok agent stdio", () =>
     Effect.gen(function* () {
       const runtime = yield* makeProbeRuntime;

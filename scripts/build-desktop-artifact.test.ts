@@ -65,7 +65,7 @@ import {
   WINDOWS_SERVER_RESOURCE_SOURCE_DIR,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessArchitecture, HostProcessPlatform } from "@openswe/shared/hostProcess";
 
 function mockProcess(exitCode: number) {
   return ChildProcessSpawner.makeHandle({
@@ -111,7 +111,7 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const tempDir = yield* fs.makeTempDirectoryScoped({
-    prefix: "t3-windows-payload-test-",
+    prefix: "openswe-windows-payload-test-",
   });
   const sourceDir = path.join(tempDir, "server-source");
   const serverEntryPath = path.join(sourceDir, "apps/server/dist/bin.mjs");
@@ -136,7 +136,7 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
     );
   }
   yield* fs.writeFileString(
-    path.join(resourcesDir, "resource-monitor/t3-resource-monitor.exe"),
+    path.join(resourcesDir, "resource-monitor/openswe-resource-monitor.exe"),
     "monitor",
   );
   const appExecutableName = "open-swe.exe";
@@ -189,7 +189,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                T3CODE_DESKTOP_UPDATE_REPOSITORY: "pingdotgg/t3code",
+                OPENSWE_DESKTOP_UPDATE_REPOSITORY: "langchain-ai/open-swe",
               },
             }),
           ),
@@ -200,7 +200,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                GITHUB_REPOSITORY: "pingdotgg/t3code",
+                GITHUB_REPOSITORY: "langchain-ai/open-swe",
               },
             }),
           ),
@@ -210,13 +210,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(latestConfig, {
         provider: "github",
         owner: "pingdotgg",
-        repo: "t3code",
+        repo: "openswe",
         releaseType: "release",
       });
       assert.deepStrictEqual(nightlyConfig, {
         provider: "github",
         owner: "pingdotgg",
-        repo: "t3code",
+        repo: "openswe",
         releaseType: "prerelease",
         channel: "nightly",
       });
@@ -228,10 +228,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       resolveDesktopRuntimeDependencies(
         {
           "@effect/platform-node": "catalog:",
-          "@t3tools/contracts": "workspace:*",
-          "@t3tools/shared": "workspace:*",
-          "@t3tools/ssh": "workspace:*",
-          "@t3tools/tailscale": "workspace:*",
+          "@openswe/contracts": "workspace:*",
+          "@openswe/shared": "workspace:*",
+          "@openswe/ssh": "workspace:*",
+          "@openswe/tailscale": "workspace:*",
           effect: "catalog:",
           electron: "41.5.0",
         },
@@ -526,7 +526,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const tempDir = yield* fs.makeTempDirectoryScoped({
-            prefix: "t3-windows-architecture-test-",
+            prefix: "openswe-windows-architecture-test-",
           });
           const sourceDir = path.join(tempDir, "server");
           const nativeFiles = [
@@ -580,11 +580,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const repoRoot = yield* fs.makeTempDirectoryScoped({
-          prefix: "t3-resource-monitor-cache-test-",
+          prefix: "openswe-resource-monitor-cache-test-",
         });
         const binaryPath = path.join(
           repoRoot,
-          "native/resource-monitor/target/x86_64-unknown-linux-gnu/release/t3-resource-monitor",
+          "native/resource-monitor/target/x86_64-unknown-linux-gnu/release/openswe-resource-monitor",
         );
         const stageResourcesDir = path.join(repoRoot, "stage");
         yield* fs.makeDirectory(path.dirname(binaryPath), { recursive: true });
@@ -600,7 +600,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           Effect.provide(
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
-                env: { T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true" },
+                env: { OPENSWE_DESKTOP_REUSE_RESOURCE_MONITOR: "true" },
               }),
             ),
           ),
@@ -608,7 +608,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
         assert.equal(
           yield* fs.readFileString(
-            path.join(stageResourcesDir, "resource-monitor/t3-resource-monitor"),
+            path.join(stageResourcesDir, "resource-monitor/openswe-resource-monitor"),
           ),
           "cached monitor",
         );
@@ -830,7 +830,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         yield* fs.writeFileString(nativePath, "native-binary");
         const resourceMonitorPath = path.join(
           fixture.packagedAppDir,
-          "resources/resource-monitor/t3-resource-monitor.exe",
+          "resources/resource-monitor/openswe-resource-monitor.exe",
         );
         yield* fs.remove(resourceMonitorPath);
         yield* fs.makeDirectory(resourceMonitorPath);
@@ -843,7 +843,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.instanceOf(resourceMonitorError, WindowsPackagedPayloadValidationError);
         assert.equal(resourceMonitorError.reason, "resource-monitor-missing");
         assert.deepStrictEqual(resourceMonitorError.missingFiles, [
-          "resource-monitor/t3-resource-monitor.exe",
+          "resource-monitor/openswe-resource-monitor.exe",
         ]);
       }),
     ),
@@ -872,7 +872,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       Effect.gen(function* () {
         const fixture = yield* makeWindowsPayloadFixture({
           copyUnpackedNatives: true,
-          serverEntrySource: 'import "t3code-deliberately-missing-package";\n',
+          serverEntrySource: 'import "openswe-deliberately-missing-package";\n',
         });
         const error = yield* validateWindowsPackagedPayload({
           stageDistDir: fixture.stageDistDir,
@@ -881,7 +881,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         }).pipe(Effect.flip);
 
         assert.instanceOf(error, BundleNotSelfContainedError);
-        assert.include(error.output, "t3code-deliberately-missing-package");
+        assert.include(error.output, "openswe-deliberately-missing-package");
       }),
     ),
   );
@@ -932,7 +932,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const stageResourcesDir = yield* fs.makeTempDirectoryScoped({
-          prefix: "t3code-dmg-background-",
+          prefix: "openswe-dmg-background-",
         });
         const dmgDir = path.join(stageResourcesDir, "dmg");
         yield* fs.makeDirectory(dmgDir, { recursive: true });
@@ -983,7 +983,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const stageResourcesDir = yield* fs.makeTempDirectoryScoped({
-          prefix: "t3code-dmg-background-missing-",
+          prefix: "openswe-dmg-background-missing-",
         });
 
         const error = yield* stageDesktopDmgBackground(stageResourcesDir, "latest", false).pipe(
@@ -999,24 +999,24 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("derives macOS passkey signing configuration from the Clerk publishable key", () => {
     const configuration = resolveMacPasskeySigningConfiguration({
-      T3CODE_APPLE_TEAM_ID: "abc1234567",
-      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("example.clerk.accounts.dev$")}`,
+      OPENSWE_APPLE_TEAM_ID: "abc1234567",
+      OPENSWE_MACOS_PROVISIONING_PROFILE: "/tmp/openswe.provisionprofile",
+      OPENSWE_CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("example.clerk.accounts.dev$")}`,
     });
 
     assert.deepStrictEqual(configuration, {
       appId: "com.langchain.openswe",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
-      provisioningProfilePath: "/tmp/t3code.provisionprofile",
+      provisioningProfilePath: "/tmp/openswe.provisionprofile",
     });
   });
 
   it("normalizes explicit macOS passkey RP domains and renders required entitlements", () => {
     const configuration = resolveMacPasskeySigningConfiguration({
-      T3CODE_APPLE_TEAM_ID: "ABC1234567",
-      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PASSKEY_RP_DOMAINS:
+      OPENSWE_APPLE_TEAM_ID: "ABC1234567",
+      OPENSWE_MACOS_PROVISIONING_PROFILE: "/tmp/openswe.provisionprofile",
+      OPENSWE_CLERK_PASSKEY_RP_DOMAINS:
         " Clerk.Example.com,example.clerk.accounts.dev,clerk.example.com ",
     });
     const entitlements = renderMacPasskeyEntitlements(configuration);
@@ -1042,21 +1042,21 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     };
 
     const missingProfileError = captureError({
-      T3CODE_APPLE_TEAM_ID: "ABC1234567",
-      T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
+      OPENSWE_APPLE_TEAM_ID: "ABC1234567",
+      OPENSWE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
     });
     assert.instanceOf(missingProfileError, MissingMacPasskeyProvisioningProfileError);
     assert.equal(
       missingProfileError.message,
-      "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.",
+      "OPENSWE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.",
     );
 
     const unsafeDomain =
       "https://domain-user:domain-secret@example.clerk.accounts.dev/path?token=query-secret";
     const invalidDomainError = captureError({
-      T3CODE_APPLE_TEAM_ID: "ABC1234567",
-      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PASSKEY_RP_DOMAINS: unsafeDomain,
+      OPENSWE_APPLE_TEAM_ID: "ABC1234567",
+      OPENSWE_MACOS_PROVISIONING_PROFILE: "/tmp/openswe.provisionprofile",
+      OPENSWE_CLERK_PASSKEY_RP_DOMAINS: unsafeDomain,
     });
     assert.instanceOf(invalidDomainError, InvalidMacPasskeyRpDomainError);
     assert.equal(invalidDomainError.reason, "scheme-not-allowed");
@@ -1072,20 +1072,20 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.throws(
       () =>
         resolveMacPasskeySigningConfiguration({
-          T3CODE_APPLE_TEAM_ID: "ABC1234567",
-          T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-          T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev:8443",
+          OPENSWE_APPLE_TEAM_ID: "ABC1234567",
+          OPENSWE_MACOS_PROVISIONING_PROFILE: "/tmp/openswe.provisionprofile",
+          OPENSWE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev:8443",
         }),
       /Invalid passkey RP domain/u,
     );
     const invalidPublishableKeyError = captureError({
-      T3CODE_APPLE_TEAM_ID: "ABC1234567",
-      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PUBLISHABLE_KEY: "pk_test_%",
+      OPENSWE_APPLE_TEAM_ID: "ABC1234567",
+      OPENSWE_MACOS_PROVISIONING_PROFILE: "/tmp/openswe.provisionprofile",
+      OPENSWE_CLERK_PUBLISHABLE_KEY: "pk_test_%",
     });
     assert.instanceOf(invalidPublishableKeyError, InvalidMacPasskeyPublishableKeyError);
     assert.ok(invalidPublishableKeyError.cause);
-    assert.equal(invalidPublishableKeyError.message, "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.");
+    assert.equal(invalidPublishableKeyError.message, "OPENSWE_CLERK_PUBLISHABLE_KEY is invalid.");
     assert.notProperty(invalidPublishableKeyError, "publishableKey");
     assert.notInclude(invalidPublishableKeyError.message, "pk_test_%");
   });
@@ -1116,13 +1116,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.gen(function* () {
       const config = yield* createBuildConfig("mac", "dmg", "1.2.3", true, false, undefined, {
         entitlementsPath: "/tmp/entitlements.mac.plist",
-        provisioningProfilePath: "/tmp/t3code.provisionprofile",
+        provisioningProfilePath: "/tmp/openswe.provisionprofile",
       });
 
       const mac = config.mac as Record<string, unknown>;
       assert.equal(config.appId, "com.langchain.openswe");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
-      assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
+      assert.equal(mac.provisioningProfile, "/tmp/openswe.provisionprofile");
       assert.deepStrictEqual(mac.protocols, [
         { name: "Open SWE", schemes: ["open-swe", "open-swe-dev"] },
       ]);
@@ -1184,8 +1184,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("win", "arm64"), [
       "aarch64-pc-windows-msvc",
     ]);
-    assert.equal(resourceMonitorExecutableName("mac"), "t3-resource-monitor");
-    assert.equal(resourceMonitorExecutableName("win"), "t3-resource-monitor.exe");
+    assert.equal(resourceMonitorExecutableName("mac"), "openswe-resource-monitor");
+    assert.equal(resourceMonitorExecutableName("win"), "openswe-resource-monitor.exe");
   });
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {
@@ -1363,11 +1363,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                T3CODE_DESKTOP_SKIP_BUILD: "true",
-                T3CODE_DESKTOP_KEEP_STAGE: "true",
-                T3CODE_DESKTOP_SIGNED: "true",
-                T3CODE_DESKTOP_VERBOSE: "true",
-                T3CODE_DESKTOP_MOCK_UPDATES: "true",
+                OPENSWE_DESKTOP_SKIP_BUILD: "true",
+                OPENSWE_DESKTOP_KEEP_STAGE: "true",
+                OPENSWE_DESKTOP_SIGNED: "true",
+                OPENSWE_DESKTOP_VERBOSE: "true",
+                OPENSWE_DESKTOP_MOCK_UPDATES: "true",
               },
             }),
           ),
@@ -1453,7 +1453,7 @@ it.effect("rebases packaged links into the isolated tree", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-copy-symlinks-" });
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-copy-symlinks-" });
     const source = path.join(root, "source");
     const destination = path.join(root, "destination");
     const packageDir = path.join(source, "node_modules/.pnpm/example@1/node_modules/example");

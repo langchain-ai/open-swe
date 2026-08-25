@@ -1,10 +1,10 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { scopedThreadKey } from "@openswe/client-runtime/environment";
+import type { ScopedThreadRef } from "@openswe/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 
-import { normalizePreviewUrl } from "@t3tools/shared/preview";
+import { normalizePreviewUrl } from "@openswe/shared/preview";
 import { readPreparedConnection } from "~/state/session";
 
 import { isLocalLoopbackHost, normalizeHostname } from "./browser/browserTargetResolver";
@@ -138,7 +138,7 @@ export function migratePersistedBrowserHistoryState(persistedState: unknown): {
   return { byProjectKey: evictExcessProjects(byProjectKey) };
 }
 
-const BROWSER_HISTORY_STORAGE_KEY = "t3code:browser-history:v1";
+const BROWSER_HISTORY_STORAGE_KEY = "openswe:browser-history:v1";
 
 const PENDING_MAX_PER_THREAD = 10;
 const PENDING_MAX_THREADS = 20;

@@ -1,4 +1,4 @@
-export * from "@t3tools/shared/advertisedEndpoint";
+export * from "@openswe/shared/advertisedEndpoint";
 
 export const environmentEndpointUrl = (httpBaseUrl: string, pathname: string): string => {
   const url = new URL(httpBaseUrl);

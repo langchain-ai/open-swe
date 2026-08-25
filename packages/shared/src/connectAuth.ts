@@ -14,7 +14,7 @@ const CONNECT_CALLBACK_PATH = "/connect/callback";
  * decide whether it is the hosted deployment — the two must agree, so the
  * default lives here.
  */
-export const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
+export const DEFAULT_HOSTED_APP_URL = "https://app.openswe.codes";
 
 /**
  * Requested at authorize time by the hosted page and honored by the CLI's
@@ -150,7 +150,7 @@ export function checkConnectAuthCode(
 ): ConnectAuthCode | string {
   const parsed = parseConnectAuthCode(blob);
   if (parsed === null) {
-    return "That does not look like a T3 Connect code. Copy the full code.";
+    return "That does not look like a Open SWE Connect code. Copy the full code.";
   }
   if (parsed.state !== expectedState) {
     return "That code belongs to a different connect request. Open the URL above and try again.";

@@ -1,4 +1,4 @@
-import { TextGenerationError } from "@t3tools/contracts";
+import { TextGenerationError } from "@openswe/contracts";
 import * as Schema from "effect/Schema";
 
 const isTextGenerationError = Schema.is(TextGenerationError);

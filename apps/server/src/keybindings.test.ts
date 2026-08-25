@@ -1,4 +1,4 @@
-import { KeybindingCommand, KeybindingRule, KeybindingsConfig } from "@t3tools/contracts";
+import { KeybindingCommand, KeybindingRule, KeybindingsConfig } from "@openswe/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
@@ -11,7 +11,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
-import { KeybindingsConfigError } from "@t3tools/contracts";
+import { KeybindingsConfigError } from "@openswe/contracts";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const encodeKeybindingsConfigJson = Schema.encodeEffect(KeybindingsConfigJson);
@@ -27,7 +27,7 @@ const makeKeybindingsLayer = () => {
     Layer.provideMerge(
       Layer.fresh(
         ServerConfig.layerTest(process.cwd(), {
-          prefix: "t3code-keybindings-test-",
+          prefix: "openswe-keybindings-test-",
         }),
       ),
     ),

@@ -1,4 +1,4 @@
-import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
+import { type ProviderDriverKind, type ProviderInstanceId } from "@openswe/contracts";
 import { memo } from "react";
 import { StarIcon } from "lucide-react";
 import {

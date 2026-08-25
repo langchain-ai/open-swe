@@ -1,4 +1,4 @@
-import type { PreviewSessionSnapshot, ProjectScript } from "@t3tools/contracts";
+import type { PreviewSessionSnapshot, ProjectScript } from "@openswe/contracts";
 
 export function shouldShowPreviewEmptyState(snapshot: PreviewSessionSnapshot | null): boolean {
   return snapshot === null || snapshot.navStatus._tag === "Idle";

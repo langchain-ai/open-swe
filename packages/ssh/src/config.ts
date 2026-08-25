@@ -1,4 +1,4 @@
-import type { DesktopDiscoveredSshHost } from "@t3tools/contracts";
+import type { DesktopDiscoveredSshHost } from "@openswe/contracts";
 
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";

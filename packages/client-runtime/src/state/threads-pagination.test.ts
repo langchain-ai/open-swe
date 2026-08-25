@@ -10,7 +10,7 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

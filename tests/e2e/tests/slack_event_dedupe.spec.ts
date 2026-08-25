@@ -25,20 +25,14 @@ async function botTexts(request: APIRequestContext): Promise<string[]> {
   return msgs.filter((m) => m.is_bot).map((m) => m.text);
 }
 
-async function runCount(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<number> {
+async function runCount(request: APIRequestContext, threadId: string): Promise<number> {
   const res = await request.get(`/threads/${threadId}/runs`);
   if (!res.ok()) return -1;
   const runs = (await res.json()) as unknown[];
   return runs.length;
 }
 
-async function threadStatus(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<string> {
+async function threadStatus(request: APIRequestContext, threadId: string): Promise<string> {
   const res = await request.get(`/threads/${threadId}`);
   if (!res.ok()) return "";
   const thread = (await res.json()) as { status?: string };

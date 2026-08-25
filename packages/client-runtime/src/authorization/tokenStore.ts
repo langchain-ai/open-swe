@@ -1,5 +1,5 @@
-import { EnvironmentId } from "@t3tools/contracts";
-import { RelayManagedEndpoint } from "@t3tools/contracts/relay";
+import { EnvironmentId } from "@openswe/contracts";
+import { RelayManagedEndpoint } from "@openswe/contracts/relay";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import type { ConnectionAttemptError } from "../connection/model.ts";
 
 export class RemoteDpopAccessToken extends Schema.Class<RemoteDpopAccessToken>(
-  "@t3tools/client-runtime/authorization/RemoteDpopAccessToken",
+  "@openswe/client-runtime/authorization/RemoteDpopAccessToken",
 )({
   environmentId: EnvironmentId,
   label: Schema.String,
@@ -28,7 +28,7 @@ export class RemoteDpopAccessTokenStore extends Context.Service<
     readonly put: (token: RemoteDpopAccessToken) => Effect.Effect<void, ConnectionAttemptError>;
     readonly remove: (environmentId: EnvironmentId) => Effect.Effect<void, ConnectionAttemptError>;
   }
->()("@t3tools/client-runtime/authorization/tokenStore/RemoteDpopAccessTokenStore") {}
+>()("@openswe/client-runtime/authorization/tokenStore/RemoteDpopAccessTokenStore") {}
 
 export const make = (service: RemoteDpopAccessTokenStore["Service"]) =>
   RemoteDpopAccessTokenStore.of(service);

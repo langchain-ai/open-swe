@@ -1,4 +1,4 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import { ProviderInteractionMode, RuntimeMode } from "@openswe/contracts";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";

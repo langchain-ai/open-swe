@@ -4,7 +4,7 @@
  *
  * @module usageFormat
  */
-import { UsageDay, type UsageResolution, type UsageSummaryInput } from "@t3tools/contracts";
+import { UsageDay, type UsageResolution, type UsageSummaryInput } from "@openswe/contracts";
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
   style: "currency",

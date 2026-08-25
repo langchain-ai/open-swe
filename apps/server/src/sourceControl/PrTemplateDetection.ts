@@ -1,4 +1,4 @@
-import type { GitCommandError } from "@t3tools/contracts";
+import type { GitCommandError } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 

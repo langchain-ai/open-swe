@@ -38,10 +38,7 @@ async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
-async function setPullRequestHealth(
-  page: Page,
-  values: Record<string, unknown>,
-) {
+async function setPullRequestHealth(page: Page, values: Record<string, unknown>) {
   const res = await page.request.post("/control/pull-request-health", {
     data: { number: 1, ...values },
   });
@@ -80,13 +77,9 @@ async function openThreadViaSlackLink(
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
-    .fill(
-      options.message ?? "<@U0BOT> please add a greet() helper and open a PR",
-    );
+    .fill(options.message ?? "<@U0BOT> please add a greet() helper and open a PR");
   await page.locator("#send").click();
-  await expect(
-    page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }),
-  ).toBeVisible();
+  await expect(page.locator(".msg.bot").filter({ hasText: "Add greet() helper" })).toBeVisible();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
   await expect(webLink).toBeVisible();
@@ -101,13 +94,9 @@ async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await page.locator("#reset").click();
   await page
     .locator("#text")
-    .fill(
-      "<@U0BOT> E2E_MULTI_PR open related pull requests in both repositories",
-    );
+    .fill("<@U0BOT> E2E_MULTI_PR open related pull requests in both repositories");
   await page.locator("#send").click();
-  await expect(
-    page.locator(".msg.bot").filter({ hasText: "anotherorg/companion" }),
-  ).toBeVisible();
+  await expect(page.locator(".msg.bot").filter({ hasText: "anotherorg/companion" })).toBeVisible();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
   await expect(webLink).toBeVisible();
@@ -118,9 +107,9 @@ async function openMultiRepoPrThreadViaSlackLink(page: Page) {
 async function expectTranscriptVisible(page: Page) {
   await expect(async () => {
     await page.reload();
-    await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
-    ).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole("link", { name: "Add greet() helper" }).first()).toBeVisible({
+      timeout: 8000,
+    });
   }).toPass({ timeout: 60000 });
 }
 
@@ -128,9 +117,7 @@ async function waitForThreadIdle(page: Page, threadId: string) {
   await expect
     .poll(
       async () => {
-        const res = await page.request.get(
-          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
-        );
+        const res = await page.request.get(`/dashboard/api/threads/${threadId}?mark_viewed=false`);
         if (!res.ok()) return "unknown";
         return ((await res.json()) as { status?: string }).status ?? "unknown";
       },
@@ -152,17 +139,11 @@ async function waitForThreadNotBusy(page: Page, threadId: string) {
     .not.toBe("busy");
 }
 
-async function waitForStateToContain(
-  page: Page,
-  threadId: string,
-  text: string,
-) {
+async function waitForStateToContain(page: Page, threadId: string, text: string) {
   await expect
     .poll(
       async () => {
-        const res = await page.request.get(
-          `/dashboard/api/threads/${threadId}/state`,
-        );
+        const res = await page.request.get(`/dashboard/api/threads/${threadId}/state`);
         if (!res.ok()) return false;
         return JSON.stringify(await res.json()).includes(text);
       },
@@ -187,35 +168,24 @@ async function openThreadActionsMenu(page: Page) {
 }
 
 test.describe("Slack → web handoff (real dashboard UI)", () => {
-  test("the SAME user continues the conversation in the web app", async ({
-    page,
-  }) => {
+  test("the SAME user continues the conversation in the web app", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
 
     // The owner sees the composer (either the follow-up bar once the transcript
     // hydrates, or the empty-state bar before it — both mean they can type).
-    const composer = composerFor(
-      page,
-      /Add a follow up|Send the first message/,
-    );
+    const composer = composerFor(page, /Add a follow up|Send the first message/);
     await expect(composer.editor).toBeVisible();
     await expect(composer.prompt).toBeVisible();
     // Continue from the web — a new agent reply streams into the same thread.
     await typeIntoComposer(page, "Looks good — can you also add a docstring?");
-    await expect(
-      page.getByText(/anything else you'd like changed/),
-    ).toBeVisible();
+    await expect(page.getByText(/anything else you'd like changed/)).toBeVisible();
 
     // The transcript that started in Slack is here too (incl. the PR link).
-    await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Add greet() helper" }).first()).toBeVisible();
   });
 
-  test("keeps pull requests from multiple repositories above the composer", async ({
-    page,
-  }) => {
+  test("keeps pull requests from multiple repositories above the composer", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openMultiRepoPrThreadViaSlackLink(page);
 
@@ -234,9 +204,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         name: "Open fakeorg/demo pull request #1",
       }),
     ).toHaveCount(0);
-    await expect(
-      page.getByRole("button", { name: "Show 1 more" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show 1 more" })).toBeVisible();
 
     await companionLink.hover();
     const hoverCard = page.getByTestId("pr-hover-card-anotherorg/companion-2");
@@ -257,9 +225,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(companionLink).toBeVisible();
   });
 
-  test("shows live pull request health and submits actionable fixes", async ({
-    page,
-  }) => {
+  test("shows live pull request health and submits actionable fixes", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
@@ -268,14 +234,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     const summary = page.getByTestId("pr-summary-fakeorg/demo-1");
     const fixButton = page.getByRole("button", { name: "Fix PR #1 issues" });
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-muted-foreground",
-    );
-    await expect(summary).not.toHaveAttribute(
-      "data-pr-tone",
-      "text-success-foreground",
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-muted-foreground");
+    await expect(summary).not.toHaveAttribute("data-pr-tone", "text-success-foreground");
     await expect(summary).toContainText("draft");
     await expect(fixButton).toHaveCount(0);
 
@@ -290,10 +250,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       review_threads: [],
     });
     await page.reload();
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-success-foreground",
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-success-foreground");
     await expect(summary).toContainText("open");
     await expect(fixButton).toHaveCount(0);
     await page.waitForTimeout(1_000);
@@ -302,23 +259,17 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       route.fulfill({ status: 502, json: { detail: "GitHub unavailable" } }),
     );
     const failedRefresh = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/pull-request-status") &&
-        response.status() === 502,
+      (response) => response.url().endsWith("/pull-request-status") && response.status() === 502,
     );
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("visibilitychange")),
-    );
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
     await failedRefresh;
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-muted-foreground",
-      { timeout: 5_000 },
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-muted-foreground", {
+      timeout: 5_000,
+    });
     await summary.focus();
-    await expect(
-      page.getByTestId("pr-hover-card-fakeorg/demo-1"),
-    ).toContainText("GitHub health is unavailable");
+    await expect(page.getByTestId("pr-hover-card-fakeorg/demo-1")).toContainText(
+      "GitHub health is unavailable",
+    );
     await page.keyboard.press("Escape");
     await page.unroute("**/pull-request-status");
 
@@ -395,9 +346,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(unresolvedComments).toContainText(
       "Handle the null response before reading the payload.",
     );
-    await expect(unresolvedComments).toContainText(
-      "Add regression coverage for the retry path.",
-    );
+    await expect(unresolvedComments).toContainText("Add regression coverage for the retry path.");
     await expect(unresolvedComments).not.toContainText(
       "This resolved comment must not be counted.",
     );
@@ -424,17 +373,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     await page.route("**/stream/events", (route) => route.abort());
     await page.goto(`/agents/${threadId}`);
-    await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
-    ).toBeVisible({ timeout: 20_000 });
-    await expect(
-      page.getByText("This thread has no messages yet."),
-    ).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Add greet() helper" }).first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByText("This thread has no messages yet.")).toHaveCount(0);
   });
 
-  test("renders Slack mrkdwn and identifies the Slack sender", async ({
-    page,
-  }) => {
+  test("renders Slack mrkdwn and identifies the Slack sender", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page, {
       message:
@@ -446,23 +391,18 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .locator('[data-message-surface="slack"]')
       .filter({ hasText: "Slack docs" })
       .first();
-    await expect(
-      slackMessage.getByRole("img", { name: "Slack" }),
-    ).toBeVisible();
+    await expect(slackMessage.getByRole("img", { name: "Slack" })).toBeVisible();
     await expect(slackMessage.locator("strong")).toHaveText("important");
     await expect(slackMessage).toContainText("R&D");
     await expect(slackMessage.locator("code")).toContainText("code docs");
-    await expect(
-      slackMessage.getByRole("link", { name: "code docs" }),
-    ).toHaveCount(0);
-    await expect(
-      slackMessage.getByRole("link", { name: "Slack docs" }),
-    ).toHaveAttribute("href", "https://example.com/slack-docs");
+    await expect(slackMessage.getByRole("link", { name: "code docs" })).toHaveCount(0);
+    await expect(slackMessage.getByRole("link", { name: "Slack docs" })).toHaveAttribute(
+      "href",
+      "https://example.com/slack-docs",
+    );
   });
 
-  test("keeps sent Slack messages visible while work is folded", async ({
-    page,
-  }) => {
+  test("keeps sent Slack messages visible while work is folded", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
@@ -483,18 +423,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(
       await acknowledgement.evaluate(
         (message, entry) =>
-          Boolean(
-            message.compareDocumentPosition(entry) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
-          ),
+          Boolean(message.compareDocumentPosition(entry) & Node.DOCUMENT_POSITION_FOLLOWING),
         await edit.elementHandle(),
       ),
     ).toBe(true);
   });
 
-  test("expands an Edit call into a highlighted inline diff", async ({
-    page,
-  }) => {
+  test("expands an Edit call into a highlighted inline diff", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
@@ -512,23 +447,19 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     const inlineDiff = edit.locator("[data-diff]");
     await expect(inlineDiff).toBeVisible();
-    await expect(
-      inlineDiff.locator('[data-line][data-line-type="change-deletion"]'),
-    ).toContainText('return "Hello!"');
-    await expect(
-      inlineDiff.locator('[data-line][data-line-type="change-addition"]'),
-    ).toContainText('return f"Hello, {name}!"');
+    await expect(inlineDiff.locator('[data-line][data-line-type="change-deletion"]')).toContainText(
+      'return "Hello!"',
+    );
+    await expect(inlineDiff.locator('[data-line][data-line-type="change-addition"]')).toContainText(
+      'return f"Hello, {name}!"',
+    );
     await expect(inlineDiff).toHaveAttribute("data-disable-line-numbers");
     await expect(inlineDiff).not.toContainText("normalize");
     await expect(inlineDiff).not.toContainText("farewell");
-    await expect
-      .poll(() => inlineDiff.locator("[data-line] span").count())
-      .toBeGreaterThan(2);
+    await expect.poll(() => inlineDiff.locator("[data-line] span").count()).toBeGreaterThan(2);
   });
 
-  test("keeps the transcript mounted after navigation and refocus", async ({
-    page,
-  }) => {
+  test("keeps the transcript mounted after navigation and refocus", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
@@ -539,18 +470,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page).toHaveURL(/\/agents\/?$/);
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/agents/${threadId}$`));
-    await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Add greet() helper" }).first()).toBeVisible();
 
     const foregroundHydration = page
       .waitForRequest(
         (request) => {
           const path = new URL(request.url()).pathname;
-          return (
-            request.method() === "GET" &&
-            path === `/dashboard/api/threads/${threadId}/state`
-          );
+          return request.method() === "GET" && path === `/dashboard/api/threads/${threadId}/state`;
         },
         { timeout: 1_000 },
       )
@@ -558,26 +484,16 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         () => true,
         () => false,
       );
-    await page.evaluate(() =>
-      document.dispatchEvent(new Event("visibilitychange")),
-    );
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
     expect(await foregroundHydration).toBe(false);
-    await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Add greet() helper" }).first()).toBeVisible();
 
     await typeIntoComposer(page, "Can you also add a docstring?");
-    await expect(
-      page.getByText(/anything else you'd like changed/),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
-    ).toBeVisible();
+    await expect(page.getByText(/anything else you'd like changed/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "Add greet() helper" }).first()).toBeVisible();
   });
 
-  test("does not expose the originating Slack thread for public repos", async ({
-    page,
-  }) => {
+  test("does not expose the originating Slack thread for public repos", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
 
@@ -586,9 +502,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect.poll(() => latestPrBody(page)).not.toContain("Slack thread");
   });
 
-  test("exposes the originating Slack thread for private repos", async ({
-    page,
-  }) => {
+  test("exposes the originating Slack thread for private repos", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page, { repoPrivate: true });
 
@@ -604,9 +518,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
   // The queued card is optimistic, so a regression shows up as a flash the DOM
   // holds for only the length of one request — too short for a locator poll.
-  test("never flashes a queued card when no run is in progress", async ({
-    page,
-  }) => {
+  test("never flashes a queued card when no run is in progress", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
@@ -621,15 +533,12 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       const seen = { value: false };
       (window as unknown as Record<string, unknown>).__queuedCardSeen = seen;
       new MutationObserver(() => {
-        if (document.querySelector('[data-testid="queued-message"]'))
-          seen.value = true;
+        if (document.querySelector('[data-testid="queued-message"]')) seen.value = true;
       }).observe(document.body, { childList: true, subtree: true });
     });
 
     await typeIntoComposer(page, "Can you also add a docstring?");
-    await expect(
-      page.getByText(/anything else you'd like changed/),
-    ).toBeVisible();
+    await expect(page.getByText(/anything else you'd like changed/)).toBeVisible();
 
     const flashed = await page.evaluate(
       () =>
@@ -658,9 +567,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     }).toPass({ timeout: 60000 });
     await typeIntoComposer(page, queuedText);
 
-    const queuedMessage = page
-      .getByTestId("queued-message")
-      .filter({ hasText: queuedText });
+    const queuedMessage = page.getByTestId("queued-message").filter({ hasText: queuedText });
     await expect(queuedMessage).toBeVisible();
     const screenshotPath = testInfo.outputPath("queued-messages-dashboard.png");
     await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -671,10 +578,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     const serverRefresh = await page.waitForResponse((response) => {
       const path = new URL(response.url()).pathname;
-      return (
-        response.request().method() === "GET" &&
-        path === `/dashboard/api/threads/${threadId}`
-      );
+      return response.request().method() === "GET" && path === `/dashboard/api/threads/${threadId}`;
     });
     expect(serverRefresh.ok()).toBeTruthy();
     await expect(serverRefresh.json()).resolves.toMatchObject({
@@ -687,9 +591,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   // that rewrite drops the client-minted message id, the SDK's optimistic copy
   // never reconciles with the server's echo and the same text renders twice —
   // once in place, once at the tail of the transcript.
-  test("keeps sender metadata hidden after refreshing a new web thread", async ({
-    page,
-  }) => {
+  test("keeps sender metadata hidden after refreshing a new web thread", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
     const dismissOnboarding = page.getByRole("button", {
@@ -705,9 +607,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
     expect(threadId).not.toBe("");
 
-    const userMessage = page
-      .getByTestId("user-message")
-      .filter({ hasText: prompt });
+    const userMessage = page.getByTestId("user-message").filter({ hasText: prompt });
     await expect(userMessage).toContainText(prompt);
     await expect(userMessage).not.toContainText("sender_context");
     await waitForStateToContain(page, threadId, "system:sender-context");
@@ -733,71 +633,62 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
 
-    await expect(
-      page.getByTestId("user-message").filter({ hasText: followUp }),
-    ).toHaveCount(1);
+    await expect(page.getByTestId("user-message").filter({ hasText: followUp })).toHaveCount(1);
   });
 
-  test("renders structured input envelopes safely and keeps legacy messages", async ({
-    page,
-  }) => {
+  test("renders structured input envelopes safely and keeps legacy messages", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openRunningThreadViaSlackLink(page);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
     expect(threadId).not.toBe("");
     await waitForThreadIdle(page, threadId);
 
-    await page.route(
-      `**/dashboard/api/threads/${threadId}/state`,
-      async (route) => {
-        const response = await route.fetch();
-        const body = (await response.json()) as {
-          values?: { messages?: Array<Record<string, unknown>> };
-        };
-        const messages = body.values?.messages ?? [];
-        body.values = {
-          ...body.values,
-          messages: [
-            {
-              type: "human",
-              id: "entity-person",
-              content:
-                '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
-            },
-            {
-              type: "human",
-              id: "entity-system",
-              content:
-                '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
-            },
-            {
-              type: "human",
-              id: "structured-person",
-              content:
-                '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
-            },
-            {
-              type: "human",
-              id: "structured-system",
-              content:
-                '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
-            },
-            {
-              type: "human",
-              id: "legacy-e2e",
-              content: "Legacy stays visible",
-            },
-            ...messages,
-          ],
-        };
-        await route.fulfill({ response, json: body });
-      },
-    );
+    await page.route(`**/dashboard/api/threads/${threadId}/state`, async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as {
+        values?: { messages?: Array<Record<string, unknown>> };
+      };
+      const messages = body.values?.messages ?? [];
+      body.values = {
+        ...body.values,
+        messages: [
+          {
+            type: "human",
+            id: "entity-person",
+            content:
+              '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+          },
+          {
+            type: "human",
+            id: "entity-system",
+            content:
+              '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+          },
+          {
+            type: "human",
+            id: "structured-person",
+            content:
+              '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
+          },
+          {
+            type: "human",
+            id: "structured-system",
+            content:
+              '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
+          },
+          {
+            type: "human",
+            id: "legacy-e2e",
+            content: "Legacy stays visible",
+          },
+          ...messages,
+        ],
+      };
+      await route.fulfill({ response, json: body });
+    });
 
     await page.reload();
-    await expect(
-      page.getByText("Person says <img data-e2e-injected src=x>"),
-    ).toBeVisible();
+    await expect(page.getByText("Person says <img data-e2e-injected src=x>")).toBeVisible();
     await expect(page.locator("img[data-e2e-injected]")).toHaveCount(0);
     await expect(page.getByText("Automation checks CI")).toHaveCount(0);
     const systemChip = page.getByRole("button", { name: "Scheduler" });
@@ -805,16 +696,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await systemChip.click();
     await expect(page.getByText("Automation checks CI")).toBeVisible();
     await expect(page.getByText("Legacy stays visible")).toBeVisible();
-    await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
-      0,
-    );
+    await expect(page.getByText("github:alice", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("system:scheduler", { exact: false })).toHaveCount(0);
     await expect(
-      page.getByText("system:scheduler", { exact: false }),
-    ).toHaveCount(0);
-    await expect(
-      page
-        .locator('[data-message-sender-kind="person"]')
-        .filter({ hasText: "Person says" }),
+      page.locator('[data-message-sender-kind="person"]').filter({ hasText: "Person says" }),
     ).toBeVisible();
     await expect(
       page
@@ -857,9 +742,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       id: threadId,
       status: "interrupted",
     });
-    await expect(
-      page.getByRole("button", { name: "Send message" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
     await expect(stopButton).toHaveCount(0);
   });
 
@@ -900,15 +783,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       id: threadId,
       status: "interrupted",
     });
-    await expect(
-      page.getByRole("button", { name: "Send message" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
     await expect(stopButton).toHaveCount(0);
   });
 
-  test("a DIFFERENT user can post, and their message is attributed", async ({
-    page,
-  }) => {
+  test("a DIFFERENT user can post, and their message is attributed", async ({ page }) => {
     await loginAs(page, OTHER_USER);
     await openThreadViaSlackLink(page);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
@@ -918,10 +797,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expectTranscriptVisible(page);
 
     // …and a non-owner now gets a composer too (owner-only restriction removed).
-    const composer = composerFor(
-      page,
-      /Add a follow up|Send the first message/,
-    );
+    const composer = composerFor(page, /Add a follow up|Send the first message/);
     await expect(composer.editor).toBeVisible();
     await expect(composer.prompt).toBeVisible();
 
@@ -935,16 +811,12 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // stored: in the sender's own session the bubble is still the SDK's
     // optimistic echo of what they typed, which carries no envelope.
     await page.reload();
-    await expect(
-      page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
-    ).toBeVisible();
+    await expect(page.getByText(new RegExp(`@${OTHER_USER.login}`)).first()).toBeVisible();
   });
 
   // A slow sidebar used to render as a blank column, indistinguishable from an
   // account with no threads.
-  test("shows a loading placeholder while the sidebar list is in flight", async ({
-    page,
-  }) => {
+  test("shows a loading placeholder while the sidebar list is in flight", async ({ page }) => {
     await loginAs(page, SAME_USER);
 
     let release = () => {};
@@ -972,9 +844,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
   // A persisted filter makes the "no matches" branch true before any data has
   // arrived, so the two states could otherwise render together.
-  test("does not claim an empty result while the sidebar is still loading", async ({
-    page,
-  }) => {
+  test("does not claim an empty result while the sidebar is still loading", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.addInitScript(() => {
       localStorage.setItem(
@@ -1005,18 +875,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // `useSidebarPrefs` writes the full sanitized object back on mount, so the
     // stored value gaining a key the seed never had is the hydration signal.
     await page.waitForFunction(
-      () =>
-        (localStorage.getItem("open-swe.agents.sidebar-prefs") ?? "").includes(
-          "collapsed",
-        ),
+      () => (localStorage.getItem("open-swe.agents.sidebar-prefs") ?? "").includes("collapsed"),
       undefined,
       { timeout: 30_000 },
     );
 
     await expect(skeleton).toBeVisible();
-    await expect(page.getByText("No threads match these filters.")).toHaveCount(
-      0,
-    );
+    await expect(page.getByText("No threads match these filters.")).toHaveCount(0);
 
     release();
   });

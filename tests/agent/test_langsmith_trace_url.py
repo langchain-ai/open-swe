@@ -42,9 +42,9 @@ async def test_trace_url_falls_back_to_env_project_id(monkeypatch: pytest.Monkey
     monkeypatch.setenv("LANGSMITH_TRACING_PROJECT_ID_PROD", "env-pid")
     monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}))
 
-    url = await ls_utils.get_langsmith_trace_url("t3")
+    url = await ls_utils.get_langsmith_trace_url("openswe")
 
-    assert url == "https://smith.example/o/tenant-1/projects/p/env-pid/t/t3"
+    assert url == "https://smith.example/o/tenant-1/projects/p/env-pid/t/openswe"
 
 
 async def test_trace_url_none_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:

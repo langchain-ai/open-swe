@@ -3,7 +3,7 @@ import {
   type DesktopHostTelemetrySnapshot,
   type ResourceMonitorProcessSample,
   type ResourceMonitorSnapshotEvent,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -136,7 +136,7 @@ describe("resource telemetry process model", () => {
     expect(result.groups.backend.processCount).toBe(4);
     expect(result.groups.monitor.processCount).toBe(1);
     expect(result.groups.monitor.processStarts).toBe(1);
-    expect(result.groups.allT3.processStarts).toBe(5);
+    expect(result.groups.allOpenSWE.processStarts).toBe(5);
   });
 
   it("deduplicates Electron metrics and classifies Electron descendants", () => {

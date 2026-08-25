@@ -1,4 +1,4 @@
-import type { PreviewAnnotationPayload } from "@t3tools/contracts";
+import type { PreviewAnnotationPayload } from "@openswe/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

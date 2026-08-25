@@ -7,14 +7,14 @@ import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { assert, it } from "@effect/vitest";
 
-import { GitCommandError } from "@t3tools/contracts";
+import { GitCommandError } from "@openswe/contracts";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 import { runVcsDriverContractSuite } from "./testing/VcsDriverContractHarness.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3-git-vcs-contract-",
+  prefix: "openswe-git-vcs-contract-",
 });
 const GitContractLayer = Layer.mergeAll(GitVcsDriver.vcsLayer, GitVcsDriver.layer).pipe(
   Layer.provide(ServerConfigLayer),
@@ -77,13 +77,13 @@ it.effect("GitVcsDriver forwards execute env to the VCS process", () => {
       cwd: "/repo",
       args: ["status"],
       env: {
-        GIT_INDEX_FILE: "/tmp/t3-index",
+        GIT_INDEX_FILE: "/tmp/openswe-index",
       },
       appendTruncationMarker: true,
     });
 
     assert.deepStrictEqual(observedEnv, {
-      GIT_INDEX_FILE: "/tmp/t3-index",
+      GIT_INDEX_FILE: "/tmp/openswe-index",
     });
     assert.strictEqual(observedAppendTruncationMarker, true);
   }).pipe(

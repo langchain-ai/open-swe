@@ -3,10 +3,10 @@ import { defineConfig } from "vite-plus";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
 const repoEnv = loadRepoEnv();
-const shouldLaunchElectronAfterPack = process.env.T3CODE_DESKTOP_DEV === "1";
+const shouldLaunchElectronAfterPack = process.env.OPENSWE_DESKTOP_DEV === "1";
 const publicConfigDefine = {
-  __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
-    repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
+  __OPENSWE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
+    repoEnv.OPENSWE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
   ),
 };
 
@@ -15,13 +15,13 @@ export default defineConfig({
     tasks: {
       build: {
         command: "node scripts/build-preview-annotation-css.mjs && vp pack",
-        dependsOn: ["t3#build"],
+        dependsOn: ["openswe#build"],
         cache: false,
       },
       dev: {
         command:
-          "node scripts/build-preview-annotation-css.mjs && cross-env T3CODE_DESKTOP_DEV=1 vp pack --watch",
-        dependsOn: ["t3#build"],
+          "node scripts/build-preview-annotation-css.mjs && cross-env OPENSWE_DESKTOP_DEV=1 vp pack --watch",
+        dependsOn: ["openswe#build"],
         cache: false,
       },
       "dev:bundle": {
@@ -30,7 +30,7 @@ export default defineConfig({
       },
       "dev:electron": {
         command: "node scripts/dev-electron.mjs",
-        dependsOn: ["t3#build"],
+        dependsOn: ["openswe#build"],
         cache: false,
       },
     },
@@ -45,7 +45,7 @@ export default defineConfig({
       entry: ["src/main.ts"],
       clean: true,
       deps: {
-        alwaysBundle: (id) => id.startsWith("@t3tools/"),
+        alwaysBundle: (id) => id.startsWith("@openswe/"),
       },
       ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
     },

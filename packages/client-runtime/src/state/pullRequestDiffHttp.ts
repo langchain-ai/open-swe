@@ -1,4 +1,4 @@
-import type { PullRequestDiffInput, PullRequestDiffResult } from "@t3tools/contracts";
+import type { PullRequestDiffInput, PullRequestDiffResult } from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -53,7 +53,7 @@ export class PullRequestDiffLoader extends Context.Service<
       input: PullRequestDiffInput,
     ) => Effect.Effect<PullRequestDiffResult, RemoteEnvironmentRequestError>;
   }
->()("@t3tools/client-runtime/state/pullRequestDiffHttp/PullRequestDiffLoader") {}
+>()("@openswe/client-runtime/state/pullRequestDiffHttp/PullRequestDiffLoader") {}
 
 export const pullRequestDiffLoaderLayer: Layer.Layer<
   PullRequestDiffLoader,

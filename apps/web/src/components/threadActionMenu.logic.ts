@@ -1,5 +1,5 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
-import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+import type { ContextMenuItem } from "@openswe/contracts";
+import type { SnoozePreset } from "@openswe/client-runtime/state/thread-settled";
 
 /**
  * Ids for the per-thread action menu. Snooze presets are dispatched as

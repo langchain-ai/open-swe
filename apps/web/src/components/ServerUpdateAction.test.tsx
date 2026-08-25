@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@openswe/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -64,7 +64,7 @@ describe("ServerUpdateAction", () => {
     expect(testState.toast).toHaveBeenCalledWith({
       type: "success",
       title: "Test server updated",
-      description: "Reconnected on t3@0.0.31.",
+      description: "Reconnected on openswe@0.0.31.",
     });
   });
 

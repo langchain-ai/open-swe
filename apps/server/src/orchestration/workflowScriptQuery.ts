@@ -17,7 +17,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import { OrchestrationGetWorkflowScriptError } from "@t3tools/contracts";
+import { OrchestrationGetWorkflowScriptError } from "@openswe/contracts";
 import * as Effect from "effect/Effect";
 
 const SCRIPT_BYTE_CAP = 256 * 1024;

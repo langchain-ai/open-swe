@@ -80,7 +80,7 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-test-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-service-launcher-test-" });
       const statePath = path.join(root, "runtime", "service-state.json");
       const state = {
         protocol: SERVICE_LAUNCHER_PROTOCOL,
@@ -96,10 +96,10 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-stop-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-service-launcher-stop-" });
       const statePath = path.join(root, "runtime", "service-state.json");
       const versionDir = path.join(root, "runtime", "versions", "1.0.0");
-      const entryPath = path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs");
+      const entryPath = path.join(versionDir, "node_modules", "openswe", "dist", "bin.mjs");
       yield* fs.makeDirectory(path.dirname(entryPath), { recursive: true });
       yield* fs.writeFileString(entryPath, "setInterval(() => {}, 1_000);\n");
       yield* fs.writeFileString(path.join(versionDir, ".install-complete"), "1.0.0\n");
@@ -126,7 +126,7 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-flow-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-service-launcher-flow-" });
       const statePath = path.join(root, "runtime", "service-state.json");
       const databasePath = path.join(root, "userdata", "state.sqlite");
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
@@ -134,7 +134,7 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
       // @effect-diagnostics-next-line preferSchemaOverJson:off - embeds a path in fake child source.
       const encodedDatabasePath = JSON.stringify(databasePath);
       const childSource = `
-const context = JSON.parse(process.env.T3_SERVICE_LAUNCHER_CONTEXT);
+const context = JSON.parse(process.env.OPEN_SWE_SERVICE_LAUNCHER_CONTEXT);
 if (context.update?.status === "pending") {
   process.send({ type: "prepared", updateId: context.update.id });
   process.on("message", (message) => {
@@ -149,7 +149,7 @@ if (context.update?.status === "pending") {
 `;
       for (const version of ["1.0.0", "1.1.0"]) {
         const versionDir = path.join(root, "runtime", "versions", version);
-        const entryPath = path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs");
+        const entryPath = path.join(versionDir, "node_modules", "openswe", "dist", "bin.mjs");
         yield* fs.makeDirectory(path.dirname(entryPath), { recursive: true });
         yield* fs.writeFileString(entryPath, childSource);
         yield* fs.writeFileString(path.join(versionDir, ".install-complete"), `${version}\n`);
@@ -179,7 +179,9 @@ if (context.update?.status === "pending") {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-rollback-" });
+      const root = yield* fs.makeTempDirectoryScoped({
+        prefix: "openswe-service-launcher-rollback-",
+      });
       const statePath = path.join(root, "runtime", "service-state.json");
       const databasePath = path.join(root, "userdata", "state.sqlite");
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
@@ -187,7 +189,7 @@ if (context.update?.status === "pending") {
       // @effect-diagnostics-next-line preferSchemaOverJson:off - embeds a path in fake child source.
       const encodedDatabasePath = JSON.stringify(databasePath);
       const childSource = `
-const context = JSON.parse(process.env.T3_SERVICE_LAUNCHER_CONTEXT);
+const context = JSON.parse(process.env.OPEN_SWE_SERVICE_LAUNCHER_CONTEXT);
 if (context.update?.status === "pending") {
   process.send({ type: "prepared", updateId: "wrong-update" });
 } else if (context.update === undefined) {
@@ -199,7 +201,7 @@ if (context.update?.status === "pending") {
 `;
       for (const version of ["1.0.0", "1.1.0"]) {
         const versionDir = path.join(root, "runtime", "versions", version);
-        const entryPath = path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs");
+        const entryPath = path.join(versionDir, "node_modules", "openswe", "dist", "bin.mjs");
         yield* fs.makeDirectory(path.dirname(entryPath), { recursive: true });
         yield* fs.writeFileString(entryPath, childSource);
         yield* fs.writeFileString(path.join(versionDir, ".install-complete"), `${version}\n`);
@@ -233,7 +235,7 @@ if (context.update?.status === "pending") {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-db-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "openswe-service-launcher-db-" });
       const statePath = path.join(root, "runtime", "service-state.json");
       const databasePath = path.join(root, "userdata", "state.sqlite");
       const original = "database before migration";
@@ -243,7 +245,7 @@ if (context.update?.status === "pending") {
       const encodedDatabasePath = JSON.stringify(databasePath);
       const childSource = `
 import { writeFileSync } from "node:fs";
-const context = JSON.parse(process.env.T3_SERVICE_LAUNCHER_CONTEXT);
+const context = JSON.parse(process.env.OPEN_SWE_SERVICE_LAUNCHER_CONTEXT);
 if (context.update?.status === "pending") {
   writeFileSync(context.update.dbPath, "database after migration");
   writeFileSync(context.update.dbPath + "-wal", "trial wal");
@@ -258,7 +260,7 @@ if (context.update?.status === "pending") {
 `;
       for (const version of ["1.0.0", "1.1.0"]) {
         const versionDir = path.join(root, "runtime", "versions", version);
-        const entryPath = path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs");
+        const entryPath = path.join(versionDir, "node_modules", "openswe", "dist", "bin.mjs");
         yield* fs.makeDirectory(path.dirname(entryPath), { recursive: true });
         yield* fs.writeFileString(entryPath, childSource);
         yield* fs.writeFileString(path.join(versionDir, ".install-complete"), `${version}\n`);

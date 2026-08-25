@@ -4,7 +4,7 @@ import {
   PREVIEW_VIEWPORT_MIN_DIMENSION,
   type PreviewViewportSetting,
   type PreviewViewportSize,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 export interface BrowserViewportLayout {
   readonly canvasWidth: number;

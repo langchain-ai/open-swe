@@ -9,8 +9,8 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { SpawnExecutableResolution } from "@t3tools/shared/shell";
+import { HostProcessEnvironment, HostProcessPlatform } from "@openswe/shared/hostProcess";
+import { SpawnExecutableResolution } from "@openswe/shared/shell";
 
 import * as ProcessRunner from "./processRunner.ts";
 

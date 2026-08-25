@@ -1,4 +1,4 @@
-import type { RelayClientDeviceRecord } from "@t3tools/contracts/relay";
+import type { RelayClientDeviceRecord } from "@openswe/contracts/relay";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -31,7 +31,7 @@ describe("mobile client presentation", () => {
   it("describes the client platform and enabled notification events", () => {
     const client = device();
 
-    expect(mobileClientPlatformLabel(client)).toBe("iOS 18 · T3 Code 1.2.3");
+    expect(mobileClientPlatformLabel(client)).toBe("iOS 18 · Open SWE 1.2.3");
     expect(mobileClientNotificationDetail(client)).toBe(
       "Alerts enabled for approvals, completions.",
     );

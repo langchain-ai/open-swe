@@ -1,5 +1,5 @@
-import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
-import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
+import { bootstrapRemoteBearerSession } from "@openswe/client-runtime/authorization";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@openswe/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -40,7 +40,7 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
   {
     readonly getBearerToken: Effect.Effect<string, DesktopLocalEnvironmentAuthError>;
   }
->()("@t3tools/desktop/backend/DesktopLocalEnvironmentAuth") {}
+>()("@openswe/desktop/backend/DesktopLocalEnvironmentAuth") {}
 
 export const make = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
@@ -71,7 +71,7 @@ export const make = Effect.gen(function* () {
           httpBaseUrl: config.httpBaseUrl.href,
           credential,
           clientMetadata: {
-            label: "T3 Code Desktop",
+            label: "Open SWE Desktop",
             deviceType: "desktop",
           },
         }).pipe(

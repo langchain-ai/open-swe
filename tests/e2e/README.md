@@ -24,8 +24,8 @@ code runs for real.
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
 | Environment tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
-| Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
-| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
+| Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                     |
+| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot        |
 | GitHub App token mint, `api.github.com/user` identity            | stubbed (offline)                                                          |
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render,

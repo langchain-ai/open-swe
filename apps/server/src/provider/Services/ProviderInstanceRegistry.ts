@@ -17,7 +17,7 @@
  *
  * @module provider/Services/ProviderInstanceRegistry
  */
-import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
+import type { ProviderInstanceId, ServerProvider } from "@openswe/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as PubSub from "effect/PubSub";
@@ -84,4 +84,4 @@ export interface ProviderInstanceRegistryShape {
 export class ProviderInstanceRegistry extends Context.Service<
   ProviderInstanceRegistry,
   ProviderInstanceRegistryShape
->()("t3/provider/Services/ProviderInstanceRegistry") {}
+>()("openswe/provider/Services/ProviderInstanceRegistry") {}

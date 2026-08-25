@@ -10,7 +10,7 @@ import "vite-plus/test/config";
 import { defineConfig, type Connect, type Plugin } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
-import { DEV_PROXIED_PATH_PREFIXES } from "@t3tools/shared/devProxy";
+import { DEV_PROXIED_PATH_PREFIXES } from "@openswe/shared/devProxy";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 
@@ -24,14 +24,14 @@ Object.assign(process.env, repoEnv);
 // pins the client to localhost and breaks every non-localhost origin — the
 // exact failure single-origin mode exists to prevent, and an invisible one
 // since the page still loads.
-const isSingleOriginDev = process.env.T3CODE_SINGLE_ORIGIN_DEV === "1";
+const isSingleOriginDev = process.env.OPENSWE_SINGLE_ORIGIN_DEV === "1";
 
 const port = Number(process.env.PORT ?? 5733);
 const explicitHost = process.env.HOST?.trim();
 const host = explicitHost || "localhost";
 const configuredWsUrl = isSingleOriginDev ? undefined : process.env.VITE_WS_URL?.trim();
 const configuredHttpUrl = isSingleOriginDev ? undefined : process.env.VITE_HTTP_URL?.trim();
-const configuredRelayUrl = repoEnv.VITE_T3CODE_RELAY_URL?.trim() || "";
+const configuredRelayUrl = repoEnv.VITE_OPENSWE_RELAY_URL?.trim() || "";
 const configuredClerkPublishableKey = repoEnv.VITE_CLERK_PUBLISHABLE_KEY?.trim() || "";
 const configuredClerkJwtTemplate = repoEnv.VITE_CLERK_JWT_TEMPLATE?.trim() || "";
 const configuredClerkCliOAuthClientId = repoEnv.VITE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() || "";
@@ -53,14 +53,14 @@ const configuredHostedAppUrl = (() => {
   }
   return undefined;
 })();
-const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
+const sourcemapEnv = process.env.OPENSWE_WEB_SOURCEMAP?.trim().toLowerCase();
 
 // Vite 8.1's experimental bundled dev mode: serves rolldown-bundled chunks in
 // dev for much faster startup/reload on large module graphs, with HMR served
-// as hot patches. Opt-in while experimental: T3CODE_BUNDLED_DEV=1 pnpm dev:web
+// as hot patches. Opt-in while experimental: OPENSWE_BUNDLED_DEV=1 pnpm dev:web
 // The dev runner defaults this on for --share runs (remote browsers pay a
-// round trip per import level in unbundled dev); T3CODE_BUNDLED_DEV=0 opts out.
-const bundledDevEnv = process.env.T3CODE_BUNDLED_DEV?.trim().toLowerCase();
+// round trip per import level in unbundled dev); OPENSWE_BUNDLED_DEV=0 opts out.
+const bundledDevEnv = process.env.OPENSWE_BUNDLED_DEV?.trim().toLowerCase();
 const bundledDev = bundledDevEnv === "1" || bundledDevEnv === "true";
 
 const buildSourcemap: boolean | "hidden" =
@@ -89,7 +89,7 @@ function resolveDevProxyTarget(
 ): string | undefined {
   // Browser dev is single-origin: the backend port is proxied through this
   // server so the app works from any origin (localhost, tailnet, LAN, phone).
-  // T3CODE_PORT is set by scripts/dev-runner.ts for every non-desktop mode.
+  // OPENSWE_PORT is set by scripts/dev-runner.ts for every non-desktop mode.
   const port = Number(backendPort?.trim());
   if (Number.isInteger(port) && port > 0) {
     return `http://localhost:${port}/`;
@@ -117,7 +117,7 @@ function resolveDevProxyTarget(
   }
 }
 
-const devProxyTarget = resolveDevProxyTarget(process.env.T3CODE_PORT, configuredWsUrl);
+const devProxyTarget = resolveDevProxyTarget(process.env.OPENSWE_PORT, configuredWsUrl);
 
 // Vite's dev server sends JS uncompressed. On localhost that is free; over a
 // shared origin (tailnet, LAN) it is the whole cold-start: bundled dev serves
@@ -127,7 +127,7 @@ const devProxyTarget = resolveDevProxyTarget(process.env.T3CODE_PORT, configured
 // (quality 11) would trade the transfer stall for an equally long encode stall.
 function devCompressionPlugin(): Plugin {
   return {
-    name: "t3code:dev-compression",
+    name: "openswe:dev-compression",
     apply: "serve",
     configureServer(server) {
       // compression() is typed against Express's req/res, which extend the
@@ -145,7 +145,7 @@ function devCompressionPlugin(): Plugin {
 // a dev server over Tailscale/LAN. Tailnet names are safe to allow wholesale:
 // the DNS is controlled by tailscale, so they can't be rebound by an attacker.
 // Anything else (ngrok, a LAN IP alias) goes through the env var.
-const configuredAllowedHosts = (process.env.T3CODE_DEV_ALLOWED_HOSTS ?? "")
+const configuredAllowedHosts = (process.env.OPENSWE_DEV_ALLOWED_HOSTS ?? "")
   .split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
@@ -188,7 +188,7 @@ export default defineConfig(() => {
       // under single-origin dev this must stay empty even when a `.env`
       // supplies it, so the client falls back to window.location.origin.
       "import.meta.env.VITE_HTTP_URL": JSON.stringify(configuredHttpUrl ?? ""),
-      "import.meta.env.VITE_T3CODE_RELAY_URL": JSON.stringify(configuredRelayUrl),
+      "import.meta.env.VITE_OPENSWE_RELAY_URL": JSON.stringify(configuredRelayUrl),
       "import.meta.env.VITE_CLERK_PUBLISHABLE_KEY": JSON.stringify(configuredClerkPublishableKey),
       "import.meta.env.VITE_CLERK_JWT_TEMPLATE": JSON.stringify(configuredClerkJwtTemplate),
       "import.meta.env.VITE_CLERK_CLI_OAUTH_CLIENT_ID": JSON.stringify(

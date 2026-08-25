@@ -78,7 +78,7 @@ export const removeLocalStorageItem = (key: string) => {
   }
 };
 
-const LOCAL_STORAGE_CHANGE_EVENT = "t3code:local_storage_change";
+const LOCAL_STORAGE_CHANGE_EVENT = "openswe:local_storage_change";
 
 interface LocalStorageChangeDetail {
   key: string;

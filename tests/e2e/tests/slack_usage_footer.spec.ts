@@ -8,20 +8,14 @@ test.describe("Slack run usage footer", () => {
   });
 
   test("shows model-reported usage on the final reply", async ({ page }) => {
-    await page
-      .locator("#text")
-      .fill("<@U0BOT> please add a greet() helper and open a PR");
+    await page.locator("#text").fill("<@U0BOT> please add a greet() helper and open a PR");
     await page.locator("#send").click();
 
-    const reply = page
-      .locator(".msg.bot")
-      .filter({ hasText: "Add greet() helper" });
+    const reply = page.locator(".msg.bot").filter({ hasText: "Add greet() helper" });
     await expect(reply).toBeVisible();
     await expect(reply).toContainText("fake-scripted-model");
     await expect(reply).toContainText("12.3K main-agent tokens");
     await expect(reply).not.toContainText("$");
-    await expect(reply.getByRole("link", { name: "Open in Web" })).toHaveCount(
-      1,
-    );
+    await expect(reply.getByRole("link", { name: "Open in Web" })).toHaveCount(1);
   });
 });

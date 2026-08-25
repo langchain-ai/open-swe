@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/client-runtime",
+  "name": "@openswe/client-runtime",
   "private": true,
   "type": "module",
   "exports": {
@@ -161,8 +161,8 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
+    "@openswe/contracts": "workspace:*",
+    "@openswe/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import type { VcsRef } from "@t3tools/contracts";
+import type { VcsRef } from "@openswe/contracts";
 
 export interface BaseRefChoice {
   readonly id: string;

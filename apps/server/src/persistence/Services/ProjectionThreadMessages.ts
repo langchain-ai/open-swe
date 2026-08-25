@@ -13,7 +13,7 @@ import {
   ThreadId,
   TurnId,
   IsoDateTime,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Option from "effect/Option";
@@ -92,4 +92,4 @@ export interface ProjectionThreadMessageRepositoryShape {
 export class ProjectionThreadMessageRepository extends Context.Service<
   ProjectionThreadMessageRepository,
   ProjectionThreadMessageRepositoryShape
->()("t3/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository") {}
+>()("openswe/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository") {}

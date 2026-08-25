@@ -11,7 +11,7 @@ import type {
   OrchestrationThread,
   OrchestrationThreadActivity,
   TurnId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 
 export type ThreadDetailReducerResult =
   | { readonly kind: "updated"; readonly thread: OrchestrationThread }

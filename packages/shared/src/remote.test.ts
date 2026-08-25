@@ -37,7 +37,7 @@ describe("remote", () => {
     expect(
       resolveRemotePairingTarget({
         pairingUrl:
-          "https://app.t3.codes/pair?host=https%3A%2F%2Fdesktop.tailnet.ts.net%3A44342%2F#token=pairing-token",
+          "https://app.openswe.codes/pair?host=https%3A%2F%2Fdesktop.tailnet.ts.net%3A44342%2F#token=pairing-token",
       }),
     ).toEqual({
       credential: "pairing-token",
@@ -88,7 +88,8 @@ describe("remote", () => {
   it("normalizes a protocol-relative host from a hosted pairing link", () => {
     expect(
       resolveRemotePairingTarget({
-        pairingUrl: "https://app.t3.codes/pair?host=%2F%2Fremote.example.com#token=pairing-token",
+        pairingUrl:
+          "https://app.openswe.codes/pair?host=%2F%2Fremote.example.com#token=pairing-token",
       }),
     ).toEqual({
       credential: "pairing-token",
@@ -156,7 +157,7 @@ describe("remote", () => {
     try {
       resolveRemotePairingTarget({
         pairingUrl:
-          "https://app.t3.codes/pair?host=ftp%3A%2F%2Fremote.example.com#token=pairing-token",
+          "https://app.openswe.codes/pair?host=ftp%3A%2F%2Fremote.example.com#token=pairing-token",
       });
     } catch (cause) {
       hostError = cause;

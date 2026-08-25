@@ -24,7 +24,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "openswe-server-runtime-state-test-",
       });
       const statePath = path.join(root, "runtime", "server.json");
       const state: ServerRuntimeState.PersistedServerRuntimeState = {
@@ -67,7 +67,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "openswe-server-runtime-state-test-",
       });
 
       const restored = yield* ServerRuntimeState.readPersistedServerRuntimeState(
@@ -91,7 +91,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "openswe-server-runtime-state-test-",
       });
       const statePath = path.join(root, "server.json");
       yield* fileSystem.writeFileString(statePath, "{not json");
@@ -128,7 +128,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "openswe-server-runtime-state-test-",
       });
       const statePath = path.join(root, "server.json");
       yield* fileSystem.makeDirectory(statePath);
@@ -157,7 +157,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "openswe-server-runtime-state-test-",
       });
       const blockedDirectory = path.join(root, "not-a-directory");
       const statePath = path.join(blockedDirectory, "server.json");

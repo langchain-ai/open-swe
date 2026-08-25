@@ -1,4 +1,4 @@
-import * as RelayClient from "@t3tools/shared/relayClient";
+import * as RelayClient from "@openswe/shared/relayClient";
 import { assert, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as ConfigProvider from "effect/ConfigProvider";

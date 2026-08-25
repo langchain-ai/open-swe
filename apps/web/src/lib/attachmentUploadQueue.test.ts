@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@openswe/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { ComposerImageAttachment } from "../composerDraftStore";
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   readPreparedConnection: vi.fn(),
 }));
 
-vi.mock("@t3tools/client-runtime/state/runtime", () => ({
+vi.mock("@openswe/client-runtime/state/runtime", () => ({
   runAtomCommand: mocks.runAtomCommand,
 }));
 

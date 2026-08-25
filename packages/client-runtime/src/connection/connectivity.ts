@@ -11,7 +11,7 @@ export class Connectivity extends Context.Service<
     readonly status: Effect.Effect<NetworkStatus>;
     readonly changes: Stream.Stream<NetworkStatus>;
   }
->()("@t3tools/client-runtime/connection/connectivity") {}
+>()("@openswe/client-runtime/connection/connectivity") {}
 
 export const make = (service: Connectivity["Service"]) => Connectivity.of(service);
 

@@ -13,13 +13,13 @@ import {
   TriangleAlertIcon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type { ScopedThreadRef, ServerProviderSkill } from "@openswe/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
+} from "@openswe/client-runtime/state/runtime";
+import { classifyMarkdownImageSource } from "@openswe/client-runtime/markdown-images";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import React, {

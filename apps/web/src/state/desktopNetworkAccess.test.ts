@@ -1,4 +1,4 @@
-import type { AdvertisedEndpoint, DesktopServerExposureState } from "@t3tools/contracts";
+import type { AdvertisedEndpoint, DesktopServerExposureState } from "@openswe/contracts";
 import * as Cause from "effect/Cause";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { AtomRegistry } from "effect/unstable/reactivity";

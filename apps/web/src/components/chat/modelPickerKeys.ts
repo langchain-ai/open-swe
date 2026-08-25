@@ -1,4 +1,4 @@
-import type { ProviderInstanceId } from "@t3tools/contracts";
+import type { ProviderInstanceId } from "@openswe/contracts";
 
 const MODEL_KEY_PREFIX = "model:";
 const LEGACY_SECTION_KEY_PREFIX = "legacy-models:";

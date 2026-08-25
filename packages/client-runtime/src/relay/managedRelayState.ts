@@ -1,13 +1,13 @@
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
-} from "@t3tools/contracts/relay";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@openswe/contracts/relay";
+import type { EnvironmentId } from "@openswe/contracts";
 import {
   RelayEnvironmentConnectScope,
   RelayEnvironmentStatusScope,
-} from "@t3tools/contracts/relay";
-import { decodeRelayJwt } from "@t3tools/shared/relayJwt";
+} from "@openswe/contracts/relay";
+import { decodeRelayJwt } from "@openswe/shared/relayJwt";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
@@ -124,7 +124,7 @@ export function createManagedRelaySession(input: ManagedRelaySessionInput): Mana
         try: () => readCachedClerkToken(nowMillis),
         catch: (cause) =>
           new ManagedRelaySessionError({
-            message: "Could not obtain the T3 Connect session token.",
+            message: "Could not obtain the Open SWE Connect session token.",
             cause,
           }),
       });
@@ -182,7 +182,7 @@ function readSessionClerkToken(
         ? Effect.succeed(token)
         : Effect.fail(
             new ManagedRelaySessionError({
-              message: "The T3 Connect session token is unavailable.",
+              message: "The Open SWE Connect session token is unavailable.",
             }),
           ),
     ),
@@ -229,7 +229,7 @@ export const deregisterManagedRelayEnvironment = Effect.fn(
   const session = registry.get(managedRelaySessionAtom);
   if (!session || session.accountId !== input.accountId) {
     return yield* new ManagedRelaySessionError({
-      message: "Sign in to T3 Connect before deregistering an environment.",
+      message: "Sign in to Open SWE Connect before deregistering an environment.",
     });
   }
   const clerkToken = yield* readSessionClerkToken(session);
@@ -245,7 +245,7 @@ function requireClerkToken(
   if (!session || session.accountId !== accountId) {
     return Effect.fail(
       new ManagedRelaySessionError({
-        message: "Sign in to T3 Connect before loading relay data.",
+        message: "Sign in to Open SWE Connect before loading relay data.",
       }),
     );
   }
@@ -315,7 +315,7 @@ export function readManagedRelaySnapshotState<A>(
   let errorTraceId: string | null = null;
   if (result._tag === "Failure") {
     const cause = Cause.squash(result.cause);
-    error = cause instanceof Error ? cause.message : "Could not load T3 Connect data.";
+    error = cause instanceof Error ? cause.message : "Could not load Open SWE Connect data.";
     errorTraceId = findErrorTraceId(cause);
   }
   return {

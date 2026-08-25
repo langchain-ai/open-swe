@@ -9,7 +9,7 @@ import {
   ProviderRuntimeEvent,
   ProviderSession,
   ProviderInstanceId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import {
   ApprovalRequestId,
   CommandId,
@@ -22,7 +22,7 @@ import {
   type ServerSettings,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@openswe/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -227,7 +227,7 @@ describe("ProviderRuntimeIngestion", () => {
     serverSettings?: Partial<ServerSettings>;
     threadTitle?: string;
   }) {
-    const workspaceRoot = makeTempDir("t3-provider-project-");
+    const workspaceRoot = makeTempDir("openswe-provider-project-");
     NodeFS.mkdirSync(NodePath.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
     const orchestrationLayer = OrchestrationEngineLive.pipe(

@@ -2,11 +2,11 @@ import { assert, describe } from "@effect/vitest";
 
 import { createOxlintRuleHarness } from "../test/utils.ts";
 
-const rule = createOxlintRuleHarness("t3code/no-manual-effect-runtime-in-tests", {
+const rule = createOxlintRuleHarness("openswe/no-manual-effect-runtime-in-tests", {
   filename: "fixture.test.ts",
 });
 
-describe("t3code/no-manual-effect-runtime-in-tests", () => {
+describe("openswe/no-manual-effect-runtime-in-tests", () => {
   rule.valid(
     "allows @effect/vitest effect tests",
     `
@@ -61,7 +61,7 @@ describe("t3code/no-manual-effect-runtime-in-tests", () => {
   );
 });
 
-const productionRule = createOxlintRuleHarness("t3code/no-manual-effect-runtime-in-tests");
+const productionRule = createOxlintRuleHarness("openswe/no-manual-effect-runtime-in-tests");
 
 productionRule.valid(
   "allows production runtime boundaries",

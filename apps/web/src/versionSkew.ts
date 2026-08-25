@@ -1,5 +1,5 @@
-import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from "@t3tools/contracts";
-import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
+import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from "@openswe/contracts";
+import { compareSemverVersions, parseSemver } from "@openswe/shared/semver";
 import * as Schema from "effect/Schema";
 
 import { APP_VERSION } from "./branding";
@@ -11,7 +11,7 @@ export interface VersionMismatch {
   readonly hint: string;
 }
 
-export const VERSION_MISMATCH_DISMISSALS_STORAGE_KEY = "t3code:version-mismatch-dismissals:v1";
+export const VERSION_MISMATCH_DISMISSALS_STORAGE_KEY = "openswe:version-mismatch-dismissals:v1";
 
 const VersionMismatchDismissalsSchema = Schema.Struct({
   keys: Schema.Array(Schema.String),
@@ -30,7 +30,7 @@ function versionCore(version: string): string {
 }
 
 /**
- * The skew a user can act on: the connected server runs an older T3 Code than
+ * The skew a user can act on: the connected server runs an older Open SWE than
  * this client, so the server is the side that needs updating.
  *
  * Two nightly builds compare their full versions, including the date and run.
@@ -67,7 +67,7 @@ export function resolveVersionMismatch(
   return {
     clientVersion: normalizedClientVersion,
     serverVersion: normalizedServerVersion,
-    hint: "Version mismatch. Try syncing the client and server to the same T3 Code version.",
+    hint: "Version mismatch. Try syncing the client and server to the same Open SWE version.",
   };
 }
 
@@ -87,7 +87,7 @@ export function resolveServerSelfUpdateCapability(
 
 /** The command to hand users whose server cannot update itself. */
 export function manualServerUpdateCommand(targetVersion: string): string {
-  return `npx t3@${targetVersion}`;
+  return `npx openswe@${targetVersion}`;
 }
 
 /** One sentence telling the user how to resolve version skew for a server,

@@ -1,4 +1,4 @@
-import type { ProviderInstanceEnvironment } from "@t3tools/contracts";
+import type { ProviderInstanceEnvironment } from "@openswe/contracts";
 
 export function mergeProviderInstanceEnvironment(
   environment: ProviderInstanceEnvironment | undefined,

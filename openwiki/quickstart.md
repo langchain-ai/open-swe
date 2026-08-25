@@ -5,6 +5,7 @@ description: Entry point to Open SWE, an internal coding-agent framework built o
 resource: /README.md
 tags: [open-swe, architecture, agent-platform, quickstart]
 ---
+
 # Open SWE quickstart
 
 Open SWE is a framework for an organization-specific coding agent. It combines a LangGraph runtime, Deep Agents-based coding and review graphs, isolated sandboxes, and collaboration surfaces in Slack, Linear, GitHub, and a web dashboard. The intended outcome is an agent that can receive engineering context, work in a repository, and report or publish its result without giving its credentials directly to the execution environment.
@@ -27,14 +28,14 @@ The web dashboard is not a separate backend: it is a Vite/TanStack client over F
 
 ## Repository map
 
-| Area | Source anchors | Why it matters |
-|---|---|---|
-| Agent runtime | `agent/server.py`, `agent/graphs/`, `langgraph.json` | Assembles the coding graph and registers deployed assistants. |
-| Ingress and dispatch | `agent/api/app.py`, `agent/webhooks/`, `agent/dispatch.py` | Verifies incoming events and creates durable LangGraph runs. |
-| Review system | `agent/reviewer.py`, `agent/review/`, `agent/analyzer.py` | Implements diff-scoped review and per-repository review style. |
-| Dashboard | `agent/dashboard/`, `ui/src/` | Owns OAuth/session-backed management APIs and their client UI. |
-| Execution boundary | `agent/utils/sandbox.py`, `agent/integrations/`, `Dockerfile` | Selects isolated execution providers and configures the sandbox image. |
-| Verification | `tests/`, `tests/e2e/`, `evals/reviewer/`, `.github/workflows/ci.yml` | Covers Python behavior, end-to-end flow, and reviewer quality. |
+| Area                 | Source anchors                                                        | Why it matters                                                         |
+| -------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Agent runtime        | `agent/server.py`, `agent/graphs/`, `langgraph.json`                  | Assembles the coding graph and registers deployed assistants.          |
+| Ingress and dispatch | `agent/api/app.py`, `agent/webhooks/`, `agent/dispatch.py`            | Verifies incoming events and creates durable LangGraph runs.           |
+| Review system        | `agent/reviewer.py`, `agent/review/`, `agent/analyzer.py`             | Implements diff-scoped review and per-repository review style.         |
+| Dashboard            | `agent/dashboard/`, `ui/src/`                                         | Owns OAuth/session-backed management APIs and their client UI.         |
+| Execution boundary   | `agent/utils/sandbox.py`, `agent/integrations/`, `Dockerfile`         | Selects isolated execution providers and configures the sandbox image. |
+| Verification         | `tests/`, `tests/e2e/`, `evals/reviewer/`, `.github/workflows/ci.yml` | Covers Python behavior, end-to-end flow, and reviewer quality.         |
 
 ## First changes: where to start
 

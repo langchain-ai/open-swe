@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { AssetPreviewTypeValidationError, ThreadId } from "@t3tools/contracts";
-import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
+import { AssetPreviewTypeValidationError, ThreadId } from "@openswe/contracts";
+import { PROJECT_FAVICON_FALLBACK_MARKER } from "@openswe/shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -13,19 +13,19 @@ import * as TestClock from "effect/testing/TestClock";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
+import * as OpenSWEProjectFileLoader from "../project/OpenSWEProjectFileLoader.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { ASSET_ROUTE_PREFIX, issueAssetUrl, resolveAsset } from "./AssetAccess.ts";
 
 const configLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3-asset-access-test-",
+  prefix: "openswe-asset-access-test-",
 });
 const testLayer = Layer.mergeAll(
   configLayer,
   WorkspacePaths.layer,
   ProjectFaviconResolver.layer.pipe(
     Layer.provide(WorkspacePaths.layer),
-    Layer.provide(T3ProjectFileLoader.layer),
+    Layer.provide(OpenSWEProjectFileLoader.layer),
   ),
   ServerSecretStore.layer.pipe(Layer.provide(configLayer)),
 ).pipe(Layer.provideMerge(NodeServices.layer));
@@ -36,7 +36,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-workspace-",
+        prefix: "openswe-asset-workspace-",
       });
       const htmlPath = path.join(root, "report.html");
       const cssPath = path.join(root, "report.css");
@@ -77,10 +77,10 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-root-",
+        prefix: "openswe-asset-root-",
       });
       const outside = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-outside-",
+        prefix: "openswe-asset-outside-",
       });
       const htmlPath = path.join(outside, "report.html");
       yield* fileSystem.writeFileString(htmlPath, "<p>outside</p>");
@@ -111,7 +111,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-permission-root-",
+        prefix: "openswe-asset-permission-root-",
       });
       const htmlPath = path.join(root, "report.html");
       yield* fileSystem.writeFileString(htmlPath, "<p>report</p>");
@@ -153,7 +153,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-image-workspace-",
+        prefix: "openswe-asset-image-workspace-",
       });
       const assetsDirectory = path.join(root, "assets");
       const imagePath = path.join(assetsDirectory, "icon.png");
@@ -213,7 +213,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-",
+        prefix: "openswe-asset-favicon-",
       });
       const faviconPath = path.join(root, "favicon.svg");
       const initialFavicon = "<svg>a</svg>";
@@ -271,7 +271,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-override-",
+        prefix: "openswe-asset-favicon-override-",
       });
       yield* fileSystem.makeDirectory(path.join(root, "brand"));
       yield* fileSystem.writeFileString(path.join(root, "brand", "custom.svg"), "<svg />");
@@ -292,10 +292,10 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-workspace-",
+        prefix: "openswe-asset-favicon-workspace-",
       });
       const pictures = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-pictures-",
+        prefix: "openswe-asset-favicon-pictures-",
       });
       const externalPath = path.join(pictures, "custom.png");
       const siblingPath = path.join(pictures, "sibling.png");
@@ -330,7 +330,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-hint-",
+        prefix: "openswe-asset-favicon-hint-",
       });
       yield* fileSystem.makeDirectory(path.join(root, "brand"));
       yield* fileSystem.writeFileString(path.join(root, "brand", "hint.svg"), "<svg>hint</svg>");
@@ -351,7 +351,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-automatic-",
+        prefix: "openswe-asset-favicon-automatic-",
       });
       yield* fileSystem.makeDirectory(path.join(root, "brand"));
       yield* fileSystem.writeFileString(path.join(root, "brand", "saved.svg"), "<svg>saved</svg>");
@@ -371,7 +371,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-type-",
+        prefix: "openswe-asset-favicon-type-",
       });
       yield* fileSystem.writeFileString(path.join(root, "secret.txt"), "not an image");
 
@@ -390,7 +390,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-expiry-",
+        prefix: "openswe-asset-favicon-expiry-",
       });
       yield* fileSystem.writeFileString(path.join(root, "favicon.svg"), "<svg />");
 
@@ -413,7 +413,7 @@ describe("AssetAccess", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-error-",
+        prefix: "openswe-asset-favicon-error-",
       });
       const platformCause = PlatformError.systemError({
         _tag: "PermissionDenied",

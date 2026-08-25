@@ -26,11 +26,11 @@ make typecheck          # basedpyright agent tests
 
 `langgraph.json` declares three graph entrypoints and the FastAPI app, all served together by `langgraph dev`:
 
-| Graph | Entrypoint | Purpose |
-|---|---|---|
-| `agent` | `agent.server:traced_agent` (wraps `get_agent`) | Main coding agent (Slack/Linear/GitHub-triggered). |
-| `reviewer` | `agent.reviewer:traced_reviewer_agent` (wraps `get_reviewer_agent`) | Read-only PR reviewer. Findings model + `publish_review`. |
-| `analyzer` | `agent.analyzer:traced_analyzer` (wraps `get_analyzer`) | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
+| Graph      | Entrypoint                                                          | Purpose                                                                                      |
+| ---------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `agent`    | `agent.server:traced_agent` (wraps `get_agent`)                     | Main coding agent (Slack/Linear/GitHub-triggered).                                           |
+| `reviewer` | `agent.reviewer:traced_reviewer_agent` (wraps `get_reviewer_agent`) | Read-only PR reviewer. Findings model + `publish_review`.                                    |
+| `analyzer` | `agent.analyzer:traced_analyzer` (wraps `get_analyzer`)             | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
 
 The FastAPI app is `agent.webapp:app`.
 
@@ -118,7 +118,7 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 - New middleware: add to `agent/middleware/`, export from `agent/middleware/__init__.py`, add to the `middleware=[...]` list in `server.py:get_agent` — order is significant (see the stack above).
 - New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
-- Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+- Minimal-to-no code comments — only when the _why_ isn't obvious from the code.
 - Do not add feature documentation to this file. Shipping a feature earns it **no** line here — not a section, not a pointer, not a resolution order or a list of which module wins. Anyone can read that from the code. Feature detail belongs in the code, its docstrings, and the PR description. Only edit this file when asked to, or when something it already claims has become wrong.
 
 <!-- OPENWIKI:START -->

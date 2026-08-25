@@ -1,4 +1,4 @@
-import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
+import type { EnvironmentId, ServerConfig } from "@openswe/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 

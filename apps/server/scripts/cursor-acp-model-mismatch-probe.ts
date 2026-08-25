@@ -3,7 +3,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeProcess from "node:process";
 import * as NodeReadline from "node:readline";
 import * as NodeTimers from "node:timers";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@openswe/shared/shell";
 import * as Effect from "effect/Effect";
 
 type JsonPrimitive = null | boolean | number | string;

@@ -7,7 +7,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import { HostProcessHostname, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessHostname, HostProcessPlatform } from "@openswe/shared/hostProcess";
 import { vi } from "vite-plus/test";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -64,7 +64,7 @@ describe("resolveServerEnvironmentLabel", () => {
   it.effect("uses hostname fallback regardless of launch mode", () =>
     Effect.gen(function* () {
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32", "macbook-pro")));
 
       expect(result).toBe("macbook-pro");
@@ -87,7 +87,7 @@ describe("resolveServerEnvironmentLabel", () => {
       );
 
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       }).pipe(Effect.provide(withHostPlatform(TestLayer, "darwin", "macbook-pro")));
 
       expect(result).toBe("Julius's MacBook Pro");
@@ -104,7 +104,7 @@ describe("resolveServerEnvironmentLabel", () => {
   it.effect("prefers Linux PRETTY_HOSTNAME from machine-info", () =>
     Effect.gen(function* () {
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       }).pipe(Effect.provide(withHostPlatform(LinuxMachineInfoLayer, "linux", "buildbox")));
 
       expect(result).toBe("Build Agent 01");
@@ -128,7 +128,7 @@ describe("resolveServerEnvironmentLabel", () => {
       );
 
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       }).pipe(Effect.provide(withHostPlatform(TestLayer, "linux", "runner-01")));
 
       expect(result).toBe("CI Runner");
@@ -145,7 +145,7 @@ describe("resolveServerEnvironmentLabel", () => {
   it.effect("falls back to the hostname when friendly labels are unavailable", () =>
     Effect.gen(function* () {
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32", "JULIUS-LAPTOP")));
 
       expect(result).toBe("JULIUS-LAPTOP");
@@ -170,7 +170,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
     return Effect.gen(function* () {
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       });
 
       expect(result).toBe("macbook-pro");
@@ -234,7 +234,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
     return Effect.gen(function* () {
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       });
 
       expect(result).toBe("CI Runner");
@@ -276,10 +276,10 @@ describe("resolveServerEnvironmentLabel", () => {
       );
 
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
+        cwdBaseName: "openswe",
       }).pipe(Effect.provide(withHostPlatform(TestLayer, "linux", "   ")));
 
-      expect(result).toBe("t3code");
+      expect(result).toBe("openswe");
     }),
   );
 });

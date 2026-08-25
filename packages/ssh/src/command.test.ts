@@ -14,7 +14,7 @@ import {
   baseSshArgs,
   getLastNonEmptyOutputLine,
   parseSshResolveOutput,
-  resolveRemoteT3CliPackageSpec,
+  resolveRemoteOpenSWECliPackageSpec,
   runSshCommand,
 } from "./command.ts";
 import { SshCommandError } from "./errors.ts";
@@ -99,37 +99,37 @@ describe("ssh command", () => {
     }),
   );
 
-  it.effect("resolves the remote t3 package spec from the desktop release channel", () =>
+  it.effect("resolves the remote openswe package spec from the desktop release channel", () =>
     Effect.sync(() => {
       assert.equal(
-        resolveRemoteT3CliPackageSpec({
+        resolveRemoteOpenSWECliPackageSpec({
           appVersion: "0.0.17",
           updateChannel: "latest",
         }),
-        "t3@0.0.17",
+        "openswe@0.0.17",
       );
       assert.equal(
-        resolveRemoteT3CliPackageSpec({
+        resolveRemoteOpenSWECliPackageSpec({
           appVersion: "0.0.17-nightly.20260415.44",
           updateChannel: "nightly",
         }),
-        "t3@0.0.17-nightly.20260415.44",
+        "openswe@0.0.17-nightly.20260415.44",
       );
       assert.equal(
-        resolveRemoteT3CliPackageSpec({
+        resolveRemoteOpenSWECliPackageSpec({
           appVersion: "0.0.0-dev",
           updateChannel: "nightly",
           isDevelopment: true,
         }),
-        "t3@nightly",
+        "openswe@nightly",
       );
       assert.equal(
-        resolveRemoteT3CliPackageSpec({
+        resolveRemoteOpenSWECliPackageSpec({
           appVersion: "0.0.0-dev",
           updateChannel: "latest",
           isDevelopment: true,
         }),
-        "t3@nightly",
+        "openswe@nightly",
       );
     }),
   );

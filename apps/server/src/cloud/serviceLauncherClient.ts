@@ -1,5 +1,5 @@
-import type { ServerSelfUpdateOutcome } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import type { ServerSelfUpdateOutcome } from "@openswe/contracts";
+import { HostProcessEnvironment } from "@openswe/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -34,7 +34,7 @@ export class ServiceLauncherClientError extends Schema.TaggedErrorClass<ServiceL
       case "decode-context":
         return "The service launcher supplied invalid startup context.";
       case "version-mismatch":
-        return "The service launcher started a different t3 version.";
+        return "The service launcher started a different openswe version.";
       case "ipc-unavailable":
         return "The service launcher IPC channel is unavailable.";
       case "unmanaged":
@@ -78,7 +78,7 @@ interface ServiceLauncherProcess {
 }
 
 export const ServiceLauncherHostProcess = Context.Reference<ServiceLauncherProcess>(
-  "t3/cloud/serviceLauncherHostProcess",
+  "openswe/cloud/serviceLauncherHostProcess",
   {
     defaultValue: () => ({
       connected: process.connected && process.send !== undefined,
@@ -109,7 +109,7 @@ export class ServiceLauncherClient extends Context.Service<
       ServiceLauncherClientError
     >;
   }
->()("t3/cloud/serviceLauncherClient") {}
+>()("openswe/cloud/serviceLauncherClient") {}
 
 const resolveStartup = Effect.fn("cloud.service_launcher_client.resolve_startup")(
   function* (options?: { readonly currentVersion?: string }) {
