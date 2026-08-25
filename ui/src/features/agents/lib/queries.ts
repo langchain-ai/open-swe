@@ -511,7 +511,7 @@ export function useSidebarThreads({
     },
     activeQuery,
     resolvedQuery,
-    isPending: activeQuery.isPending,
+    isPending: activeQuery.isPending || activeRecentQuery.isPending,
   }
 }
 

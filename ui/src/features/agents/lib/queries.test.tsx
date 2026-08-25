@@ -327,6 +327,48 @@ describe("useSidebarThreads", () => {
     })
   })
 
+  it("stays pending until recent activity is loaded", async () => {
+    let finishRecent: ((page: ThreadsPage) => void) | undefined
+    const recentRequest = new Promise<ThreadsPage>((resolve) => {
+      finishRecent = resolve
+    })
+    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation((request) => {
+      if (request?.sortBy === "updated_at") return recentRequest
+      return Promise.resolve({
+        items: [],
+        limit: SIDEBAR_PAGE_SIZE,
+        offset: 0,
+        hasMore: false,
+      })
+    })
+    const client = testClient()
+    let sidebar: ReturnType<typeof useSidebarThreads> | undefined
+
+    function Probe() {
+      sidebar = useSidebarThreads({})
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+
+    await waitFor(() => expect(sidebar?.activeQuery.isSuccess).toBe(true))
+    await waitFor(() => expect(finishRecent).toBeTypeOf("function"))
+    expect(sidebar?.isPending).toBe(true)
+    await act(async () => {
+      finishRecent?.({
+        items: [],
+        limit: SIDEBAR_PAGE_SIZE,
+        offset: 0,
+        hasMore: false,
+      })
+    })
+    await waitFor(() => expect(sidebar?.isPending).toBe(false))
+  })
+
   it("appends the next active page", async () => {
     const activeThreads = Array.from(
       { length: SIDEBAR_PAGE_SIZE * 2 },
