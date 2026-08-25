@@ -1,6 +1,7 @@
 """Typed construction and serialization for application-owned model inputs."""
 
 import hashlib
+from collections.abc import Mapping
 from html import escape
 from typing import Any, Literal, NotRequired, TypedDict, cast
 from xml.etree import ElementTree
@@ -192,7 +193,7 @@ def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
     return hashes
 
 
-def visible_dynamic_context_hashes(state: object) -> set[str]:
+def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     """Context hashes the model can still see, so the rest is reintroduced.
 
     Summarization replaces everything before ``cutoff_index`` with a summary, so a
@@ -200,13 +201,11 @@ def visible_dynamic_context_hashes(state: object) -> set[str]:
     state. Treating it as introduced is what leaves the model unable to resolve a
     sender it is still being shown messages from.
     """
-    if not isinstance(state, dict):
-        return set()
     messages = state.get("messages")
     if not isinstance(messages, (list, tuple)):
         return set()
     event = state.get(SUMMARIZATION_EVENT_KEY)
-    cutoff = event.get("cutoff_index") if isinstance(event, dict) else None
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
     if isinstance(cutoff, int) and cutoff >= 0:
         messages = messages[cutoff:]
     return dynamic_context_hashes_from_messages(messages)
