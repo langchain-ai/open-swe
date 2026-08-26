@@ -46,7 +46,7 @@ This is useful for pre-installing languages, frameworks, or internal tools that 
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Repository Snapshots** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 
-`REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot (typically the image built from this repository's `Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
+`REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot. The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
 
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
@@ -308,7 +308,7 @@ The tools require a LangSmith sandbox and a supported model credential. The real
 | `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
 | `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
 
-The sandbox snapshot must be built from `Dockerfile.sandbox`, which installs Chromium, Stagehand, and the browser runtime.
+The sandbox snapshot must include Chromium, Stagehand, and the browser runtime.
 
 ---
 

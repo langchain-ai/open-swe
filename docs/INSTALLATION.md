@@ -159,28 +159,9 @@ To set up per-user OAuth:
 
 LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-(Optional) Build and Push a custom Docker Image to Docker hub
-First build and push the sandbox Docker image to a registry LangSmith can pull from. The sandbox image is `Dockerfile.sandbox` — pass `-f Dockerfile.sandbox`, because the root `Dockerfile` builds the API server image instead and produces snapshots without `git`, `gh`, `sfw`, the Docker CLI, or the language runtimes agent runs need. On Apple Silicon, force `linux/amd64`
+The image must carry the toolchain agent runs expect — `git`, `gh`, `sfw`, the Docker CLI, and the language runtimes — and must be in a registry LangSmith can pull from.
 
-```bash
-docker buildx build \
-  -f Dockerfile.sandbox \
-  --platform linux/amd64 \
-  -t <your-docker-hub>/<name-of-your-image> \
-  --push .
-```
-
-For a multi-arch tag that also runs locally on Apple Silicon:
-
-```bash
-docker buildx build \
-  -f Dockerfile.sandbox \
-  --platform linux/amd64,linux/arm64 \
-  -t <your-docker-hub>/<name-of-your-image> \
-  --push .
-```
-
-Then build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
+Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
 ```python
 from langsmith.sandbox import SandboxClient
@@ -188,7 +169,7 @@ from langsmith.sandbox import SandboxClient
 client = SandboxClient(api_key="<your key>")
 snapshot = client.create_snapshot(
     name="open-swe",
-    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",  # built from ./Dockerfile.sandbox
+    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",
     fs_capacity_bytes=128 * 1024**3,
 )
 print(snapshot.id)
@@ -220,7 +201,7 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"
 REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
 
-A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot should include the GitHub CLI from `Dockerfile.sandbox`; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot must include the GitHub CLI; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
 
 ### Environments
 
@@ -260,7 +241,7 @@ ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this
 
 `secrets.GITHUB_TOKEN` works for neither: installation tokens have no user identity, and they are not OIDC tokens. `examples/github-actions/set-base-snapshot.yml` is a copy-ready workflow using the OIDC path.
 
-`REPO_SNAPSHOT_BASE_IMAGE` should point at the same published Open SWE sandbox image you used to create the default snapshot (for example, the image built from `./Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the `FROM` line when generating per-repo Dockerfile templates. If it is not set, template generation is intentionally disabled so admins do not accidentally build repo-scoped snapshots from a bare image that lacks Open SWE's required tools (`git`, `gh`, `sfw`, language runtimes, and proxy assumptions).
+`REPO_SNAPSHOT_BASE_IMAGE` should point at the same published Open SWE sandbox image you used to create the default snapshot. The admin **Repository Snapshots** page uses it as the `FROM` line when generating per-repo Dockerfile templates. If it is not set, template generation is intentionally disabled so admins do not accidentally build repo-scoped snapshots from a bare image that lacks Open SWE's required tools (`git`, `gh`, `sfw`, language runtimes, and proxy assumptions).
 
 ## 5. Set up triggers
 
@@ -718,7 +699,7 @@ GitHub App must allow `<backend-url>/dashboard/api/auth/callback` for desktop lo
 
 Production runs the backend and dashboard separately.
 
-**Backend — standalone Docker:** the root `Dockerfile` builds a production LangGraph API server image for Open SWE. It is not the sandbox image; build sandbox snapshots from `Dockerfile.sandbox`.
+**Backend — standalone Docker:** the root `Dockerfile` builds a production LangGraph API server image for Open SWE. It is not the sandbox image.
 
 ```bash
 docker build -t open-swe .
