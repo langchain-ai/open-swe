@@ -331,12 +331,14 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
           status: "completed",
           conclusion: "failure",
           details_url: "https://checks.example/unit-tests",
+          required: true,
         },
         {
           name: "browser-e2e",
           status: "completed",
           conclusion: "timed_out",
           details_url: "https://checks.example/browser-e2e",
+          required: false,
         },
         {
           name: "preview-deploy",
@@ -351,13 +353,31 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
           target_url: "https://checks.example/security",
         },
       ],
+      reviews: [
+        {
+          author: "lead-reviewer",
+          state: "CHANGES_REQUESTED",
+          body: "The fallback must preserve the original exception.",
+          url: "https://github.example/review/1",
+        },
+      ],
+      review_decision: "CHANGES_REQUESTED",
       review_threads: [
         {
-          author: "reviewer-one",
-          body: "Handle the null response before reading the payload.",
           path: "agent/dashboard/routes.py",
           line: 42,
-          url: "https://github.example/discussion/1",
+          comments: [
+            {
+              author: "reviewer-one",
+              body: "Handle the null response before reading the payload.",
+              url: "https://github.example/discussion/1",
+            },
+            {
+              author: "author-one",
+              body: "I handled null but still need to retain the retry reason.",
+              url: "https://github.example/discussion/1-reply",
+            },
+          ],
         },
         {
           author: "reviewer-two",
@@ -404,8 +424,24 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     await page.keyboard.press("Escape");
     await fixButton.click();
-    const fixPrompt = "Fix the actionable issues on";
+    const fixPrompt = "Fresh GitHub scan:";
     await waitForStateToContain(page, threadId, fixPrompt);
+    const state = await page.request.get(`/threads/${threadId}/state`);
+    const stateText = JSON.stringify(await state.json());
+    expect(stateText).toContain("[required] unit-tests: FAILURE");
+    expect(stateText).toContain("[optional] browser-e2e: TIMED_OUT");
+    expect(stateText).toContain(
+      "The fallback must preserve the original exception.",
+    );
+    expect(stateText).toContain(
+      "Handle the null response before reading the payload.",
+    );
+    expect(stateText).toContain(
+      "I handled null but still need to retain the retry reason.",
+    );
+    expect(stateText).not.toContain(
+      "This resolved comment must not be counted.",
+    );
     await expect(page.getByText(new RegExp(fixPrompt)).first()).toBeVisible();
   });
 

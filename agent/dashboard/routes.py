@@ -224,6 +224,7 @@ from .thread_api import (
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
+    get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
@@ -1999,6 +2000,22 @@ async def api_get_thread_pull_request_status(
     return await get_dashboard_thread_pull_request_status(
         thread_id,
         session["sub"],
+        email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/pull-request-context")
+async def api_get_thread_pull_request_context(
+    thread_id: str,
+    repo_full_name: str,
+    number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pull_request_context(
+        thread_id,
+        session["sub"],
+        repo_full_name=repo_full_name,
+        number=number,
         email=session.get("email"),
     )
 

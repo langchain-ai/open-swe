@@ -757,23 +757,55 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
-    return JSONResponse(
-        {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                fakes.review_thread_graphql(thread)
-                                for thread in pr["review_threads"]
-                            ],
-                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+    review_threads = {
+        "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+    pull_request: dict[str, Any] = {"reviewThreads": review_threads}
+    query = body.get("query", "")
+    if "PullRequestFixReviews" in query:
+        pull_request.update(
+            {
+                "reviewDecision": pr["review_decision"],
+                "mergeStateStatus": "DIRTY" if not pr["mergeable"] else "CLEAN",
+                "latestOpinionatedReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": review.get("author")},
+                            "state": review.get("state"),
+                            "body": review.get("body", ""),
+                            "url": review.get("url"),
+                        }
+                        for review in pr["reviews"]
+                    ]
+                },
+            }
+        )
+    if "PullRequestFixChecks" in query:
+        pull_request = {
+            "commits": {
+                "nodes": [
+                    {
+                        "commit": {
+                            "oid": pr["head_sha"],
+                            "statusCheckRollup": {
+                                "contexts": {
+                                    "nodes": [
+                                        *[fakes.check_graphql(check) for check in pr["check_runs"]],
+                                        *[
+                                            fakes.status_graphql(status)
+                                            for status in pr["statuses"]
+                                        ],
+                                    ],
+                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                }
+                            },
                         }
                     }
-                }
+                ]
             }
         }
-    )
+    return JSONResponse({"data": {"repository": {"pullRequest": pull_request}}})
 
 
 # --- fake Slack API (real slack code hits this) ----------------------------

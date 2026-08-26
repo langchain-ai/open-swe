@@ -1,4 +1,5 @@
 import type {
+  AgentPullRequestContextResponse,
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
@@ -308,6 +309,19 @@ export const agentsApi = {
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
     ),
+  getThreadPullRequestContext: (
+    threadId: string,
+    repoFullName: string,
+    number: number
+  ) => {
+    const query = new URLSearchParams({
+      repo_full_name: repoFullName,
+      number: String(number),
+    })
+    return agentsRequest<AgentPullRequestContextResponse>(
+      `/threads/${encodeURIComponent(threadId)}/pull-request-context?${query}`
+    )
+  },
   listWorkflowApprovals: (threadId: string) =>
     agentsRequest<WorkflowPushApprovalsResponse>(
       `/workflow-approval/${encodeURIComponent(threadId)}`
