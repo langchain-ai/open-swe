@@ -106,8 +106,7 @@ export function PlanReview({
               {isShared ? "Shared response" : "Implementation plan"}
             </h1>
             <p className="text-xs text-muted-foreground/70">
-              {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
-              {plan.isOwner ? " (owner)" : ""} · status:{" "}
+              {isShared ? "Viewing" : "Reviewing"} as {plan.user.name} · status:{" "}
               <span data-testid="plan-status">{plan.status}</span>
             </p>
           </div>

@@ -972,7 +972,6 @@ function ThreadRow({
   const resolveThread = useResolveAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
-  const isReadOnly = thread.isOwner === false
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
       ? `+${thread.diffStats.additions}`
@@ -1161,30 +1160,26 @@ function ThreadRow({
                 <CopyIcon className="size-3.5" />
                 Copy sandbox ID
               </ContextMenu.Item>
-              {!isReadOnly && (
-                <ContextMenu.Item
-                  onClick={() => onToggleResolved()}
-                  disabled={resolveThread.isPending}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  {isResolved ? (
-                    <ArrowCounterClockwiseIcon className="size-3.5" />
-                  ) : (
-                    <CheckCircleIcon className="size-3.5" />
-                  )}
-                  {isResolved ? "Unresolve thread" : "Resolve thread"}
-                </ContextMenu.Item>
-              )}
-              {!isReadOnly && (
-                <ContextMenu.Item
-                  onClick={() => onDelete()}
-                  disabled={isDeleting}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  <TrashIcon className="size-3.5" />
-                  Delete thread
-                </ContextMenu.Item>
-              )}
+              <ContextMenu.Item
+                onClick={() => onToggleResolved()}
+                disabled={resolveThread.isPending}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+              >
+                {isResolved ? (
+                  <ArrowCounterClockwiseIcon className="size-3.5" />
+                ) : (
+                  <CheckCircleIcon className="size-3.5" />
+                )}
+                {isResolved ? "Unresolve thread" : "Resolve thread"}
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                onClick={() => onDelete()}
+                disabled={isDeleting}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+              >
+                <TrashIcon className="size-3.5" />
+                Delete thread
+              </ContextMenu.Item>
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
         </ContextMenu.Portal>

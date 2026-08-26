@@ -4,12 +4,9 @@ import type { AgentSource, AgentStatus, AgentThread } from "./types"
 
 export type SidebarGroupMode = "none" | "focus" | "date" | "status" | "repo"
 
-export type SidebarOwnership = "all" | "mine" | "shared"
-
 export type PrFilter = "none" | "draft" | "open" | "merged" | "closed"
 
 export interface SidebarFilters {
-  ownership: SidebarOwnership
   statuses: Array<AgentStatus>
   sources: Array<AgentSource>
   pr: Array<PrFilter>
@@ -20,7 +17,6 @@ export interface SidebarFilters {
 }
 
 export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
-  ownership: "all",
   statuses: [],
   sources: [],
   pr: [],
@@ -39,15 +35,6 @@ export const GROUP_MODE_OPTIONS: Array<{
   { value: "date", label: "Date" },
   { value: "status", label: "Status" },
   { value: "none", label: "None" },
-]
-
-export const OWNERSHIP_OPTIONS: Array<{
-  value: SidebarOwnership
-  label: string
-}> = [
-  { value: "all", label: "All agents" },
-  { value: "mine", label: "My agents" },
-  { value: "shared", label: "Shared with me" },
 ]
 
 export const STATUS_FILTER_OPTIONS: Array<{
@@ -108,8 +95,6 @@ export function filterThreads(
     ) {
       return false
     }
-    if (filters.ownership === "mine" && thread.isOwner === false) return false
-    if (filters.ownership === "shared" && thread.isOwner !== false) return false
     if (
       filters.statuses.length > 0 &&
       !filters.statuses.includes(thread.status)
@@ -309,7 +294,6 @@ export function groupThreadsByMode(
 /** True when any filter dimension differs from the defaults. */
 export function hasActiveFilters(filters: SidebarFilters): boolean {
   return (
-    filters.ownership !== DEFAULT_SIDEBAR_FILTERS.ownership ||
     filters.statuses.length > 0 ||
     filters.sources.length > 0 ||
     filters.pr.length > 0 ||

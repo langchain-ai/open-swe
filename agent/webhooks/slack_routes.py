@@ -408,15 +408,6 @@ async def slack_interactivity(
         )
         if not thread_id:
             return {"status": "ignored", "reason": "Slack thread is not associated"}
-        if not await common._slack_user_is_thread_owner(thread_id, user_id):
-            await common.post_slack_thread_reply(
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                text="Only the person who requested this run can approve workflow file pushes.",
-                agent_thread_id=thread_id,
-            )
-            return {"status": "ignored", "reason": "approver is not the thread owner"}
-
         if workflow_action not in {"approve", "reject"}:
             return {"status": "ignored", "reason": "Unknown workflow approval action"}
         approved = workflow_action == "approve"

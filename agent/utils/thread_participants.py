@@ -18,6 +18,9 @@ from .linear import fetch_linear_issue_participant_emails
 from .slack import fetch_slack_thread_messages
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
+# Slack and Linear senders who have no GitHub mapping are still participants;
+# their email is the only identifier the thread ever learns.
+PARTICIPANT_EMAILS_KEY = "participant_emails"
 _SLACK_SYSTEM_MESSAGE_SUBTYPES = {
     "bot_message",
     "channel_archive",
@@ -37,16 +40,35 @@ _SLACK_SYSTEM_MESSAGE_SUBTYPES = {
 }
 
 
-def merge_participant_logins(existing: Any, *logins: Any) -> list[str]:
-    merged: dict[str, str] = {}
-    if isinstance(existing, list):
-        for value in existing:
-            if isinstance(value, str) and value.strip():
-                merged[value.strip().lower()] = value.strip()
-    for value in logins:
+def participant_search_filters(login: str, email: str | None = None) -> list[dict[str, Any]]:
+    """Metadata filters matching threads this person has participated in."""
+    filters = [{PARTICIPANT_LOGINS_KEY: {login.strip().lower(): True}}]
+    if isinstance(email, str) and email.strip():
+        filters.append({PARTICIPANT_EMAILS_KEY: {email.strip().lower(): True}})
+    return filters
+
+
+def merge_participants(existing: Any, *values: Any) -> dict[str, bool]:
+    """Participants as a key-per-person map so metadata search can match one entry.
+
+    JSONB containment only reaches inside objects, so a list would force an
+    exact-match filter on the whole set.
+    """
+    merged = dict.fromkeys(participant_logins(existing), True)
+    for value in values:
         if isinstance(value, str) and value.strip():
-            merged[value.strip().lower()] = value.strip()
-    return [merged[key] for key in sorted(merged)]
+            merged[value.strip().lower()] = True
+    return dict(sorted(merged.items()))
+
+
+def participant_logins(stored: Any) -> list[str]:
+    if isinstance(stored, Mapping):
+        return sorted(key.strip().lower() for key in stored if isinstance(key, str) and key.strip())
+    if isinstance(stored, list):
+        return sorted(
+            {value.strip().lower() for value in stored if isinstance(value, str) and value.strip()}
+        )
+    return []
 
 
 async def _active_mapping_login(login: str | None) -> str | None:
@@ -125,9 +147,8 @@ async def resolve_thread_participant_logins(
     metadata = thread_metadata(thread)
 
     candidate_logins = set(
-        merge_participant_logins(
+        merge_participants(
             metadata.get(PARTICIPANT_LOGINS_KEY),
-            metadata.get("github_login"),
             configurable.get("github_login"),
         )
     )

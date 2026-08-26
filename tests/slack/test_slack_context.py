@@ -111,13 +111,15 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
     assert "permalink" not in enriched.dump()["slack_thread"]
 
 
-def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.MonkeyPatch) -> None:
-    owner_context = {"slack_thread": {"triggering_user_id": "UOWNER"}}
-    threads = _FakeThreadsClient({"metadata": {"source_context": owner_context}})
+def test_upsert_accumulates_participants_and_pins_source_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opening_context = {"slack_thread": {"triggering_user_id": "UFIRST"}}
+    threads = _FakeThreadsClient({"metadata": {"source_context": opening_context}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
 
     async def upsert(github_login: str, user_email: str, slack_user_id: str) -> None:
-        await webhook_common.upsert_agent_thread_owner_metadata(
+        await webhook_common.upsert_agent_thread_metadata(
             "thread-id",
             source="slack",
             github_login=github_login,
@@ -128,13 +130,14 @@ def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.Monkey
             ),
         )
 
-    asyncio.run(upsert("owner-gh", "owner@example.com", "UOWNER"))
+    asyncio.run(upsert("first-gh", "first@example.com", "UFIRST"))
     asyncio.run(upsert("commenter-gh", "commenter@example.com", "UCOMMENTER"))
     metadata = cast(dict, threads.thread)["metadata"]
-    assert metadata["github_login"] == "owner-gh"
-    assert metadata["triggering_user_email"] == "owner@example.com"
-    assert metadata["source_context"] == owner_context
-    assert metadata["title"] == metadata["title_seed"] == "owner-gh"
+    assert "github_login" not in metadata
+    assert "triggering_user_email" not in metadata
+    assert metadata["participant_logins"] == {"commenter-gh": True, "first-gh": True}
+    assert metadata["source_context"] == opening_context
+    assert metadata["title"] == metadata["title_seed"] == "first-gh"
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
@@ -1339,7 +1342,7 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
 
     monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "upsert_agent_thread_owner_metadata", fake_upsert_owner)
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", fake_upsert_owner)
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
@@ -1480,7 +1483,7 @@ def test_thread_environment_round_trips_through_metadata(
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
 
     asyncio.run(
-        webhook_common.upsert_agent_thread_owner_metadata(
+        webhook_common.upsert_agent_thread_metadata(
             "thread-id",
             source="slack",
             environment="staging",
