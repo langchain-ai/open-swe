@@ -88,7 +88,7 @@ All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__
 Agent/UI parity is a product principle: anything users can do in the dashboard UI should generally also be possible through an agent tool, subject to the same authorization and safety boundaries. When adding a UI capability, add or extend the corresponding curated tool unless there is a documented reason not to.
 
 Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `manage_code_channel`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
 
 `list_threads`, `get_thread`, and `manage_thread` are parent-agent-only; `manage_thread` is unavailable during plan mode while the two read-only tools remain available.
 
@@ -117,6 +117,8 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 ### Thread-id derivation
 
 Webhooks compute deterministic thread ids so the same Linear issue / Slack thread / PR routes back to the same running agent. See `utils/github_comments.py:get_thread_id_from_branch` and the equivalents in `utils/linear.py` / `utils/slack.py`. Reviewer threads have their own deterministic ids and are tagged with `REVIEWER_THREAD_KIND` metadata so the FastAPI side can find them.
+
+Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task session. Open SWE keys Slack locations by `(channel_id, thread_ts)`, so a code channel uses the `CODE_CHANNEL_SESSION_TS` (`"0"`) sentinel as its timestamp: it satisfies the existing timestamp validation, can never collide with a real message ts, and makes default replies post top-level while preserving a real `reply_thread_ts` when the user starts a Slack thread. Channel context reads from `conversations.history`; user-started thread context reads from `conversations.replies`. Session status, runtime commands, properties, views, canvases, and archival go through `agents.sessions.*` / `agents.conversations.*`.
 
 ## Conventions
 

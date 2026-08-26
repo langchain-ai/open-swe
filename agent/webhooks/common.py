@@ -128,6 +128,16 @@ from ..utils.slack import (
     update_slack_message,
     verify_slack_signature,
 )
+from ..utils.slack_code_channels import (  # noqa: F401
+    CODE_CHANNEL_SESSION_TS,
+    DEFAULT_CODE_CHANNEL_COMMANDS,
+    get_block_suggestions,
+    is_code_channel,
+    repo_context_bar_items,
+    set_commands,
+    set_context_bar,
+    set_session_status,
+)
 from ..utils.slack_events import (
     claim_slack_event,
     slack_event_already_seen,
@@ -137,7 +147,7 @@ from ..utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
-from ..utils.slack_stop import process_slack_stop_reaction
+from ..utils.slack_stop import process_agent_session_stopped, process_slack_stop_reaction
 from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
 from ..utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
@@ -148,6 +158,7 @@ from ..utils.thread_participants import (
 __all__ = [
     "Any",
     "BackgroundTasks",
+    "CODE_CHANNEL_SESSION_TS",
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
     "DOCS_PLZ_SLACK_GATE_REPLY",
@@ -242,6 +253,7 @@ __all__ = [
     "get_valid_access_token",
     "has_access_token_record",
     "is_bot_token_only_mode",
+    "is_code_channel",
     "json",
     "list_reviewer_findings",
     "logger",
@@ -255,6 +267,7 @@ __all__ = [
     "post_review_started_comment",
     "post_slack_thread_reply",
     "post_slack_trace_reply",
+    "process_agent_session_stopped",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
     "process_slack_stop_reaction",
@@ -262,6 +275,7 @@ __all__ = [
     "react_to_github_comment",
     "react_to_linear_comment",
     "reconcile_findings_with_review_threads",
+    "repo_context_bar_items",
     "refresh_user_mapping_cache",
     "resolve_agent_model_id",
     "resolve_login_from_email_async",
@@ -269,7 +283,9 @@ __all__ = [
     "resolve_slack_thread_id",
     "sanitize_github_comment_body",
     "select_slack_context_messages",
+    "set_context_bar",
     "set_reviewer_thread_metadata",
+    "set_session_status",
     "slack_channel_allows_operations",
     "slack_event_already_seen",
     "store_slack_run_mapping",

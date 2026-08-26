@@ -14,6 +14,12 @@ from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
+from ..utils.slack_code_channels import (
+    is_code_channel_session,
+    repo_context_bar_items,
+    set_context_bar,
+    set_view,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -630,6 +636,34 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            slack_thread = configurable.get("slack_thread")
+            active = await get_active_slack_thread(
+                get_client(),
+                thread_id,
+                slack_thread if isinstance(slack_thread, dict) else None,
+            )
+            if active and is_code_channel_session(str(active.get("thread_ts") or "")):
+                channel_id = str(active.get("channel_id") or "")
+                await set_context_bar(
+                    channel_id,
+                    repo_context_bar_items(
+                        {"owner": owner, "name": repo},
+                        branch=head,
+                        pr_url=pr_url if isinstance(pr_url, str) else "",
+                    ),
+                )
+                response = await client.get(
+                    f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
+                    headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},
+                )
+                if response.status_code == 200 and response.text.strip():
+                    await set_view(
+                        channel_id,
+                        "diff",
+                        content=response.text,
+                        base_branch=base,
+                        head_branch=head,
+                    )
     except Exception:
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True
