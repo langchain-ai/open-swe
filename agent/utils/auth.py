@@ -1,5 +1,6 @@
 """GitHub OAuth and LangSmith authentication utilities."""
 
+import asyncio
 import logging
 import os
 from collections.abc import Mapping
@@ -24,6 +25,7 @@ from .slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_rep
 from .user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
+_legacy_auth_impact_tasks: set[asyncio.Task[None]] = set()
 
 client = get_client()
 
@@ -318,6 +320,32 @@ def _cache_resolved_github_token(
     return token, expires_at
 
 
+async def _log_legacy_auth_migration_impact(source: str, github_login: str) -> None:
+    from ..dashboard.profiles import get_valid_access_token
+
+    try:
+        open_swe_token = await get_valid_access_token(github_login)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "legacy_github_auth_migration_impact_unknown source=%s github_login=%s",
+            source,
+            github_login,
+        )
+        return
+    logger.info(
+        "legacy_github_auth_migration_impact source=%s github_login=%s requires_reauth=%s",
+        source,
+        github_login,
+        not open_swe_token,
+    )
+
+
+def _schedule_legacy_auth_migration_impact(source: str, github_login: str) -> None:
+    task = asyncio.create_task(_log_legacy_auth_migration_impact(source, github_login))
+    _legacy_auth_impact_tasks.add(task)
+    task.add_done_callback(_legacy_auth_impact_tasks.discard)
+
+
 async def resolve_token_from_email(
     email: str | None,
     source: str,
@@ -382,23 +410,7 @@ async def resolve_token_from_email(
 
     github_login = configurable.get("github_login")
     if isinstance(github_login, str) and github_login.strip():
-        from ..dashboard.profiles import get_valid_access_token
-
-        try:
-            open_swe_token = await get_valid_access_token(github_login.strip())
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "legacy_github_auth_migration_impact_unknown source=%s github_login=%s",
-                source,
-                github_login.strip(),
-            )
-        else:
-            logger.info(
-                "legacy_github_auth_migration_impact source=%s github_login=%s requires_reauth=%s",
-                source,
-                github_login.strip(),
-                not open_swe_token,
-            )
+        _schedule_legacy_auth_migration_impact(source, github_login.strip())
     else:
         logger.info(
             "legacy_github_auth_migration_impact source=%s email=%s requires_reauth=true",

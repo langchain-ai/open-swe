@@ -46,7 +46,7 @@ def test_leave_failure_comment_posts_generic_token_free_slack_notice(
     assert "https://app.example.com/my-settings" in thread_called["message"]
 
 
-def test_resolve_token_from_email_logs_legacy_only_user(
+def test_resolve_token_from_email_logs_legacy_only_user_in_background(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setattr(
@@ -66,17 +66,30 @@ def test_resolve_token_from_email_logs_legacy_only_user(
     async def fake_legacy_token(user_id: str, tenant_id: str) -> dict[str, str]:
         return {"token": "legacy-token"}
 
-    async def fake_open_swe_token(login: str) -> None:
-        return None
-
     from agent.dashboard import profiles
 
     monkeypatch.setattr(auth, "get_ls_user_id_from_email", fake_user_info)
     monkeypatch.setattr(auth, "get_github_token_for_user", fake_legacy_token)
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_open_swe_token)
+
+    async def scenario() -> str:
+        lookup_started = asyncio.Event()
+        release_lookup = asyncio.Event()
+
+        async def fake_open_swe_token(login: str) -> None:
+            lookup_started.set()
+            await release_lookup.wait()
+
+        monkeypatch.setattr(profiles, "get_valid_access_token", fake_open_swe_token)
+        token, _ = await auth.resolve_token_from_email("mason@example.com", "github")
+        await lookup_started.wait()
+        assert "legacy_github_auth_migration_impact " not in caplog.text
+        tasks = list(auth._legacy_auth_impact_tasks)
+        release_lookup.set()
+        await asyncio.gather(*tasks)
+        return token
 
     with caplog.at_level(logging.INFO, logger=auth.logger.name):
-        token, _ = asyncio.run(auth.resolve_token_from_email("mason@example.com", "github"))
+        token = asyncio.run(scenario())
 
     assert token == "legacy-token"
     assert (
