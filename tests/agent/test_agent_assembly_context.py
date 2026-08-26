@@ -501,6 +501,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     parent_names = {_registered_tool_name(tool) for tool in parent_tools}
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
+        "manage_code_channel",
         "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",
