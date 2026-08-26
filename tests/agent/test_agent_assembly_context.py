@@ -44,6 +44,7 @@ async def _capture_create_deep_agent_kwargs(
     thread_settings: dict[str, object] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
+    make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = "thread-ctx"
 
@@ -52,7 +53,7 @@ async def _capture_create_deep_agent_kwargs(
         return _DummyAgent()
 
     def fake_make_model(model_id: str, **kwargs: object) -> MagicMock:
-        captured.setdefault("make_model_calls", []).append((model_id, kwargs))
+        make_model_calls.append((model_id, kwargs))
         return MagicMock()
 
     clear_sandbox_backend(thread_id)
@@ -92,6 +93,7 @@ async def _capture_create_deep_agent_kwargs(
         await get_agent(config)
 
     clear_sandbox_backend(thread_id)
+    captured["make_model_calls"] = make_model_calls
     return captured
 
 

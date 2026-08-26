@@ -159,6 +159,17 @@ class BackendSupervisor {
     this.closing = false;
     this.ready = null;
     this.failure = null;
+    this.gatewayEnv = null;
+  }
+
+  gatewayEnvironment() {
+    if (this.gatewayEnv) return this.gatewayEnv;
+    const env = { ...process.env, ...this.options.env };
+    this.gatewayEnv = resolveGatewayEnvironment(
+      env,
+      this.options.gatewayEnvironment,
+    );
+    return this.gatewayEnv;
   }
 
   start() {
@@ -189,10 +200,7 @@ class BackendSupervisor {
       env: {
         ...process.env,
         ...this.options.env,
-        ...resolveGatewayEnvironment(
-          { ...process.env, ...this.options.env },
-          this.options.gatewayEnvironment,
-        ),
+        ...this.gatewayEnvironment(),
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
@@ -261,12 +269,12 @@ class BackendSupervisor {
   }
 
   credentialStatus(modelId) {
-    const env = { ...process.env, ...this.options.env };
     return modelCredentialStatus(
       modelId,
       {
-        ...env,
-        ...resolveGatewayEnvironment(env, this.options.gatewayEnvironment),
+        ...process.env,
+        ...this.options.env,
+        ...this.gatewayEnvironment(),
       },
       { openAiOAuth: this.options.openAiOAuthAvailable?.() === true },
     );
@@ -412,6 +420,5 @@ module.exports = {
   localBackendTarget,
   modelCredentialStatus,
   packagedBackendTarget,
-  resolveGatewayEnvironment,
   reservePort,
 };
