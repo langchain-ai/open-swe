@@ -2,6 +2,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent import store as agent_store
 from agent.dashboard import environments as env_store
@@ -421,6 +422,53 @@ async def test_capture_requires_the_langsmith_provider(
             await env_store.capture_environment_snapshot("base", "sb-123")
 
     capture.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_clearing_create_params_with_null_stays_readable(
+    fake_store: FakeStore,
+) -> None:
+    """An explicit ``create_params: null`` must not poison the record.
+
+    The store mutates records in place, so an unvalidated null would only
+    surface on the next read — as a ValidationError that makes the environment
+    unresolvable, unupdatable, and invisible to listings.
+    """
+    await ENVIRONMENTS.create(
+        EnvironmentCreate(name="base", create_params={"_internal_runtime": "v2"}), "ramon"
+    )
+
+    updated = await ENVIRONMENTS.apply_update("base", EnvironmentUpdate(create_params=None))
+
+    assert updated.create_params == {}
+    reread = await ENVIRONMENTS.get("base")
+    assert reread is not None
+    assert reread.create_params == {}
+    assert [record.slug for record in await ENVIRONMENTS.list_all()] == ["base"]
+
+
+@pytest.mark.asyncio
+async def test_a_record_stored_with_null_create_params_is_still_readable(
+    fake_store: FakeStore,
+) -> None:
+    """Records written before create_params was modelled can hold a null."""
+    fake_store.seed(
+        env_store.ENVIRONMENTS_NAMESPACE,
+        "legacy",
+        {"slug": "legacy", "name": "legacy", "create_params": None},
+    )
+
+    record = await ENVIRONMENTS.get("legacy")
+
+    assert record is not None
+    assert record.create_params == {}
+    assert record.sandbox_create_params() == {}
+
+
+def test_assignment_is_validated() -> None:
+    record = Environment(slug="base")
+    with pytest.raises(ValidationError):
+        record.vcpus = "not-an-int"  # type: ignore[assignment]
 
 
 # --- per-thread selection ---

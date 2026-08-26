@@ -276,7 +276,10 @@ class EnvironmentUpdate(BaseModel):
 
 
 class Environment(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    # Assignment is validated because the store mutates records in place, and an
+    # unvalidated write here is only caught on the next read — by which point the
+    # record is already unreadable.
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
 
     slug: str
     name: str = ""
@@ -295,6 +298,12 @@ class Environment(BaseModel):
     created_by: str = ""
     created_at: str = ""
     updated_at: str = ""
+
+    @field_validator("create_params", mode="before")
+    @classmethod
+    def _null_create_params_are_empty(cls, v: Any) -> Any:
+        """``EnvironmentUpdate`` clears create params with an explicit null."""
+        return {} if v is None else v
 
     @classmethod
     def seed(cls, create: EnvironmentCreate, created_by: str) -> "Environment":
