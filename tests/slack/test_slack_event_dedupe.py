@@ -97,8 +97,8 @@ def _patch_slack_webhook(
     increment_version = AsyncMock(return_value=1)
     request.node.thread_version_increment = increment_version
 
-    async def channel_context(_channel_id: str) -> dict[str, Any]:
-        return {}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
+        return {"is_ext_shared": False}
 
     async def not_docs_plz(_channel_id: str, _context: dict[str, Any]) -> bool:
         return False
@@ -193,6 +193,53 @@ async def test_concurrent_cross_instance_redeliveries_start_one_run() -> None:
 
     assert [response["status"] for response in responses].count("accepted") == 1
     assert len(background_tasks.tasks) == 1
+
+
+async def test_external_channel_refuses_without_starting_a_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    background_tasks = _FakeBackgroundTasks()
+    post_reply = AsyncMock(return_value=True)
+    resolve_thread = cast(AsyncMock, webhook_common.resolve_slack_thread_id)
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": True}),
+    )
+    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
+
+    response = await _post(_mention_payload(), background_tasks)
+
+    assert response == {"status": "ignored", "reason": "Slack channel is not eligible"}
+    assert len(background_tasks.tasks) == 1
+    await background_tasks.tasks[0][0](*background_tasks.tasks[0][1])
+    post_reply.assert_awaited_once_with(
+        "C1",
+        "1786573369.551099",
+        slack_routes._EXTERNAL_CHANNEL_REFUSAL,
+    )
+    resolve_thread.assert_not_awaited()
+
+
+async def test_unverified_channel_fails_closed_without_reply_or_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    background_tasks = _FakeBackgroundTasks()
+    post_reply = AsyncMock(return_value=True)
+    resolve_thread = cast(AsyncMock, webhook_common.resolve_slack_thread_id)
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": None}),
+    )
+    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
+
+    response = await _post(_mention_payload(), background_tasks)
+
+    assert response == {"status": "ignored", "reason": "Slack channel is not eligible"}
+    assert background_tasks.tasks == []
+    post_reply.assert_not_awaited()
+    resolve_thread.assert_not_awaited()
 
 
 async def test_preprocessing_failure_does_not_claim_event(monkeypatch: pytest.MonkeyPatch) -> None:

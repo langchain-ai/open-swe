@@ -80,6 +80,28 @@ async def test_selected_option_updates_original_message(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
+async def test_external_channel_interaction_is_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _option_payload()
+    lookup = AsyncMock(return_value="thread-1")
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes.common, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(
+        slack_routes.common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": True}),
+    )
+    background_tasks = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(_request(payload), background_tasks)
+
+    assert result == {"status": "ignored", "reason": "Slack channel is not eligible"}
+    assert background_tasks.tasks == []
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_option_interaction_schedules_update_before_agent_processing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -94,7 +116,7 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     monkeypatch.setattr(
         slack_routes.common,
         "_get_slack_channel_context",
-        AsyncMock(return_value={"name": "proj-open-swe"}),
+        AsyncMock(return_value={"name": "proj-open-swe", "is_ext_shared": False}),
     )
     monkeypatch.setattr(
         slack_routes.common,
