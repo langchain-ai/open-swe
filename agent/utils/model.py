@@ -9,6 +9,7 @@ from .gateway import gateway_env_default, gateway_overrides
 from .openai_oauth import build_desktop_openai_oauth_model, desktop_openai_oauth_available
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
+BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
@@ -174,10 +175,14 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
 
     init_model_id = model_id
     if model_id.startswith("baseten:"):
-        if not gateway_applied:
-            raise ValueError("Baseten models require the LangSmith LLM Gateway")
         init_model_id = model_id.split(":", 1)[1]
         model_kwargs["model_provider"] = "openai"
+        if not gateway_applied:
+            api_key = os.environ.get("BASETEN_API_KEY")
+            if not api_key:
+                raise ValueError("BASETEN_API_KEY is required when Gateway routing is disabled")
+            model_kwargs["base_url"] = BASETEN_BASE_URL
+            model_kwargs["api_key"] = api_key
 
     profile_override = model_profile_with_context_override(model_id)
     if profile_override is not None:

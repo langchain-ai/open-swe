@@ -482,9 +482,15 @@ def test_make_model_gateway_baseten(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["api_key"] == "ls-key"
 
 
-def test_make_model_baseten_requires_gateway() -> None:
-    with pytest.raises(ValueError, match="require the LangSmith LLM Gateway"):
+def test_make_model_direct_baseten(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BASETEN_API_KEY", "baseten-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
         model.make_model("baseten:zai-org/GLM-5.3-Flash", use_gateway=False)
+    assert captured["model"] == "zai-org/GLM-5.3-Flash"
+    assert captured["model_provider"] == "openai"
+    assert captured["base_url"] == model.BASETEN_BASE_URL
+    assert captured["api_key"] == "baseten-key"
 
 
 def test_make_model_gateway_without_key_falls_back_direct(
