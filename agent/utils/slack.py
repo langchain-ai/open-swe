@@ -1239,25 +1239,33 @@ async def fetch_slack_thread_message_by_ts(
     if not SLACK_BOT_TOKEN:
         return None
 
+    from .slack_code_channels import is_code_channel_session
+
+    session_channel = is_code_channel_session(thread_ts)
+    method = "conversations.history" if session_channel else "conversations.replies"
+    params = {
+        "channel": channel_id,
+        "oldest": message_ts,
+        "latest": message_ts,
+        "inclusive": "true",
+        "limit": 1,
+    }
+    if not session_channel:
+        params["ts"] = thread_ts
+
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
-                f"{SLACK_API_BASE_URL}/conversations.replies",
+                f"{SLACK_API_BASE_URL}/{method}",
                 headers=_slack_headers(),
-                params={
-                    "channel": channel_id,
-                    "ts": thread_ts,
-                    "oldest": message_ts,
-                    "latest": message_ts,
-                    "inclusive": "true",
-                    "limit": 1,
-                },
+                params=params,
             )
             response.raise_for_status()
             payload = response.json()
         except httpx.HTTPError:
             logger.exception(
-                "Slack conversations.replies request failed for channel=%s thread=%s ts=%s",
+                "Slack %s request failed for channel=%s thread=%s ts=%s",
+                method,
                 channel_id,
                 thread_ts,
                 message_ts,
@@ -1266,7 +1274,8 @@ async def fetch_slack_thread_message_by_ts(
 
     if not payload.get("ok"):
         logger.warning(
-            "Slack conversations.replies failed for channel=%s thread=%s ts=%s: %s",
+            "Slack %s failed for channel=%s thread=%s ts=%s: %s",
+            method,
             channel_id,
             thread_ts,
             message_ts,
@@ -1360,7 +1369,12 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
 
 async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     """Return the public permalink for a Slack message, or None if unavailable."""
+    from .slack_code_channels import is_code_channel_session
+
+    # A code channel session has no anchor message to permalink to.
     if not SLACK_BOT_TOKEN or not channel_id or not message_ts:
+        return None
+    if is_code_channel_session(message_ts):
         return None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
