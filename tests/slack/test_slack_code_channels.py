@@ -9,6 +9,7 @@ from starlette.requests import Request
 from agent.utils import slack as slack_utils
 from agent.utils import slack_code_channels, slack_events
 from agent.webhooks import common as webhook_common
+from agent.webhooks import slack as slack_service
 from agent.webhooks import slack_routes
 
 
@@ -21,7 +22,7 @@ class _FakeRequest:
         return self._body
 
 
-async def test_set_diff_view_uses_documented_payload_and_bounds_content(
+async def test_set_diff_view_uses_documented_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     call = AsyncMock(return_value=({"ok": True}, None))
@@ -29,7 +30,7 @@ async def test_set_diff_view_uses_documented_payload_and_bounds_content(
 
     ok, error = await slack_code_channels.set_diff_view(
         "C-code",
-        "x" * (slack_code_channels.VIEW_CONTENT_MAX_CHARS + 1),
+        "diff --git a/a.py b/a.py\n-old\n+new\n",
         base_branch="main",
         head_branch="feature/code-channels",
     )
@@ -41,11 +42,128 @@ async def test_set_diff_view_uses_documented_payload_and_bounds_content(
         {
             "channel_id": "C-code",
             "type": "diff",
-            "content": "x" * slack_code_channels.VIEW_CONTENT_MAX_CHARS,
+            "content": "diff --git a/a.py b/a.py\n-old\n+new\n",
             "base_branch": "main",
             "head_branch": "feature/code-channels",
         },
     )
+
+
+async def test_set_view_rejects_content_over_one_megabyte(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call = AsyncMock()
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    data, error = await slack_code_channels.set_view(
+        "C-code",
+        "html",
+        view_key="report",
+        content="é" * (slack_code_channels.VIEW_CONTENT_MAX_BYTES // 2 + 1),
+    )
+
+    assert data is None
+    assert error == "content_too_large"
+    call.assert_not_awaited()
+
+
+async def test_set_view_supports_html_block_kit_and_canvas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call = AsyncMock(return_value=({"ok": True, "view_id": "V1"}, None))
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    await slack_code_channels.set_view(
+        "C-code",
+        "html",
+        view_key="reports/coverage.html",
+        name="Coverage",
+        content="<!doctype html><title>Coverage</title>",
+        csp={"resource_domains": ["https://cdn.jsdelivr.net"]},
+    )
+    await slack_code_channels.set_view(
+        "C-code",
+        "block_kit",
+        view_key="plan",
+        blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": "Plan"}}],
+    )
+    await slack_code_channels.set_view(
+        "C-code",
+        "canvas",
+        view_key="design-doc",
+        canvas_id="F123",
+        access_level="comment",
+    )
+
+    assert call.await_args_list[0].args == (
+        "agents.conversations.setView",
+        {
+            "channel_id": "C-code",
+            "type": "html",
+            "content": "<!doctype html><title>Coverage</title>",
+            "view_key": "reports/coverage.html",
+            "name": "Coverage",
+            "csp": {"resource_domains": ["https://cdn.jsdelivr.net"]},
+        },
+    )
+    assert call.await_args_list[1].args[1]["blocks"][0]["type"] == "section"
+    assert call.await_args_list[2].args[1] == {
+        "channel_id": "C-code",
+        "type": "canvas",
+        "canvas_id": "F123",
+        "access_level": "comment",
+        "view_key": "design-doc",
+    }
+
+
+async def test_commands_properties_and_canvas_methods_use_canonical_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call = AsyncMock(
+        side_effect=[
+            ({"ok": True, "command_count": 1}, None),
+            ({"ok": True}, None),
+            ({"ok": True, "views": [{"view_id": "V1", "type": "html"}]}, None),
+            ({"ok": True, "view_id": "V1"}, None),
+            ({"ok": True, "canvas_id": "F1", "content": "# Plan"}, None),
+            ({"ok": True, "sections_changed_count": 1}, None),
+        ]
+    )
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    commands = [{"name": "create-pr", "description": "Open a pull request"}]
+    items = [{"key": "review", "label": "Review", "item_type": "action"}]
+    await slack_code_channels.set_commands("C-code", commands)
+    await slack_code_channels.set_properties(
+        "C-code",
+        code_channel={"context_bar_items": items},
+        agent_resource={"url": "https://example.com", "resource_type": "ticket"},
+    )
+    views, error = await slack_code_channels.list_views("C-code")
+    await slack_code_channels.remove_view("C-code", view_id="V1")
+    await slack_code_channels.get_canvas("C-code", "F1", include_resolved=True)
+    await slack_code_channels.set_canvas_content("C-code", "F1", "# Revised")
+
+    assert views == [{"view_id": "V1", "type": "html"}]
+    assert error is None
+    assert call.await_args_list[0].args[1] == {"channel_id": "C-code", "commands": commands}
+    assert call.await_args_list[1].args[1] == {
+        "channel_id": "C-code",
+        "code_channel": {"context_bar_items": items},
+        "agent_resource": {"url": "https://example.com", "resource_type": "ticket"},
+    }
+    assert call.await_args_list[3].args[1] == {"channel_id": "C-code", "view_id": "V1"}
+    assert call.await_args_list[4].args[1] == {
+        "channel_id": "C-code",
+        "canvas_id": "F1",
+        "content_format": "markdown",
+        "include_resolved": True,
+    }
+    assert call.await_args_list[5].args[1] == {
+        "channel_id": "C-code",
+        "canvas_id": "F1",
+        "content": "# Revised",
+    }
 
 
 def test_repo_context_bar_items_use_supported_icons_and_branch_link() -> None:
@@ -61,6 +179,33 @@ def test_repo_context_bar_items_use_supported_icons_and_branch_link() -> None:
         "icon": "branch",
         "url": "https://github.com/langchain-ai/open-swe/tree/feature/code%20channels",
     }
+
+
+def test_untagged_code_channel_message_does_not_interrupt_active_work() -> None:
+    assert not slack_service._interrupts_active_run(
+        "talking to a teammate",
+        "BOT",
+        treat_all_messages_as_mentions=True,
+        code_channel=True,
+        message_update=False,
+        explicit_request=False,
+    )
+    assert slack_service._interrupts_active_run(
+        "<@BOT> stop and do this",
+        "BOT",
+        treat_all_messages_as_mentions=True,
+        code_channel=True,
+        message_update=False,
+        explicit_request=False,
+    )
+    assert slack_service._interrupts_active_run(
+        "/run-tests",
+        "BOT",
+        treat_all_messages_as_mentions=True,
+        code_channel=True,
+        message_update=False,
+        explicit_request=True,
+    )
 
 
 async def test_untagged_code_channel_message_routes_to_the_channel_session(
@@ -98,6 +243,7 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
                         "type": "message",
                         "channel": "C-code",
                         "ts": "1786573369.551099",
+                        "thread_ts": "1786573300.000000",
                         "user": "U1",
                         "text": "no mention needed here",
                     },
@@ -112,6 +258,7 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     assert event_data["code_channel"] is True
     assert event_data["treat_all_messages_as_mentions"] is True
     assert event_data["thread_ts"] == webhook_common.CODE_CHANNEL_SESSION_TS
+    assert event_data["reply_thread_ts"] == "1786573300.000000"
 
 
 async def test_code_channel_replies_are_posted_top_level(monkeypatch: pytest.MonkeyPatch) -> None:

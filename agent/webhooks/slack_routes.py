@@ -1,6 +1,8 @@
 """Slack webhook HTTP routes."""
 
 import asyncio
+import hashlib
+from time import time_ns
 from typing import Any
 
 from fastapi import APIRouter
@@ -13,6 +15,74 @@ from . import slack as service
 router = APIRouter()
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
+
+
+def _synthetic_slack_ts() -> str:
+    timestamp = time_ns()
+    return f"{timestamp // 1_000_000_000}.{timestamp % 1_000_000_000:09d}"
+
+
+def _bounded_payload_text(label: str, payload: dict[str, Any]) -> str:
+    serialized = common.json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"{label}\n```json\n{serialized[:8000]}\n```"
+
+
+async def _queue_code_channel_turn(
+    background_tasks: common.BackgroundTasks,
+    *,
+    channel_id: str,
+    user_id: str,
+    text: str,
+    event_id: str,
+    event_ts: str,
+    explicit_request: bool,
+) -> dict[str, str]:
+    if not channel_id or not user_id or not text or not event_id or not event_ts:
+        return {"status": "ignored", "reason": "Missing code channel interaction fields"}
+    if not await common.is_code_channel(channel_id):
+        return {"status": "ignored", "reason": "Not a code channel"}
+
+    client = get_langgraph_client()
+    thread_id = await common.lookup_slack_thread_id(
+        client, channel_id, common.CODE_CHANNEL_SESSION_TS
+    )
+    if not thread_id:
+        return {"status": "ignored", "reason": "Code channel is not associated"}
+    if not await common.claim_slack_event(event_id, channel_id, event_ts):
+        return {"status": "ignored", "reason": "Duplicate code channel interaction"}
+
+    channel_context = await common._get_slack_channel_context(channel_id)
+    repo_config = await common.get_slack_repo_config(
+        channel_id,
+        common.CODE_CHANNEL_SESSION_TS,
+        slack_user_id=user_id,
+        channel_context=channel_context,
+        thread_id=thread_id,
+    )
+    thread_version = await common.increment_slack_thread_version(
+        client, channel_id, common.CODE_CHANNEL_SESSION_TS, event_ts
+    )
+    background_tasks.add_task(
+        service.process_slack_mention,
+        {
+            "channel_id": channel_id,
+            "channel_context": channel_context,
+            "thread_ts": common.CODE_CHANNEL_SESSION_TS,
+            "event_ts": event_ts,
+            "original_message_ts": event_ts,
+            "user_id": user_id,
+            "text": text,
+            "attachments": [],
+            "bot_user_id": common.SLACK_BOT_USER_ID,
+            "thread_id": thread_id,
+            "thread_version": thread_version,
+            "treat_all_messages_as_mentions": True,
+            "code_channel": True,
+            "explicit_request": explicit_request,
+        },
+        repo_config,
+    )
+    return {"status": "accepted", "message": "Code channel interaction queued"}
 
 
 async def _lookup_delivered_message_update(
@@ -115,6 +185,38 @@ async def slack_webhook(
         return {"status": "ignored", "reason": "Not an event callback"}
 
     event = payload.get("event", {})
+    event_id = str(payload.get("event_id") or "")
+
+    if event.get("type") == "code_channel_action":
+        action = event.get("action") if isinstance(event.get("action"), dict) else {}
+        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        user = event.get("user")
+        user_id = str(
+            user.get("id") if isinstance(user, dict) else user or event.get("user_id") or ""
+        )
+        channel = event.get("channel")
+        channel_id = str(
+            channel.get("id")
+            if isinstance(channel, dict)
+            else channel or event.get("channel_id") or ""
+        )
+        event_ts = str(event.get("event_ts") or event.get("action_ts") or _synthetic_slack_ts())
+        action_payload = {
+            "key": event.get("key") or action.get("key") or item.get("key"),
+            "label": event.get("label") or action.get("label") or item.get("label"),
+            "value": event.get("value") or action.get("value") or item.get("value"),
+        }
+        return await _queue_code_channel_turn(
+            background_tasks,
+            channel_id=channel_id,
+            user_id=user_id,
+            text=_bounded_payload_text(
+                "A code channel context-bar action was selected.", action_payload
+            ),
+            event_id=event_id or f"code-channel-action:{channel_id}:{event_ts}",
+            event_ts=event_ts,
+            explicit_request=True,
+        )
 
     if event.get("type") == "reaction_added":
         reaction = event.get("reaction")
@@ -145,7 +247,6 @@ async def slack_webhook(
         )
         return {"status": "accepted", "message": "Session stop queued"}
 
-    event_id = str(payload.get("event_id") or "")
     retry_num = request.headers.get("X-Slack-Retry-Num", "")
     if retry_num and await common.slack_event_already_seen(event_id):
         common.logger.info(
@@ -176,6 +277,9 @@ async def slack_webhook(
     event_ts = event.get("event_ts") or event.get("ts")
     original_message_ts = updated_message.get("ts")
     thread_ts = updated_message.get("thread_ts") or original_message_ts
+    reply_thread_ts = updated_message.get("thread_ts")
+    if not isinstance(reply_thread_ts, str):
+        reply_thread_ts = ""
     user_id = updated_message.get("user")
     text = updated_message.get("text")
     attachments = updated_message.get("attachments", [])
@@ -296,6 +400,7 @@ async def slack_webhook(
                 "bot_user_id": bot_user_id,
                 "message_update": True,
                 "code_channel": in_code_channel,
+                "reply_thread_ts": reply_thread_ts if in_code_channel else "",
             }
             background_tasks.add_task(
                 _process_slack_message_update,
@@ -350,6 +455,7 @@ async def slack_webhook(
             "untagged_reply": is_untagged_two_party_reply,
             "message_update": is_message_update,
             "code_channel": in_code_channel,
+            "reply_thread_ts": reply_thread_ts if in_code_channel else "",
         }
         repo_config = await common.get_slack_repo_config(
             channel_id,
@@ -369,10 +475,57 @@ async def slack_webhook(
     return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
 
+@router.post("/webhooks/slack/code-channel-commands")
+async def slack_code_channel_command(
+    request: common.Request, background_tasks: common.BackgroundTasks
+) -> dict[str, str]:
+    """Handle runtime slash commands registered for a Slack code channel."""
+    body = await request.body()
+    signature = request.headers.get("X-Slack-Signature", "")
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    if not common.verify_slack_signature(
+        body=body,
+        timestamp=timestamp,
+        signature=signature,
+        secret=common.SLACK_SIGNING_SECRET,
+    ):
+        common.logger.warning("Invalid Slack code channel command signature")
+        raise common.HTTPException(status_code=401, detail="Invalid signature")
+
+    form = common.parse_qs(body.decode("utf-8"))
+    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    channel_id = value("channel_id")
+    user_id = value("user_id")
+    command = value("command").removeprefix("/")
+    command_text = value("text")
+    trigger_id = value("trigger_id")
+    if not (channel_id and user_id and 1 <= len(command) <= 31 and len(command_text) <= 4000):
+        return {"response_type": "ephemeral", "text": "That code-channel command was invalid."}
+
+    event_ts = _synthetic_slack_ts()
+    event_id = f"code-channel-command:{trigger_id or hashlib.sha256(body).hexdigest()}"
+    command_line = f"/{command}{f' {command_text}' if command_text else ''}"
+    result = await _queue_code_channel_turn(
+        background_tasks,
+        channel_id=channel_id,
+        user_id=user_id,
+        text=f"A runtime code-channel command was invoked: {command_line}",
+        event_id=event_id,
+        event_ts=event_ts,
+        explicit_request=True,
+    )
+    if result["status"] != "accepted":
+        return {
+            "response_type": "ephemeral",
+            "text": "Open SWE could not route that command to this code channel.",
+        }
+    return {"response_type": "ephemeral", "text": f"Working on /{command}…"}
+
+
 @router.post("/webhooks/slack/interactivity")
 async def slack_interactivity(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Handle Slack Block Kit interactions."""
     body = await request.body()
     signature = request.headers.get("X-Slack-Signature", "")
@@ -393,6 +546,67 @@ async def slack_interactivity(
     except common.json.JSONDecodeError:
         common.logger.exception("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
+
+    container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+    if payload.get("type") == "block_suggestion" and container.get("type") == "code_channel_view":
+        channel_id = str(container.get("channel_id") or "")
+        view_id = str(container.get("view_id") or "")
+        action_id = str(payload.get("action_id") or "")
+        if not channel_id or not view_id or not action_id:
+            return {"options": []}
+        options = await common.get_block_suggestions(
+            get_langgraph_client(),
+            channel_id,
+            view_id,
+            action_id,
+            str(payload.get("value") or "")[:200],
+        )
+        return {"options": options}
+    if payload.get("type") == "block_actions" and container.get("type") == "code_channel_view":
+        actions = payload.get("actions") if isinstance(payload.get("actions"), list) else []
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        first_action = actions[0] if actions and isinstance(actions[0], dict) else {}
+        event_ts = str(first_action.get("action_ts") or _synthetic_slack_ts())
+        safe_actions = [
+            {
+                key: action[key]
+                for key in (
+                    "action_id",
+                    "type",
+                    "value",
+                    "selected_option",
+                    "selected_options",
+                    "selected_user",
+                    "selected_users",
+                    "selected_conversation",
+                    "selected_conversations",
+                    "selected_channel",
+                    "selected_channels",
+                    "selected_date",
+                    "selected_time",
+                    "selected_date_time",
+                )
+                if key in action
+            }
+            for action in actions[:10]
+            if isinstance(action, dict)
+        ]
+        interaction = {
+            "view_id": container.get("view_id"),
+            "actions": safe_actions,
+        }
+        payload_fingerprint = hashlib.sha256(payload_raw.encode()).hexdigest()
+        return await _queue_code_channel_turn(
+            background_tasks,
+            channel_id=str(container.get("channel_id") or ""),
+            user_id=str(user.get("id") or ""),
+            text=_bounded_payload_text(
+                "A user interacted with a code channel Block Kit view.", interaction
+            ),
+            event_id=f"code-channel-view:{payload.get('trigger_id') or payload_fingerprint}",
+            event_ts=event_ts,
+            explicit_request=True,
+        )
 
     action = _first_open_swe_option_action(payload.get("actions"))
     if action is None:

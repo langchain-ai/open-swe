@@ -54,8 +54,9 @@ _UNTAGGED_REPLY_PREAMBLE = (
 _CODE_CHANNEL_CONTEXT = (
     "## Slack Code Channel\n"
     "The whole channel is one session. Treat messages as addressed to you unless clearly aimed "
-    "at someone else; replies already post top-level. Use `manage_code_channel` to keep its "
-    "repo/branch/PR context and diff current, then archive it with your closing summary."
+    "at someone else; replies post top-level unless the user started a Slack thread. Use "
+    "`manage_code_channel` for session "
+    "status, title, context, runtime commands, HTML/diff/Block Kit/canvas views, and archival."
 )
 
 _MESSAGE_UPDATE_PREAMBLE = (
@@ -88,6 +89,23 @@ def _is_explicit_slack_request(
         treat_all_messages_as_mentions
         or (bot_user_id and f"<@{bot_user_id}>" in text)
         or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+    )
+
+
+def _interrupts_active_run(
+    text: str,
+    bot_user_id: str,
+    *,
+    treat_all_messages_as_mentions: bool,
+    code_channel: bool,
+    message_update: bool,
+    explicit_request: bool,
+) -> bool:
+    return explicit_request or _is_explicit_slack_request(
+        text,
+        bot_user_id,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions and not code_channel,
+        message_update=message_update,
     )
 
 
@@ -546,6 +564,9 @@ async def _process_slack_mention_impl(
     attachments = event_data.get("attachments", [])
     bot_user_id = event_data.get("bot_user_id", "")
     message_update = bool(event_data.get("message_update"))
+    reply_thread_ts = event_data.get("reply_thread_ts")
+    if not isinstance(reply_thread_ts, str):
+        reply_thread_ts = ""
     original_message_ts = event_data.get("original_message_ts")
     if not isinstance(original_message_ts, str) or not original_message_ts:
         original_message_ts = event_ts
@@ -604,8 +625,11 @@ async def _process_slack_mention_impl(
             if isinstance(timezone_value, str):
                 user_timezone = timezone_value.strip()
 
+    context_thread_ts = reply_thread_ts or thread_ts
     thread_messages = (
-        [] if message_update else await common.fetch_slack_thread_messages(channel_id, thread_ts)
+        []
+        if message_update
+        else await common.fetch_slack_thread_messages(channel_id, context_thread_ts)
     )
     current_message = next(
         (message for message in thread_messages if str(message.get("ts")) == original_message_ts),
@@ -802,6 +826,8 @@ async def _process_slack_mention_impl(
     }
     if user_timezone:
         slack_thread_context["triggering_user_timezone"] = user_timezone
+    if code_channel and reply_thread_ts:
+        slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     configurable: dict[str, Any] = {
         "repo": repo_config,
@@ -843,13 +869,13 @@ async def _process_slack_mention_impl(
         environment=environment_slug,
     )
 
-    # A DM (treat_all_messages_as_mentions) is inherently directed at the bot, so
-    # it interrupts immediately like an explicit @-mention rather than debouncing.
-    explicitly_tagged = _is_explicit_slack_request(
+    explicitly_tagged = _interrupts_active_run(
         text,
         bot_user_id,
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        code_channel=code_channel,
         message_update=message_update,
+        explicit_request=bool(event_data.get("explicit_request")),
     )
     run_input = _slack_context_input(
         context_messages,
@@ -864,7 +890,9 @@ async def _process_slack_mention_impl(
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")
-        await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
+        if is_first_mention:
+            await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
+            await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
     try:
         run = await _dispatch_or_queue_slack_run(
             langgraph_client,

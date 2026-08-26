@@ -118,7 +118,7 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 
 Webhooks compute deterministic thread ids so the same Linear issue / Slack thread / PR routes back to the same running agent. See `utils/github_comments.py:get_thread_id_from_branch` and the equivalents in `utils/linear.py` / `utils/slack.py`. Reviewer threads have their own deterministic ids and are tagged with `REVIEWER_THREAD_KIND` metadata so the FastAPI side can find them.
 
-Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task session. Open SWE keys Slack locations by `(channel_id, thread_ts)`, so a code channel uses the `CODE_CHANNEL_SESSION_TS` (`"0"`) sentinel as its timestamp: it satisfies the existing timestamp validation, can never collide with a real message ts, and is what makes replies post top-level and thread context read from `conversations.history`. Session status, the context bar, views, and archival go through `agents.sessions.*` / `agents.conversations.*`.
+Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task session. Open SWE keys Slack locations by `(channel_id, thread_ts)`, so a code channel uses the `CODE_CHANNEL_SESSION_TS` (`"0"`) sentinel as its timestamp: it satisfies the existing timestamp validation, can never collide with a real message ts, and makes default replies post top-level while preserving a real `reply_thread_ts` when the user starts a Slack thread. Channel context reads from `conversations.history`; user-started thread context reads from `conversations.replies`. Session status, runtime commands, properties, views, canvases, and archival go through `agents.sessions.*` / `agents.conversations.*`.
 
 ## Conventions
 

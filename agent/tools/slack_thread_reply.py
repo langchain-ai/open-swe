@@ -77,6 +77,15 @@ async def slack_thread_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
+    from ..utils.slack_code_channels import is_code_channel_session
+
+    reply_thread_ts = active.get("reply_thread_ts")
+    post_thread_ts = (
+        str(reply_thread_ts)
+        if is_code_channel_session(str(thread_ts)) and isinstance(reply_thread_ts, str)
+        else str(thread_ts)
+    )
+
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         current_version = await get_slack_thread_version(client, channel_id, thread_ts)
         if thread_version != current_version:
@@ -97,6 +106,7 @@ async def slack_thread_reply(
             message,
             blocks=slack_blocks,
             usage=usage,
+            post_thread_ts=post_thread_ts,
             agent_thread_id=thread_id if isinstance(thread_id, str) else None,
             langgraph_client=client,
             run_id=run_id,
@@ -226,10 +236,11 @@ async def _post_and_store_mapping(
     langgraph_client: Any | None = None,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
+    post_thread_ts: str | None = None,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
-        thread_ts,
+        post_thread_ts or thread_ts,
         message,
         blocks=blocks,
         usage=usage,

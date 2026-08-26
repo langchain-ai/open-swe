@@ -14,33 +14,88 @@ from ..utils.slack import (
 )
 from ..utils.slack_code_channels import (
     CODE_CHANNEL_SESSION_TS,
+    DEFAULT_CODE_CHANNEL_COMMANDS,
+    VIEW_CONTENT_MAX_BYTES,
+    CanvasAccessLevel,
+    SessionStatus,
+    ViewType,
     archive_code_channel,
+    block_suggestions_error,
     create_code_channel,
+    delete_block_suggestions,
+    get_canvas,
     is_code_channel_session,
+    list_views,
+    remove_view,
     rename_session,
+    repo_context_bar_items,
+    set_agent_resource,
+    set_canvas_content,
+    set_commands,
     set_context_bar,
-    set_diff_view,
+    set_session_status_result,
+    set_summary_message,
+    set_view,
+    store_block_suggestions,
 )
 from ..utils.thread_ops import langgraph_client
+from .create_sandbox_file_download_url import _resolve_sandbox_file
 
 
 async def manage_code_channel(
-    action: Literal["create", "rename", "context", "view", "archive"],
+    action: Literal[
+        "create",
+        "status",
+        "rename",
+        "context",
+        "summary",
+        "resource",
+        "commands",
+        "view",
+        "list_views",
+        "remove_view",
+        "get_canvas",
+        "set_canvas",
+        "archive",
+    ],
     title: str = "",
+    team_id: str = "",
+    is_private: bool | None = None,
+    status: SessionStatus = "active",
     items: list[dict[str, Any]] | None = None,
+    summary_message_ts: str = "",
+    summary_thread_ts: str = "",
+    resource: dict[str, Any] | None = None,
+    commands: list[dict[str, Any]] | None = None,
+    view_type: ViewType = "diff",
+    view_key: str = "",
+    view_id: str = "",
+    name: str = "",
     content: str = "",
+    file_path: str = "",
+    blocks: list[dict[str, Any]] | None = None,
+    suggestions: dict[str, list[dict[str, Any]]] | None = None,
+    canvas_id: str = "",
+    access_level: CanvasAccessLevel = "write",
     base_branch: str = "",
     head_branch: str = "",
-    summary_message_ts: str = "",
+    csp: dict[str, list[str]] | None = None,
+    include_resolved: bool = False,
 ) -> dict[str, Any]:
-    """Manage this session's dedicated Slack code channel.
+    """Manage the complete Slack code-channel surface for this session.
 
-    `create` moves the current Slack thread into a channel named by `title`.
-    `rename` changes its `title`. `context` replaces its bar with up to five
-    `items` (`key`, `label`, `icon`, `url`). `view` publishes `content` as a diff,
-    optionally labeled with `base_branch` and `head_branch`. `archive` closes the
-    channel; first post the closing summary and pass its timestamp as
-    `summary_message_ts` so Slack preserves it.
+    Use `create` to promote the current Slack thread. Use `status`, `rename`,
+    `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
+    upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
+    can be passed directly or read from `file_path`, while Block Kit uses `blocks`
+    plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
+    `list_views` and `remove_view` to reconcile
+    tabs. Use `get_canvas` to read markdown and comments and `set_canvas` to
+    replace its markdown while preserving comment anchors. Post a closing summary
+    before `archive` and pass its timestamp as `summary_message_ts`.
+
+    Files must be inside the active sandbox work directory, valid UTF-8, and at
+    most 1 MB. Never publish secrets or credentials in a view.
     """
     config = get_config()
     configurable = config.get("configurable", {})
@@ -61,42 +116,159 @@ async def manage_code_channel(
     if action == "create":
         if is_code_channel_session(thread_ts):
             return {"success": False, "error": "This session is already a code channel"}
-        return await _create(client, thread_id, active, title)
+        repo = configurable.get("repo")
+        return await _create(
+            client,
+            thread_id,
+            active,
+            title,
+            repo if isinstance(repo, dict) else None,
+            team_id=team_id,
+            is_private=is_private,
+        )
 
     if not is_code_channel_session(thread_ts):
         return {"success": False, "error": "This session is not in a code channel"}
 
+    if action == "status":
+        data, error = await set_session_status_result(channel_id, status)
+        return _result(action, channel_id, data, error)
     if action == "rename":
-        if not title.strip():
-            return {"success": False, "error": "title is required"}
         ok, error = await rename_session(channel_id, title)
-    elif action == "context":
-        if not items:
+        return _result(action, channel_id, None, error if not ok else None)
+    if action == "context":
+        if items is None:
             return {"success": False, "error": "items is required"}
         ok, error = await set_context_bar(channel_id, items)
-    elif action == "view":
-        if not content.strip():
-            return {"success": False, "error": "content is required"}
-        ok, error = await set_diff_view(
+        return _result(action, channel_id, None, error if not ok else None)
+    if action == "summary":
+        data, error = await set_summary_message(
             channel_id,
-            content,
+            summary_message_ts.strip(),
+            thread_ts=summary_thread_ts.strip(),
+        )
+        return _result(action, channel_id, data, error)
+    if action == "resource":
+        if resource is None:
+            return {"success": False, "error": "resource is required"}
+        data, error = await set_agent_resource(channel_id, resource)
+        return _result(action, channel_id, data, error)
+    if action == "commands":
+        if commands is None:
+            return {"success": False, "error": "commands is required; use [] to clear"}
+        data, error = await set_commands(channel_id, commands)
+        return _result(action, channel_id, data, error)
+    if action == "view":
+        resolved_content, content_error = await _resolve_content(content, file_path)
+        if content_error:
+            return {"success": False, "error": content_error}
+        if suggestions is not None:
+            if view_type != "block_kit":
+                return {
+                    "success": False,
+                    "error": "suggestions are only supported for block_kit views",
+                }
+            suggestions_error = block_suggestions_error(suggestions)
+            if suggestions_error:
+                return {"success": False, "error": suggestions_error}
+        data, error = await set_view(
+            channel_id,
+            view_type,
+            view_key=view_key,
+            content=resolved_content,
+            blocks=blocks,
+            canvas_id=canvas_id,
+            access_level=access_level,
             base_branch=base_branch,
             head_branch=head_branch,
+            name=name or title,
+            csp=csp,
         )
-    elif action == "archive":
+        result = _result(action, channel_id, data, error)
+        if not error and suggestions is not None and data:
+            slack_view_id = data.get("view_id")
+            if isinstance(slack_view_id, str) and slack_view_id:
+                try:
+                    await store_block_suggestions(client, channel_id, slack_view_id, suggestions)
+                except Exception as exc:  # noqa: BLE001
+                    result["warnings"] = [f"Could not store Block Kit suggestions: {exc}"]
+        return result
+    if action == "list_views":
+        views, error = await list_views(channel_id)
+        return _result(action, channel_id, {"views": views} if views is not None else None, error)
+    if action == "remove_view":
+        data, error = await remove_view(channel_id, view_key=view_key, view_id=view_id)
+        result = _result(action, channel_id, data, error)
+        removed_view_id = data.get("view_id") if data else None
+        if not error and isinstance(removed_view_id, str) and removed_view_id:
+            with suppress(Exception):
+                await delete_block_suggestions(client, channel_id, removed_view_id)
+        return result
+    if action == "get_canvas":
+        data, error = await get_canvas(channel_id, canvas_id, include_resolved=include_resolved)
+        return _result(action, channel_id, data, error)
+    if action == "set_canvas":
+        resolved_content, content_error = await _resolve_content(content, file_path)
+        if content_error:
+            return {"success": False, "error": content_error}
+        data, error = await set_canvas_content(channel_id, canvas_id, resolved_content)
+        return _result(action, channel_id, data, error)
+    if action == "archive":
+        _, status_error = await set_session_status_result(channel_id, "closed")
         ok, error = await archive_code_channel(
             channel_id, summary_message_ts=summary_message_ts.strip()
         )
-    else:
-        return {"success": False, "error": f"Unknown action {action}"}
+        result = _result(action, channel_id, None, error if not ok else None)
+        if status_error:
+            result["warnings"] = [f"Could not set session status to closed: {status_error}"]
+        return result
+    return {"success": False, "error": f"Unknown action {action}"}
 
-    if not ok:
-        return {"success": False, "error": error or "Slack rejected the request"}
-    return {"success": True, "action": action, "channel_id": channel_id}
+
+def _result(
+    action: str,
+    channel_id: str,
+    data: dict[str, Any] | None,
+    error: str | None,
+) -> dict[str, Any]:
+    if error:
+        return {"success": False, "error": error}
+    result: dict[str, Any] = {"success": True, "action": action, "channel_id": channel_id}
+    if data:
+        result["data"] = data
+    return result
+
+
+async def _resolve_content(content: str, file_path: str) -> tuple[str, str | None]:
+    if content and file_path:
+        return "", "Pass content or file_path, not both"
+    if not file_path:
+        return content, None
+    try:
+        backend, path, _ = await _resolve_sandbox_file(file_path)
+        downloads = await backend.adownload_files([path])
+    except Exception as exc:  # noqa: BLE001
+        return "", f"Could not read file_path: {exc}"
+    if not downloads or not downloads[0].content:
+        return "", "file_path is empty or unreadable"
+    raw = downloads[0].content
+    if len(raw) > VIEW_CONTENT_MAX_BYTES:
+        return "", "file_path exceeds Slack's 1 MB view limit"
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return "", "file_path must contain valid UTF-8 text"
 
 
 async def _create(
-    client: Any, thread_id: str, active: dict[str, Any], title: str
+    client: Any,
+    thread_id: str,
+    active: dict[str, Any],
+    title: str,
+    repo: dict[str, Any] | None,
+    *,
+    team_id: str = "",
+    is_private: bool | None = None,
 ) -> dict[str, Any]:
     if not title.strip():
         return {"success": False, "error": "title is required"}
@@ -109,6 +281,8 @@ async def _create(
         session_id=thread_id,
         origin_channel_id=source_channel,
         origin_message_ts=origin_message_ts,
+        team_id=team_id,
+        is_private=is_private,
     )
     if not channel_id:
         return {"success": False, "error": error or "Slack could not create the code channel"}
@@ -143,8 +317,6 @@ async def _create(
                 },
             )
     except Exception as exc:  # noqa: BLE001
-        # Leave no channel that still routes here: an orphan would keep
-        # delivering messages into a session that never moved.
         if bound:
             with suppress(Exception):
                 await delete_slack_thread_associations(
@@ -170,9 +342,25 @@ async def _create(
             "retryable": True,
         }
 
-    return {
+    warnings: list[str] = []
+    _, status_error = await set_session_status_result(channel_id, "processing")
+    if status_error:
+        warnings.append(f"Could not set processing status: {status_error}")
+    context_items = repo_context_bar_items(repo)
+    if context_items:
+        _, context_error = await set_context_bar(channel_id, context_items)
+        if context_error:
+            warnings.append(f"Could not set repository context: {context_error}")
+    _, commands_error = await set_commands(channel_id, DEFAULT_CODE_CHANNEL_COMMANDS)
+    if commands_error:
+        warnings.append(f"Could not register default commands: {commands_error}")
+
+    result: dict[str, Any] = {
         "success": True,
         "action": "create",
         "channel_id": channel_id,
         "dashboard_url": dashboard_thread_url(thread_id),
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result
