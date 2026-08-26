@@ -37,7 +37,7 @@ SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 
-SlackChannelContext = dict[str, str]
+SlackChannelContext = dict[str, str | bool | None]
 _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
@@ -932,13 +932,14 @@ def _cache_slack_channel_info(channel_id: str, channel: dict[str, Any]) -> None:
     )
 
 
-async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
+async def get_slack_channel_info(
+    channel_id: str, *, use_cache: bool = True
+) -> dict[str, Any] | None:
     """Get Slack channel details (including topic/purpose) by channel ID."""
     if not SLACK_BOT_TOKEN or not channel_id:
         return None
 
-    cached = _cached_slack_channel_info(channel_id)
-    if cached is not None:
+    if use_cache and (cached := _cached_slack_channel_info(channel_id)) is not None:
         return cached
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -1004,6 +1005,11 @@ def normalize_slack_channel_context(
     topic = _channel_section_value(channel, "topic")
     purpose = _channel_section_value(channel, "purpose")
     description = "\n".join(value for value in (topic, purpose) if value)
+    is_ext_shared = channel.get("is_ext_shared") if isinstance(channel, dict) else None
+    is_pending_ext_shared = (
+        channel.get("is_pending_ext_shared") if isinstance(channel, dict) else None
+    )
+    is_im = channel.get("is_im") if isinstance(channel, dict) else None
     return {
         "id": channel_id,
         "name": name,
@@ -1011,7 +1017,22 @@ def normalize_slack_channel_context(
         "topic": topic,
         "purpose": purpose,
         "description": description,
+        "is_ext_shared": is_ext_shared if isinstance(is_ext_shared, bool) else None,
+        "is_pending_ext_shared": (
+            is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
+        ),
+        "is_im": is_im if isinstance(is_im, bool) else None,
     }
+
+
+def slack_channel_allows_operations(channel_context: dict[str, Any] | None) -> bool:
+    """Allow operations only when Slack confirms the channel is not externally shared."""
+    if not isinstance(channel_context, dict):
+        return False
+    return channel_context.get("is_im") is True or (
+        channel_context.get("is_ext_shared") is False
+        and channel_context.get("is_pending_ext_shared") is False
+    )
 
 
 def get_slack_channel_context_description(channel_context: dict[str, Any] | None) -> str:
@@ -1050,9 +1071,11 @@ def is_slack_channel_named(channel_context: dict[str, Any] | None, expected_name
     )
 
 
-async def get_slack_channel_context(channel_id: str) -> SlackChannelContext:
+async def get_slack_channel_context(
+    channel_id: str, *, use_cache: bool = True
+) -> SlackChannelContext:
     """Fetch and normalize Slack channel context."""
-    channel = await get_slack_channel_info(channel_id)
+    channel = await get_slack_channel_info(channel_id, use_cache=use_cache)
     return normalize_slack_channel_context(channel_id, channel)
 
 

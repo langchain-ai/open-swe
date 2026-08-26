@@ -52,6 +52,29 @@ class _FakeClient:
         self.threads = threads_client
 
 
+def test_channel_context_preserves_external_sharing_status() -> None:
+    context = slack_utils.normalize_slack_channel_context(
+        "C123", {"name": "shared", "is_ext_shared": True}
+    )
+
+    assert context["is_ext_shared"] is True
+    assert not slack_utils.slack_channel_allows_operations(context)
+
+
+def test_channel_operations_fail_closed_without_external_sharing_status() -> None:
+    context = slack_utils.normalize_slack_channel_context("C123", None)
+
+    assert context["is_ext_shared"] is None
+    assert not slack_utils.slack_channel_allows_operations(context)
+    assert slack_utils.slack_channel_allows_operations(
+        {"is_ext_shared": False, "is_pending_ext_shared": False}
+    )
+    assert not slack_utils.slack_channel_allows_operations(
+        {"is_ext_shared": False, "is_pending_ext_shared": True}
+    )
+    assert slack_utils.slack_channel_allows_operations({"is_im": True})
+
+
 def test_source_context_preserves_existing_slack_permalink_on_lookup_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

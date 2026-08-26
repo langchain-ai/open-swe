@@ -122,6 +122,7 @@ from ..utils.slack import (
     resolve_slack_links_in_context,  # noqa: F401
     resolve_slack_thread_id,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
+    slack_channel_allows_operations,  # noqa: F401
     store_slack_run_mapping,  # noqa: F401
     strip_bot_mention,  # noqa: F401
     update_slack_message,
@@ -269,6 +270,7 @@ __all__ = [
     "sanitize_github_comment_body",
     "select_slack_context_messages",
     "set_reviewer_thread_metadata",
+    "slack_channel_allows_operations",
     "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
@@ -530,10 +532,10 @@ def _run_id_for_logging(run: Any) -> str:
     return run_id if isinstance(run_id, str) and run_id else "<unknown>"
 
 
-async def _get_slack_channel_context(channel_id: str) -> dict[str, str]:
+async def _get_slack_channel_context(channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
     """Fetch Slack channel context without blocking Slack-triggered runs on failure."""
     try:
-        return await get_slack_channel_context(channel_id)
+        return await get_slack_channel_context(channel_id, use_cache=use_cache)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to resolve Slack channel context")
         return normalize_slack_channel_context(channel_id, None)

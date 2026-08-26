@@ -435,6 +435,8 @@ Slack Block Kit option buttons only work when Interactivity is enabled and point
 
 Slack messages are routed to the Slack default repo (`SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
 
+Open SWE refuses Slack Connect channels when `conversations.info` reports `is_ext_shared`, before starting an agent run. If Slack cannot verify a channel, it fails closed and does not operate there.
+
 **"Sign in with Slack" account linking (optional):**
 
 The dashboard can let a user link their Slack identity to their GitHub login via Slack OIDC ("Sign in with Slack"). This is what lets a Slack-triggered run resolve to the right GitHub user. To enable it:
