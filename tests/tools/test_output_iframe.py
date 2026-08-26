@@ -1,9 +1,12 @@
 import importlib
+import shlex
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from langchain_core.messages import ToolMessage
+
+from agent.utils.html_artifact import artifact_skeleton
 
 iframe_tool = importlib.import_module("agent.tools.output_iframe")
 
@@ -70,10 +73,14 @@ async def test_output_iframe_snapshots_html_and_returns_signed_urls(
         "title": "Quarterly chart",
         "filename": "chart.html",
     }
+    prefix, suffix = artifact_skeleton("Quarterly chart")
+    copy_source = "head -c 1000001 -- /workspace/project/chart.html"
     assert backend.commands == [
         "test -f /workspace/project/chart.html && stat -c %s -- /workspace/project/chart.html",
         "mkdir -p -- /workspace/project/.open-swe/iframe-artifacts/artifact-id && "
-        "head -c 1000001 -- /workspace/project/chart.html > "
+        f"{{ if grep -qi '<html[ >]' -- /workspace/project/chart.html; then {copy_source}; "
+        f"else printf '%s' {shlex.quote(prefix)}; {copy_source}; "
+        f"printf '%s' {shlex.quote(suffix)}; fi; }} > "
         "/workspace/project/.open-swe/iframe-artifacts/artifact-id/chart.html && "
         "stat -c %s -- "
         "/workspace/project/.open-swe/iframe-artifacts/artifact-id/chart.html",
@@ -113,7 +120,10 @@ async def test_output_iframe_rejects_snapshot_that_grows_during_copy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls, backend = _configure(monkeypatch)
-    backend.copy_output = str(iframe_tool._MAX_HTML_BYTES + 1)
+    prefix, suffix = artifact_skeleton(None)
+    backend.copy_output = str(
+        iframe_tool._MAX_HTML_BYTES + len(prefix.encode()) + len(suffix.encode()) + 1
+    )
 
     with pytest.raises(ValueError, match="1 MB"):
         await iframe_tool._output_iframe("chart.html")

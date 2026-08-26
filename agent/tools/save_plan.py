@@ -1,6 +1,7 @@
 """Tool: ``save_plan``. Publish a sandbox HTML artifact for review or sharing."""
 
 import logging
+import re
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -13,6 +14,7 @@ from ..dashboard.plan_store import (
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
+from ..utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -27,19 +29,14 @@ async def save_plan(
     """Publish a self-contained HTML plan artifact from the sandbox.
 
     Use this in plan mode once the artifact is ready. Outside plan mode, use it
-    to share a long response without switching the thread into plan mode. Create
-    one complete ``.html`` document directly under ``/workspace/plans/`` and pass
-    that path here. The document is displayed only in a sandboxed iframe.
-
-    The HTML must include a descriptive ``<title>``, real content, inline CSS,
-    explicit body background and text colors, accessible focus states, and a
-    responsive layout. Inline or data-URI every asset. Google Fonts stylesheets
-    are the only permitted external resources; include fallback font stacks.
-    Define complete light tokens in ``:root``, system-dark overrides in
-    ``@media (prefers-color-scheme: dark)`` guarded by
-    ``:root:not([data-theme=\"light\"])``, and explicit dark overrides in
-    ``:root[data-theme=\"dark\"]``. Do not include scripts, forms, embeds, or
-    dependencies on host-page CSS or JavaScript.
+    to share a long response without switching the thread into plan mode. Write
+    one ``.html`` file directly under ``/workspace/plans/`` and pass that path
+    here. Read the ``html-artifacts`` skill for the authoring rules: write the
+    page content and omit ``<html>``/``<head>``/``<body>`` — they are added
+    here, along with a minimal CSS reset — and include a ``<title>``. The
+    artifact is rendered in an opaque-origin sandboxed iframe under a strict CSP:
+    inline CSS and JavaScript, Canvas, WebGL, and Google Fonts work; network
+    access and web storage do not.
 
     Args:
         plan_file_path: Path to the HTML artifact in the sandbox.
@@ -71,10 +68,10 @@ async def save_plan(
         content = (await _read_plan_file(str(thread_id), path)).strip()
         if not content:
             return {"success": False, "error": "plan file cannot be empty"}
-        validation_error = _validate_html(content)
-        if validation_error:
-            return {"success": False, "error": validation_error}
-        await _save(str(thread_id), content, path, plan_mode=_active_plan_mode(state, configurable))
+        document = wrap_html_artifact(content, title=_title_from_path(path))
+        await _save(
+            str(thread_id), document, path, plan_mode=_active_plan_mode(state, configurable)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
@@ -130,16 +127,9 @@ def _is_html_path(path: str) -> bool:
     return bool(filename and "/" not in filename and filename.lower().endswith(".html"))
 
 
-def _validate_html(content: str) -> str | None:
-    lowered = content.lower()
-    if "<html" not in lowered or "<head" not in lowered or "<body" not in lowered:
-        return "plan file must be a complete HTML document with html, head, and body elements"
-    if "<title" not in lowered:
-        return "plan file must include a descriptive title"
-    if "<script" in lowered:
-        return "plan HTML cannot include scripts"
-    if "<iframe" in lowered or "<object" in lowered or "<embed" in lowered:
-        return "plan HTML cannot include nested embeds"
-    if "<form" in lowered:
-        return "plan HTML cannot include forms"
-    return None
+def _title_from_path(path: str) -> str:
+    """Fallback artifact name for a plan file that carries no title of its own."""
+    stem = path.rsplit("/", 1)[-1].removesuffix(".html")
+    stem = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", stem)
+    words = stem.replace("-", " ").replace("_", " ").strip()
+    return words[:1].upper() + words[1:] if words else DEFAULT_TITLE
