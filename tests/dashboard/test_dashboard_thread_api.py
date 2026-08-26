@@ -2061,7 +2061,7 @@ async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> No
     assert exc_info.value.status_code == 404
 
 
-async def test_list_dashboard_threads_sidebar_includes_pinned_non_owner(monkeypatch) -> None:
+async def test_list_dashboard_threads_sidebar_includes_pinned_thread(monkeypatch) -> None:
     owned = _make_threads(1, resolved_before=0)
     shared = {
         "thread_id": "shared-thread",
@@ -2103,7 +2103,6 @@ async def test_list_dashboard_threads_sidebar_includes_pinned_non_owner(monkeypa
     )
 
     assert [item["id"] for item in result["pinned"]] == ["shared-thread"]
-    assert result["pinned"][0]["isOwner"] is False
 
 
 async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(

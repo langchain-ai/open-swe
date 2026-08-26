@@ -944,12 +944,7 @@ async def _pinned_thread_summaries(
             return None
         if not isinstance(thread, Mapping) or not _thread_is_readable(_thread_metadata(thread)):
             return None
-        return await _summarize_thread(
-            client,
-            thread,
-            owner_login=login,
-            owner_email=email,
-        )
+        return await _summarize_thread(client, thread)
 
     summaries = await asyncio.gather(
         *(load(thread_id) for thread_id in await list_thread_pin_ids(login))
