@@ -51,7 +51,7 @@ When the artifact is a tool or dashboard rather than a document, the craft shift
 
 ## Point of view
 
-Ground visual choices in the task's subject and audience, and honor any design system already in the repo (`CLAUDE.md`, a tokens or theme file, existing component styles) over your own choices.
+Ground visual choices in the task's subject and audience, and honor any design system already in the repo (`AGENTS.md`, a tokens or theme file, existing component styles) over your own choices.
 
 Avoid generic AI defaults: cream/terracotta serif pages, black with one neon accent, purple-blue gradient heroes, broadsheet hairlines over dense columns, centered-everything layouts, ubiquitous rounded cards, decorative numbering, emoji section markers, and defaulting to Inter or Space Grotesk. Where the user names a visual direction, follow it exactly — including when they ask for one of these.
 
