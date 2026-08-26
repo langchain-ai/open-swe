@@ -101,6 +101,11 @@ def validate_sandbox_startup_config() -> None:
     than on the first sandbox creation.
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    from agent.integrations.corridor_commit_scan import (
+        validate_corridor_commit_scanning_sandbox,
+    )
+
+    validate_corridor_commit_scanning_sandbox(sandbox_type)
     if sandbox_type == "langsmith":
         from agent.integrations.langsmith import LangSmithProvider
 
