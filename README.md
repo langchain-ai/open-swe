@@ -10,6 +10,7 @@
 
 <div align="center">
   <h3>Open-source framework for building your org's internal coding agent.</h3>
+  <p>Approved by mdrxy.</p>
 </div>
 
 <div align="center">
