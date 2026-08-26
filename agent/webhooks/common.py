@@ -133,7 +133,6 @@ from ..utils.slack_code_channels import (  # noqa: F401
     DEFAULT_CODE_CHANNEL_COMMANDS,
     get_block_suggestions,
     is_code_channel,
-    rename_session,
     repo_context_bar_items,
     set_commands,
     set_context_bar,

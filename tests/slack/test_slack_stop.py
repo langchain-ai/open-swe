@@ -1,6 +1,5 @@
 import builtins
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -299,16 +298,20 @@ async def test_agent_session_stopped_targets_agent_view_thread(
     thread_id = _add_thread(client, "3.000")
     client.runs.by_status["running"] = [{"run_id": "run-running"}]
     _patch_handler(monkeypatch, client)
-    set_status = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_stop, "set_session_status", set_status)
+    statuses: list[tuple[str, str, str]] = []
 
+    async def set_status(channel_id: str, status: str, thread_ts: str = "") -> bool:
+        statuses.append((channel_id, status, thread_ts))
+        return True
+
+    monkeypatch.setattr(slack_stop, "set_session_status", set_status)
     await slack_stop.process_agent_session_stopped(
         {"type": "agent_session_stopped", "channel": "C123", "thread_ts": "3.000"},
         event_id="EvAgentViewStop",
     )
 
     assert client.runs.cancelled[0]["thread_id"] == thread_id
-    set_status.assert_awaited_once_with("C123", "active", "3.000")
+    assert statuses == [("C123", "active", "3.000")]
 
 
 async def test_duplicate_stop_reaction_has_no_side_effects(

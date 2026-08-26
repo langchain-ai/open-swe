@@ -896,12 +896,12 @@ async def _process_slack_mention_impl(
         request_blocks=content_blocks,
         operational_context=operational_context,
     )
-    await common.set_session_status(channel_id, "processing", thread_ts)
-    if is_first_mention:
-        await common.rename_session(channel_id, clean_text[:200], thread_ts)
-        if code_channel:
-            await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
-            await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    await common.set_session_status(
+        channel_id, "processing", thread_ts, clean_text[:200] if is_first_mention else ""
+    )
+    if code_channel and is_first_mention:
+        await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
+        await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
     try:
         run = await _dispatch_or_queue_slack_run(
             langgraph_client,
