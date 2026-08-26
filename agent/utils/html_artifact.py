@@ -3,7 +3,10 @@
 import html
 import re
 
-_FULL_DOCUMENT = re.compile(r"<html[\s>]", re.IGNORECASE)
+_FULL_DOCUMENT = re.compile(r"<html([\s>]|$)", re.IGNORECASE | re.MULTILINE)
+
+# The same test as `_FULL_DOCUMENT` for callers that can only shell out to grep.
+FULL_DOCUMENT_GREP = "<html([[:space:]>]|$)"
 _TITLE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.IGNORECASE | re.DOTALL)
 
 RESET = (

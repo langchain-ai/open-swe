@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from langchain_core.tools import tool
 
-from ..utils.html_artifact import artifact_skeleton
+from ..utils.html_artifact import FULL_DOCUMENT_GREP, artifact_skeleton
 from .create_sandbox_file_download_url import (
     _resolve_sandbox_file,
     create_sandbox_file_download_url,
@@ -45,7 +45,8 @@ async def _output_iframe(
     copy_source = f"head -c {_MAX_HTML_BYTES + 1} -- {quoted_source}"
     copied = await backend.aexecute(
         f"mkdir -p -- {shlex.quote(snapshot_dir)} && "
-        f"{{ if grep -qi '<html[ >]' -- {quoted_source}; then {copy_source}; else "
+        f"{{ if grep -qiE {shlex.quote(FULL_DOCUMENT_GREP)} -- {quoted_source}; "
+        f"then {copy_source}; else "
         f"printf '%s' {shlex.quote(prefix)}; {copy_source}; "
         f"printf '%s' {shlex.quote(suffix)}; fi; }} > {quoted_snapshot} && "
         f"stat -c %s -- {quoted_snapshot}",

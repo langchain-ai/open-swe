@@ -1,5 +1,10 @@
+import subprocess
+
+import pytest
+
 from agent.utils.html_artifact import (
     DEFAULT_TITLE,
+    FULL_DOCUMENT_GREP,
     artifact_skeleton,
     is_full_document,
     wrap_html_artifact,
@@ -35,6 +40,35 @@ def test_scripts_and_forms_survive_wrapping() -> None:
 
     assert "<script>draw()</script>" in wrapped
     assert f"<title>{DEFAULT_TITLE}</title>" in wrapped
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '<!doctype html><html lang="en"><body>x</body></html>',
+        '<html\nlang="en">\n<body>x</body>\n</html>',
+        "<html>\n<body>x</body>\n</html>",
+        "<h1>fragment</h1>",
+        "<htmlish>not a document</htmlish>",
+        "<p>mentions &lt;html&gt; in prose</p>",
+    ],
+)
+def test_grep_pattern_agrees_with_the_python_detector(content: str, tmp_path) -> None:
+    path = tmp_path / "artifact.html"
+    path.write_text(content)
+
+    found = subprocess.run(
+        ["grep", "-qiE", FULL_DOCUMENT_GREP, "--", str(path)],
+        check=False,
+    )
+
+    assert (found.returncode == 0) is is_full_document(content)
+
+
+def test_multiline_html_tag_is_not_double_wrapped() -> None:
+    document = '<html\nlang="en">\n<head></head>\n<body>x</body>\n</html>'
+
+    assert wrap_html_artifact(document) == document
 
 
 def test_skeleton_escapes_the_title() -> None:
