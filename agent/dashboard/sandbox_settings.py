@@ -7,8 +7,8 @@ stored value wins, and an unset record falls back to the env var.
 
 The value is an opaque provider-scoped identifier — for ``SANDBOX_TYPE=langsmith``
 it is a LangSmith snapshot id — so it is stored as free text with no format
-validation. Per-repo snapshots (:mod:`agent.dashboard.repo_snapshots`) still take
-precedence over this base for runs that target a repo with a ready snapshot.
+validation. An environment with a ready snapshot still takes precedence over this
+base.
 """
 
 import logging

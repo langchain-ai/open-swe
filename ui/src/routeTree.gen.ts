@@ -25,7 +25,7 @@ import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
 import { Route as AgentsEnvironmentsRouteImport } from './routes/agents_.environments'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
-import { Route as AgentsSnapshotsRouteImport } from './routes/agents_.snapshots'
+import { Route as AgentsSandboxRouteImport } from './routes/agents_.sandbox'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
@@ -117,9 +117,9 @@ const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
   path: '/agents/instructions',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsSnapshotsRoute = AgentsSnapshotsRouteImport.update({
-  id: '/agents_/snapshots',
-  path: '/agents/snapshots',
+const AgentsSandboxRoute = AgentsSandboxRouteImport.update({
+  id: '/agents_/sandbox',
+  path: '/agents/sandbox',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
@@ -191,7 +191,7 @@ export interface FileRoutesByFullPath {
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
-  '/agents/snapshots': typeof AgentsSnapshotsRoute
+  '/agents/sandbox': typeof AgentsSandboxRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
@@ -219,7 +219,7 @@ export interface FileRoutesByTo {
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
-  '/agents/snapshots': typeof AgentsSnapshotsRoute
+  '/agents/sandbox': typeof AgentsSandboxRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
@@ -249,7 +249,7 @@ export interface FileRoutesById {
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents_/environments': typeof AgentsEnvironmentsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
-  '/agents_/snapshots': typeof AgentsSnapshotsRoute
+  '/agents_/sandbox': typeof AgentsSandboxRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
@@ -280,7 +280,7 @@ export interface FileRouteTypes {
     | '/agents/threads'
     | '/agents/environments'
     | '/agents/instructions'
-    | '/agents/snapshots'
+    | '/agents/sandbox'
     | '/review/styles'
     | '/agents/'
     | '/agents/$threadId/plan'
@@ -308,7 +308,7 @@ export interface FileRouteTypes {
     | '/agents/threads'
     | '/agents/environments'
     | '/agents/instructions'
-    | '/agents/snapshots'
+    | '/agents/sandbox'
     | '/review/styles'
     | '/agents'
     | '/agents/$threadId/plan'
@@ -337,7 +337,7 @@ export interface FileRouteTypes {
     | '/agents/threads'
     | '/agents_/environments'
     | '/agents_/instructions'
-    | '/agents_/snapshots'
+    | '/agents_/sandbox'
     | '/review_/styles'
     | '/agents/'
     | '/agents/$threadId_/plan'
@@ -364,7 +364,7 @@ export interface RootRouteChildren {
   AdminEvalsRoute: typeof AdminEvalsRoute
   AgentsEnvironmentsRoute: typeof AgentsEnvironmentsRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
-  AgentsSnapshotsRoute: typeof AgentsSnapshotsRoute
+  AgentsSandboxRoute: typeof AgentsSandboxRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
   OwnerRepoPullNumberRoute: typeof OwnerRepoPullNumberRoute
@@ -484,11 +484,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsInstructionsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents_/snapshots': {
-      id: '/agents_/snapshots'
-      path: '/agents/snapshots'
-      fullPath: '/agents/snapshots'
-      preLoaderRoute: typeof AgentsSnapshotsRouteImport
+    '/agents_/sandbox': {
+      id: '/agents_/sandbox'
+      path: '/agents/sandbox'
+      fullPath: '/agents/sandbox'
+      preLoaderRoute: typeof AgentsSandboxRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/review_/styles': {
@@ -608,7 +608,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminEvalsRoute: AdminEvalsRoute,
   AgentsEnvironmentsRoute: AgentsEnvironmentsRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
-  AgentsSnapshotsRoute: AgentsSnapshotsRoute,
+  AgentsSandboxRoute: AgentsSandboxRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
   OwnerRepoPullNumberRoute: OwnerRepoPullNumberRoute,
