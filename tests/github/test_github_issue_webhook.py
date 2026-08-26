@@ -38,7 +38,7 @@ def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
         return 1
 
     async def channel_context(*args: object, **kwargs: object) -> dict[str, bool]:
-        return {"is_ext_shared": False}
+        return {"is_ext_shared": False, "is_pending_ext_shared": False}
 
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
@@ -615,6 +615,7 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
             "purpose": "",
             "description": "",
             "is_ext_shared": False,
+            "is_pending_ext_shared": False,
         }
 
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
@@ -678,6 +679,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         "purpose": "repo:langchain-ai/open-swe",
         "description": "Coordinate work\nrepo:langchain-ai/open-swe",
         "is_ext_shared": False,
+        "is_pending_ext_shared": False,
     }
 
     async def fake_get_slack_channel_context(

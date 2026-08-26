@@ -229,7 +229,7 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         webhook_common,
         "_get_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": False}),
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 
     response = await slack_routes.slack_webhook(
@@ -251,7 +251,7 @@ async def test_slack_webhook_queues_stop_reaction(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         webhook_common,
         "_get_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": False}),
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 
     response = await slack_routes.slack_webhook(
@@ -275,7 +275,7 @@ async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(
         webhook_common,
         "_get_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": False}),
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 
     response = await slack_routes.slack_webhook(
@@ -299,7 +299,7 @@ async def test_slack_webhook_ignores_untracked_reaction(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         webhook_common,
         "_get_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": False}),
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 
     response = await slack_routes.slack_webhook(

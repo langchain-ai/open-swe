@@ -116,7 +116,13 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     monkeypatch.setattr(
         slack_routes.common,
         "_get_slack_channel_context",
-        AsyncMock(return_value={"name": "proj-open-swe", "is_ext_shared": False}),
+        AsyncMock(
+            return_value={
+                "name": "proj-open-swe",
+                "is_ext_shared": False,
+                "is_pending_ext_shared": False,
+            }
+        ),
     )
     monkeypatch.setattr(
         slack_routes.common,

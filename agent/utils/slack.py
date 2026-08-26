@@ -1005,6 +1005,9 @@ def normalize_slack_channel_context(
     purpose = _channel_section_value(channel, "purpose")
     description = "\n".join(value for value in (topic, purpose) if value)
     is_ext_shared = channel.get("is_ext_shared") if isinstance(channel, dict) else None
+    is_pending_ext_shared = (
+        channel.get("is_pending_ext_shared") if isinstance(channel, dict) else None
+    )
     is_im = channel.get("is_im") if isinstance(channel, dict) else None
     return {
         "id": channel_id,
@@ -1014,6 +1017,9 @@ def normalize_slack_channel_context(
         "purpose": purpose,
         "description": description,
         "is_ext_shared": is_ext_shared if isinstance(is_ext_shared, bool) else None,
+        "is_pending_ext_shared": (
+            is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
+        ),
         "is_im": is_im if isinstance(is_im, bool) else None,
     }
 
@@ -1022,7 +1028,10 @@ def slack_channel_allows_operations(channel_context: dict[str, Any] | None) -> b
     """Allow operations only when Slack confirms the channel is not externally shared."""
     if not isinstance(channel_context, dict):
         return False
-    return channel_context.get("is_im") is True or channel_context.get("is_ext_shared") is False
+    return channel_context.get("is_im") is True or (
+        channel_context.get("is_ext_shared") is False
+        and channel_context.get("is_pending_ext_shared") is False
+    )
 
 
 def get_slack_channel_context_description(channel_context: dict[str, Any] | None) -> str:

@@ -65,7 +65,12 @@ def test_channel_operations_fail_closed_without_external_sharing_status() -> Non
 
     assert context["is_ext_shared"] is None
     assert not slack_utils.slack_channel_allows_operations(context)
-    assert slack_utils.slack_channel_allows_operations({"is_ext_shared": False})
+    assert slack_utils.slack_channel_allows_operations(
+        {"is_ext_shared": False, "is_pending_ext_shared": False}
+    )
+    assert not slack_utils.slack_channel_allows_operations(
+        {"is_ext_shared": False, "is_pending_ext_shared": True}
+    )
     assert slack_utils.slack_channel_allows_operations({"is_im": True})
 
 

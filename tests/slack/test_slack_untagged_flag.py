@@ -99,7 +99,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False}
+        return {"is_ext_shared": False, "is_pending_ext_shared": False}
 
     async def not_docs_plz(_channel_id: str, _context: dict[str, Any]) -> bool:
         return False
