@@ -17,6 +17,8 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.source_context import SourceContext
+
 from ..dispatch import dispatch_agent_run
 from ..input_messages import (
     PersonIdentity,
@@ -396,14 +398,10 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
 def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     if metadata.get("repo_private") is not True:
         return None
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, dict):
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None:
         return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return None
-    permalink = slack_thread.get("permalink")
-    return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
+    return slack_thread.permalink.strip() or None
 
 
 def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
@@ -431,16 +429,12 @@ def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     )
     category = _metadata_string(metadata, "thread_category")
     if not category:
-        source_context = metadata.get("source_context")
+        context = SourceContext.from_metadata(metadata)
         if _is_automation_thread(metadata):
             category = "automation"
-        elif isinstance(metadata.get("pr_number"), int) or (
-            isinstance(source_context, dict) and source_context.get("pr_number")
-        ):
+        elif isinstance(metadata.get("pr_number"), int) or context.pr_number:
             category = "pull_request"
-        elif isinstance(source_context, dict) and (
-            source_context.get("github_issue") or source_context.get("linear_issue")
-        ):
+        elif context.github_issue or context.linear_issue:
             category = "issue"
         else:
             category = "interactive"
@@ -1408,10 +1402,8 @@ async def _build_dashboard_configurable(
         configurable["repo"] = repo_config
     elif metadata.get("repo_explicitly_none") is True:
         configurable["repo_explicitly_none"] = True
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        for key, value in source_context.items():
-            configurable.setdefault(key, value)
+    for key, value in SourceContext.from_metadata(metadata).dump().items():
+        configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
         configurable["plan_mode"] = True
     # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
@@ -1758,11 +1750,10 @@ async def _enrich_run_start_command(
 
 
 def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, dict):
+    context = SourceContext.from_metadata(metadata)
+    if context.slack_thread is None:
         return None
-    slack_thread = source_context.get("slack_thread")
-    return slack_thread if isinstance(slack_thread, dict) else None
+    return context.dump()["slack_thread"]
 
 
 async def _notify_slack_web_handoff(

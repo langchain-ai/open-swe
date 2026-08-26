@@ -19,6 +19,7 @@ import httpx
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 
+from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -1596,18 +1597,11 @@ def _thread_metadata_slack_location(thread: Mapping[str, Any]) -> tuple[str, str
     metadata = thread.get("metadata")
     if not isinstance(metadata, Mapping):
         return None
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, Mapping):
-        return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, Mapping):
-        return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+    location = SourceContext.from_metadata(metadata).slack_location
+    if location is None:
         return None
     try:
-        return _normalize_slack_location(channel_id, thread_ts)
+        return _normalize_slack_location(*location)
     except SlackThreadMappingError:
         return None
 
@@ -1626,7 +1620,9 @@ async def resolve_slack_thread_id(
 
     matches = await langgraph_client.threads.search(
         metadata={
-            "source_context": {"slack_thread": {"channel_id": channel, "thread_ts": timestamp}}
+            "source_context": SourceContext(
+                slack_thread=SlackThreadRef(channel_id=channel, thread_ts=timestamp)
+            ).dump()
         },
         limit=2,
     )
@@ -1659,18 +1655,12 @@ async def get_active_slack_thread(
         try:
             thread = await langgraph_client.threads.get(thread_id)
             metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
-            source_context = (
-                metadata.get("source_context") if isinstance(metadata, Mapping) else None
-            )
-            slack_thread = (
-                source_context.get("slack_thread") if isinstance(source_context, Mapping) else None
-            )
-            if isinstance(slack_thread, Mapping):
-                location = dict(slack_thread)
+            context = SourceContext.from_metadata(metadata)
+            if context.slack_thread is not None:
                 _normalize_slack_location(
-                    str(location.get("channel_id") or ""), str(location.get("thread_ts") or "")
+                    context.slack_thread.channel_id, context.slack_thread.thread_ts
                 )
-                return location
+                return context.dump()["slack_thread"]
         except Exception:
             logger.debug("Could not resolve active Slack location for thread %s", thread_id)
     if isinstance(fallback, Mapping):

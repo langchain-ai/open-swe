@@ -10,6 +10,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import dispatch_agent_run
+from agent.source_context import SourceContext
 
 from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
 from .slack_events import claim_slack_event
@@ -39,15 +40,10 @@ def _thread_metadata(thread: object) -> dict[str, Any]:
 def _matching_slack_context(
     metadata: Mapping[str, Any], channel_id: str, thread_ts: str
 ) -> dict[str, Any] | None:
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, Mapping):
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None or not slack_thread.is_at(channel_id, thread_ts):
         return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, Mapping):
-        return None
-    if slack_thread.get("channel_id") != channel_id or slack_thread.get("thread_ts") != thread_ts:
-        return None
-    return dict(slack_thread)
+    return slack_thread.model_dump(mode="json", exclude_unset=True)
 
 
 async def _resolve_stop_target(
