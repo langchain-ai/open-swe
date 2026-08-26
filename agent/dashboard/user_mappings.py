@@ -23,11 +23,9 @@ dict entry).
 
 import logging
 import threading
-from datetime import UTC, datetime
 from typing import Any, Literal
 
-import httpx
-from langgraph_sdk import get_client
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +33,6 @@ USER_MAPPINGS_NAMESPACE: list[str] = ["user_mappings"]
 
 MappingSource = Literal["slack_oauth"]
 MappingStatus = Literal["active", "pending"]
-
-
-def _client():
-    return get_client()
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _norm_login(login: str | None) -> str:
@@ -179,62 +169,38 @@ def is_login_mapped(login: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _record_from_item(item: Any) -> dict[str, Any] | None:
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
-
-
-async def _load_all_records() -> list[dict[str, Any]]:
-    result = await _client().store.search_items(USER_MAPPINGS_NAMESPACE, limit=1000)
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    out: list[dict[str, Any]] = []
-    for item in items or []:
-        record = _record_from_item(item)
-        if record:
-            out.append(record)
-    return out
-
-
 async def refresh_cache() -> list[dict[str, Any]]:
     """Load every mapping from the Store and replace the in-process cache."""
-    records = await _load_all_records()
+    records = await search_values(USER_MAPPINGS_NAMESPACE, limit=1000)
     prime_cache(records)
     return records
 
 
 async def _ensure_cache_loaded() -> None:
+    """Prime the cache if it is cold.
+
+    Fail-soft on purpose: the async lookups below run on webhook and commit
+    paths where an unresolvable user is an expected outcome, so a store failure
+    degrades to "unmapped" instead of breaking the caller.
+    """
     with _cache_lock:
         loaded = _cache_loaded
     if not loaded:
         try:
             await refresh_cache()
-        except Exception as e:  # noqa: BLE001
-            logger.debug("user mapping cache load failed: %s", e)
+        except Exception:
+            logger.warning("user mapping cache load failed", exc_info=True)
 
 
 async def get_mapping(login: str) -> dict[str, Any] | None:
     norm = _norm_login(login)
     if not norm:
         return None
-    try:
-        item = await _client().store.get_item(USER_MAPPINGS_NAMESPACE, norm.lower())
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return None
-        logger.warning("user mapping lookup failed for %s: %s", norm, e)
-        return None
-    return _record_from_item(item)
+    return await get_value(USER_MAPPINGS_NAMESPACE, norm.lower())
 
 
 async def list_mappings() -> list[dict[str, Any]]:
-    try:
-        records = await _load_all_records()
-    except Exception as e:  # noqa: BLE001
-        logger.debug("user mapping list failed: %s", e)
-        return []
-    prime_cache(records)
+    records = await refresh_cache()
     return sorted(records, key=lambda r: _norm_login(r.get("github_login")).lower())
 
 
@@ -296,10 +262,10 @@ async def upsert_mapping(
         "slack_user_id": _norm_slack_id(slack_user_id) or existing.get("slack_user_id") or None,
         "source": source,
         "status": status,
-        "created_at": existing.get("created_at") or _now(),
-        "updated_at": _now(),
+        "created_at": existing.get("created_at") or now_iso(),
+        "updated_at": now_iso(),
     }
-    await _client().store.put_item(USER_MAPPINGS_NAMESPACE, login.lower(), record)
+    await put_value(USER_MAPPINGS_NAMESPACE, login.lower(), record)
     _deindex_login(login)
     _index_record(record)
     return record
@@ -309,12 +275,7 @@ async def delete_mapping(github_login: str) -> bool:
     login = _norm_login(github_login)
     if not login:
         return False
-    try:
-        await _client().store.delete_item(USER_MAPPINGS_NAMESPACE, login.lower())
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            _deindex_login(login)
-            return False
-        raise
+    existed = await get_mapping(login) is not None
+    await delete_value(USER_MAPPINGS_NAMESPACE, login.lower())
     _deindex_login(login)
-    return True
+    return existed

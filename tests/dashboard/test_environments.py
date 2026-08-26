@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent import store as agent_store
 from agent.dashboard import environments as env_store
 from agent.dashboard.environments import (
     EnvironmentCreate,
@@ -30,11 +31,17 @@ def _fake_client() -> tuple[MagicMock, dict[tuple[Any, ...], Any]]:
     async def delete_item(ns: list[str], key: str) -> None:
         store.pop((tuple(ns), key), None)
 
-    async def search_items(ns: list[str], limit: int = 100) -> dict[str, Any]:
+    async def search_items(
+        ns: list[str],
+        *,
+        filter: dict[str, Any] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         items = [
             {"value": value} for (namespace, _key), value in store.items() if namespace == tuple(ns)
         ]
-        return {"items": items[:limit]}
+        return {"items": items[offset : offset + limit]}
 
     client.store.put_item = AsyncMock(side_effect=put_item)
     client.store.get_item = AsyncMock(side_effect=get_item)
@@ -179,7 +186,7 @@ def test_environment_prompt_blank_is_none() -> None:
 @pytest.mark.asyncio
 async def test_only_the_environment_named_default_is_resolved() -> None:
     client, _ = _fake_client()
-    with patch.object(env_store, "get_client", return_value=client):
+    with patch.object(agent_store, "store_client", return_value=client):
         await env_store.create_environment(EnvironmentCreate(name="Draft"), "ramon")
         assert await env_store.resolve_default_environment() is None
 
@@ -193,7 +200,7 @@ async def test_only_the_environment_named_default_is_resolved() -> None:
 @pytest.mark.asyncio
 async def test_create_rejects_duplicate_name() -> None:
     client, _ = _fake_client()
-    with patch.object(env_store, "get_client", return_value=client):
+    with patch.object(agent_store, "store_client", return_value=client):
         await env_store.create_environment(EnvironmentCreate(name="base"), "ramon")
         with pytest.raises(ValueError, match="already exists"):
             await env_store.create_environment(EnvironmentCreate(name="Base"), "ramon")
@@ -202,7 +209,7 @@ async def test_create_rejects_duplicate_name() -> None:
 @pytest.mark.asyncio
 async def test_update_writes_only_provided_fields() -> None:
     client, _ = _fake_client()
-    with patch.object(env_store, "get_client", return_value=client):
+    with patch.object(agent_store, "store_client", return_value=client):
         await env_store.create_environment(
             EnvironmentCreate(
                 name="base",
@@ -238,7 +245,7 @@ async def test_update_writes_only_provided_fields() -> None:
 @pytest.mark.asyncio
 async def test_update_rejects_a_rename_across_slugs() -> None:
     client, _ = _fake_client()
-    with patch.object(env_store, "get_client", return_value=client):
+    with patch.object(agent_store, "store_client", return_value=client):
         await env_store.create_environment(EnvironmentCreate(name="draft"), "ramon")
         with pytest.raises(ValueError, match="renaming an environment"):
             await env_store.update_environment("draft", EnvironmentUpdate(name="default"))
@@ -249,7 +256,7 @@ async def test_delete_removes_record_and_snapshot() -> None:
     client, _ = _fake_client()
     delete_snapshot = AsyncMock()
     with (
-        patch.object(env_store, "get_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
     ):
         await env_store.create_environment(EnvironmentCreate(name="default"), "ramon")
@@ -264,7 +271,7 @@ async def test_delete_removes_record_and_snapshot() -> None:
 async def test_resolve_default_environment_swallows_store_failures() -> None:
     client = MagicMock()
     client.store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
-    with patch.object(env_store, "get_client", return_value=client):
+    with patch.object(agent_store, "store_client", return_value=client):
         assert await env_store.resolve_default_environment() is None
 
 
@@ -291,7 +298,7 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot() -> None:
     capture = AsyncMock(return_value=_FakeSnapshot("snap-2"))
     delete_snapshot = AsyncMock()
     with (
-        patch.object(env_store, "get_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
         patch(
             "agent.integrations.langsmith.get_async_sandbox_client",
@@ -324,7 +331,7 @@ async def test_capture_walks_the_name_suffix_past_a_conflict() -> None:
     client, _ = _fake_client()
     capture = AsyncMock(side_effect=[_NameConflict("taken"), _FakeSnapshot("snap-2")])
     with (
-        patch.object(env_store, "get_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch.object(env_store, "_delete_snapshot", AsyncMock()),
         patch(
             "agent.integrations.langsmith.get_async_sandbox_client",
@@ -348,7 +355,7 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> No
     capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
     delete_snapshot = AsyncMock()
     with (
-        patch.object(env_store, "get_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
         patch(
             "agent.integrations.langsmith.get_async_sandbox_client",
@@ -377,7 +384,7 @@ async def test_first_capture_failure_marks_the_environment_failed() -> None:
     client, _ = _fake_client()
     capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
     with (
-        patch.object(env_store, "get_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch(
             "agent.integrations.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
@@ -402,7 +409,7 @@ async def test_capture_requires_the_langsmith_provider(monkeypatch: pytest.Monke
     client, _ = _fake_client()
     capture = AsyncMock()
     with (
-        patch.object(env_store, "get_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch(
             "agent.integrations.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
@@ -436,7 +443,7 @@ def test_parse_environment_tag(text: str, expected_slug: str | None, expected_te
 @pytest.mark.asyncio
 async def test_resolve_environment_prefers_the_selection() -> None:
     client, _ = _fake_client()
-    with patch.object(env_store, "get_client", return_value=client):
+    with patch.object(agent_store, "store_client", return_value=client):
         await env_store.create_environment(EnvironmentCreate(name="default"), "ramon")
         await env_store.create_environment(EnvironmentCreate(name="staging"), "ramon")
 
@@ -457,7 +464,7 @@ async def test_resolve_environment_prefers_the_selection() -> None:
 @pytest.mark.asyncio
 async def test_environment_options_omit_admin_only_settings() -> None:
     client, _ = _fake_client()
-    with patch.object(env_store, "get_client", return_value=client):
+    with patch.object(agent_store, "store_client", return_value=client):
         await env_store.create_environment(
             EnvironmentCreate(
                 name="default",

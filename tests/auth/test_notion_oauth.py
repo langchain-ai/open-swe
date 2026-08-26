@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from cryptography.fernet import Fernet
 
+from agent import store as agent_store
 from agent.dashboard import notion_oauth as no
 
 
@@ -31,7 +32,7 @@ class _FakeClient:
 @pytest.fixture()
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
     store = _FakeStore()
-    monkeypatch.setattr(no, "_client", lambda: _FakeClient(store))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     return store
 

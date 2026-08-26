@@ -18,6 +18,8 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
+
 logger = logging.getLogger(__name__)
 
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
@@ -52,22 +54,8 @@ def plan_file_path_for_thread(thread_id: str) -> str:
     return f"{PLAN_FILE_DIRECTORY}/{date}-{slug or 'plan'}.html"
 
 
-def _client() -> Any:
-    return get_client()
-
-
-def _item_value(item: Any) -> dict[str, Any] | None:
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
-
-
-async def _stored_plan_file_path(client: Any, thread_id: str) -> str | None:
-    try:
-        value = _item_value(await client.store.get_item(PLAN_CONTENT_NAMESPACE, thread_id)) or {}
-    except Exception:
-        return None
+async def _stored_plan_file_path(thread_id: str) -> str | None:
+    value = await get_plan_content(thread_id) or {}
     path = value.get("plan_file_path")
     return path if isinstance(path, str) and path else None
 
@@ -88,9 +76,8 @@ async def save_plan_content(
     on it are cleared — otherwise stale feedback would resurface on the new plan
     and be fed back to the agent on the next approve/reject. A manual owner edit
     passes ``clear_comments=False`` so reviewer feedback survives the edit."""
-    client = _client()
     if plan_file_path is None:
-        plan_file_path = await _stored_plan_file_path(client, thread_id)
+        plan_file_path = await _stored_plan_file_path(thread_id)
     record: dict[str, Any] = {"status": status}
     if html is not None:
         record["html"] = html
@@ -98,11 +85,7 @@ async def save_plan_content(
         record["markdown"] = markdown
     if plan_file_path:
         record["plan_file_path"] = plan_file_path
-    await client.store.put_item(
-        PLAN_CONTENT_NAMESPACE,
-        thread_id,
-        record,
-    )
+    await put_value(PLAN_CONTENT_NAMESPACE, thread_id, record)
     if clear_comments:
         try:
             await clear_plan_comments(thread_id)
@@ -143,14 +126,13 @@ async def get_plan_content(
     With ``raise_on_error=True`` a store failure propagates instead of resolving
     to ``None``. Approve uses this so a transient failure aborts the decision
     rather than dispatching the agent without the (possibly edited) plan."""
-    client = _client()
     try:
-        item = await client.store.get_item(PLAN_CONTENT_NAMESPACE, thread_id)
+        return await get_value(PLAN_CONTENT_NAMESPACE, thread_id)
     except Exception:
         if raise_on_error:
             raise
+        logger.warning("plan content lookup failed for %s", thread_id, exc_info=True)
         return None
-    return _item_value(item)
 
 
 async def set_plan_status(
@@ -165,7 +147,6 @@ async def set_plan_status(
     entering_plan_after_share = (
         existing.get("status") == PLAN_STATUS_SHARED and status == PLAN_STATUS_PLANNING
     )
-    client = _client()
     record: dict[str, Any] = {"status": status}
     if not entering_plan_after_share:
         for field in ("html", "markdown"):
@@ -184,14 +165,10 @@ async def set_plan_status(
             name=str(approved_by.get("name") or ""),
             source=str(approved_by.get("source") or ""),
         )
-        approved_at = datetime.now(UTC).isoformat()
+        approved_at = now_iso()
         record.update(approved_by=approver, approved_at=approved_at)
         metadata.update(plan_approved_by=approver, plan_approved_at=approved_at)
-    await client.store.put_item(
-        PLAN_CONTENT_NAMESPACE,
-        thread_id,
-        record,
-    )
+    await put_value(PLAN_CONTENT_NAMESPACE, thread_id, record)
     if plan_mode is not None:
         metadata["plan_mode"] = plan_mode
     await _merge_thread_metadata(thread_id, metadata)
@@ -210,15 +187,13 @@ async def list_plan_comments(
     resolving to ``[]``. Approve/reject use this so a transient failure surfaces
     (the decision endpoint errors) rather than silently feeding the agent an
     empty comment set and dropping the reviewer's feedback."""
-    client = _client()
     try:
-        items = await client.store.search_items(_comments_namespace(thread_id), limit=1000)
+        comments = await search_values(_comments_namespace(thread_id), limit=1000)
     except Exception:
         if raise_on_error:
             raise
+        logger.warning("plan comment lookup failed for %s", thread_id, exc_info=True)
         return []
-    raw = items.get("items", []) if isinstance(items, dict) else getattr(items, "items", [])
-    comments = [v for v in (_item_value(item) for item in raw) if v]
     comments.sort(key=lambda c: str(c.get("created_at", "")))
     return comments
 
@@ -240,20 +215,19 @@ async def add_plan_comment(
         "author": author,
         "author_login": author_login,
         "body": body,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": now_iso(),
     }
-    await _client().store.put_item(_comments_namespace(thread_id), comment["id"], comment)
+    await put_value(_comments_namespace(thread_id), comment["id"], comment)
     return comment
 
 
 async def delete_plan_comment(thread_id: str, comment_id: str) -> None:
-    await _client().store.delete_item(_comments_namespace(thread_id), comment_id)
+    await delete_value(_comments_namespace(thread_id), comment_id)
 
 
 async def _merge_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> None:
-    client = _client()
     try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata)
+        await get_client().threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:
         # The thread always exists by the time a plan is saved (the run created
         # it); a transient update failure must not crash the agent mid-run.
