@@ -482,15 +482,24 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         )
     )
 
-    expected_thread_id = "mapped-thread"
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
+    expected_footer = "<https://app.example.com/agents/mapped-thread|Open in Web>"
     assert captured["text"] == f"Done {expected_footer}"
-    posted_blocks = captured["blocks"]
-    assert isinstance(posted_blocks, list)
-    assert posted_blocks == [
+    assert captured["blocks"] == [
         {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
         {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
     ]
+
+    captured.clear()
+    asyncio.run(
+        slack_utils.post_slack_thread_reply_with_ts(
+            "C-code",
+            webhook_common.CODE_CHANNEL_SESSION_TS,
+            "Done",
+            agent_thread_id="mapped-thread",
+        )
+    )
+    assert captured["text"] == "Done"
+    assert captured["blocks"] is None
 
 
 def test_post_slack_thread_reply_keeps_long_messages_text_only(

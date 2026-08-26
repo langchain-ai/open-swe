@@ -891,7 +891,12 @@ async def _process_slack_mention_impl(
     if code_channel:
         await common.set_session_status(channel_id, "processing")
         if is_first_mention:
-            await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
+            await common.set_context_bar(
+                channel_id,
+                common.repo_context_bar_items(
+                    repo_config, dashboard_url=common.dashboard_thread_url(thread_id) or ""
+                ),
+            )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
     try:
         run = await _dispatch_or_queue_slack_run(
