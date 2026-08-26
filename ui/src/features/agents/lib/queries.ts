@@ -454,7 +454,11 @@ export function useSeedAgentThreadDetails(
 export const SIDEBAR_PAGE_SIZE = 10
 
 function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
-  return [...(data?.active.items ?? []), ...(data?.resolved.items ?? [])]
+  return [
+    ...(data?.pinned ?? []),
+    ...(data?.active.items ?? []),
+    ...(data?.resolved.items ?? []),
+  ]
 }
 
 export function useSidebarThreads({
@@ -491,6 +495,7 @@ export function useSidebarThreads({
   const data = query.data ?? {
     active: { items: [], limit: activeLimit, hasMore: false },
     resolved: { items: [], limit: resolvedLimit, hasMore: false },
+    pinned: [],
   }
 
   return {
@@ -736,7 +741,6 @@ export function optimisticThread(
     status: "running",
     viewed: true,
     viewedAt: now,
-    isOwner: true,
     createdAt: now,
     updatedAt: now,
     traceUrl: null,
@@ -791,6 +795,16 @@ export function useDeleteAgentThread() {
         navigate({ to: "/agents" })
       }
     },
+  })
+}
+
+export function usePinAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; pinned: boolean }) =>
+      agentsApi.pinThread(vars.threadId, vars.pinned),
+    onSettled: () => invalidateAgentThreadLists(queryClient),
   })
 }
 

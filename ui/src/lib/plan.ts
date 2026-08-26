@@ -40,7 +40,6 @@ export interface PlanData {
   status: PlanStatus
   html: string
   markdown: string
-  isOwner: boolean
   approvedBy: PlanApprover | null
   approvedAt: string | null
   user: PlanUser

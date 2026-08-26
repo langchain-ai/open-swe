@@ -199,8 +199,7 @@ export function PlanReview({
               {isShared ? "Shared response" : "Implementation plan"}
             </h1>
             <p className="text-xs text-muted-foreground/70">
-              {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
-              {plan.isOwner ? " (owner)" : ""} · status:{" "}
+              {isShared ? "Viewing" : "Reviewing"} as {plan.user.name} · status:{" "}
               <span data-testid="plan-status">{plan.status}</span>
             </p>
           </div>
@@ -345,8 +344,7 @@ export function PlanReview({
                                   {comment.body}
                                 </span>
                               </button>
-                              {(plan.isOwner ||
-                                comment.author_login === plan.user.login) && (
+                              {comment.author_login === plan.user.login && (
                                 <button
                                   type="button"
                                   data-testid="comment-delete"

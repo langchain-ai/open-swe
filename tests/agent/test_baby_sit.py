@@ -9,6 +9,7 @@ from langgraph_sdk.errors import ConflictError
 
 from agent import baby_sit, scheduler
 from agent import store as agent_store
+from agent.source_context import SourceContext
 from agent.utils.slack import GitHubPrRef
 
 
@@ -39,12 +40,14 @@ class _Crons:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.deleted: list[str] = []
+        self.searches: list[dict[str, Any]] = []
 
     async def create(self, assistant_id: str, **kwargs: Any):
         self.created.append({"assistant_id": assistant_id, **kwargs})
         return {"cron_id": f"cron-{len(self.created)}"}
 
-    async def search(self, **_kwargs: Any):
+    async def search(self, **kwargs: Any):
+        self.searches.append(kwargs)
         return []
 
     async def delete(self, cron_id: str) -> None:
@@ -113,7 +116,9 @@ async def _start_watch(client: _Client) -> baby_sit.BabySitWatch:
             "source": "slack",
             "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"},
         },
-        source_context={"slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}},
+        source_context=SourceContext.parse(
+            {"slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}}
+        ),
     )
 
 
@@ -122,15 +127,19 @@ async def test_watch_lifecycle_creates_and_deletes_ten_minute_cron(
 ) -> None:
     watch = await _start_watch(watch_client)
 
-    assert watch["key"] == "acme/repo#7"
+    assert watch.key == "acme/repo#7"
     assert watch_client.threads.deleted == []
+    assert watch_client.crons.searches == [
+        {"metadata": {"kind": "baby_sit_watch", "watch_key": "acme/repo#7"}, "limit": 10}
+    ]
+    assert watch_client.crons.created[0]["assistant_id"] == "scheduler"
     assert watch_client.crons.created[0]["schedule"] == "*/10 * * * *"
     assert watch_client.crons.created[0]["input"] == {
         "task": "baby_sit",
         "watch_key": "acme/repo#7",
     }
 
-    assert await baby_sit.stop_watch(watch["key"]) is True
+    assert await baby_sit.stop_watch(watch.key) is True
     assert watch_client.crons.deleted == ["cron-1"]
     assert watch_client.store.values == {}
 
@@ -291,9 +300,9 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     watch = await _start_watch(watch_client)
-    watch["source_context"] = {}
-    watch["run_config"] = {"thread_id": "thread-1", "source": "dashboard"}
-    await baby_sit._put_watch(watch)
+    watch.source_context = SourceContext()
+    watch.run_config = {"thread_id": "thread-1", "source": "dashboard"}
+    await baby_sit.WATCHES.save(watch)
     monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
         baby_sit,
@@ -367,10 +376,10 @@ async def test_new_head_resets_retry_budget(
     monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
 
     assert await baby_sit.evaluate_watch("acme/repo#7") == "pending"
-    watch = await baby_sit.get_watch("acme/repo#7")
+    watch = await baby_sit.WATCHES.get("acme/repo#7")
     assert watch is not None
-    assert watch["head_sha"] == "head-2"
-    assert watch["retry_count"] == 0
+    assert watch.head_sha == "head-2"
+    assert watch.retry_count == 0
 
 
 async def test_failed_webhook_matches_active_head_and_deduplicates_delivery(
@@ -402,9 +411,9 @@ async def test_failed_webhook_matches_active_head_and_deduplicates_delivery(
     assert new_head == {"matched": 1, "dispatched": 1}
     assert evaluate.await_count == 2
     token.assert_awaited_with(installation_id=99)
-    watch = await baby_sit.get_watch("acme/repo#7")
+    watch = await baby_sit.WATCHES.get("acme/repo#7")
     assert watch is not None
-    assert watch["installation_id"] == 99
+    assert watch.installation_id == 99
 
 
 async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -> None:

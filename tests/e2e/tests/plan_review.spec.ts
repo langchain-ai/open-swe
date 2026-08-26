@@ -209,7 +209,10 @@ test.describe("Plan review", () => {
     ).toBeVisible({
       timeout: 30_000,
     });
-    await expect(ownerArtifact).toHaveAttribute("sandbox", "allow-scripts");
+    await expect(ownerArtifact).toHaveAttribute(
+      "sandbox",
+      "allow-scripts allow-downloads",
+    );
     const embeddedSummaryBox = await owner
       .getByTestId("plan-summary")
       .boundingBox();

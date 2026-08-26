@@ -6,6 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from typing import Any
 
+from agent.source_context import SourceContext
 from agent.thread_ids import (
     github_issue_thread_id,
     pr_comment_thread_id,
@@ -1203,13 +1204,13 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         },
     }
 
-    await common.upsert_agent_thread_owner_metadata(
+    await common.upsert_agent_thread_metadata(
         thread_id,
         source="github",
         repo_config=repo_config,
         github_login=github_login,
         title=title or (f"Issue #{issue_number}" if issue_number else ""),
-        source_context={"github_issue": configurable["github_issue"]},
+        source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
     )
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)

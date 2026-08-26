@@ -11,7 +11,7 @@ from typing import Any, cast
 import httpx
 from langchain_core.messages.content import create_text_block
 
-from agent.dashboard.environments import get_environment, parse_environment_tag
+from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -24,6 +24,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -480,19 +481,19 @@ async def _notify_slack_processing_error(
             common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
             or "Slack request"
         )
-        await common.upsert_agent_thread_owner_metadata(
+        await common.upsert_agent_thread_metadata(
             thread_id,
             source="slack",
             repo_config=repo_config,
             title=clean_text,
-            source_context={
-                "slack_thread": {
-                    "channel_id": channel_id,
-                    "thread_ts": thread_ts,
-                    "triggering_user_id": user_id,
-                    "triggering_event_ts": event_ts,
-                }
-            },
+            source_context=SourceContext(
+                slack_thread=SlackThreadRef(
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    triggering_user_id=user_id,
+                    triggering_event_ts=event_ts,
+                )
+            ),
         )
     except Exception:  # noqa: BLE001
         common.logger.warning(
@@ -658,7 +659,7 @@ async def _process_slack_mention_impl(
     environment_slug: str | None = None
     if is_first_mention:
         tagged_slug, text_without_tag = parse_environment_tag(clean_text)
-        if tagged_slug and await get_environment(tagged_slug) is not None:
+        if tagged_slug and await ENVIRONMENTS.get(tagged_slug) is not None:
             environment_slug = tagged_slug
             clean_text = text_without_tag or "(no text in mention)"
         elif tagged_slug:
@@ -822,14 +823,14 @@ async def _process_slack_mention_impl(
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    await common.upsert_agent_thread_owner_metadata(
+    await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
         repo_config=repo_config,
         github_login=mapped_login or "",
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
-        source_context={"slack_thread": configurable["slack_thread"]},
+        source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
     )
 

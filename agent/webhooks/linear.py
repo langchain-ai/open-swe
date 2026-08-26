@@ -17,6 +17,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
 
 from . import common
@@ -249,14 +250,14 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
-    await common.upsert_agent_thread_owner_metadata(
+    await common.upsert_agent_thread_metadata(
         thread_id,
         source="linear",
         repo_config=repo_config,
         github_login=mapped_login or "",
         user_email=user_email or "",
         title=title or identifier or "Linear issue",
-        source_context={"linear_issue": configurable["linear_issue"]},
+        source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
     )
 
     run_messages = [

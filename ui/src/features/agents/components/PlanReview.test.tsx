@@ -68,7 +68,6 @@ const plan: PlanData = {
   status: "ready",
   html: "<h1>Plan</h1>",
   markdown: "",
-  isOwner: true,
   approvedBy: null,
   approvedAt: null,
   user: {

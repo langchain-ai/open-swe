@@ -4,6 +4,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.source_context import SourceContext
+
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.slack import (
     append_slack_web_link_footer,
@@ -147,7 +149,10 @@ async def slack_move_thread(
             destination_bound = True
             await client.threads.update(
                 thread_id=thread_id,
-                metadata={"source": "slack", "source_context": {"slack_thread": new_slack}},
+                metadata={
+                    "source": "slack",
+                    "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
+                },
             )
             persisted = await get_active_slack_thread(client, thread_id)
             if not persisted or (persisted.get("channel_id"), persisted.get("thread_ts")) != (
