@@ -1,7 +1,6 @@
 """REST API for HTML plan artifacts, comments, approval, and change requests."""
 
 import asyncio
-import html
 import logging
 from typing import Any
 
@@ -21,6 +20,7 @@ from .plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
     delete_plan_comment,
+    format_plan_comments,
     get_plan_content,
     list_plan_comments,
     make_plan_approver,
@@ -51,6 +51,8 @@ class TextAnchor(BaseModel):
     exact: str = Field(min_length=1, max_length=1000)
     prefix: str = Field(max_length=64)
     suffix: str = Field(max_length=64)
+    context_before: str = Field(default="", max_length=1000)
+    context_after: str = Field(default="", max_length=1000)
     start: int = Field(ge=0, le=2_000_000)
     end: int = Field(gt=0, le=2_000_000)
 
@@ -255,7 +257,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         plan_html = str(content.get("html", "")).strip()
         plan_markdown = str(content.get("markdown", "")).strip()
         comments = await list_plan_comments(thread_id, raise_on_error=True)
-        feedback = _format_comments(comments)
+        feedback = format_plan_comments(comments)
         await set_plan_status(
             thread_id,
             PLAN_STATUS_APPROVED,
@@ -314,7 +316,7 @@ async def reject_plan(
         await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     if rejection is not None and not rejection.dispatch:
         return {"status": PLAN_STATUS_REVISING}
-    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
+    feedback = format_plan_comments(await list_plan_comments(thread_id, raise_on_error=True))
     text = (
         "The plan needs changes before implementation. Address this reviewer feedback in the "
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "
@@ -379,27 +381,6 @@ async def _maybe_post_plan_approved_to_slack(
         return
     if not ok:
         logger.warning("Could not post plan approval Slack reply to %s/%s", channel_id, thread_ts)
-
-
-def _format_comments(comments: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    index = 1
-    for comment in comments:
-        body = str(comment.get("body", "")).strip()
-        if not body:
-            continue
-        author = str(comment.get("author") or "reviewer").strip()
-        anchor = comment.get("anchor")
-        exact = str(anchor.get("exact") or "").strip() if isinstance(anchor, dict) else ""
-        attributes = f' author="{html.escape(author, quote=True)}"'
-        if exact:
-            attributes += f' selected_text="{html.escape(exact, quote=True)}"'
-        lines.append(
-            f"{index}. <untrusted-plan-comment{attributes}>"
-            f"{html.escape(body)}</untrusted-plan-comment>"
-        )
-        index += 1
-    return "\n".join(lines)
 
 
 async def _dispatch_followup(

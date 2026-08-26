@@ -18,45 +18,64 @@ def test_dashboard_plan_url_none_without_thread() -> None:
 
 
 def test_format_comments_numbers_and_skips_blank() -> None:
-    from agent.dashboard.plan_api import _format_comments
+    from agent.dashboard.plan_store import format_plan_comments
 
-    text = _format_comments(
+    text = format_plan_comments(
         [
             {"author": "alice", "body": "add a docstring"},
             {"author": "bob", "body": "looks good"},
             {"author": "carol", "body": "   "},  # blank → skipped
         ]
     )
-    assert (
-        '1. <untrusted-plan-comment author="alice">add a docstring</untrusted-plan-comment>' in text
-    )
-    assert '2. <untrusted-plan-comment author="bob">looks good</untrusted-plan-comment>' in text
+    assert '<plan-review-comment author="alice">' in text
+    assert "<reviewer-feedback>add a docstring</reviewer-feedback>" in text
+    assert '<plan-review-comment author="bob">' in text
+    assert "<reviewer-feedback>looks good</reviewer-feedback>" in text
     assert "carol" not in text
 
 
-def test_format_comments_includes_selected_quote() -> None:
-    from agent.dashboard.plan_api import _format_comments
+def test_format_comments_includes_highlight_and_surrounding_context() -> None:
+    from agent.dashboard.plan_store import format_plan_comments
 
-    text = _format_comments(
+    text = format_plan_comments(
         [
             {
                 "author": "alice",
-                "body": "make this concrete",
-                "anchor": {"exact": "Persist the result"},
+                "body": "make <this> concrete",
+                "anchor": {
+                    "exact": "Persist the result",
+                    "context_before": "Write the output\nCheck permissions",
+                    "context_after": "Return the identifier\nLog completion",
+                },
             }
         ]
     )
 
     assert text == (
-        '1. <untrusted-plan-comment author="alice" selected_text="Persist the result">'
-        "make this concrete</untrusted-plan-comment>"
+        '1. <plan-review-comment author="alice">\n'
+        "<surrounding-context>Write the output\nCheck permissions\nPersist the result\n"
+        "Return the identifier\nLog completion</surrounding-context>\n"
+        "<highlighted-text>Persist the result</highlighted-text>\n"
+        "<reviewer-feedback>make &lt;this&gt; concrete</reviewer-feedback>\n"
+        "</plan-review-comment>"
     )
 
 
 def test_format_comments_empty() -> None:
-    from agent.dashboard.plan_api import CommentBody, TextAnchor, _format_comments
+    from agent.dashboard.plan_api import CommentBody, TextAnchor
+    from agent.dashboard.plan_store import format_plan_comments
 
-    assert _format_comments([]) == ""
+    assert format_plan_comments([]) == ""
+    anchor = TextAnchor(
+        exact="text",
+        prefix="",
+        suffix="",
+        context_before="one\ntwo\nthree",
+        context_after="four\nfive\nsix",
+        start=0,
+        end=4,
+    )
+    assert anchor.context_before == "one\ntwo\nthree"
     with pytest.raises(ValueError, match="anchor range"):
         CommentBody(
             body="comment",

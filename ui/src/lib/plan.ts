@@ -50,6 +50,8 @@ export interface PlanTextAnchor {
   exact: string
   prefix: string
   suffix: string
+  context_before?: string
+  context_after?: string
   start: number
   end: number
 }

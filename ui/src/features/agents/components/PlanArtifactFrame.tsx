@@ -148,10 +148,18 @@ function frameScript(channel: string): string {
       }
       if (start < 0) return null;
       const end = start + exact.length;
+      const nearbyLines = value => value
+        .split("\\n")
+        .map(line => line.trim())
+        .filter(Boolean);
+      const context_before = nearbyLines(text.slice(0, start)).slice(-3).join("\\n").slice(-1000);
+      const context_after = nearbyLines(text.slice(end)).slice(0, 3).join("\\n").slice(0, 1000);
       return {
         exact,
         prefix: text.slice(Math.max(0, start - 64), start),
         suffix: text.slice(end, end + 64),
+        context_before,
+        context_after,
         start,
         end
       };
@@ -237,7 +245,15 @@ function isAnchor(value: unknown): value is PlanTextAnchor {
     anchor.exact.length > 0 &&
     anchor.exact.length <= 1000 &&
     typeof anchor.prefix === "string" &&
+    anchor.prefix.length <= 64 &&
     typeof anchor.suffix === "string" &&
+    anchor.suffix.length <= 64 &&
+    (anchor.context_before === undefined ||
+      (typeof anchor.context_before === "string" &&
+        anchor.context_before.length <= 1000)) &&
+    (anchor.context_after === undefined ||
+      (typeof anchor.context_after === "string" &&
+        anchor.context_after.length <= 1000)) &&
     typeof anchor.start === "number" &&
     typeof anchor.end === "number" &&
     anchor.start >= 0 &&
