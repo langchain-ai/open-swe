@@ -60,6 +60,37 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     stop.assert_awaited_once_with("C1", "2.0")
 
 
+async def test_rate_limit_defers_append_until_retry_after(monkeypatch) -> None:
+    clock = 10.0
+    monkeypatch.setattr(slack_thinking, "monotonic", lambda: clock)
+    append = AsyncMock(side_effect=[(False, "rate_limited: 30"), (True, None)])
+    monkeypatch.setattr(slack_thinking, "append_slack_stream", append)
+    stream = slack_thinking.SlackThinkingStream(
+        client=AsyncMock(),
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="0",
+        recipient_user_id="U1",
+        recipient_team_id="T1",
+        mapping_thread_ts="0",
+        original_message_ts="1.1",
+    )
+    stream.message_ts = "2.0"
+    step = slack_thinking.Step("step-1", "Reading", "in_progress")
+    stream.pending[step.task_id] = step
+
+    await stream.flush(force=True)
+    clock = 39.0
+    await stream.flush(force=True)
+    assert append.await_count == 1
+
+    clock = 40.0
+    await stream.flush(force=True)
+    assert append.await_count == 2
+    assert not stream.pending
+
+
 def test_namespaced_tool_events_have_stable_distinct_ids() -> None:
     stream = slack_thinking.SlackThinkingStream(
         client=AsyncMock(),

@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 StepStatus = Literal["in_progress", "complete", "error"]
 _FLUSH_INTERVAL_SECONDS = 1.0
+_DEFAULT_RETRY_SECONDS = 30.0
+_MAX_RETRY_SECONDS = 300.0
 
 
 @dataclass
@@ -130,6 +132,7 @@ class SlackThinkingStream:
         self.steps: dict[tuple[tuple[str, ...], str], Step] = {}
         self.pending: dict[str, Step] = {}
         self.last_flush = monotonic()
+        self.retry_at = 0.0
         self.disabled = False
 
     async def start(self) -> bool:
@@ -195,14 +198,23 @@ class SlackThinkingStream:
     async def flush(self, *, force: bool = False) -> None:
         if self.disabled or not self.message_ts or not self.pending:
             return
-        if not force and monotonic() - self.last_flush < _FLUSH_INTERVAL_SECONDS:
+        now = monotonic()
+        if now < self.retry_at or (not force and now - self.last_flush < _FLUSH_INTERVAL_SECONDS):
             return
         chunks = [step.chunk() for step in self.pending.values()]
         ok, error = await append_slack_stream(self.channel_id, self.message_ts, chunks)
         if ok:
             self.pending.clear()
             self.last_flush = monotonic()
-        elif not (error or "").startswith("rate_limited"):
+            self.retry_at = 0.0
+        elif (error or "").startswith("rate_limited"):
+            _, _, raw_delay = (error or "").partition(":")
+            try:
+                delay = float(raw_delay.strip()) if raw_delay else _DEFAULT_RETRY_SECONDS
+            except ValueError:
+                delay = _DEFAULT_RETRY_SECONDS
+            self.retry_at = monotonic() + min(max(delay, 1.0), _MAX_RETRY_SECONDS)
+        else:
             logger.warning("Disabling Slack Thinking Steps for run %s: %s", self.run_id, error)
             self.disabled = True
 
