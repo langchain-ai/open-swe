@@ -642,6 +642,33 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(flashed).toBe(false);
   });
 
+  test("recovers the transcript after the live event stream disconnects", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.route("**/stream/events", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "",
+      }),
+    );
+    await openRunningThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
+
+    await waitForThreadIdle(page, threadId);
+    await waitForStateToContain(
+      page,
+      threadId,
+      "Let me know if you'd like any changes.",
+    );
+    await expect(
+      page.getByText("Let me know if you'd like any changes."),
+    ).toBeVisible({ timeout: 10_000 });
+  });
+
   test("keeps follow-ups visible while queued during a running agent", async ({
     page,
   }, testInfo) => {
