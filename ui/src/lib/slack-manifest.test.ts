@@ -3,8 +3,16 @@ import { describe, expect, it } from "vitest"
 import { slackAppManifest } from "./slack-manifest"
 
 const CODE_CHANNEL_SCOPES = ["code_channels:manage", "files:read"]
-const CODE_CHANNEL_EVENTS = ["code_channel_action", "message.channels", "message.groups"]
-const AGENT_EVENTS = ["agent_session_stopped", "app_context_changed", "app_home_opened"]
+const CODE_CHANNEL_EVENTS = [
+  "code_channel_action",
+  "message.channels",
+  "message.groups",
+]
+const AGENT_EVENTS = [
+  "agent_session_stopped",
+  "app_context_changed",
+  "app_home_opened",
+]
 
 describe("slackAppManifest", () => {
   it("includes the native Slack Agent experience", () => {

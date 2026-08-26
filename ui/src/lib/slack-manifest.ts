@@ -18,7 +18,11 @@ const LEGACY_BOT_SCOPES = [
 ]
 
 const LEGACY_BOT_EVENTS = ["app_mention", "message.im", "message.mpim"]
-const AGENT_BOT_EVENTS = ["agent_session_stopped", "app_context_changed", "app_home_opened"]
+const AGENT_BOT_EVENTS = [
+  "agent_session_stopped",
+  "app_context_changed",
+  "app_home_opened",
+]
 
 export function slackAppManifest(codeChannelsEnabled = false) {
   const features: Record<string, unknown> = {
@@ -65,7 +69,12 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       ],
       scopes: {
         bot: codeChannelsEnabled
-          ? [...LEGACY_BOT_SCOPES, "assistant:write", "code_channels:manage", "files:read"]
+          ? [
+              ...LEGACY_BOT_SCOPES,
+              "assistant:write",
+              "code_channels:manage",
+              "files:read",
+            ]
           : [...LEGACY_BOT_SCOPES, "assistant:write"],
       },
     },
