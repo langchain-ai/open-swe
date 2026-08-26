@@ -92,6 +92,8 @@ function AdminPage() {
 
       <PRTraceResolutionSection />
 
+      <SlackFirehoseSection />
+
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
   )
@@ -666,6 +668,76 @@ function PRTraceResolutionSection() {
                 variant="outline"
                 onClick={saveProject}
                 disabled={!settings.data || !projectDirty || save.isPending}
+              >
+                Save
+              </Button>
+            </div>
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+function SlackFirehoseSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [channelDraft, setChannelDraft] = useState("")
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setChannelDraft(settings.data?.slack_firehose_channel_id ?? "")
+  }, [settings.data?.slack_firehose_channel_id])
+
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const savedChannel = settings.data?.slack_firehose_channel_id ?? ""
+  const channelDirty = channelDraft.trim() !== savedChannel
+
+  const saveChannel = () => {
+    if (!settings.data || !channelDirty) return
+    save.mutate({
+      ...settings.data,
+      slack_firehose_channel_id: channelDraft.trim() || null,
+    })
+  }
+
+  return (
+    <SettingsSection
+      title="Slack Firehose Channel"
+      description="EXPERIMENTAL — mirror every agent thread into one Slack channel as a read-only duplicate: the request, the agent's messages, and a rolling card of its tool calls. Replies there do not reach the agent. Invite the Open SWE bot to the channel first."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Firehose channel ID"
+          description="Slack channel ID (e.g. C0123ABCDEF). Leave blank to turn the firehose off."
+          control={
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-64"
+                placeholder="C0123ABCDEF"
+                value={channelDraft}
+                onChange={(e) => setChannelDraft(e.target.value)}
+                onBlur={saveChannel}
+                disabled={!settings.data || save.isPending}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={saveChannel}
+                disabled={!settings.data || !channelDirty || save.isPending}
               >
                 Save
               </Button>

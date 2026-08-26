@@ -35,6 +35,7 @@ from e2e_env import (  # noqa: E402
     BASE_URL,
     BOT_USER_ID,
     DEMO_CHANNEL,
+    FIREHOSE_CHANNEL,
     HUMAN_USER,
     REPO_ROOT,
     TEST_USERS,
@@ -87,6 +88,23 @@ async def control_reset() -> JSONResponse:
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
     return JSONResponse({"ok": True})
+
+
+@app.post("/control/firehose-channel")
+async def control_firehose_channel(request: Request) -> JSONResponse:
+    """Point the Slack firehose at the mock channel (or turn it off) mid-suite."""
+    from agent.dashboard.team_settings import (
+        TeamSettingsUpdate,
+        get_team_settings,
+        upsert_team_settings,
+    )
+
+    body = await request.json()
+    settings = await get_team_settings()
+    settings.pop("updated_at", None)
+    settings["slack_firehose_channel_id"] = FIREHOSE_CHANNEL if body.get("enabled") else None
+    await upsert_team_settings(TeamSettingsUpdate.model_validate(settings))
+    return JSONResponse({"ok": True, "channel": settings["slack_firehose_channel_id"]})
 
 
 @app.post("/control/prepare-sandbox-repo")

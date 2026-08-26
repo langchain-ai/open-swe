@@ -30,6 +30,7 @@ SECOND_PR_TITLE = "Add companion integration"
 BOT_USER_ID = "U0BOT"
 BOT_USERNAME = "open-swe"
 DEMO_CHANNEL = "C_DEMO"
+FIREHOSE_CHANNEL = "C_FIREHOSE"
 HUMAN_USER = "U_HUMAN"
 
 PORT = os.environ.setdefault("E2E_PORT", "2024")

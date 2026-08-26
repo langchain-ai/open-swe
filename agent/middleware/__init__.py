@@ -8,6 +8,7 @@ _MIDDLEWARE_MODULES = {
     "IntegrationGroup": ".dynamic_tools",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
+    "FirehoseMiddleware": ".firehose",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelFallbackMiddleware": ".model_fallback",
     "notify_step_limit_reached": ".notify_step_limit",
@@ -35,6 +36,7 @@ _MIDDLEWARE_MODULES = {
 __all__ = [
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
+    "FirehoseMiddleware",
     "IntegrationGroup",
     "ModelCallTimeoutMiddleware",
     "ModelFallbackMiddleware",
@@ -67,6 +69,7 @@ if TYPE_CHECKING:
     from .dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
+    from .firehose import FirehoseMiddleware
     from .model_call_timeout import ModelCallTimeoutMiddleware
     from .model_fallback import ModelFallbackMiddleware
     from .notify_step_limit import notify_step_limit_reached

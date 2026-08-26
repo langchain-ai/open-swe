@@ -101,6 +101,7 @@ from .middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
+    FirehoseMiddleware,
     IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
@@ -267,6 +268,17 @@ def _tool_loader_timeout_seconds() -> float:
         logger.warning("TOOL_LOADER_TIMEOUT_SECONDS must be positive; using default")
         return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
     return timeout
+
+
+def _repo_full_name(configurable: dict[str, Any]) -> str | None:
+    repo = configurable.get("repo")
+    if not isinstance(repo, Mapping):
+        return None
+    owner = repo.get("owner")
+    name = repo.get("name")
+    if isinstance(owner, str) and owner and isinstance(name, str) and name:
+        return f"{owner}/{name}"
+    return None
 
 
 async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
@@ -1760,6 +1772,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     plan_mode=plan_mode,
                     corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
+                ),
+                *(
+                    []
+                    if local_run or stop_summary_mode
+                    else [
+                        FirehoseMiddleware(
+                            thread_id=thread_id,
+                            source=source,
+                            repo=_repo_full_name(configurable),
+                            requester=profile_login or user_email or None,
+                        )
+                    ]
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),

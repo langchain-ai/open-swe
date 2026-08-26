@@ -177,6 +177,8 @@ export interface TeamSettings {
   fable_enabled?: boolean
   review_tracing_project?: string | null
   org_guidelines?: string | null
+  /** EXPERIMENTAL: Slack channel every agent thread is mirrored into. */
+  slack_firehose_channel_id?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null

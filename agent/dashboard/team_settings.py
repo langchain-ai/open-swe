@@ -38,6 +38,7 @@ DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
 TRANSCRIPTION_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 
 
 class TranscriptionSettingsUpdate(BaseModel):
@@ -63,6 +64,7 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     fable_enabled: bool = False
     review_tracing_project: str | None = None
     org_guidelines: str | None = None
+    slack_firehose_channel_id: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -93,6 +95,20 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
             raise ValueError(
                 f"org_guidelines must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
             )
+        return text
+
+    @field_validator("slack_firehose_channel_id", mode="before")
+    @classmethod
+    def _normalize_firehose_channel(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("slack_firehose_channel_id must be a string")
+        text = v.strip().lstrip("#")
+        if not text:
+            return None
+        if not SLACK_CHANNEL_ID_RE.fullmatch(text):
+            raise ValueError("slack_firehose_channel_id must be a Slack channel ID")
         return text
 
     @field_validator("review_tracing_project", mode="before")
@@ -282,6 +298,7 @@ def _default_settings() -> dict[str, Any]:
         "fable_enabled": False,
         "review_tracing_project": None,
         "org_guidelines": None,
+        "slack_firehose_channel_id": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
@@ -341,6 +358,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "fable_enabled": update.fable_enabled,
         "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
+        "slack_firehose_channel_id": update.slack_firehose_channel_id,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
         "default_agent_subagent_model": update.default_agent_subagent_model,
@@ -517,6 +535,15 @@ async def get_team_review_tracing_project() -> str | None:
     settings = await get_team_settings()
     value = settings.get("review_tracing_project")
     if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+async def get_team_firehose_channel_id() -> str | None:
+    """Return the Slack channel that mirrors every agent thread, if configured."""
+    settings = await get_team_settings()
+    value = settings.get("slack_firehose_channel_id")
+    if isinstance(value, str) and SLACK_CHANNEL_ID_RE.fullmatch(value.strip()):
         return value.strip()
     return None
 
