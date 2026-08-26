@@ -69,7 +69,7 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	npx --yes basedpyright agent tests
+	uv run basedpyright agent tests
 
 ######################
 # HELP
