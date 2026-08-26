@@ -44,6 +44,7 @@ class SystemIdentity(TypedDict):
     platform: NotRequired[str]
     sender_type: NotRequired[str]
     subject_id: NotRequired[str]
+    context_hash: NotRequired[str]
 
 
 Identity = PersonIdentity | ChannelIdentity | SystemIdentity
@@ -79,7 +80,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "open_swe_account",
     ),
     "channel": ("platform", "name", "thread_id", "topic", "purpose"),
-    "system": ("display_name", "platform", "sender_type", "subject_id"),
+    "system": ("display_name", "platform", "sender_type", "subject_id", "context_hash"),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 _SYSTEM_ENTITY_ID = "system:open-swe"

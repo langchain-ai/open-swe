@@ -8,6 +8,7 @@ the agent itself is stateless.
 """
 # ruff: noqa: E402
 
+import hashlib
 import logging
 import os
 import warnings
@@ -1250,7 +1251,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         if sender_id is None:
             return []
-        identity: SystemIdentity = {**_SENDER_CONTEXT_SYSTEM, "subject_id": sender_id}
+        identity: SystemIdentity = {
+            **_SENDER_CONTEXT_SYSTEM,
+            "subject_id": sender_id,
+            "context_hash": hashlib.sha256(sender_context.encode()).hexdigest(),
+        }
         introduction_hash = dynamic_context_hash(system_introduction(identity)["content"])
         if introduction_hash in visible_dynamic_context_hashes(state):
             return []
