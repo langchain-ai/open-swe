@@ -16,11 +16,11 @@ import os
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent.store import KeyedRecordStore, now_iso
+from agent.store import TypedStore, now_iso
 
 from .review_styles import normalize_repo_full_name
 
@@ -138,18 +138,6 @@ class RepoSnapshotUpdate(BaseModel):
         return v
 
 
-def _parse_iso(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
 def _stale_build_seconds() -> int:
     raw = os.environ.get("REPO_SNAPSHOT_STALE_BUILD_SECONDS")
     if not raw:
@@ -161,100 +149,143 @@ def _stale_build_seconds() -> int:
     return max(value, 0)
 
 
-def is_repo_snapshot_build_stale(record: dict[str, Any]) -> bool:
-    if record.get("status") != "building":
-        return False
-    started_at = _parse_iso(record.get("build_started_at"))
-    if started_at is None:
-        return True
-    return (datetime.now(UTC) - started_at).total_seconds() > _stale_build_seconds()
+class RepoSnapshot(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    full_name: str
+    owner: str = ""
+    name: str = ""
+    dockerfile: str = ""
+    snapshot_id: str | None = None
+    snapshot_name: str | None = None
+    status: BuildStatus = "none"
+    status_message: str | None = None
+    build_log: str | None = None
+    fs_capacity_bytes: int = DEFAULT_BUILD_FS_CAPACITY_BYTES
+    vcpus: int = DEFAULT_BUILD_VCPUS
+    mem_bytes: int = DEFAULT_BUILD_MEM_BYTES
+    target: str | None = None
+    build_args: dict[str, str] | None = None
+    build_started_at: str | None = None
+    last_built_at: str | None = None
+    created_by: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    @classmethod
+    def seed(cls, full_name: str, created_by: str = "") -> "RepoSnapshot":
+        owner, _, name = full_name.partition("/")
+        now = now_iso()
+        return cls(
+            full_name=full_name,
+            owner=owner,
+            name=name,
+            dockerfile=generate_dockerfile_template(full_name),
+            created_by=created_by,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @property
+    def build_is_stale(self) -> bool:
+        """Whether a ``building`` record has been stuck long enough to override."""
+        if self.status != "building":
+            return False
+        started_at = _parse_iso(self.build_started_at)
+        if started_at is None:
+            return True
+        return (datetime.now(UTC) - started_at).total_seconds() > _stale_build_seconds()
 
 
-def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
-    owner, name = full_name.split("/", 1)
-    return {
-        "full_name": full_name,
-        "owner": owner,
-        "name": name,
-        "dockerfile": generate_dockerfile_template(full_name),
-        "snapshot_id": None,
-        "snapshot_name": None,
-        "status": "none",
-        "status_message": None,
-        "build_log": None,
-        "fs_capacity_bytes": DEFAULT_BUILD_FS_CAPACITY_BYTES,
-        "vcpus": DEFAULT_BUILD_VCPUS,
-        "mem_bytes": DEFAULT_BUILD_MEM_BYTES,
-        "target": None,
-        "build_args": None,
-        "build_started_at": None,
-        "last_built_at": None,
-        "created_by": created_by,
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
-_RECORDS = KeyedRecordStore(
-    REPO_SNAPSHOTS_NAMESPACE,
-    sort_key="full_name",
-    default_factory=_default_record,
-)
+class RepoSnapshotStore(TypedStore[RepoSnapshot]):
+    """Repo snapshots, keyed by the normalized ``owner/repo``."""
+
+    def __init__(self) -> None:
+        super().__init__(REPO_SNAPSHOTS_NAMESPACE, RepoSnapshot)
+
+    async def get(self, key: str) -> RepoSnapshot | None:
+        return await super().get(normalize_repo_full_name(key))
+
+    async def delete(self, key: str) -> None:
+        await super().delete(normalize_repo_full_name(key))
+
+    async def list_all(self) -> list[RepoSnapshot]:
+        records = await self.search_all()
+        records.sort(key=lambda record: record.full_name)
+        return records
+
+    async def save(self, record: RepoSnapshot) -> RepoSnapshot:
+        record.updated_at = now_iso()
+        return await self.put(record.full_name, record)
+
+    async def create(self, full_name: str, created_by: str) -> RepoSnapshot:
+        full_name = normalize_repo_full_name(full_name)
+        existing = await self.get(full_name)
+        if existing:
+            return existing
+        return await self.put(full_name, RepoSnapshot.seed(full_name, created_by))
+
+    async def apply_update(self, full_name: str, update: RepoSnapshotUpdate) -> RepoSnapshot:
+        record = await self.get(full_name) or RepoSnapshot.seed(normalize_repo_full_name(full_name))
+        record.dockerfile = update.dockerfile
+        record.target = update.target
+        record.build_args = update.build_args
+        if update.fs_capacity_bytes is not None:
+            record.fs_capacity_bytes = update.fs_capacity_bytes
+        if update.vcpus is not None:
+            record.vcpus = update.vcpus
+        if update.mem_bytes is not None:
+            record.mem_bytes = update.mem_bytes
+        return await self.save(record)
+
+    async def mark_building(self, full_name: str) -> RepoSnapshot:
+        record = await self.get(full_name)
+        if record is None:
+            raise ValueError(f"no repo snapshot record for {full_name}")
+        record.status = "building"
+        record.status_message = None
+        record.build_log = None
+        record.build_started_at = now_iso()
+        return await self.save(record)
+
+    async def mark_ready(
+        self, full_name: str, *, snapshot_id: str, snapshot_name: str, build_log: str
+    ) -> None:
+        record = await self.get(full_name)
+        if record is None:
+            return
+        record.status = "ready"
+        record.status_message = None
+        record.build_started_at = None
+        record.snapshot_id = snapshot_id
+        record.snapshot_name = snapshot_name
+        record.build_log = build_log
+        record.last_built_at = now_iso()
+        await self.save(record)
+
+    async def mark_failed(self, full_name: str, message: str) -> None:
+        record = await self.get(full_name)
+        if record is None:
+            return
+        record.status = "failed"
+        record.status_message = message
+        record.build_started_at = None
+        await self.save(record)
 
 
-async def get_repo_snapshot(full_name: str) -> dict[str, Any] | None:
-    return await _RECORDS.get(normalize_repo_full_name(full_name))
-
-
-async def list_repo_snapshots() -> list[dict[str, Any]]:
-    return await _RECORDS.list()
-
-
-async def create_repo_snapshot(full_name: str, created_by: str) -> dict[str, Any]:
-    return await _RECORDS.create(normalize_repo_full_name(full_name), created_by)
-
-
-async def update_repo_snapshot(full_name: str, update: RepoSnapshotUpdate) -> dict[str, Any]:
-    patch: dict[str, Any] = {
-        "dockerfile": update.dockerfile,
-        "target": update.target,
-        "build_args": update.build_args,
-    }
-    for field, value in (
-        ("fs_capacity_bytes", update.fs_capacity_bytes),
-        ("vcpus", update.vcpus),
-        ("mem_bytes", update.mem_bytes),
-    ):
-        if value is not None:
-            patch[field] = value
-    return await _RECORDS.update(normalize_repo_full_name(full_name), patch)
-
-
-async def delete_repo_snapshot(full_name: str) -> bool:
-    full_name = normalize_repo_full_name(full_name)
-    if not await get_repo_snapshot(full_name):
-        return False
-    await _RECORDS.delete(full_name)
-    return True
-
-
-async def mark_repo_snapshot_building(full_name: str) -> dict[str, Any]:
-    """Set a repo snapshot's status to ``building`` and return the record."""
-    full_name = normalize_repo_full_name(full_name)
-    existing = await _RECORDS.get(full_name)
-    if existing is None:
-        raise ValueError(f"no repo snapshot record for {full_name}")
-    return await _RECORDS.put(
-        full_name,
-        {
-            **existing,
-            "status": "building",
-            "status_message": None,
-            "build_log": None,
-            "build_started_at": now_iso(),
-            "updated_at": now_iso(),
-        },
-    )
+REPO_SNAPSHOTS = RepoSnapshotStore()
 
 
 async def resolve_repo_snapshot_id(owner: str | None, name: str | None) -> str | None:
@@ -267,41 +298,16 @@ async def resolve_repo_snapshot_id(owner: str | None, name: str | None) -> str |
     if not owner or not name:
         return None
     try:
-        record = await _RECORDS.get(f"{owner}/{name}")
+        record = await REPO_SNAPSHOTS.get(f"{owner}/{name}")
     except Exception:
         logger.warning("repo snapshot lookup failed for %s/%s", owner, name, exc_info=True)
         return None
-    if not record or record.get("status") != "ready":
+    if not record or record.status != "ready":
         return None
-    snapshot_id = record.get("snapshot_id")
-    return snapshot_id if isinstance(snapshot_id, str) and snapshot_id else None
+    return record.snapshot_id or None
 
 
-async def _set_status(
-    full_name: str,
-    status: BuildStatus,
-    *,
-    status_message: str | None = None,
-    extra: dict[str, Any] | None = None,
-) -> None:
-    full_name = normalize_repo_full_name(full_name)
-    existing = await _RECORDS.get(full_name)
-    if existing is None:
-        return
-    value = {
-        **existing,
-        "status": status,
-        "status_message": status_message,
-        "updated_at": now_iso(),
-    }
-    if status != "building":
-        value["build_started_at"] = None
-    if extra:
-        value.update(extra)
-    await _RECORDS.put(full_name, value)
-
-
-def _build_snapshot_sync(record: dict[str, Any], snapshot_name: str) -> tuple[str, str]:
+def _build_snapshot_sync(record: RepoSnapshot, snapshot_name: str) -> tuple[str, str]:
     """Build a snapshot from the record's Dockerfile. Runs in a worker thread.
 
     Returns ``(snapshot_id, build_log_tail)``. Raises on build failure.
@@ -326,23 +332,17 @@ def _build_snapshot_sync(record: dict[str, Any], snapshot_name: str) -> tuple[st
     try:
         with tempfile.TemporaryDirectory(prefix="openswe-snapshot-") as context_dir:
             dockerfile_path = Path(context_dir) / "Dockerfile"
-            dockerfile_path.write_text(record.get("dockerfile") or "")
-            build_args = (
-                record.get("build_args") if isinstance(record.get("build_args"), dict) else None
-            )
-            target = record.get("target") if isinstance(record.get("target"), str) else None
+            dockerfile_path.write_text(record.dockerfile)
             snapshot = client.create_snapshot_from_dockerfile(
                 snapshot_name,
                 dockerfile="Dockerfile",
-                fs_capacity_bytes=int(
-                    record.get("fs_capacity_bytes") or DEFAULT_BUILD_FS_CAPACITY_BYTES
-                ),
+                fs_capacity_bytes=record.fs_capacity_bytes,
                 context=context_dir,
-                build_args=build_args or None,
-                target=target or None,
+                build_args=record.build_args or None,
+                target=record.target or None,
                 on_build_log=_on_log,
-                vcpus=int(record.get("vcpus") or DEFAULT_BUILD_VCPUS),
-                mem_bytes=int(record.get("mem_bytes") or DEFAULT_BUILD_MEM_BYTES),
+                vcpus=record.vcpus,
+                mem_bytes=record.mem_bytes,
                 timeout=timeout,
             )
     finally:
@@ -361,7 +361,7 @@ async def run_snapshot_build(full_name: str) -> None:
     import asyncio
 
     full_name = normalize_repo_full_name(full_name)
-    record = await get_repo_snapshot(full_name)
+    record = await REPO_SNAPSHOTS.get(full_name)
     if record is None:
         logger.warning("Cannot build snapshot for %s: no record", full_name)
         return
@@ -374,22 +374,13 @@ async def run_snapshot_build(full_name: str) -> None:
         snapshot_id, log_tail = await asyncio.to_thread(_build_snapshot_sync, record, snapshot_name)
     except Exception as e:  # noqa: BLE001
         logger.warning("Snapshot build failed for %s: %s", full_name, e, exc_info=True)
-        await _set_status(
-            full_name,
-            "failed",
-            status_message=str(e)[:1000],
-        )
+        await REPO_SNAPSHOTS.mark_failed(full_name, str(e)[:1000])
         return
 
-    await _set_status(
+    await REPO_SNAPSHOTS.mark_ready(
         full_name,
-        "ready",
-        status_message=None,
-        extra={
-            "snapshot_id": snapshot_id,
-            "snapshot_name": snapshot_name,
-            "build_log": log_tail,
-            "last_built_at": now_iso(),
-        },
+        snapshot_id=snapshot_id,
+        snapshot_name=snapshot_name,
+        build_log=log_tail,
     )
     logger.info("Built snapshot %s for repo %s", snapshot_id, full_name)

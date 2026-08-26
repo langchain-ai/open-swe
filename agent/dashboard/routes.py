@@ -109,18 +109,13 @@ from .repo_cache import (
     write_cached_repos,
 )
 from .repo_snapshots import (
+    REPO_SNAPSHOTS,
+    RepoSnapshot,
     RepoSnapshotConfigError,
     RepoSnapshotCreate,
     RepoSnapshotUpdate,
-    create_repo_snapshot,
-    delete_repo_snapshot,
     generate_dockerfile_template,
-    get_repo_snapshot,
-    is_repo_snapshot_build_stale,
-    list_repo_snapshots,
-    mark_repo_snapshot_building,
     run_snapshot_build,
-    update_repo_snapshot,
 )
 from .review_api import (
     create_review_comment,
@@ -972,8 +967,8 @@ async def api_set_sandbox_settings(
 @router.get("/repo-snapshots")
 async def api_list_repo_snapshots(
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> list[dict[str, Any]]:
-    return await list_repo_snapshots()
+) -> list[RepoSnapshot]:
+    return await REPO_SNAPSHOTS.list_all()
 
 
 @router.get("/repo-snapshots/template")
@@ -991,9 +986,9 @@ async def api_repo_snapshot_template(
 async def api_create_repo_snapshot(
     body: RepoSnapshotCreate,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
+) -> RepoSnapshot:
     try:
-        return await create_repo_snapshot(body.full_name, _admin["sub"])
+        return await REPO_SNAPSHOTS.create(body.full_name, _admin["sub"])
     except RepoSnapshotConfigError as e:
         raise HTTPException(500, str(e)) from e
 
@@ -1002,8 +997,8 @@ async def api_create_repo_snapshot(
 async def api_get_repo_snapshot(
     full_name: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    record = await get_repo_snapshot(normalize_repo_full_name(full_name))
+) -> RepoSnapshot:
+    record = await REPO_SNAPSHOTS.get(full_name)
     if not record:
         raise HTTPException(404, "repo snapshot not found")
     return record
@@ -1014,8 +1009,8 @@ async def api_update_repo_snapshot(
     full_name: str,
     body: RepoSnapshotUpdate,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await update_repo_snapshot(normalize_repo_full_name(full_name), body)
+) -> RepoSnapshot:
+    return await REPO_SNAPSHOTS.apply_update(full_name, body)
 
 
 @router.post("/repo-snapshots/{full_name:path}/build")
@@ -1023,16 +1018,16 @@ async def api_build_repo_snapshot(
     full_name: str,
     background_tasks: BackgroundTasks,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
+) -> RepoSnapshot:
     full_name = normalize_repo_full_name(full_name)
-    record = await get_repo_snapshot(full_name)
+    record = await REPO_SNAPSHOTS.get(full_name)
     if not record:
         raise HTTPException(404, "repo snapshot not found")
-    if not (record.get("dockerfile") or "").strip():
+    if not record.dockerfile.strip():
         raise HTTPException(400, "dockerfile is empty")
-    if record.get("status") == "building" and not is_repo_snapshot_build_stale(record):
+    if record.status == "building" and not record.build_is_stale:
         raise HTTPException(409, "a build is already in progress")
-    record = await mark_repo_snapshot_building(full_name)
+    record = await REPO_SNAPSHOTS.mark_building(full_name)
     background_tasks.add_task(run_snapshot_build, full_name)
     return record
 
@@ -1043,10 +1038,9 @@ async def api_delete_repo_snapshot(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Response:
     full_name = normalize_repo_full_name(full_name)
-    record = await get_repo_snapshot(full_name)
-    if not record:
+    if not await REPO_SNAPSHOTS.get(full_name):
         raise HTTPException(404, "repo snapshot not found")
-    await delete_repo_snapshot(full_name)
+    await REPO_SNAPSHOTS.delete(full_name)
     return Response(status_code=204)
 
 
