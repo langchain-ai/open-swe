@@ -24,6 +24,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -485,14 +486,14 @@ async def _notify_slack_processing_error(
             source="slack",
             repo_config=repo_config,
             title=clean_text,
-            source_context={
-                "slack_thread": {
-                    "channel_id": channel_id,
-                    "thread_ts": thread_ts,
-                    "triggering_user_id": user_id,
-                    "triggering_event_ts": event_ts,
-                }
-            },
+            source_context=SourceContext(
+                slack_thread=SlackThreadRef(
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    triggering_user_id=user_id,
+                    triggering_event_ts=event_ts,
+                )
+            ),
         )
     except Exception:  # noqa: BLE001
         common.logger.warning(
@@ -829,7 +830,7 @@ async def _process_slack_mention_impl(
         github_login=mapped_login or "",
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
-        source_context={"slack_thread": configurable["slack_thread"]},
+        source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
     )
 

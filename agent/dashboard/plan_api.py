@@ -9,6 +9,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel
 
+from agent.source_context import SourceContext
+
 from ..dispatch import dispatch_agent_run
 from ..utils.slack import post_slack_thread_reply
 from .oauth import require_same_origin_for_mutations, require_session
@@ -312,14 +314,11 @@ def _approval_actor_name(session: dict[str, Any]) -> str:
 
 
 def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | None:
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, dict):
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None:
         return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
+    channel_id = slack_thread.channel_id
+    thread_ts = slack_thread.thread_ts
     if not isinstance(channel_id, str) or not channel_id.strip():
         return None
     if not isinstance(thread_ts, str) or not thread_ts.strip():
@@ -388,11 +387,9 @@ async def _dispatch_followup(
     repo = _repo_config_from_metadata(metadata)
     if repo:
         configurable["repo"] = repo
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        slack_thread = source_context.get("slack_thread")
-        if isinstance(slack_thread, dict):
-            configurable["slack_thread"] = slack_thread
+    context = SourceContext.from_metadata(metadata)
+    if context.slack_thread is not None:
+        configurable["slack_thread"] = context.dump()["slack_thread"]
     configurable["plan_mode"] = plan_mode
 
     return await dispatch_agent_run(

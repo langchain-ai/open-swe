@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
+from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 
 from ..dispatch import create_durable_run
@@ -491,7 +492,7 @@ def _agent_run_metadata(
         metadata["repo_owner"] = repo["owner"]
         metadata["repo_name"] = repo["name"]
     if slack_thread:
-        metadata["source_context"] = {"slack_thread": slack_thread}
+        metadata["source_context"] = SourceContext.parse({"slack_thread": slack_thread}).dump()
     if admin_thread:
         metadata["admin_thread"] = True
     return metadata
