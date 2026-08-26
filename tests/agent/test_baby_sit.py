@@ -40,12 +40,14 @@ class _Crons:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.deleted: list[str] = []
+        self.searches: list[dict[str, Any]] = []
 
     async def create(self, assistant_id: str, **kwargs: Any):
         self.created.append({"assistant_id": assistant_id, **kwargs})
         return {"cron_id": f"cron-{len(self.created)}"}
 
-    async def search(self, **_kwargs: Any):
+    async def search(self, **kwargs: Any):
+        self.searches.append(kwargs)
         return []
 
     async def delete(self, cron_id: str) -> None:
@@ -127,6 +129,10 @@ async def test_watch_lifecycle_creates_and_deletes_ten_minute_cron(
 
     assert watch.key == "acme/repo#7"
     assert watch_client.threads.deleted == []
+    assert watch_client.crons.searches == [
+        {"metadata": {"kind": "baby_sit_watch", "watch_key": "acme/repo#7"}, "limit": 10}
+    ]
+    assert watch_client.crons.created[0]["assistant_id"] == "scheduler"
     assert watch_client.crons.created[0]["schedule"] == "*/10 * * * *"
     assert watch_client.crons.created[0]["input"] == {
         "task": "baby_sit",
