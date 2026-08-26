@@ -482,15 +482,24 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         )
     )
 
-    expected_thread_id = "mapped-thread"
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
+    expected_footer = "<https://app.example.com/agents/mapped-thread|Open in Web>"
     assert captured["text"] == f"Done {expected_footer}"
-    posted_blocks = captured["blocks"]
-    assert isinstance(posted_blocks, list)
-    assert posted_blocks == [
+    assert captured["blocks"] == [
         {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
         {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
     ]
+
+    captured.clear()
+    asyncio.run(
+        slack_utils.post_slack_thread_reply_with_ts(
+            "C-code",
+            webhook_common.CODE_CHANNEL_SESSION_TS,
+            "Done",
+            agent_thread_id="mapped-thread",
+        )
+    )
+    assert captured["text"] == "Done"
+    assert captured["blocks"] is None
 
 
 def test_post_slack_thread_reply_keeps_long_messages_text_only(
@@ -571,37 +580,6 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
         "elements": [{"type": "mrkdwn", "text": expected_footer}],
     }
     assert blocks[0]["text"]["text"] == "Pick one"
-
-
-def test_post_slack_code_channel_reply_omits_web_footer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}]
-
-    async def fake_post_message_with_ts(
-        channel_id: str,
-        text: str,
-        **kwargs: object,
-    ) -> tuple[str | None, str | None]:
-        captured.update({"text": text, **kwargs})
-        return "1.1", None
-
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
-    monkeypatch.setattr(slack_utils, "_post_slack_message_with_ts", fake_post_message_with_ts)
-
-    asyncio.run(
-        slack_utils.post_slack_thread_reply_with_ts(
-            "C-code",
-            webhook_common.CODE_CHANNEL_SESSION_TS,
-            "Done",
-            blocks=blocks,
-            agent_thread_id="mapped-thread",
-        )
-    )
-
-    assert captured["text"] == "Done"
-    assert captured["blocks"] == blocks
 
 
 def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(

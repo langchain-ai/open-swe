@@ -270,7 +270,7 @@ def _format_slack_thread_section(
     return "\n".join(lines)
 
 
-async def _format_slack_run_links_section(thread_id: str, *, code_channel: bool = False) -> str:
+async def _format_slack_run_links_section(thread_id: str) -> str:
     dashboard_url = common.dashboard_thread_url(thread_id)
     trace_url = await get_langsmith_trace_url(thread_id)
     lines = ["## Open SWE Links"]
@@ -278,14 +278,9 @@ async def _format_slack_run_links_section(thread_id: str, *, code_channel: bool 
         lines.append(f"- Web: {dashboard_url}")
     if trace_url:
         lines.append(f"- Trace: {trace_url}")
-    if code_channel:
-        lines.append(
-            "- The Web link is available in the code channel context bar; do not duplicate it in replies. Share the trace URL only if asked."
-        )
-    else:
-        lines.append(
-            "- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked."
-        )
+    lines.append(
+        "- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked."
+    )
     return "\n".join(lines)
 
 
@@ -725,7 +720,7 @@ async def _process_slack_mention_impl(
         f"## Triggered by\n{trigger_user}\n\n"
         f"{trigger_user_timezone_section}"
         f"{slack_thread_section}\n\n"
-        f"{await _format_slack_run_links_section(thread_id, code_channel=code_channel)}"
+        f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
         + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
     )

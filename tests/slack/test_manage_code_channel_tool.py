@@ -62,11 +62,6 @@ async def test_promotion_initializes_status_context_and_runtime_commands(
     monkeypatch.setattr(manage_tool, "set_session_status_result", status)
     monkeypatch.setattr(manage_tool, "set_context_bar", context)
     monkeypatch.setattr(manage_tool, "set_commands", commands)
-    monkeypatch.setattr(
-        manage_tool,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://app.example.com/agents/{thread_id}",
-    )
 
     result = await manage_tool._create(
         client,
@@ -79,10 +74,4 @@ async def test_promotion_initializes_status_context_and_runtime_commands(
     assert result["success"] is True
     status.assert_awaited_once_with("C-code", "processing")
     context.assert_awaited_once()
-    assert context.await_args.args[1][-1] == {
-        "key": "web",
-        "label": "Open in Web",
-        "icon": "globe",
-        "url": "https://app.example.com/agents/thread-1",
-    }
     commands.assert_awaited_once_with("C-code", manage_tool.DEFAULT_CODE_CHANNEL_COMMANDS)
