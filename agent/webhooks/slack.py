@@ -53,12 +53,9 @@ _UNTAGGED_REPLY_PREAMBLE = (
 
 _CODE_CHANNEL_CONTEXT = (
     "## Slack Code Channel\n"
-    "This channel is a dedicated code channel: the whole channel is one session with you. "
-    "Reply with top-level channel messages (`slack_thread_reply` already posts them in-channel) "
-    "and treat every message here as addressed to you unless it is clearly aimed at another "
-    "person. Keep the channel chrome current with `manage_code_channel`: set context bar items "
-    "for the repo/branch/PR you settle on, publish a `diff` view when you have changes to review, "
-    "and archive the channel with your closing summary once the task is finished."
+    "The whole channel is one session. Treat messages as addressed to you unless clearly aimed "
+    "at someone else; replies already post top-level. Use `manage_code_channel` to keep its "
+    "repo/branch/PR context and diff current, then archive it with your closing summary."
 )
 
 _MESSAGE_UPDATE_PREAMBLE = (

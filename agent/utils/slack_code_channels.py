@@ -1,10 +1,5 @@
-"""Slack code channels — ``agents.conversations.*`` and ``agents.sessions.*``.
-
-A code channel is one Slack channel dedicated to one agent session: the whole
-channel is the session, so there is no thread timestamp to key it by. Open SWE
-keys every Slack location by ``(channel_id, thread_ts)``, so code channels use
-:data:`CODE_CHANNEL_SESSION_TS` as their timestamp — it satisfies the existing
-timestamp validation and can never collide with a real Slack message ts.
+"""Slack code channels, keyed with a non-message timestamp because the whole
+channel is one agent session rather than a Slack thread.
 """
 
 import logging
@@ -24,12 +19,7 @@ from .slack import (
 logger = logging.getLogger(__name__)
 
 CODE_CHANNEL_SESSION_TS = "0"
-CODE_CHANNEL_RECORD_TYPE = "agent_channel"
-CONTEXT_BAR_MAX_ITEMS = 5
 VIEW_CONTENT_MAX_CHARS = 200_000
-CHANNEL_NAME_MAX_CHARS = 200
-
-SessionStatus = Literal["processing", "active", "suspended", "closed"]
 
 
 def is_code_channel_session(thread_ts: str | None) -> bool:
@@ -42,7 +32,7 @@ async def is_code_channel(channel_id: str) -> bool:
     channel = await get_slack_channel_info(channel_id)
     properties = channel.get("properties") if isinstance(channel, dict) else None
     record = properties.get("record_channel") if isinstance(properties, dict) else None
-    return isinstance(record, dict) and record.get("record_type") == CODE_CHANNEL_RECORD_TYPE
+    return isinstance(record, dict) and record.get("record_type") == "agent_channel"
 
 
 async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
@@ -80,7 +70,7 @@ async def create_code_channel(
     data, error = await _call(
         "agents.conversations.create",
         {
-            "name": name.strip()[:CHANNEL_NAME_MAX_CHARS],
+            "name": name.strip()[:200],
             "session_id": session_id,
             "origin_channel_id": origin_channel_id,
             "origin_message_ts": origin_message_ts,
@@ -96,13 +86,12 @@ async def create_code_channel(
 
 
 async def set_session_status(
-    channel_id: str, status: SessionStatus, *, thread_ts: str | None = None
+    channel_id: str, status: Literal["processing", "active", "suspended", "closed"]
 ) -> bool:
-    """Set the lifecycle status of a code channel or thread session."""
-    payload: dict[str, Any] = {"channel_id": channel_id, "status": status}
-    if thread_ts and not is_code_channel_session(thread_ts):
-        payload["thread_ts"] = thread_ts
-    _, error = await _call("agents.sessions.setStatus", payload)
+    """Set a code channel's lifecycle status."""
+    _, error = await _call(
+        "agents.sessions.setStatus", {"channel_id": channel_id, "status": status}
+    )
     return error is None
 
 
@@ -110,7 +99,7 @@ async def rename_session(channel_id: str, title: str) -> tuple[bool, str | None]
     """Rename a code channel session."""
     _, error = await _call(
         "agents.sessions.rename",
-        {"channel_id": channel_id, "title": title.strip()[:CHANNEL_NAME_MAX_CHARS]},
+        {"channel_id": channel_id, "title": title.strip()[:200]},
     )
     return error is None, error
 
@@ -121,7 +110,7 @@ async def set_context_bar(channel_id: str, items: list[dict[str, Any]]) -> tuple
         "agents.conversations.setProperties",
         {
             "channel_id": channel_id,
-            "code_channel": {"context_bar_items": items[:CONTEXT_BAR_MAX_ITEMS]},
+            "code_channel": {"context_bar_items": items[:5]},
         },
     )
     return error is None, error
@@ -140,12 +129,10 @@ async def set_diff_view(
         "type": "diff",
         "content": content[:VIEW_CONTENT_MAX_CHARS],
     }
-    for key, value in (
-        ("base_branch", base_branch),
-        ("head_branch", head_branch),
-    ):
-        if value:
-            payload[key] = value
+    if base_branch:
+        payload["base_branch"] = base_branch
+    if head_branch:
+        payload["head_branch"] = head_branch
     _, error = await _call("agents.conversations.setView", payload)
     return error is None, error
 

@@ -33,22 +33,14 @@ async def manage_code_channel(
     head_branch: str = "",
     summary_message_ts: str = "",
 ) -> dict[str, Any]:
-    """Manage the Slack code channel for this session.
+    """Manage this session's dedicated Slack code channel.
 
-    A code channel is a Slack channel dedicated to one task with you. Actions:
-
-    - `create`: move this session into a new code channel opened from the current
-      Slack thread. Pass `title` as the task headline. Only use it when the work
-      deserves its own channel, and never when you are already in one.
-    - `rename`: retitle the session with `title` once you know what the task is.
-    - `context`: replace the context bar with `items` (max 5), each
-      `{"key", "label", "icon", "url"}` — repo, branch, PR link, CI status.
-    - `view`: publish a unified diff in the channel's diff tab. Pass `content`
-      and optionally `base_branch`/`head_branch`. Publishing again replaces the
-      tab in place.
-    - `archive`: close the channel when the task is done. Post your closing
-      summary with `slack_thread_reply` first and pass its `message_ts` as
-      `summary_message_ts` so it survives archival.
+    `create` moves the current Slack thread into a channel named by `title`.
+    `rename` changes its `title`. `context` replaces its bar with up to five
+    `items` (`key`, `label`, `icon`, `url`). `view` publishes `content` as a diff,
+    optionally labeled with `base_branch` and `head_branch`. `archive` closes the
+    channel; first post the closing summary and pass its timestamp as
+    `summary_message_ts` so Slack preserves it.
     """
     config = get_config()
     configurable = config.get("configurable", {})

@@ -139,7 +139,7 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Reaction removal queued"}
         return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
 
-    if event.get("type") in ("agent_session_stopped", "message_stream_stopped"):
+    if event.get("type") == "agent_session_stopped":
         background_tasks.add_task(
             common.process_agent_session_stopped, event, str(payload.get("event_id") or "")
         )

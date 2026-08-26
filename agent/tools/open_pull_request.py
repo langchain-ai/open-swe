@@ -15,7 +15,6 @@ from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
 from ..utils.slack_code_channels import (
-    VIEW_CONTENT_MAX_CHARS,
     is_code_channel_session,
     repo_context_bar_items,
     set_context_bar,
@@ -561,7 +560,7 @@ async def _publish_code_channel_pr(
     if resp.status_code == 200 and resp.text.strip():
         await set_diff_view(
             channel_id,
-            resp.text[:VIEW_CONTENT_MAX_CHARS],
+            resp.text,
             base_branch=base,
             head_branch=head,
         )
