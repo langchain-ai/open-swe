@@ -236,8 +236,10 @@ async def slack_webhook(
             return {"status": "ignored", "reason": "Slack channel is not eligible"}
 
     if event.get("type") == "code_channel_action":
-        action = event.get("action") if isinstance(event.get("action"), dict) else {}
-        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        action_value = event.get("action")
+        item_value = event.get("item")
+        action: dict[str, Any] = action_value if isinstance(action_value, dict) else {}
+        item: dict[str, Any] = item_value if isinstance(item_value, dict) else {}
         user = event.get("user")
         user_id = str(
             user.get("id") if isinstance(user, dict) else user or event.get("user_id") or ""
