@@ -438,7 +438,7 @@ Slack Block Kit option buttons only work when Interactivity is enabled and point
 
 **Code channels (early access):**
 
-The manifest above enables Slack [code channels](https://api.slack.com/partners/code-channels) — one Slack channel dedicated to one Open SWE session. In a code channel the whole channel is the session, so Open SWE answers every message without needing an `@`-mention, replies as top-level channel messages, reports its session status, and keeps the context bar (repo, branch, PR) and the diff tab current as it works. The agent can promote a normal Slack thread into a code channel, retitle it, publish views, and archive it with `manage_code_channel`.
+The manifest above enables Slack [code channels](https://api.slack.com/partners/code-channels) — one Slack channel dedicated to one Open SWE session. In a code channel the whole channel is the session, so Open SWE answers every message without needing an `@`-mention, replies as top-level channel messages, reports its session status, and keeps the context bar (repo, branch, PR) and the diff tab current as it works. The agent can promote a normal Slack thread into a code channel, retitle it, publish its diff, and archive it with `manage_code_channel`.
 
 This requires the `code_channels:manage` bot scope, the `agent_session_stopped` bot event, and `features.code_channels.enabled`. Code channel messages arrive over the `message.channels` / `message.groups` subscriptions an app already uses; `message.session` is an alternative for apps that want *only* session messages, and subscribing to both does not duplicate deliveries. Code channels are in early access: if your workspace is not enrolled, leave `features.code_channels` out of the manifest — everything else keeps working unchanged.
 

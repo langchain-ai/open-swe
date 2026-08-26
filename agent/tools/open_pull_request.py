@@ -19,7 +19,7 @@ from ..utils.slack_code_channels import (
     is_code_channel_session,
     repo_context_bar_items,
     set_context_bar,
-    set_view,
+    set_diff_view,
 )
 
 logger = logging.getLogger(__name__)
@@ -559,9 +559,8 @@ async def _publish_code_channel_pr(
         headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},
     )
     if resp.status_code == 200 and resp.text.strip():
-        await set_view(
+        await set_diff_view(
             channel_id,
-            "diff",
             resp.text[:VIEW_CONTENT_MAX_CHARS],
             base_branch=base,
             head_branch=head,

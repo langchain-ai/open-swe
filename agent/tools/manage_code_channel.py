@@ -1,5 +1,5 @@
 from contextlib import suppress
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from langgraph.config import get_config
 
@@ -14,24 +14,20 @@ from ..utils.slack import (
 )
 from ..utils.slack_code_channels import (
     CODE_CHANNEL_SESSION_TS,
-    ViewType,
     archive_code_channel,
     create_code_channel,
     is_code_channel_session,
     rename_session,
     set_context_bar,
-    set_view,
+    set_diff_view,
 )
 from ..utils.thread_ops import langgraph_client
-
-_VIEW_TYPES = ("html", "diff", "block_kit", "canvas")
 
 
 async def manage_code_channel(
     action: Literal["create", "rename", "context", "view", "archive"],
     title: str = "",
     items: list[dict[str, Any]] | None = None,
-    view_type: str = "diff",
     content: str = "",
     base_branch: str = "",
     head_branch: str = "",
@@ -47,9 +43,9 @@ async def manage_code_channel(
     - `rename`: retitle the session with `title` once you know what the task is.
     - `context`: replace the context bar with `items` (max 5), each
       `{"key", "label", "icon", "url"}` — repo, branch, PR link, CI status.
-    - `view`: publish a view tab. Pass `view_type` (`diff`, `html`, `block_kit`,
-      `canvas`) and `content`; for a `diff` also pass `base_branch`/`head_branch`.
-      Publishing again replaces the tab in place.
+    - `view`: publish a unified diff in the channel's diff tab. Pass `content`
+      and optionally `base_branch`/`head_branch`. Publishing again replaces the
+      tab in place.
     - `archive`: close the channel when the task is done. Post your closing
       summary with `slack_thread_reply` first and pass its `message_ts` as
       `summary_message_ts` so it survives archival.
@@ -87,15 +83,11 @@ async def manage_code_channel(
             return {"success": False, "error": "items is required"}
         ok, error = await set_context_bar(channel_id, items)
     elif action == "view":
-        if view_type not in _VIEW_TYPES:
-            return {"success": False, "error": f"view_type must be one of {_VIEW_TYPES}"}
         if not content.strip():
             return {"success": False, "error": "content is required"}
-        ok, error = await set_view(
+        ok, error = await set_diff_view(
             channel_id,
-            cast(ViewType, view_type),
             content,
-            title=title,
             base_branch=base_branch,
             head_branch=head_branch,
         )

@@ -260,6 +260,39 @@ async def test_stop_reaction_without_event_id_has_no_side_effects(
     assert client.runs.cancelled == []
 
 
+async def test_agent_session_stopped_cancels_without_followup_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client, "0")
+    client.runs.by_status["running"] = [{"run_id": "run-running"}]
+    client.store.items[(("queue", thread_id), "pending_messages")] = {
+        "value": {"messages": [{"content": "later"}]}
+    }
+    dispatched, claimed = _patch_handler(monkeypatch, client)
+
+    await slack_stop.process_agent_session_stopped(
+        {"type": "agent_session_stopped", "channel": "C123"},
+        event_id="EvSessionStop",
+    )
+
+    assert claimed == ["EvSessionStop"]
+    assert client.runs.cancelled == [
+        {
+            "thread_id": thread_id,
+            "run_ids": ["run-running"],
+            "action": "interrupt",
+        }
+    ]
+    assert (("queue", thread_id), "pending_messages") in client.store.deleted
+    assert len(client.threads.updates) == 1
+    updated_thread_id, metadata = client.threads.updates[0]
+    assert updated_thread_id == thread_id
+    assert metadata["latest_run_status"] == "interrupted"
+    assert isinstance(metadata["stop_requested_at_ms"], int)
+    assert dispatched == []
+
+
 async def test_duplicate_stop_reaction_has_no_side_effects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

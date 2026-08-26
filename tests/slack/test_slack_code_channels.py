@@ -9,7 +9,7 @@ from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from agent.utils import slack as slack_utils
-from agent.utils import slack_events
+from agent.utils import slack_code_channels, slack_events
 from agent.webhooks import common as webhook_common
 from agent.webhooks import slack_routes
 
@@ -29,6 +29,62 @@ class _FakeRequest:
 
     async def body(self) -> bytes:
         return self._body
+
+
+async def test_set_diff_view_uses_documented_payload_and_bounds_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call = AsyncMock(return_value=({"ok": True}, None))
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    ok, error = await slack_code_channels.set_diff_view(
+        "C-code",
+        "x" * (slack_code_channels.VIEW_CONTENT_MAX_CHARS + 1),
+        base_branch="main",
+        head_branch="feature/code-channels",
+    )
+
+    assert ok is True
+    assert error is None
+    call.assert_awaited_once_with(
+        "agents.conversations.setView",
+        {
+            "channel_id": "C-code",
+            "type": "diff",
+            "content": "x" * slack_code_channels.VIEW_CONTENT_MAX_CHARS,
+            "base_branch": "main",
+            "head_branch": "feature/code-channels",
+        },
+    )
+
+
+def test_repo_context_bar_items_use_supported_icons_and_branch_link() -> None:
+    items = slack_code_channels.repo_context_bar_items(
+        {"owner": "langchain-ai", "name": "open-swe"},
+        branch="feature/code channels",
+        pr_url="https://github.com/langchain-ai/open-swe/pull/2252",
+    )
+
+    assert items == [
+        {
+            "key": "repo",
+            "label": "langchain-ai/open-swe",
+            "icon": "folder",
+            "url": "https://github.com/langchain-ai/open-swe",
+        },
+        {
+            "key": "branch",
+            "label": "feature/code channels",
+            "icon": "branch",
+            "url": "https://github.com/langchain-ai/open-swe/tree/feature/code%20channels",
+        },
+        {
+            "key": "pr",
+            "label": "Pull request",
+            "icon": "link",
+            "url": "https://github.com/langchain-ai/open-swe/pull/2252",
+        },
+    ]
 
 
 async def test_untagged_code_channel_message_routes_to_the_channel_session(

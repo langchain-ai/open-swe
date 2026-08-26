@@ -9,6 +9,7 @@ timestamp validation and can never collide with a real Slack message ts.
 
 import logging
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -26,10 +27,9 @@ CODE_CHANNEL_SESSION_TS = "0"
 CODE_CHANNEL_RECORD_TYPE = "agent_channel"
 CONTEXT_BAR_MAX_ITEMS = 5
 VIEW_CONTENT_MAX_CHARS = 200_000
-CHANNEL_NAME_MAX_CHARS = 80
+CHANNEL_NAME_MAX_CHARS = 200
 
 SessionStatus = Literal["processing", "active", "suspended", "closed"]
-ViewType = Literal["html", "diff", "block_kit", "canvas"]
 
 
 def is_code_channel_session(thread_ts: str | None) -> bool:
@@ -127,23 +127,20 @@ async def set_context_bar(channel_id: str, items: list[dict[str, Any]]) -> tuple
     return error is None, error
 
 
-async def set_view(
+async def set_diff_view(
     channel_id: str,
-    view_type: ViewType,
     content: str,
     *,
-    title: str = "",
     base_branch: str = "",
     head_branch: str = "",
 ) -> tuple[bool, str | None]:
-    """Create or replace a view tab on a code channel."""
+    """Create or replace the diff tab on a code channel."""
     payload: dict[str, Any] = {
         "channel_id": channel_id,
-        "type": view_type,
+        "type": "diff",
         "content": content[:VIEW_CONTENT_MAX_CHARS],
     }
     for key, value in (
-        ("title", title),
         ("base_branch", base_branch),
         ("head_branch", head_branch),
     ):
@@ -181,7 +178,10 @@ def repo_context_bar_items(
             }
         )
     if branch:
-        items.append({"key": "branch", "label": branch, "icon": "git-branch"})
+        item = {"key": "branch", "label": branch, "icon": "branch"}
+        if owner and name:
+            item["url"] = f"https://github.com/{owner}/{name}/tree/{quote(branch, safe='/')}"
+        items.append(item)
     if pr_url.startswith("https://"):
         items.append({"key": "pr", "label": "Pull request", "icon": "link", "url": pr_url})
     return items
