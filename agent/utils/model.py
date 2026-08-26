@@ -20,7 +20,13 @@ DEFAULT_MAX_RETRIES = 6
 # max-effort reasoning on a long context, and let ``max_retries`` above turn a
 # stall into a retry instead of a dead run.
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
-_TIMEOUT_PROVIDER_PREFIXES = ("openai:", "anthropic:", "google_genai:", "fireworks:")
+_TIMEOUT_PROVIDER_PREFIXES = (
+    "openai:",
+    "anthropic:",
+    "baseten:",
+    "google_genai:",
+    "fireworks:",
+)
 
 _MODEL_CACHE: dict[
     tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
@@ -166,6 +172,13 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
+    init_model_id = model_id
+    if model_id.startswith("baseten:"):
+        if not gateway_applied:
+            raise ValueError("Baseten models require the LangSmith LLM Gateway")
+        init_model_id = model_id.split(":", 1)[1]
+        model_kwargs["model_provider"] = "openai"
+
     profile_override = model_profile_with_context_override(model_id)
     if profile_override is not None:
         model_kwargs["profile"] = profile_override
@@ -187,7 +200,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             model_id.split(":", 1)[1], **cast(dict[str, Any], model_kwargs)
         )
     else:
-        model = init_chat_model(model=model_id, **cast(dict[str, Any], model_kwargs))
+        model = init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
     _MODEL_CACHE[key] = model
     return model
 
@@ -320,6 +333,8 @@ def provider_model_kwargs(
         effort = fireworks_reasoning_effort_for(profile_effort)
         if effort is not None:
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
+    elif model_id.startswith("baseten:") and profile_effort in ("low", "high", "max"):
+        kwargs["reasoning_effort"] = profile_effort
     return kwargs
 
 

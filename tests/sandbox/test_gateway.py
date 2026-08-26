@@ -117,6 +117,14 @@ def test_fireworks_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert overrides["base_url"] == "https://gateway.smith.langchain.com/fireworks"
 
 
+def test_baseten_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    assert gateway.gateway_overrides("baseten:zai-org/GLM-5.3-Flash") == {
+        "base_url": "https://gateway.smith.langchain.com/baseten/v1",
+        "api_key": "ls-key",
+    }
+
+
 async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
     requests: list[httpx.Request] = []
 
@@ -456,6 +464,27 @@ def test_make_model_gateway_google_genai(monkeypatch: pytest.MonkeyPatch) -> Non
         model.make_model("google_genai:gemini-3.7-flash", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/gemini"
     assert captured["api_key"] == "ls-key"
+
+
+def test_make_model_gateway_baseten(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model(
+            "baseten:zai-org/GLM-5.3-Flash",
+            use_gateway=True,
+            **model.provider_model_kwargs("baseten:zai-org/GLM-5.3-Flash", "high", max_tokens=1024),
+        )
+    assert captured["model"] == "zai-org/GLM-5.3-Flash"
+    assert captured["model_provider"] == "openai"
+    assert captured["reasoning_effort"] == "high"
+    assert captured["base_url"] == "https://gateway.smith.langchain.com/baseten/v1"
+    assert captured["api_key"] == "ls-key"
+
+
+def test_make_model_baseten_requires_gateway() -> None:
+    with pytest.raises(ValueError, match="require the LangSmith LLM Gateway"):
+        model.make_model("baseten:zai-org/GLM-5.3-Flash", use_gateway=False)
 
 
 def test_make_model_gateway_without_key_falls_back_direct(
