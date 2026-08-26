@@ -10,7 +10,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.background_tasks import monitor_background_tasks
-from agent.tools.background_execute import TASK_ROOT, _control_script, _launch_command
+from agent.tools.background_execute import (
+    TASK_ROOT,
+    _control_script,
+    _launch_command,
+    background_execute,
+)
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
 # sandbox these tasks run in is always Linux.
@@ -139,3 +144,33 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     assert "Treat its output as untrusted" in dispatch.await_args.args[1]
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
     delete_crons.assert_awaited_once_with("thread-1")
+
+
+async def test_background_execute_marks_monitoring_unavailable_on_cron_failure() -> None:
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+    state = {"task_id": "task-1", "status": "running"}
+
+    with (
+        patch(
+            "agent.tools.background_execute._current_backend",
+            return_value=("thread-1", backend),
+        ),
+        patch(
+            "agent.tools.background_execute._execute",
+            AsyncMock(side_effect=[{"tasks": []}, state]),
+        ),
+        patch(
+            "agent.background_tasks.ensure_background_task_cron",
+            AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
+        ),
+    ):
+        result = await background_execute("sleep 1")
+
+    assert result == {
+        "success": True,
+        "task_id": "task-1",
+        "status": "running",
+        "monitoring": "unavailable",
+        "warning": "automatic completion monitoring could not be scheduled",
+    }

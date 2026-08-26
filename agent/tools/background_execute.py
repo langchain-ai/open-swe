@@ -286,12 +286,7 @@ def _current_backend() -> tuple[str, Any]:
 async def background_execute(
     command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
 ) -> dict[str, Any]:
-    """Start a long-running, non-interactive sandbox command and return immediately.
-
-    Use this for tests, builds, and waits while useful foreground work remains. Do not use it
-    for commands that edit files concurrently with the agent, installs, commits, or pushes.
-    Completion is delivered automatically; do not poll. Output is capped and saved in the sandbox.
-    """
+    """Start a sandbox command; if monitoring is unavailable, poll background_task status."""
     if not command.strip():
         return {"success": False, "error": "command must not be empty"}
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
@@ -315,12 +310,14 @@ async def background_execute(
         state = await _execute(backend, _launch_command(task_id, command, timeout))
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
+            state["monitoring"] = "unavailable"
             state["warning"] = "automatic completion monitoring is busy"
         else:
             try:
                 await ensure_background_task_cron(thread_id)
             except Exception:
                 logger.warning("Failed to schedule background-task monitor", exc_info=True)
+                state["monitoring"] = "unavailable"
                 state["warning"] = "automatic completion monitoring could not be scheduled"
         return {"success": True, **state}
     except Exception as exc:

@@ -138,6 +138,20 @@ async def test_watch_lifecycle_creates_and_deletes_ten_minute_cron(
     assert watch_client.store.values == {}
 
 
+async def test_existing_watch_cron_uses_metadata_only_search(
+    watch_client: _Client,
+) -> None:
+    watch_client.crons.search = AsyncMock(return_value=[{"cron_id": "existing-cron"}])
+
+    cron_id = await baby_sit._ensure_watch_cron("acme/repo#7")
+
+    assert cron_id == "existing-cron"
+    watch_client.crons.search.assert_awaited_once_with(
+        metadata={"kind": baby_sit.WATCH_CRON_KIND, "watch_key": "acme/repo#7"},
+        limit=10,
+    )
+
+
 async def test_fallback_uses_watch_installation_token(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:

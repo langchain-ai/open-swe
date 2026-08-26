@@ -28,7 +28,6 @@ def _client():
 async def ensure_background_task_cron(thread_id: str) -> str:
     client = _client()
     crons = await client.crons.search(
-        assistant_id="scheduler",
         metadata={"kind": CRON_KIND, "thread_id": thread_id},
         limit=10,
     )
@@ -58,7 +57,6 @@ async def ensure_background_task_cron(thread_id: str) -> str:
 async def _delete_crons(thread_id: str) -> None:
     client = _client()
     crons = await client.crons.search(
-        assistant_id="scheduler",
         metadata={"kind": CRON_KIND, "thread_id": thread_id},
         limit=10,
     )
