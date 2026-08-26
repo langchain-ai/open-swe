@@ -63,6 +63,7 @@ export function PlanReview({
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const commentRefs = useRef(new Map<string, HTMLElement>())
+  const commentMutation = useRef(0)
   const format = plan.html.trim() ? "html" : "markdown"
   const content = format === "html" ? plan.html : plan.markdown
   const isShared = plan.status === "shared"
@@ -73,9 +74,11 @@ export function PlanReview({
     if (isShared) return
     let cancelled = false
     const load = async () => {
+      const mutation = commentMutation.current
       try {
         const next = await getPlanComments(plan.threadId)
-        if (!cancelled) setComments(next)
+        if (!cancelled && mutation === commentMutation.current)
+          setComments(next)
       } catch {
         /* next poll retries */
       }
@@ -93,6 +96,7 @@ export function PlanReview({
     if (!body || !anchor) return
     setPosting(true)
     setError(null)
+    commentMutation.current += 1
     try {
       const created = await addPlanComment(plan.threadId, body, anchor)
       setComments((current) => [...current, created])
@@ -118,6 +122,7 @@ export function PlanReview({
   const removeComment = useCallback(
     async (id: string) => {
       setError(null)
+      commentMutation.current += 1
       try {
         await deletePlanComment(plan.threadId, id)
         setComments((current) => current.filter((comment) => comment.id !== id))

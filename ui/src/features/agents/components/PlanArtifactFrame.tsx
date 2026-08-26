@@ -4,6 +4,7 @@ import type { PlanComment, PlanTextAnchor } from "@/lib/plan"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
 import {
   ARTIFACT_ALLOW,
+  ARTIFACT_CSP,
   ARTIFACT_SANDBOX,
   withArtifactShell,
 } from "@/features/agents/lib/artifactShell"
@@ -114,15 +115,15 @@ function frameScript(channel: string): string {
 
     function setAnnotations(comments) {
       clearAnnotations();
-      comments.forEach((comment, index) => {
+      comments.forEach(comment => {
         const range = rangeAt(comment.anchor);
         if (!range) return;
         const marker = document.createElement("button");
         marker.type = "button";
         marker.dataset.planAnnotation = "";
         marker.className = "plan-annotation-marker";
-        marker.textContent = String(index + 1);
-        marker.title = "Open comment " + (index + 1);
+        marker.textContent = String(comment.number);
+        marker.title = "Open comment " + comment.number;
         marker.addEventListener("click", () => post({ type: "comment-selected", id: comment.id }));
         document.body.append(marker);
         markers.set(comment.id, marker);
@@ -212,17 +213,7 @@ function withViewerPolicy(
   channel: string
 ): string {
   const nonce = channel
-  const policy = [
-    "default-src 'none'",
-    `script-src 'nonce-${nonce}'`,
-    "style-src 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src https://fonts.gstatic.com data:",
-    "img-src data:",
-    "base-uri 'none'",
-    "form-action 'none'",
-    "frame-src 'none'",
-    "connect-src 'none'",
-  ].join("; ")
+  const policy = ARTIFACT_CSP
   const head = `<meta http-equiv="Content-Security-Policy" content="${policy}"><style>::highlight(plan-comments){background:#facc15;color:inherit}.plan-annotation-marker{position:fixed;z-index:2147483647;width:24px;height:24px;padding:0;border:2px solid white;border-radius:999px;background:#2563eb;color:white;font:700 12px/20px system-ui;box-shadow:0 2px 8px #0005;cursor:pointer}.plan-annotation-marker-active{animation:plan-comment-pulse 1.2s ease-out}@keyframes plan-comment-pulse{0%{box-shadow:0 0 0 0 #2563ebaa}100%{box-shadow:0 0 0 12px transparent}}</style>`
   const script = `<script nonce="${nonce}">${frameScript(channel)}</script>`
   const themed = withArtifactShell(html, theme).replace(
@@ -291,11 +282,16 @@ export function PlanArtifactFrame({
   const anchoredComments = useMemo(
     () =>
       comments
+        .map((comment, index) => ({ ...comment, number: index + 1 }))
         .filter(
-          (comment): comment is PlanComment & { anchor: PlanTextAnchor } =>
-            isAnchor(comment.anchor)
+          (
+            comment
+          ): comment is PlanComment & {
+            anchor: PlanTextAnchor
+            number: number
+          } => isAnchor(comment.anchor)
         )
-        .map(({ id, anchor }) => ({ id, anchor })),
+        .map(({ id, anchor, number }) => ({ id, anchor, number })),
     [comments]
   )
   const commentsRef = useRef(anchoredComments)
