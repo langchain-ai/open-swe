@@ -114,6 +114,25 @@ async def test_context_bar_action_routes_to_code_channel_session(
     assert "create-pr" in code_channel_route.await_args.args[0]["text"]
 
 
+async def test_agent_session_methods_include_normal_thread_ts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call = AsyncMock(return_value=({}, None))
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    await slack_code_channels.set_session_status("D-agent", "processing", "123.45")
+    await slack_code_channels.rename_session("D-agent", "Investigate issue", "123.45")
+
+    assert call.await_args_list[0].args == (
+        "agents.sessions.setStatus",
+        {"channel_id": "D-agent", "status": "processing", "thread_ts": "123.45"},
+    )
+    assert call.await_args_list[1].args == (
+        "agents.sessions.rename",
+        {"channel_id": "D-agent", "title": "Investigate issue", "thread_ts": "123.45"},
+    )
+
+
 async def test_set_view_rejects_content_over_one_megabyte(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

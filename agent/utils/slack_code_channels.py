@@ -167,28 +167,33 @@ async def create_code_channel(
 
 
 async def set_session_status_result(
-    channel_id: str, status: SessionStatus
+    channel_id: str, status: SessionStatus, thread_ts: str = ""
 ) -> tuple[dict[str, Any] | None, str | None]:
     if status not in {"processing", "active", "suspended", "closed"}:
         return None, "invalid_status"
-    return await _call("agents.sessions.setStatus", {"channel_id": channel_id, "status": status})
+    payload = {"channel_id": channel_id, "status": status}
+    if thread_ts and not is_code_channel_session(thread_ts):
+        payload["thread_ts"] = thread_ts
+    return await _call("agents.sessions.setStatus", payload)
 
 
-async def set_session_status(channel_id: str, status: SessionStatus) -> bool:
-    """Set a code channel's lifecycle status."""
-    _, error = await set_session_status_result(channel_id, status)
+async def set_session_status(channel_id: str, status: SessionStatus, thread_ts: str = "") -> bool:
+    """Set a Slack agent session's lifecycle status."""
+    _, error = await set_session_status_result(channel_id, status, thread_ts)
     return error is None
 
 
-async def rename_session(channel_id: str, title: str) -> tuple[bool, str | None]:
-    """Rename a code channel session."""
+async def rename_session(
+    channel_id: str, title: str, thread_ts: str = ""
+) -> tuple[bool, str | None]:
+    """Rename a Slack agent session."""
     clean_title = title.strip()
     if not 1 <= len(clean_title) <= 200:
         return False, "invalid_title"
-    _, error = await _call(
-        "agents.sessions.rename",
-        {"channel_id": channel_id, "title": clean_title},
-    )
+    payload = {"channel_id": channel_id, "title": clean_title}
+    if thread_ts and not is_code_channel_session(thread_ts):
+        payload["thread_ts"] = thread_ts
+    _, error = await _call("agents.sessions.rename", payload)
     return error is None, error
 
 

@@ -713,6 +713,13 @@ async def _process_slack_mention_impl(
     slack_thread_section = _format_slack_thread_section(
         channel_id, thread_ts, thread_version, context_source, channel_context
     )
+    app_context = event_data.get("app_context")
+    app_context_section = (
+        "\n\n## Active Slack Context\n"
+        + common.json.dumps(app_context, ensure_ascii=False, separators=(",", ":"))[:8000]
+        if isinstance(app_context, dict) and app_context
+        else ""
+    )
     operational_context = (
         _slack_prompt_preamble(untagged_reply, message_update) + "## Default Repository Hint\n"
         f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
@@ -722,6 +729,7 @@ async def _process_slack_mention_impl(
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
+        + app_context_section
         + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
@@ -888,9 +896,10 @@ async def _process_slack_mention_impl(
         request_blocks=content_blocks,
         operational_context=operational_context,
     )
-    if code_channel:
-        await common.set_session_status(channel_id, "processing")
-        if is_first_mention:
+    await common.set_session_status(channel_id, "processing", thread_ts)
+    if is_first_mention:
+        await common.rename_session(channel_id, clean_text[:200], thread_ts)
+        if code_channel:
             await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
     try:
@@ -904,8 +913,7 @@ async def _process_slack_mention_impl(
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear
         # the loading UI this turn switched on.
-        if code_channel:
-            await common.set_session_status(channel_id, "active")
+        await common.set_session_status(channel_id, "active", thread_ts)
         raise
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
