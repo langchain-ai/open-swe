@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react"
 import {
   ChevronDownIcon,
-  GitBranchIcon,
   GitPullRequestIcon,
   RefreshCwIcon,
 } from "lucide-react"
+import { GitBranchIcon } from "@phosphor-icons/react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
@@ -157,9 +157,9 @@ export function ChangesPanel({
             rel="noreferrer"
             aria-label="View PR"
             title="View PR"
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-8 @max-[680px]:justify-center @max-[680px]:px-0"
+            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
           >
-            <GitPullRequestIcon className="size-4 shrink-0 overflow-visible" />
+            <GitPullRequestIcon className="size-3.5 shrink-0" />
             <span className="whitespace-nowrap @max-[680px]:hidden">
               View PR
             </span>
@@ -185,7 +185,7 @@ export function ChangesPanel({
         emptyLabel={emptyLabel}
         truncated={truncated}
         leading={
-          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+          <div className="flex min-w-0 items-center gap-1.5">
             <ScopeSwitcher
               scope={scope}
               branchScopeAvailable={branchScopeAvailable}
@@ -202,9 +202,9 @@ export function ChangesPanel({
                 <Tooltip>
                   <TooltipTrigger
                     aria-label={`Branch: ${branch}`}
-                    className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent @max-[520px]:flex"
+                    className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent @max-[520px]:flex"
                   >
-                    <GitBranchIcon className="size-3.5" />
+                    <GitBranchIcon className="size-4 shrink-0" />
                   </TooltipTrigger>
                   <TooltipPopup>{branch}</TooltipPopup>
                 </Tooltip>
