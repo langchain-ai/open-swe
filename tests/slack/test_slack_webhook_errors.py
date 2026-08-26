@@ -510,7 +510,7 @@ def test_untagged_prompt_tells_the_agent_it_was_not_tagged() -> None:
     preamble = slack_webhook._slack_prompt_preamble(untagged_reply=True)
 
     assert "You were NOT tagged" in preamble
-    assert "call `no_op` and post nothing" in preamble
+    assert "end your turn without calling any tool and post nothing" in preamble
     assert "Staying silent is the right" in preamble
     assert slack_webhook._slack_request_heading(untagged_reply=True) == "## Untagged Message"
 

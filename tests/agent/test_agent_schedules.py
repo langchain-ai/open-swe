@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from agent import store as agent_store
 from agent.dashboard import schedules
 from agent.dashboard.schedules import ScheduleCreateBody, ScheduleUpdateBody
 
@@ -92,7 +93,8 @@ class _FakeClient:
 @pytest.fixture
 def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     client = _FakeClient()
-    monkeypatch.setattr(schedules, "_client", lambda: client)
+    monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
+    monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client
 
 

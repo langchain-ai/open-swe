@@ -1957,6 +1957,63 @@ async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(mo
     assert {call["offset"] for call in searches} == {0, page_size}
 
 
+async def test_list_dashboard_threads_sidebar_allows_limits_beyond_100(monkeypatch) -> None:
+    threads = _make_threads(120, resolved_before=0)
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=110, resolved_limit=0
+    )
+
+    assert result["active"]["limit"] == 110
+    assert len(result["active"]["items"]) == 110
+    assert result["active"]["hasMore"] is True
+
+
+async def test_list_dashboard_threads_sidebar_accepts_zero_resolved_limit(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=1)
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=1, resolved_limit=0
+    )
+
+    assert result["active"]["limit"] == 1
+    assert result["resolved"] == {"items": [], "limit": 0, "hasMore": True}
+
+
 async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiting(
     monkeypatch,
 ) -> None:

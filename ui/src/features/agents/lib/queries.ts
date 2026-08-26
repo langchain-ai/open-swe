@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { agentsApi } from "./api"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
@@ -130,6 +130,9 @@ function snapshotAgentThreadQueries(
   })
   const lists = [
     ...queryClient.getQueriesData({
+      queryKey: ["agent-threads", "lists", "sidebar"],
+    }),
+    ...queryClient.getQueriesData({
       queryKey: ["agent-threads", "lists", "infinite-pages"],
     }),
     ...queryClient.getQueriesData({
@@ -172,6 +175,52 @@ function setAgentThreadResolved(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
+  for (const [key, data] of queryClient.getQueriesData<SidebarThreads>({
+    queryKey: ["agent-threads", "lists", "sidebar"],
+  })) {
+    cachedThread ??= [
+      ...(data?.active.items ?? []),
+      ...(data?.resolved.items ?? []),
+    ].find((thread) => thread.id === threadId)
+    queryClient.setQueryData<SidebarThreads>(key, (prev) => {
+      if (!prev) return prev
+      const move = (source: Array<AgentThread>, target: Array<AgentThread>) => {
+        const thread = source.find((item) => item.id === threadId)
+        return thread
+          ? [update(thread), ...target.filter((item) => item.id !== threadId)]
+          : target
+      }
+      return resolved
+        ? {
+            ...prev,
+            active: {
+              ...prev.active,
+              items: prev.active.items.filter((item) => item.id !== threadId),
+            },
+            resolved: {
+              ...prev.resolved,
+              items: move(prev.active.items, prev.resolved.items).slice(
+                0,
+                prev.resolved.limit
+              ),
+            },
+          }
+        : {
+            ...prev,
+            active: {
+              ...prev.active,
+              items: move(prev.resolved.items, prev.active.items).slice(
+                0,
+                prev.active.limit
+              ),
+            },
+            resolved: {
+              ...prev.resolved,
+              items: prev.resolved.items.filter((item) => item.id !== threadId),
+            },
+          }
+    })
+  }
   for (const [key, data] of queryClient.getQueriesData<
     InfiniteData<ThreadsPage>
   >({ queryKey: ["agent-threads", "lists", "infinite-pages"] })) {
@@ -404,11 +453,8 @@ export function useSeedAgentThreadDetails(
 
 export const SIDEBAR_PAGE_SIZE = 10
 
-function infinitePageThreads(
-  data?: InfiniteData<ThreadsPage>
-): Array<AgentThread> {
-  const threads = data?.pages.flatMap((page) => page.items) ?? []
-  return [...new Map(threads.map((thread) => [thread.id, thread])).values()]
+function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
+  return [...(data?.active.items ?? []), ...(data?.resolved.items ?? [])]
 }
 
 export function useSidebarThreads({
@@ -422,67 +468,46 @@ export function useSidebarThreads({
   includeResolved?: boolean
   enabled?: boolean
 }) {
-  const scope = includeAutomations ? "all" : "interactive"
-  const activeQuery = useInfiniteThreadsPages(
-    { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope, sortBy: "created_at" },
-    { enabled, pollWhileRunning: true }
-  )
-  const resolvedQuery = useInfiniteThreadsPages(
-    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope, sortBy: "created_at" },
-    { enabled: enabled && includeResolved, pollWhileRunning: true }
-  )
-  const loadedActive = infinitePageThreads(activeQuery.data)
-  const loadedResolved = infinitePageThreads(resolvedQuery.data)
-  const activeThreadLoaded = [
-    ...loadedActive,
-    ...(includeResolved ? loadedResolved : []),
-  ].some((thread) => thread.id === activeThreadId)
-  const activeThreadQuery = useQuery({
-    queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
-    queryFn: () =>
-      agentsApi.getThread(activeThreadId as string, { markViewed: false }),
-    enabled:
-      enabled &&
-      Boolean(activeThreadId) &&
-      activeQuery.isSuccess &&
-      !activeThreadLoaded,
-    staleTime: 30_000,
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 2000 : false,
-    retry: false,
+  const [activeLimit, setActiveLimit] = useState(SIDEBAR_PAGE_SIZE)
+  const [resolvedLimit, setResolvedLimit] = useState(SIDEBAR_PAGE_SIZE)
+  const params = {
+    activeLimit,
+    resolvedLimit: includeResolved ? resolvedLimit : 0,
+    activeThreadId,
+    includeAutomations,
+  }
+  const query = useQuery({
+    queryKey: agentThreadKeys.sidebar(params),
+    queryFn: () => agentsApi.listSidebarThreads(params),
+    enabled,
+    placeholderData: (previous) => previous,
+    refetchInterval: (current) =>
+      sidebarThreads(current.state.data).some(
+        (thread) => thread.status === "running"
+      )
+        ? 2000
+        : false,
   })
-  const pinnedThread = activeThreadLoaded ? undefined : activeThreadQuery.data
-  const activeItems =
-    pinnedThread && !pinnedThread.resolved
-      ? [
-          pinnedThread,
-          ...loadedActive.filter((thread) => thread.id !== pinnedThread.id),
-        ]
-      : loadedActive
-  const resolvedItems =
-    pinnedThread?.resolved && includeResolved
-      ? [
-          pinnedThread,
-          ...loadedResolved.filter((thread) => thread.id !== pinnedThread.id),
-        ]
-      : loadedResolved
+  const data = query.data ?? {
+    active: { items: [], limit: activeLimit, hasMore: false },
+    resolved: { items: [], limit: resolvedLimit, hasMore: false },
+  }
 
   return {
-    data: {
-      active: {
-        items: activeItems,
-        limit: SIDEBAR_PAGE_SIZE,
-        hasMore: activeQuery.hasNextPage,
-      },
-      resolved: {
-        items: resolvedItems,
-        limit: SIDEBAR_PAGE_SIZE,
-        hasMore: resolvedQuery.hasNextPage,
-      },
+    data,
+    activeQuery: {
+      isFetchingNextPage:
+        query.isFetching && (query.data?.active.limit ?? 0) < activeLimit,
+      fetchNextPage: () => setActiveLimit((limit) => limit + SIDEBAR_PAGE_SIZE),
     },
-    activeQuery,
-    resolvedQuery,
-    isPending: activeQuery.isPending,
+    resolvedQuery: {
+      isLoading: includeResolved && query.isPending,
+      isFetchingNextPage:
+        query.isFetching && (query.data?.resolved.limit ?? 0) < resolvedLimit,
+      fetchNextPage: () =>
+        setResolvedLimit((limit) => limit + SIDEBAR_PAGE_SIZE),
+    },
+    isPending: query.isPending,
   }
 }
 
@@ -913,13 +938,22 @@ export function useInfiniteThreadsPages(
 
 export function useThreadsPage(
   params: ThreadsPageParams,
-  options: { enabled?: boolean; staleWhileRevalidate?: boolean } = {}
+  options: {
+    enabled?: boolean
+    staleWhileRevalidate?: boolean
+    pollWhileRunning?: boolean
+  } = {}
 ) {
   return useQuery({
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
     enabled: options.enabled,
     placeholderData: (prev) => prev,
+    refetchInterval: (query) =>
+      options.pollWhileRunning &&
+      query.state.data?.items.some((thread) => thread.status === "running")
+        ? 2000
+        : false,
     ...(options.staleWhileRevalidate
       ? {
           staleTime: 30_000,

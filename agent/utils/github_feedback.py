@@ -1,12 +1,13 @@
 import logging
 import os
 import re
-import uuid
 from collections.abc import Mapping
 from typing import Any
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+
+from agent.thread_ids import reviewer_thread_id
 
 from ..review.findings import comment_ids_for_finding, list_findings
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
@@ -26,10 +27,6 @@ GITHUB_FEEDBACK_REACTIONS: dict[str, float] = {
 _REACTION_STATE_NAMESPACE = "github_reaction_state"
 _REACTION_EVENT_NAMESPACE = "github_reaction_events"
 _PULL_URL_RE = re.compile(r"/pulls/(\d+)\Z")
-
-
-def _reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{owner}/{repo}/pr/{pr_number}/reviewer"))
 
 
 def _read_active_reactions(item: Mapping[str, Any] | None) -> set[str]:
@@ -169,7 +166,7 @@ async def process_github_reaction(
     if await _event_was_processed(langgraph_client, repo_key, delivery_id):
         return
 
-    thread_id = _reviewer_thread_id(owner, repo_name, pr_number)
+    thread_id = reviewer_thread_id(owner, repo_name, pr_number)
     findings = await list_findings(thread_id)
     finding = next(
         (candidate for candidate in findings if comment_id in comment_ids_for_finding(candidate)),

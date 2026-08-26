@@ -29,6 +29,7 @@ function useAgentsTheme() {
 function AgentsLayout() {
   useAgentsTheme()
   const session = useSession()
+  const navigate = Route.useNavigate()
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
@@ -69,7 +70,14 @@ function AgentsLayout() {
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      <AgentThreadStreamProvider threadId={activeThreadId ?? null}>
+      <AgentThreadStreamProvider
+        threadId={activeThreadId ?? null}
+        onThreadId={(id) => {
+          if (!activeThreadId) {
+            void navigate({ to: "/agents/$threadId", params: { threadId: id } })
+          }
+        }}
+      >
         <Outlet />
       </AgentThreadStreamProvider>
     </AgentsShell>

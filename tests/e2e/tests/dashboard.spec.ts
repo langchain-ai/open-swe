@@ -717,6 +717,108 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(userMessage).not.toContainText("sender_context");
   });
 
+  test("keeps the submitted message and thread view visible while a new chat starts", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/agents");
+    const dismissOnboarding = page.getByRole("button", {
+      name: "Maybe later",
+    });
+    await expect(dismissOnboarding).toBeVisible();
+    await dismissOnboarding.click();
+
+    const prompt = "Reproduce the new chat send experience";
+    const editor = page.getByTestId("composer-editor");
+    await editor.click();
+    await editor.pressSequentially(prompt);
+    await page.evaluate((submittedPrompt) => {
+      const observations = {
+        messageSeen: true,
+        messageDisappeared: false,
+        threadSeen: false,
+        newChatReturned: false,
+      };
+      const visible = (element: Element) =>
+        (element as HTMLElement).getClientRects().length > 0;
+      const sample = () => {
+        const submittedMessageVisible = Array.from(
+          document.querySelectorAll(
+            '[data-testid="user-message"], [data-testid="composer-editor"]',
+          ),
+        ).some(
+          (element) =>
+            visible(element) &&
+            (element.textContent ?? "").includes(submittedPrompt),
+        );
+        const newChatVisible = Array.from(
+          document.querySelectorAll('[data-testid="composer-editor"]'),
+        ).some(
+          (element) =>
+            visible(element) &&
+            element.getAttribute("aria-placeholder") ===
+              "Ask Open SWE to build, fix bugs, explore",
+        );
+
+        if (/^\/agents\/[^/]+$/.test(window.location.pathname)) {
+          observations.threadSeen = true;
+        }
+        if (submittedMessageVisible) observations.messageSeen = true;
+        if (observations.messageSeen && !submittedMessageVisible) {
+          observations.messageDisappeared = true;
+        }
+        if (
+          observations.messageSeen &&
+          !submittedMessageVisible &&
+          newChatVisible
+        ) {
+          observations.newChatReturned = true;
+        }
+      };
+      const observer = new MutationObserver(sample);
+      observer.observe(document.documentElement, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+      window.setInterval(sample, 10);
+      sample();
+      Object.assign(window, { __newChatObservations: observations });
+    }, prompt);
+
+    await editor.press("Enter");
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __newChatObservations: { messageSeen: boolean };
+              }
+            ).__newChatObservations.messageSeen,
+        ),
+      )
+      .toBe(true);
+    await page.waitForTimeout(5_000);
+
+    const observations = await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __newChatObservations: {
+              messageSeen: boolean;
+              messageDisappeared: boolean;
+              threadSeen: boolean;
+              newChatReturned: boolean;
+            };
+          }
+        ).__newChatObservations,
+    );
+    expect.soft(observations.messageDisappeared).toBe(false);
+    expect.soft(observations.newChatReturned).toBe(false);
+  });
+
   test("renders a web follow-up exactly once", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);

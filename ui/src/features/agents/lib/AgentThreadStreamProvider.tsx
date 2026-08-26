@@ -45,6 +45,7 @@ export function AgentThreadStreamProvider({
   threadId,
   children,
   transport = "cloud",
+  onThreadId,
 }: {
   /**
    * The active thread, or `null` on routes without one (the Agents home,
@@ -56,6 +57,7 @@ export function AgentThreadStreamProvider({
   threadId: string | null
   children: ReactNode
   transport?: "cloud" | "local"
+  onThreadId?: (threadId: string) => void
 }) {
   const queryClient = useQueryClient()
   const apiUrl =
@@ -76,9 +78,15 @@ export function AgentThreadStreamProvider({
   // they must be stable. Read the live thread id from a ref instead of
   // closing over the (changing) prop.
   const threadIdRef = useRef<string | null>(threadId)
+  const onThreadIdRef = useRef(onThreadId)
   useEffect(() => {
     threadIdRef.current = threadId
-  }, [threadId])
+    onThreadIdRef.current = onThreadId
+  }, [onThreadId, threadId])
+
+  const handleThreadId = useCallback((id: string) => {
+    onThreadIdRef.current?.(id)
+  }, [])
 
   const onCreated = useCallback(() => {
     if (transport === "cloud") invalidateAgentThreadLists(queryClient)
@@ -101,6 +109,7 @@ export function AgentThreadStreamProvider({
       assistantId={assistantId}
       client={client}
       threadId={threadId ?? undefined}
+      onThreadId={handleThreadId}
       onCreated={onCreated}
       onCompleted={onCompleted}
     >
