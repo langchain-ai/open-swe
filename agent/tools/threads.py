@@ -39,7 +39,7 @@ from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object, thread_metadata
 from ..utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from ..utils.thread_ops import langgraph_client
-from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ def _list_item(item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def list_threads(
-    owner: str | None = None,
+    participant: str | None = None,
     all_users: bool = False,
     limit: int = 25,
     offset: int = 0,
@@ -150,20 +150,22 @@ async def list_threads(
     automation_id: str | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List Open SWE threads for the current user, one owner, or all users."""
+    """List Open SWE threads the current user, one other participant, or everyone joined."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
-    requested_owner = owner.strip() if isinstance(owner, str) and owner.strip() else None
-    if requested_owner and all_users:
-        return _failure("owner and all_users cannot be used together")
+    requested = (
+        participant.strip() if isinstance(participant, str) and participant.strip() else None
+    )
+    if requested and all_users:
+        return _failure("participant and all_users cannot be used together")
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
-    cross_user = bool(requested_owner and requested_owner.lower() != actor.login.lower())
+    cross_user = bool(requested and requested.lower() != actor.login.lower())
     if (all_users or cross_user) and not actor.admin:
         return _failure("Only workspace admins can list other users' threads")
 
-    filter_owner_login = requested_owner if cross_user else None
+    filter_participant_login = requested if cross_user else None
     try:
         page = await list_dashboard_threads_page(
             actor.login,
@@ -178,7 +180,7 @@ async def list_threads(
             query=query,
             scope=scope,
             automation_id=automation_id,
-            filter_owner_login=filter_owner_login,
+            filter_participant_login=filter_participant_login,
             surfaced_only=True,
         )
     except HTTPException as exc:
@@ -364,7 +366,6 @@ def _compact_approvals(approvals: Mapping[str, Mapping[str, Any]]) -> list[dict[
 
 def _available_actions(
     *,
-    owner: bool,
     admin: bool,
     admin_thread: bool,
     running: bool,
@@ -381,15 +382,14 @@ def _available_actions(
         actions.extend(["approve_plan", "request_plan_changes"])
     if can_delete_plan_comment:
         actions.append("delete_plan_comment")
-    if owner:
-        actions.extend(["unresolve" if resolved else "resolve", "delete"])
-        if running:
-            actions.append("cancel")
-        if plan_status and plan_status not in {"approved", "cancelled", "shared"}:
-            actions.append("update_plan")
-        if any(record.get("status") == WORKFLOW_APPROVAL_PENDING for record in approvals.values()):
-            actions.extend(["approve_workflow_push", "reject_workflow_push"])
-    elif admin and running:
+    actions.extend(["unresolve" if resolved else "resolve", "delete"])
+    if running:
+        actions.append("cancel")
+    if plan_status and plan_status not in {"approved", "cancelled", "shared"}:
+        actions.append("update_plan")
+    if any(record.get("status") == WORKFLOW_APPROVAL_PENDING for record in approvals.values()):
+        actions.extend(["approve_workflow_push", "reject_workflow_push"])
+    if admin and running:
         actions.append("admin_cancel")
     return actions
 
@@ -437,9 +437,8 @@ async def get_thread(
     metadata = thread_metadata(thread)
     latest_run = runs[0] if runs else None
     plan = _compact_plan(plan_content or {}, plan_comments)
-    owner = summary.get("isOwner") is True
     running = summary.get("status") == "running"
-    can_delete_plan_comment = owner or any(
+    can_delete_plan_comment = any(
         comment.get("author_login") == actor.login for comment in plan_comments
     )
     cost = await _thread_cost(thread_id, latest_run)
@@ -452,20 +451,14 @@ async def get_thread(
         "source": summary.get("sourceUrl"),
         "pull_request": pr_url,
     }
-    participants = metadata.get(PARTICIPANT_LOGINS_KEY)
-    participant_logins = (
-        [item for item in participants if isinstance(item, str)]
-        if isinstance(participants, list)
-        else []
-    )
-    returned_participants = participant_logins[:100]
+    logins = participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))
+    returned_participants = logins[:100]
     return {
         "success": True,
         "thread": _list_item(summary),
-        "owner_login": metadata.get("github_login"),
         "participant_logins": returned_participants,
-        "participant_count": len(participant_logins),
-        "participants_truncated": len(returned_participants) < len(participant_logins),
+        "participant_count": len(logins),
+        "participants_truncated": len(returned_participants) < len(logins),
         "latest_run": _run_detail(latest_run),
         "last_user_message": _last_user_message(thread_state),
         "queued_message_count": queued_count,
@@ -474,7 +467,6 @@ async def get_thread(
         "workflow_approvals": _compact_approvals(approvals),
         "links": links,
         "available_actions": _available_actions(
-            owner=owner,
             admin=actor.admin,
             admin_thread=summary.get("adminThread") is True,
             running=running,
@@ -518,7 +510,6 @@ async def _send_message(
         mark_viewed=False,
     )
     resolved_plan_mode = summary.get("planMode") is True if plan_mode is None else plan_mode
-    caller_is_owner = summary.get("isOwner") is True
     body = ThreadMessageBody(
         content=message,
         model_id=model_id,
@@ -529,7 +520,6 @@ async def _send_message(
         queued_summary = await send_dashboard_message(
             thread_id, actor.login, body, email=actor.email
         )
-        queued_summary["isOwner"] = caller_is_owner
         return {"success": True, "mode": "queued", "thread": _list_item(queued_summary)}
     except HTTPException as exc:
         if exc.status_code != 409:
@@ -681,7 +671,6 @@ async def manage_thread(
             if not actor.admin:
                 return _failure("Only workspace admins can cancel another user's thread")
             thread = await admin_cancel_dashboard_thread(thread_id)
-            thread["isOwner"] = thread.get("ownerLogin") == actor.login
             return {"success": True, "thread": _list_item(thread)}
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(
@@ -721,14 +710,6 @@ async def manage_thread(
                 return error
             if len(content or "") > _MAX_PLAN_CHARS:
                 return _failure(f"content must be at most {_MAX_PLAN_CHARS} characters")
-            summary = await get_dashboard_thread(
-                thread_id,
-                actor.login,
-                email=actor.email,
-                mark_viewed=False,
-            )
-            if summary.get("isOwner") is not True:
-                return _failure("only the plan owner can edit the plan", status_code=403)
             existing = await get_plan_content(thread_id, raise_on_error=True) or {}
             existing_format = (
                 "markdown"

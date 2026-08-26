@@ -38,7 +38,7 @@ async def test_slack_processing_error_posts_dashboard_link(
     monkeypatch.setattr(
         slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text
     )
-    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", upsert)
+    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", upsert)
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
         slack_webhook.common, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
@@ -470,7 +470,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     )
     monkeypatch.setattr(slack_webhook.common, "_get_thread_plan_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "_upsert_slack_thread_repo_metadata", AsyncMock())
-    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", AsyncMock())
+    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
     monkeypatch.setattr(slack_webhook.common, "store_slack_run_mapping", store_mapping)
 

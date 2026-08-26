@@ -75,7 +75,7 @@ def _run_process(
         ),
         patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
         patch.object(
-            linear_webhook.common, "upsert_agent_thread_owner_metadata", side_effect=fake_upsert
+            linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert
         ),
         patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
         patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),

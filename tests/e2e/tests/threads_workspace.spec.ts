@@ -71,8 +71,7 @@ function baseMetadata(
   overrides: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
-    github_login: USER.login,
-    triggering_user_email: USER.email,
+    participant_logins: { [USER.login]: true },
     title,
     source: "dashboard",
     origin: "dashboard",
@@ -264,11 +263,8 @@ function paginationThreads(): Array<ThreadSeed> {
 
 // Earlier specs leave their own threads behind for this user, and the sidebar
 // counts every one of them — so start from an empty workspace.
-async function purgeOwnedThreads(request: APIRequestContext) {
-  for (const owner of [
-    { github_login: USER.login },
-    { triggering_user_email: USER.email },
-  ]) {
+async function purgeParticipantThreads(request: APIRequestContext) {
+  for (const owner of [{ participant_logins: { [USER.login]: true } }]) {
     for (let page = 0; page < 20; page += 1) {
       const searchResponse = await request.post("/threads/search", {
         data: { metadata: owner, limit: 100, offset: 0 },
@@ -290,7 +286,7 @@ async function seedThreads(
   request: APIRequestContext,
   threads: Array<ThreadSeed>,
 ) {
-  await purgeOwnedThreads(request);
+  await purgeParticipantThreads(request);
   for (const thread of threads) {
     const resetResponse = await request.delete(`/threads/${thread.id}`);
     expect([200, 204, 404]).toContain(resetResponse.status());

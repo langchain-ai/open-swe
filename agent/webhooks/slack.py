@@ -480,7 +480,7 @@ async def _notify_slack_processing_error(
             common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
             or "Slack request"
         )
-        await common.upsert_agent_thread_owner_metadata(
+        await common.upsert_agent_thread_metadata(
             thread_id,
             source="slack",
             repo_config=repo_config,
@@ -822,7 +822,7 @@ async def _process_slack_mention_impl(
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    await common.upsert_agent_thread_owner_metadata(
+    await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
         repo_config=repo_config,

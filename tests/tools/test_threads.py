@@ -126,7 +126,7 @@ async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.Monk
         query=None,
         scope="all",
         automation_id=None,
-        filter_owner_login=None,
+        filter_participant_login=None,
         surfaced_only=True,
     )
 
@@ -138,7 +138,7 @@ async def test_list_threads_denies_cross_user_query_for_non_admin(
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
-    result = await threads_tool.list_threads(owner="other-user")
+    result = await threads_tool.list_threads(participant="other-user")
 
     assert result == {
         "success": False,
@@ -147,20 +147,20 @@ async def test_list_threads_denies_cross_user_query_for_non_admin(
     page.assert_not_awaited()
 
 
-async def test_list_threads_admin_owner_filter_keeps_admin_as_viewer(
+async def test_list_threads_admin_participant_filter_keeps_admin_as_viewer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
-    result = await threads_tool.list_threads(owner="other-user")
+    result = await threads_tool.list_threads(participant="other-user")
 
     assert result["success"] is True
     awaited = page.await_args
     assert awaited is not None
     assert awaited.args[0] == "octocat"
-    assert awaited.kwargs["filter_owner_login"] == "other-user"
+    assert awaited.kwargs["filter_participant_login"] == "other-user"
     assert awaited.kwargs["surfaced_only"] is True
 
 
@@ -241,7 +241,6 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
                 "id": "thread-1",
                 "title": "Fix race",
                 "status": "finished",
-                "isOwner": True,
                 "traceUrl": "https://smith.example/t/thread-1",
                 "sourceUrl": "https://slack.example/thread",
                 "messages": [],
@@ -284,7 +283,6 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     result = await threads_tool.get_thread("thread-1")
 
     assert result["success"] is True
-    assert result["owner_login"] == "octocat"
     assert result["participant_logins"] == ["octocat", "reviewer"]
     assert result["last_user_message"] == {
         "text": "Fix the race",
@@ -306,7 +304,6 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
 
 def test_admin_thread_actions_require_admin() -> None:
     options = {
-        "owner": False,
         "admin_thread": True,
         "running": False,
         "resolved": False,

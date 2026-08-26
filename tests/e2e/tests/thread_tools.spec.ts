@@ -36,10 +36,14 @@ async function saveDefaultModel(page: Page) {
   expect(response.ok(), await response.text()).toBeTruthy();
 }
 
-async function purgeOwnedThreads(request: APIRequestContext) {
+async function purgeParticipantThreads(request: APIRequestContext) {
   for (;;) {
     const searchResponse = await request.post("/threads/search", {
-      data: { metadata: { github_login: USER.login }, limit: 100, offset: 0 },
+      data: {
+        metadata: { participant_logins: { [USER.login]: true } },
+        limit: 100,
+        offset: 0,
+      },
     });
     expect(searchResponse.ok(), await searchResponse.text()).toBeTruthy();
     const threads = (await searchResponse.json()) as Array<{
@@ -56,7 +60,7 @@ async function purgeOwnedThreads(request: APIRequestContext) {
 }
 
 async function seedTargetThread(request: APIRequestContext) {
-  await purgeOwnedThreads(request);
+  await purgeParticipantThreads(request);
   const deleteResponse = await request.delete(`/threads/${TARGET_THREAD_ID}`);
   expect([200, 204, 404]).toContain(deleteResponse.status());
   const now = Date.now();
@@ -65,8 +69,7 @@ async function seedTargetThread(request: APIRequestContext) {
       thread_id: TARGET_THREAD_ID,
       if_exists: "raise",
       metadata: {
-        github_login: USER.login,
-        triggering_user_email: USER.email,
+        participant_logins: { [USER.login]: true },
         title: TARGET_TITLE,
         source: "dashboard",
         origin: "dashboard",
@@ -155,7 +158,7 @@ function threadsUrl(resolved: boolean) {
 }
 
 test.afterEach(async ({ request }) => {
-  await purgeOwnedThreads(request);
+  await purgeParticipantThreads(request);
 });
 
 test("agent thread tools update the real threads UI", async ({ page }) => {

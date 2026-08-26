@@ -32,7 +32,6 @@ from .thread_api import (
     _repo_config_from_metadata,
     _thread_is_readable,
     _thread_source,
-    _user_owns_thread,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,7 +93,6 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "status": content.get("status") or metadata.get("plan_status") or "planning",
         "html": content.get("html", ""),
         "markdown": content.get("markdown", ""),
-        "isOwner": _user_owns_thread(metadata, login, email),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
         "user": {
@@ -110,10 +108,10 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
 async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    """Save an owner-edited HTML artifact while preserving review comments."""
+    """Save an edited HTML artifact while preserving review comments."""
     metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
-        raise HTTPException(403, "only the plan owner can edit the plan")
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
     legacy_markdown = isinstance(content.get("markdown"), str) and not content.get("html")
@@ -189,9 +187,8 @@ async def remove_plan_comment(
     if target is None:
         raise HTTPException(404, "comment not found")
     login = session["sub"]
-    is_owner = _user_owns_thread(metadata, login, session.get("email"))
-    if target.get("author_login") != login and not is_owner:
-        raise HTTPException(403, "only the author or the plan owner can delete a comment")
+    if target.get("author_login") != login:
+        raise HTTPException(403, "only the comment author can delete a comment")
     await delete_plan_comment(thread_id, comment_id)
     return {"ok": True}
 
