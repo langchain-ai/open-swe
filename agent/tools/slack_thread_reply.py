@@ -65,6 +65,13 @@ async def slack_thread_reply(
         slack_thread if isinstance(slack_thread, dict) else None,
     )
     active = active or {}
+    if (
+        isinstance(slack_thread, dict)
+        and slack_thread.get("channel_id") == active.get("channel_id")
+        and slack_thread.get("thread_ts") == active.get("thread_ts")
+        and isinstance(slack_thread.get("reply_thread_ts"), str)
+    ):
+        active["reply_thread_ts"] = slack_thread["reply_thread_ts"]
 
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")

@@ -86,6 +86,10 @@ async def test_slack_thread_reply_holds_mutation_lock_while_posting(
 async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def active_thread(_client: Any, thread_id: str, _fallback: Any) -> dict[str, str]:
+        assert thread_id == "thread-code"
+        return {"channel_id": "C-code", "thread_ts": "0"}
+
     async def post(
         _channel_id: str, _thread_ts: str, _message: str, **kwargs: Any
     ) -> tuple[str | None, str | None]:
@@ -97,14 +101,16 @@ async def test_code_channel_reply_stays_in_user_started_thread(
         "get_config",
         lambda: {
             "configurable": {
+                "thread_id": "thread-code",
                 "slack_thread": {
                     "channel_id": "C-code",
                     "thread_ts": "0",
                     "reply_thread_ts": "9.000",
-                }
+                },
             }
         },
     )
+    monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", active_thread)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
     assert await slack_reply_tool.slack_thread_reply("threaded", 1) == {

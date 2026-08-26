@@ -270,6 +270,13 @@ async def test_agent_session_stopped_cancels_without_followup_work(
         "value": {"messages": [{"content": "later"}]}
     }
     dispatched, claimed = _patch_handler(monkeypatch, client)
+    statuses: list[tuple[str, str]] = []
+
+    async def set_status(channel_id: str, status: str) -> bool:
+        statuses.append((channel_id, status))
+        return True
+
+    monkeypatch.setattr(slack_stop, "set_session_status", set_status)
 
     await slack_stop.process_agent_session_stopped(
         {"type": "agent_session_stopped", "channel": "C123"},
@@ -280,6 +287,7 @@ async def test_agent_session_stopped_cancels_without_followup_work(
     assert client.runs.cancelled[0]["run_ids"] == ["run-running"]
     assert (("queue", thread_id), "pending_messages") in client.store.deleted
     assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
+    assert statuses == [("C123", "active")]
     assert dispatched == []
 
 

@@ -162,11 +162,7 @@ export function SlackIntegrationSection() {
             then paste it into your Slack app settings and reinstall the app.
           </span>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void copyManifest()}
-        >
+        <Button size="sm" variant="outline" onClick={() => void copyManifest()}>
           {copyState === "copied"
             ? "Copied"
             : copyState === "failed"

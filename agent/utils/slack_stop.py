@@ -13,7 +13,7 @@ from agent.dispatch import dispatch_agent_run
 from agent.source_context import SourceContext
 
 from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
-from .slack_code_channels import CODE_CHANNEL_SESSION_TS
+from .slack_code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from .slack_events import claim_slack_event
 
 logger = logging.getLogger(__name__)
@@ -258,6 +258,7 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
             "stop_requested_at_ms": int(datetime.now(UTC).timestamp() * 1000),
         },
     )
+    await set_session_status(channel_id, "active")
 
 
 async def process_agent_session_stopped(event: dict[str, Any], event_id: str = "") -> None:
