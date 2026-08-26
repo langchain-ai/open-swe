@@ -313,9 +313,9 @@ function CloudAgentsPage() {
         />
         {session.data.is_admin && (
           <SettingsNavRow
-            to="/agents/snapshots"
-            label="Repository Snapshots"
-            description="Build a per-repo sandbox image from a custom Dockerfile. Falls back to the default image."
+            to="/agents/sandbox"
+            label="Sandbox"
+            description="The snapshot new sandboxes boot from when their environment has none."
           />
         )}
       </SettingsSection>

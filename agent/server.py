@@ -66,7 +66,6 @@ from .dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
-from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.sandbox_settings import get_admin_base_snapshot_id
 from .dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from .dashboard.team_settings import (
@@ -195,6 +194,7 @@ from .utils.authorship import (
 )
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
+from .utils.gateway import gateway_env_default
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_org_membership import is_user_active_org_member
 from .utils.github_proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
@@ -332,7 +332,6 @@ async def _resolve_proxy_token(
 
 
 async def _resolve_sandbox_create_config(
-    repo: dict[str, str] | None,
     environment_slug: str | None = None,
 ) -> tuple[str | None, SandboxResources, dict[str, Any]]:
     """Resolve the snapshot, VM sizing, and create parameters for a new sandbox."""
@@ -342,23 +341,12 @@ async def _resolve_sandbox_create_config(
     create_params = environment_sandbox_create_params(environment)
     if environment_snapshot:
         return environment_snapshot, resources, create_params
-    if repo:
-        try:
-            repo_snapshot_id = await resolve_repo_snapshot_id(repo.get("owner"), repo.get("name"))
-        except Exception:  # noqa: BLE001
-            logger.debug("Failed to resolve repo-scoped snapshot", exc_info=True)
-            repo_snapshot_id = None
-        if repo_snapshot_id:
-            return repo_snapshot_id, resources, create_params
     return await get_admin_base_snapshot_id(), resources, create_params
 
 
-async def _resolve_snapshot_id(
-    repo: dict[str, str] | None,
-    environment_slug: str | None = None,
-) -> str | None:
+async def _resolve_snapshot_id(environment_slug: str | None = None) -> str | None:
     """Resolve the snapshot a new sandbox boots from."""
-    snapshot_id, _, _ = await _resolve_sandbox_create_config(repo, environment_slug)
+    snapshot_id, _, _ = await _resolve_sandbox_create_config(environment_slug)
     return snapshot_id
 
 
@@ -367,13 +355,12 @@ async def _create_sandbox_with_proxy(
     *,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
     environment_slug: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
         snapshot_id, resources, create_params = await _resolve_sandbox_create_config(
-            repo, environment_slug
+            environment_slug
         )
     async with aphase(thread_id, "sandbox.boot", snapshot_id=snapshot_id):
         if create_params:
@@ -570,7 +557,6 @@ async def ensure_sandbox_for_thread(
     *,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
     environment_slug: str | None = None,
     allow_replacement: bool = False,
 ) -> SandboxBackendProtocol:
@@ -595,10 +581,10 @@ async def ensure_sandbox_for_thread(
     for callers whose sandbox holds nothing but a re-derivable checkout — the
     read-only reviewer, which re-preps the repo every run.
 
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
-    ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
-    from it; otherwise the base snapshot (admin setting, else
-    ``DEFAULT_SANDBOX_SNAPSHOT_ID``) is used.
+    For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
+    created sandboxes boot from the environment's snapshot when one is ready,
+    otherwise the base snapshot (admin setting, else
+    ``DEFAULT_SANDBOX_SNAPSHOT_ID``).
     Re-applies git identity every run because reused/reconnected sandboxes can
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.
@@ -626,7 +612,6 @@ async def ensure_sandbox_for_thread(
             github_proxy_token,
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
-            repo=repo,
             environment_slug=environment_slug,
         )
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
@@ -656,7 +641,6 @@ async def ensure_sandbox_for_thread(
                     github_proxy_token,
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
-                    repo=repo,
                     environment_slug=environment_slug,
                 )
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
@@ -742,7 +726,6 @@ async def reset_sandbox_for_thread(
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
-    repo: dict[str, str] | None = None,
     environment_slug: str | None = None,
 ) -> tuple[str, str]:
     """Bind a thread to a fresh sandbox while preserving its previous sandbox."""
@@ -754,7 +737,6 @@ async def recreate_sandbox_for_thread(
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
-        repo=repo,
         environment_slug=environment_slug,
     )
     if new_sandbox.id == old_sandbox_id:
@@ -1406,11 +1388,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_configurable):
             return create_desktop_backend(_configurable)
-        async with aphase(_thread_id, "sandbox.default_repo"):
-            prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
         return await ensure_sandbox_for_thread(
             _thread_id,
-            repo=prompt_default_repo,
             environment_slug=_environment_slug(_configurable),
         )
 
@@ -1435,7 +1414,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
         team_defaults = (default_model_pair(), default_model_pair())
         title_defaults = team_defaults[0]
-        use_gateway = False
+        use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
     else:

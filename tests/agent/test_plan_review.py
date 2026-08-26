@@ -206,6 +206,46 @@ async def test_save_plan_reads_html_file_from_sandbox(
     }
 
 
+async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    save_plan_tool = importlib.import_module("agent.tools.save_plan")
+
+    saved: dict[str, Any] = {}
+
+    class _Backend:
+        async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
+            return {
+                "file_data": {
+                    "encoding": "utf-8",
+                    "content": "<h1>Plan</h1><script>go()</script>",
+                }
+            }
+
+    async def fake_backend(thread_id: str) -> _Backend:
+        return _Backend()
+
+    async def fake_save_content(thread_id: str, **kwargs: Any) -> None:
+        saved.update(kwargs)
+
+    monkeypatch.setattr(
+        save_plan_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "thread-1"}},
+    )
+    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
+    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
+
+    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-add-webhook-retries.html")
+
+    assert result["success"] is True
+    assert saved["html"].startswith("<!doctype html>")
+    assert "<title>Add webhook retries</title>" in saved["html"]
+    assert "<script>go()</script>" in saved["html"]
+
+
 async def test_save_plan_preserves_plan_mode_from_state_when_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
