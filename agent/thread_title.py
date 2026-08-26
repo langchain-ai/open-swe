@@ -101,6 +101,10 @@ async def generate_and_store_thread_title(
     )["content"]
     if not isinstance(title_input, str):
         return
+    title_metadata = {"thread_id": thread_id}
+    user_id = metadata.get("user_id")
+    if isinstance(user_id, str) and user_id:
+        title_metadata["user_id"] = user_id
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
         result = await structured.ainvoke(
             [
@@ -109,7 +113,7 @@ async def generate_and_store_thread_title(
             ],
             # Empty callbacks, so this call cannot inherit the run's handlers and
             # stream its tokens into the thread the user is watching.
-            config={"callbacks": [], "run_name": "thread-title"},
+            config={"callbacks": [], "run_name": "thread-title", "metadata": title_metadata},
         )
     if not isinstance(result, _ThreadTitle):
         return

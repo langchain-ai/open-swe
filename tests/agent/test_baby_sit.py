@@ -418,3 +418,36 @@ async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -
 
     assert result == {"result": {"status": "pending"}}
     evaluate.assert_awaited_once_with("acme/repo#7")
+
+
+def test_scheduler_launch_result_attaches_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RunTree:
+        def __init__(self) -> None:
+            self.metadata: dict[str, Any] = {}
+            self.patched = False
+
+        def add_metadata(self, metadata: dict[str, Any]) -> None:
+            self.metadata.update(metadata)
+
+        def patch(self) -> None:
+            self.patched = True
+
+    run_tree = _RunTree()
+    monkeypatch.setattr(scheduler, "get_current_run_tree", lambda: run_tree)
+
+    result = scheduler._launch_result({"status": "retry_scheduled"}, "session_cost")
+
+    assert result == {"result": {"status": "retry_scheduled"}}
+    assert run_tree.metadata == {
+        "launch_task": "session_cost",
+        "launch_status": "retry_scheduled",
+    }
+    assert run_tree.patched
+
+
+def test_scheduler_launch_result_is_noop_without_run_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduler, "get_current_run_tree", lambda: None)
+
+    assert scheduler._launch_result({"status": "started"}, None) == {
+        "result": {"status": "started"}
+    }

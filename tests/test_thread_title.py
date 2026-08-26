@@ -137,6 +137,7 @@ async def test_title_generation_disables_inherited_callbacks() -> None:
             "source": "dashboard",
             "title": "please review title generation",
             "title_seed": "please review title generation",
+            "user_id": "user-456",
         }
     )
     client = type("Client", (), {"threads": threads})()
@@ -149,6 +150,10 @@ async def test_title_generation_disables_inherited_callbacks() -> None:
     )
 
     assert recorder["config"]["callbacks"] == []
+    assert recorder["config"]["metadata"] == {
+        "thread_id": "thread-123",
+        "user_id": "user-456",
+    }
 
 
 @pytest.mark.asyncio

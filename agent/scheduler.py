@@ -1,7 +1,13 @@
 """LangGraph entrypoint that fans cron ticks into fresh agent threads."""
 
 import logging
+from collections.abc import Mapping
 from typing import Any, TypedDict
+
+try:
+    from langsmith import get_current_run_tree
+except ImportError:
+    get_current_run_tree = None
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
@@ -30,28 +36,45 @@ class SchedulerState(TypedDict, total=False):
     result: dict[str, Any]
 
 
+def _launch_result(result: Any, task: str | None) -> dict[str, Any]:
+    if isinstance(result, Mapping) and get_current_run_tree is not None:
+        try:
+            run_tree = get_current_run_tree()
+            if run_tree is not None:
+                run_tree.add_metadata(
+                    {
+                        "launch_task": task or "agent_schedule",
+                        "launch_status": result.get("status"),
+                    }
+                )
+                run_tree.patch()
+        except Exception:  # noqa: BLE001
+            logger.debug("Unable to attach scheduler launch metadata", exc_info=True)
+    return {"result": result}
+
+
 async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, Any]:
     configurable = config.get("configurable") or {}
     task = state.get("task") or configurable.get("task")
     if task == "reconcile":
-        return {"result": await reconcile_stale_runs()}
+        return _launch_result(await reconcile_stale_runs(), task)
     if task == "baby_sit":
         key = state.get("watch_key") or configurable.get("watch_key")
         if not isinstance(key, str) or not key:
-            return {"result": {"status": "missing_watch_key"}}
-        return {"result": {"status": await evaluate_watch(key)}}
+            return _launch_result({"status": "missing_watch_key"}, task)
+        return _launch_result({"status": await evaluate_watch(key)}, task)
     if task == BACKGROUND_TASK_CRON_KIND:
         thread_id = state.get("thread_id") or configurable.get("thread_id")
         if not isinstance(thread_id, str) or not thread_id:
-            return {"result": {"status": "missing_thread_id"}}
-        return {"result": await monitor_background_tasks(thread_id)}
+            return _launch_result({"status": "missing_thread_id"}, task)
+        return _launch_result(await monitor_background_tasks(thread_id), task)
     if task == "session_cost":
-        return {"result": await run_session_cost_refresh(state)}
+        return _launch_result(await run_session_cost_refresh(state), task)
     schedule_id = state.get("schedule_id") or configurable.get("schedule_id")
     if not isinstance(schedule_id, str) or not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")
-        return {"result": {"status": "missing_schedule_id"}}
-    return {"result": await launch_scheduled_agent_run(schedule_id)}
+        return _launch_result({"status": "missing_schedule_id"}, task)
+    return _launch_result(await launch_scheduled_agent_run(schedule_id), task)
 
 
 def get_scheduler(config: RunnableConfig | None = None):
