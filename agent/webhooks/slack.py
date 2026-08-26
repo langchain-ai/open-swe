@@ -868,13 +868,20 @@ async def _process_slack_mention_impl(
     if code_channel:
         await common.set_session_status(channel_id, "processing")
         await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
-    run = await _dispatch_or_queue_slack_run(
-        langgraph_client,
-        thread_id,
-        run_input,
-        configurable,
-        explicitly_tagged=explicitly_tagged,
-    )
+    try:
+        run = await _dispatch_or_queue_slack_run(
+            langgraph_client,
+            thread_id,
+            run_input,
+            configurable,
+            explicitly_tagged=explicitly_tagged,
+        )
+    except Exception:
+        # No run means no completion webhook, so nothing else would ever clear
+        # the loading UI this turn switched on.
+        if code_channel:
+            await common.set_session_status(channel_id, "active")
+        raise
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
         common._run_id_for_logging(run),

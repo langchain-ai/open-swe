@@ -1,3 +1,4 @@
+from contextlib import suppress
 from typing import Any, Literal, cast
 
 from langgraph.config import get_config
@@ -9,6 +10,7 @@ from ..utils.slack import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     get_active_slack_thread,
+    slack_thread_mutation_lock,
 )
 from ..utils.slack_code_channels import (
     CODE_CHANNEL_SESSION_TS,
@@ -137,22 +139,49 @@ async def _create(
         "triggering_event_ts": origin_message_ts,
         "thread_version": 0,
     }
+    bound = False
     try:
-        await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={
-                "source": "slack",
-                "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
-            },
-        )
+        async with slack_thread_mutation_lock(
+            client, source_channel, source_ts, thread_id=thread_id
+        ) as locked_active:
+            if not locked_active or (
+                locked_active.get("channel_id"),
+                locked_active.get("thread_ts"),
+            ) != (source_channel, source_ts):
+                raise RuntimeError("Slack thread moved concurrently; retry")
+            await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
+            bound = True
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={
+                    "source": "slack",
+                    "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
+                },
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Leave no channel that still routes here: an orphan would keep
+        # delivering messages into a session that never moved.
+        if bound:
+            with suppress(Exception):
+                await delete_slack_thread_associations(
+                    client, channel_id, CODE_CHANNEL_SESSION_TS, expected_thread_id=thread_id
+                )
+        with suppress(Exception):
+            await archive_code_channel(channel_id)
+        return {
+            "success": False,
+            "error": f"Could not bind the code channel to this session: {exc}",
+            "retryable": True,
+        }
+
+    try:
         await delete_slack_thread_associations(
             client, source_channel, source_ts, expected_thread_id=thread_id
         )
     except Exception as exc:  # noqa: BLE001
         return {
             "success": False,
-            "error": f"Could not bind the code channel to this session: {exc}",
+            "error": f"Code channel created but the source thread was not detached: {exc}",
             "channel_id": channel_id,
             "retryable": True,
         }
