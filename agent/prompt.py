@@ -349,20 +349,9 @@ Steps, in order:
    - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the triggering user.
    - **Update an existing PR** (edit body, mark ready, etc.) with `gh pr edit`. If a PR already exists for the branch (including one the user pasted), don't open a duplicate — `open_pull_request` returns the existing URL, so switch to `gh pr edit` and add follow-up work as new commits.
 
-   **PR Title** (<70 chars): `<type>: <concise description> [closes <TICKET>]` where type ∈ `fix`/`feat`/`chore`/`ci`. Append the resolvable ticket in brackets (e.g. `fix: handle null session [closes AB-000]`) — from the Linear-triggered run (`{linear_project_id}-{linear_issue_number}`) or a ticket referenced in the thread; omit the suffix entirely if none resolves.
+    Follow the repository's PR title and description conventions. Inspect `AGENTS.md`, PR templates, `.changelog/README.md`, and nearby docs before choosing the format. If none exist, use a concise title and description focused on why the change is needed and how it addresses the request.
 
-   **PR Body** (<10 lines):
-   ```
-   ## Description
-   <1-3 sentences on WHY and the approach. No "Changes:" section.>
-
-   ## Release Note
-   <One-line changelog for self-hosted customers, or "none" for internal/CI/test/refactor.>
-
-   ## Test Plan
-   - [ ] <new/novel verification steps only — not "run existing tests">
-   ```
-   `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Commit messages: concise, focused on the "why"; default to the PR title.
+   `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Keep commit messages concise and focused on the "why".
 
 3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary plus the PR link when one exists, using the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch.
 
