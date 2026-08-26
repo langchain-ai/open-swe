@@ -37,6 +37,47 @@ def _async_client_cm(post_response: MagicMock) -> AsyncMock:
 
 
 @pytest.mark.asyncio
+async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+    chunks = [{"type": "task_update", "id": "step-1", "title": "Reading", "status": "in_progress"}]
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        started = await slack_utils.start_slack_stream(
+            "C1", "1.0", chunks, recipient_user_id="U1", recipient_team_id="T1"
+        )
+        appended = await slack_utils.append_slack_stream("C1", "1.0", chunks)
+        stopped = await slack_utils.stop_slack_stream("C1", "1.0")
+
+    assert started == ("1.0", None)
+    assert appended == (True, None)
+    assert stopped == (True, None)
+    calls = client_cm.post.await_args_list
+    assert calls[0].args[0].endswith("/chat.startStream")
+    assert calls[0].kwargs["json"] == {
+        "channel": "C1",
+        "chunks": chunks,
+        "task_display_mode": "timeline",
+        "thread_ts": "1.0",
+        "recipient_user_id": "U1",
+        "recipient_team_id": "T1",
+    }
+    assert calls[1].args[0].endswith("/chat.appendStream")
+    assert calls[2].kwargs["json"]["session_status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_code_channel_stream_is_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        await slack_utils.start_slack_stream("C1", "0", [])
+
+    assert "thread_ts" not in client_cm.post.await_args.kwargs["json"]
+
+
+@pytest.mark.asyncio
 async def test_update_slack_message_calls_chat_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
