@@ -17,6 +17,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
+from agent.thread_ids import reviewer_thread_id
+
 from ..review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
@@ -103,13 +105,6 @@ async def _github_write(
 
 async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
     return await _github_write("POST", path, token, json=json)
-
-
-def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
-    import uuid
-
-    stable_key = f"{owner}/{repo}/pr/{pr_number}/reviewer"
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
 def _findings_list(metadata: dict[str, Any]) -> list[dict[str, Any]]:

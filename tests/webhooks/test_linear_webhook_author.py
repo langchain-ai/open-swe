@@ -60,9 +60,7 @@ def _run_process(
 
     with (
         patch.object(linear_webhook.common, "react_to_linear_comment", new_callable=AsyncMock),
-        patch.object(
-            linear_webhook.common, "generate_thread_id_from_issue", return_value="thread-1"
-        ),
+        patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
         patch.object(
             linear_webhook.common,
             "fetch_linear_issue_details",

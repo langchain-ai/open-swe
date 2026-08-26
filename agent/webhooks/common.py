@@ -5,7 +5,6 @@ import hmac
 import json
 import logging
 import os
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -74,7 +73,6 @@ from ..utils.github_comments import (
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
     format_github_comment_body_for_prompt,
-    get_thread_id_from_branch,  # noqa: F401
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
     sanitize_github_comment_body,  # noqa: F401
@@ -224,9 +222,6 @@ __all__ = [
     "fetch_slack_thread_messages",
     "format_github_comment_body_for_prompt",
     "format_slack_messages_for_prompt",
-    "generate_reviewer_thread_id",
-    "generate_thread_id_from_github_issue",
-    "generate_thread_id_from_issue",
     "get_client",
     "get_github_app_installation_token",
     "get_github_app_installation_token_with_expiry",
@@ -238,7 +233,6 @@ __all__ = [
     "get_slack_user_info",
     "get_slack_user_names",
     "get_team_default_repo",
-    "get_thread_id_from_branch",
     "get_valid_access_token",
     "has_access_token_record",
     "is_bot_token_only_mode",
@@ -493,36 +487,6 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
             return result.get("data", {}).get("issue")
         except httpx.HTTPError:
             return None
-
-
-def generate_thread_id_from_issue(issue_id: str) -> str:
-    """Generate a deterministic thread ID from a Linear issue ID.
-
-    Args:
-        issue_id: The Linear issue ID
-
-    Returns:
-        A UUID-formatted thread ID derived from the issue ID
-    """
-    hash_bytes = hashlib.sha256(f"linear-issue:{issue_id}".encode()).hexdigest()
-    return (
-        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
-        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
-    )
-
-
-def generate_thread_id_from_github_issue(issue_id: str) -> str:
-    """Generate a deterministic thread ID from a GitHub issue ID."""
-    hash_bytes = hashlib.sha256(f"github-issue:{issue_id}".encode()).hexdigest()
-    return (
-        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
-        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
-    )
-
-
-def generate_reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
-    stable_key = f"{owner}/{repo}/pr/{pr_number}/reviewer"
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
 def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:
