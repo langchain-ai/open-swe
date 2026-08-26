@@ -17,6 +17,7 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as ReviewRouteImport } from './routes/review'
+import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
@@ -75,6 +76,11 @@ const MySettingsRoute = MySettingsRouteImport.update({
 const ReviewRoute = ReviewRouteImport.update({
   id: '/review',
   path: '/review',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SkillsRoute = SkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => rootRouteImport,
 } as any)
 const UsageRoute = UsageRouteImport.update({
@@ -184,6 +190,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/skills': typeof SkillsRoute
   '/usage': typeof UsageRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
@@ -212,6 +219,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/skills': typeof SkillsRoute
   '/usage': typeof UsageRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
@@ -242,6 +250,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/skills': typeof SkillsRoute
   '/usage': typeof UsageRoute
   '/admin_/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
@@ -273,6 +282,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/skills'
     | '/usage'
     | '/admin/evals'
     | '/agents/$threadId'
@@ -301,6 +311,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/skills'
     | '/usage'
     | '/admin/evals'
     | '/agents/$threadId'
@@ -330,6 +341,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/skills'
     | '/usage'
     | '/admin_/evals'
     | '/agents/$threadId'
@@ -360,6 +372,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
+  SkillsRoute: typeof SkillsRoute
   UsageRoute: typeof UsageRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
   AgentsEnvironmentsRoute: typeof AgentsEnvironmentsRoute
@@ -426,6 +439,13 @@ declare module '@tanstack/react-router' {
       path: '/review'
       fullPath: '/review'
       preLoaderRoute: typeof ReviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/skills': {
+      id: '/skills'
+      path: '/skills'
+      fullPath: '/skills'
+      preLoaderRoute: typeof SkillsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/usage': {
@@ -604,6 +624,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
+  SkillsRoute: SkillsRoute,
   UsageRoute: UsageRoute,
   AdminEvalsRoute: AdminEvalsRoute,
   AgentsEnvironmentsRoute: AgentsEnvironmentsRoute,

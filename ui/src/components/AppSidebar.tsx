@@ -5,6 +5,7 @@ import {
   IoGitPullRequestOutline,
   IoOptionsOutline,
   IoSettingsOutline,
+  IoSparklesOutline,
   IoStatsChartOutline,
 } from "react-icons/io5"
 import type { ComponentType, SVGProps } from "react"
@@ -32,6 +33,7 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
     heading: "Personal",
     items: [
       { to: "/my-settings", label: "Settings", icon: IoOptionsOutline },
+      { to: "/skills", label: "Skills", icon: IoSparklesOutline },
       { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
     ],
   },

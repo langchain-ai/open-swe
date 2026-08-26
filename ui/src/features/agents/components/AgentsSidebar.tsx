@@ -18,7 +18,6 @@ import {
   PlusIcon,
   PushPinIcon,
   PushPinSlashIcon,
-  SparkleIcon,
   TrashIcon,
   TreeStructureIcon,
 } from "@phosphor-icons/react"
@@ -139,7 +138,6 @@ interface AgentsSidebarProps {
 
 const NAV = [
   { to: "/agents/threads", label: "Kanban", icon: Kanban },
-  { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
