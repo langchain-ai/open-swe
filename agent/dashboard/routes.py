@@ -225,6 +225,7 @@ from .thread_api import (
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
+    pin_dashboard_thread,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
@@ -232,6 +233,7 @@ from .thread_api import (
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
+    unpin_dashboard_thread,
 )
 from .user_credentials import (
     CurrentsCredentialsUpdate,
@@ -1968,6 +1970,24 @@ async def api_list_threads_sidebar(
     header = server_timing_header(timings, counts)
     logger.info("thread sidebar timings login=%s %s", session["sub"], header)
     return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.post("/threads/{thread_id}/pin", status_code=204)
+async def api_pin_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await pin_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
+
+
+@router.delete("/threads/{thread_id}/pin", status_code=204)
+async def api_unpin_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await unpin_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
 
 
 @router.get("/threads/page")

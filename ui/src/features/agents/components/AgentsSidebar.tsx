@@ -16,6 +16,8 @@ import {
   LightningIcon,
   MagnifyingGlassIcon,
   PlusIcon,
+  PushPinIcon,
+  PushPinSlashIcon,
   SparkleIcon,
   TrashIcon,
   TreeStructureIcon,
@@ -51,6 +53,7 @@ import {
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   useDeleteAgentThread,
+  usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
   useSidebarThreads,
@@ -200,11 +203,22 @@ export function AgentsSidebar({
     if (activeLocalSessionId) setDesktopThreadSource("local")
     else if (activeThreadId) setDesktopThreadSource("cloud")
   }, [activeLocalSessionId, activeThreadId, isDesktop, setDesktopThreadSource])
-  const activeThreads = sidebar.data.active.items
-  const resolvedThreads = sidebar.data.resolved.items
+  const pinnedThreads = sidebar.data.pinned ?? []
+  const pinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
+  const allActiveThreads = sidebar.data.active.items
+  const activeThreads = allActiveThreads.filter(
+    (thread) => !pinnedIds.has(thread.id)
+  )
+  const resolvedThreads = sidebar.data.resolved.items.filter(
+    (thread) => !pinnedIds.has(thread.id)
+  )
   const activeHasMore = sidebar.data.active.hasMore
   const resolvedHasMore = sidebar.data.resolved.hasMore
-  const visibleThreads = [...activeThreads, ...resolvedThreads]
+  const visibleThreads = [
+    ...pinnedThreads,
+    ...activeThreads,
+    ...resolvedThreads,
+  ]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
@@ -252,9 +266,9 @@ export function AgentsSidebar({
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
   const cloudActivity = {
-    running: activeThreads.filter((thread) => thread.status === "running")
+    running: allActiveThreads.filter((thread) => thread.status === "running")
       .length,
-    completed: activeThreads.filter(
+    completed: allActiveThreads.filter(
       (thread) => thread.status === "finished" && !thread.viewed
     ).length,
   }
@@ -403,6 +417,15 @@ export function AgentsSidebar({
           <div className="min-h-0 flex-1 overflow-y-auto">
             {sidebar.isPending && (
               <ThreadListSkeleton compact={prefs.compact} />
+            )}
+            {!sidebar.isPending && pinnedThreads.length > 0 && (
+              <ThreadGroup
+                label="Pinned"
+                threads={pinnedThreads}
+                activeThreadId={activeThreadId}
+                onNavigate={layout.closeOnMobile}
+                compact={prefs.compact}
+              />
             )}
             {!sidebar.isPending &&
               (prefs.group === "none"
@@ -839,6 +862,7 @@ function ThreadGroup({
               isActive={thread.id === activeThreadId}
               onNavigate={onNavigate}
               compact={compact}
+              pinned={label === "Pinned"}
             />
           ))}
         </>
@@ -935,13 +959,16 @@ function ThreadRow({
   isActive,
   onNavigate,
   compact = false,
+  pinned = false,
 }: {
   thread: AgentThread
   isActive: boolean
   onNavigate?: () => void
   compact?: boolean
+  pinned?: boolean
 }) {
   const deleteThread = useDeleteAgentThread()
+  const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -965,6 +992,11 @@ function ThreadRow({
     deleteThread.mutate(thread.id, {
       onSuccess: () => setDeleteOpen(false),
     })
+  }
+
+  const onTogglePinned = () => {
+    if (pinThread.isPending) return
+    pinThread.mutate({ threadId: thread.id, pinned: !pinned })
   }
 
   const isResolved = thread.resolved === true
@@ -1020,6 +1052,12 @@ function ThreadRow({
                   : "text-muted-foreground group-hover:bg-sidebar-row-hover"
             )}
           >
+            {pinned && (
+              <PushPinIcon
+                className="size-3 shrink-0 text-primary"
+                aria-label="Pinned thread"
+              />
+            )}
             {thread.status === "running" ? (
               <CircleNotchIcon
                 className="size-3 shrink-0 animate-spin text-primary"
@@ -1102,6 +1140,18 @@ function ThreadRow({
                   Open Slack thread
                 </ContextMenu.LinkItem>
               )}
+              <ContextMenu.Item
+                onClick={onTogglePinned}
+                disabled={pinThread.isPending}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+              >
+                {pinned ? (
+                  <PushPinSlashIcon className="size-3.5" />
+                ) : (
+                  <PushPinIcon className="size-3.5" />
+                )}
+                {pinned ? "Unpin thread" : "Pin thread"}
+              </ContextMenu.Item>
               <ContextMenu.Item
                 disabled={!thread.sandboxId}
                 onClick={copySandboxId}
