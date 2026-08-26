@@ -18,7 +18,7 @@ from fastapi import HTTPException
 _GITHUB_API = "https://api.github.com"
 
 PR_DIFF_MAX_FILES = 50
-PR_DIFF_MAX_FILE_BYTES = 200_000
+PR_DIFF_MAX_FILE_BYTES = 1_000_000
 PR_DIFF_FETCH_CONCURRENCY = 5
 
 
@@ -163,6 +163,9 @@ async def _build_diff_files(
             "deletions": raw.get("deletions") if isinstance(raw.get("deletions"), int) else 0,
             "originalContent": original,
             "modifiedContent": modified,
+            # GitHub includes a bounded textual patch even when the complete blob
+            # is too large for the rich diff renderer.
+            "patch": raw.get("patch") if isinstance(raw.get("patch"), str) else None,
             # Binary or oversized blobs come back as None — the client renders a
             # placeholder instead of file contents.
             "unrenderable": original is None or modified is None,

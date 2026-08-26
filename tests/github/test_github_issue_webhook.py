@@ -37,9 +37,13 @@ def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     async def increment_version(*args: object, **kwargs: object) -> int:
         return 1
 
+    async def channel_context(*args: object, **kwargs: object) -> dict[str, bool]:
+        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
     monkeypatch.setattr(webhook_common, "increment_slack_thread_version", increment_version)
+    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -599,7 +603,9 @@ def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
 def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
+    async def fake_get_slack_channel_context(
+        channel_id: str, *, use_cache: bool = True
+    ) -> dict[str, str | bool]:
         captured["checked_channel_id"] = channel_id
         return {
             "id": channel_id,
@@ -608,6 +614,8 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
             "topic": "",
             "purpose": "",
             "description": "",
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
         }
 
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
@@ -670,9 +678,13 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         "topic": "Coordinate work",
         "purpose": "repo:langchain-ai/open-swe",
         "description": "Coordinate work\nrepo:langchain-ai/open-swe",
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
     }
 
-    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
+    async def fake_get_slack_channel_context(
+        channel_id: str, *, use_cache: bool = True
+    ) -> dict[str, str | bool]:
         captured["channel_context_request"] = channel_id
         return channel_context
 

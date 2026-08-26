@@ -850,6 +850,8 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
                 "id": channel,
                 "name": "demo",
                 "name_normalized": "demo",
+                "is_ext_shared": False,
+                "is_pending_ext_shared": False,
                 "topic": {"value": "Demo channel topic"},
                 "purpose": {"value": "Demo channel purpose"},
             }
