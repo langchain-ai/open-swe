@@ -9,8 +9,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent import background_tasks
 from agent.background_tasks import monitor_background_tasks
-from agent.tools.background_execute import TASK_ROOT, _control_script, _launch_command
+from agent.tools.background_execute import (
+    TASK_ROOT,
+    _control_script,
+    _launch_command,
+    background_execute,
+)
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
 # sandbox these tasks run in is always Linux.
@@ -103,6 +109,53 @@ def test_background_command_timeout_and_stop() -> None:
             assert state["status"] == expected
         finally:
             shutil.rmtree(task_dir, ignore_errors=True)
+
+
+async def test_background_task_cron_search_uses_metadata_not_graph_name() -> None:
+    client = AsyncMock()
+    client.crons.search.return_value = []
+    client.crons.create.return_value = {"cron_id": "cron-1"}
+
+    with patch("agent.background_tasks._client", return_value=client):
+        cron_id = await background_tasks.ensure_background_task_cron("thread-1")
+
+    assert cron_id == "cron-1"
+    client.crons.search.assert_awaited_once_with(
+        metadata={"kind": "background_tasks", "thread_id": "thread-1"}, limit=10
+    )
+    assert client.crons.create.await_args.args == ("scheduler",)
+
+
+async def test_background_execute_reports_monitor_scheduling_failure() -> None:
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+
+    with (
+        patch(
+            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
+        ),
+        patch(
+            "agent.tools.background_execute._execute",
+            AsyncMock(
+                side_effect=[
+                    {"tasks": []},
+                    {"task_id": "task-1", "status": "running"},
+                ]
+            ),
+        ),
+        patch(
+            "agent.background_tasks.ensure_background_task_cron",
+            AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
+        ),
+    ):
+        result = await background_execute("sleep 10")
+
+    assert result == {
+        "success": False,
+        "task_id": "task-1",
+        "status": "running",
+        "error": "command started, but automatic completion monitoring could not be scheduled",
+    }
 
 
 async def test_monitor_enqueues_one_claimed_completion() -> None:
