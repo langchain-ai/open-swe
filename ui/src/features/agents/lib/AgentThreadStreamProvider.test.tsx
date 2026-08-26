@@ -10,6 +10,7 @@ import type { ReactNode } from "react"
 const mocks = vi.hoisted(() => ({
   controller: { hydrate: vi.fn() },
   streamController: Symbol("stream-controller"),
+  streamProviderProps: vi.fn(),
 }))
 
 vi.mock("@langchain/langgraph-sdk", () => ({
@@ -19,7 +20,10 @@ vi.mock("@langchain/langgraph-sdk", () => ({
 
 vi.mock("@langchain/react", () => ({
   STREAM_CONTROLLER: mocks.streamController,
-  StreamProvider: ({ children }: { children: ReactNode }) => children,
+  StreamProvider: (props: { children: ReactNode; onThreadId?: unknown }) => {
+    mocks.streamProviderProps(props)
+    return props.children
+  },
   useStreamContext: () => ({
     [mocks.streamController]: mocks.controller,
   }),
@@ -28,10 +32,42 @@ vi.mock("@langchain/react", () => ({
 afterEach(() => {
   cleanup()
   mocks.controller.hydrate.mockClear()
+  mocks.streamProviderProps.mockClear()
   vi.restoreAllMocks()
 })
 
 describe("AgentThreadStreamProvider", () => {
+  it("forwards new thread ids to the latest callback", () => {
+    const queryClient = new QueryClient()
+    const firstCallback = vi.fn()
+    const latestCallback = vi.fn()
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <AgentThreadStreamProvider
+          threadId="existing"
+          onThreadId={firstCallback}
+        >
+          <div>thread</div>
+        </AgentThreadStreamProvider>
+      </QueryClientProvider>
+    )
+    const capturedCallback = mocks.streamProviderProps.mock.calls[0]?.[0]
+      .onThreadId as (threadId: string) => void
+
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <AgentThreadStreamProvider threadId={null} onThreadId={latestCallback}>
+          <div>thread</div>
+        </AgentThreadStreamProvider>
+      </QueryClientProvider>
+    )
+    capturedCallback("new-thread")
+
+    expect(firstCallback).not.toHaveBeenCalled()
+    expect(latestCallback).toHaveBeenCalledWith("new-thread")
+  })
+
   it("does not rehydrate the thread on foreground", () => {
     const queryClient = new QueryClient()
 
