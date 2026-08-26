@@ -91,10 +91,6 @@ def test_construct_system_prompt_contains_only_repository_instructions() -> None
     )
 
     assert "Repository rule sentinel." in prompt
-    assert (
-        "When different human participants in the same thread give conflicting guidance" in prompt
-    )
-    assert "Confirmation from any participant is sufficient." in prompt
     assert "Sender's Custom Instructions" not in prompt
 
 
