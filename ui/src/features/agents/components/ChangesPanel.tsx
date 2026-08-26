@@ -157,9 +157,9 @@ export function ChangesPanel({
             rel="noreferrer"
             aria-label="View PR"
             title="View PR"
-            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-8 @max-[680px]:justify-center @max-[680px]:px-0"
           >
-            <GitPullRequestIcon className="size-3.5 shrink-0" />
+            <GitPullRequestIcon className="size-4 shrink-0 overflow-visible" />
             <span className="whitespace-nowrap @max-[680px]:hidden">
               View PR
             </span>
