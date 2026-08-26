@@ -363,10 +363,6 @@ Users can also override the team/project mapping per-comment by including `repo:
         "bot_user": {
             "display_name": "Open SWE",
             "always_online": true
-        },
-        "code_channels": {
-            "enabled": true,
-            "slash_command_url": "https://<your-backend-url>/webhooks/slack/code-channel-commands"
         }
     },
     "oauth_config": {
@@ -381,8 +377,6 @@ Users can also override the team/project mapping per-comment by including `repo:
                 "channels:history",
                 "channels:read",
                 "chat:write",
-                "code_channels:manage",
-                "files:read",
                 "files:write",
                 "groups:history",
                 "groups:read",
@@ -402,10 +396,6 @@ Users can also override the team/project mapping per-comment by including `repo:
             "request_url": "https://<your-ngrok-url>/webhooks/slack",
             "bot_events": [
                 "app_mention",
-                "agent_session_stopped",
-                "code_channel_action",
-                "message.channels",
-                "message.groups",
                 "message.im",
                 "message.mpim"
             ]
@@ -423,7 +413,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 
 </details>
 
-3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Existing installations must reinstall or re-authorize the app after a scope change (`files:read`, `files:write`, `code_channels:manage`) and update `SLACK_BOT_TOKEN` with the new token.
+3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Existing installations must reinstall or re-authorize the app after adding `files:write`.
 
 **Slack URL checklist:**
 
@@ -431,15 +421,16 @@ Both Slack URLs must point at the Open SWE backend that serves `agent.webapp:app
 
 - **Event Subscriptions → Request URL:** `https://<your-backend-url>/webhooks/slack`
 - **Interactivity & Shortcuts → Interactivity Request URL:** `https://<your-backend-url>/webhooks/slack/interactivity`
-- **Code Channels → Slash command URL:** `https://<your-backend-url>/webhooks/slack/code-channel-commands`
 
 Slack Block Kit option buttons only work when Interactivity is enabled and pointed at `/webhooks/slack/interactivity`.
 
 **Code channels (early access):**
 
-The manifest above enables Slack [code channels](https://api.slack.com/partners/code-channels) — one Slack channel dedicated to one Open SWE session. In a code channel the whole channel is the session, so Open SWE answers messages without requiring an `@`-mention, replies at the channel level by default (or in a thread the user started), reports its session status, and keeps the context bar current. The `manage_code_channel` tool covers channel creation and archival, status and title, context actions and external resources, runtime slash commands, HTML/diff/Block Kit/canvas views, view reconciliation, and canvas content/comments.
+The default manifest above uses the legacy Slack integration. To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the existing Slack app, and reinstall or re-authorize it. The admin selection is browser-local and only controls which manifest is copied.
 
-This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`. The feature's `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint above, while Block Kit view actions use the normal interactivity endpoint. Code channel messages arrive over the `message.channels` / `message.groups` subscriptions an app already uses; `message.session` is an alternative for apps that want *only* session messages, and subscribing to both does not duplicate deliveries. Code channels are in early access: if your workspace is not enrolled, leave `features.code_channels` out of the manifest — everything else keeps working unchanged.
+In a code channel the whole channel is one Open SWE session, so Open SWE answers messages without requiring an `@`-mention, replies at the channel level by default (or in a thread the user started), reports its session status, and keeps the context bar current. The `manage_code_channel` tool covers channel creation and archival, status and title, context actions and external resources, runtime slash commands, HTML/diff/Block Kit/canvas views, view reconciliation, and canvas content/comments.
+
+This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`. The feature's `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint above, while Block Kit view actions use the normal interactivity endpoint. Code channel messages arrive over the `message.channels` / `message.groups` subscriptions an app already uses; `message.session` is an alternative for apps that want *only* session messages, and subscribing to both does not duplicate deliveries. Code channels are in early access: if your workspace is not enrolled, leave the Admin toggle off — everything else keeps working unchanged.
 
 **Credentials you'll need:**
 
