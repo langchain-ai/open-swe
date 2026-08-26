@@ -7,7 +7,11 @@ from agent.dashboard import thread_api
 
 
 class _RegistryRow:
+    id = "thread-1"
     environment = "cloud"
+    status = "idle"
+    repo_full_name = "octo/repo"
+    git_checkpoint: dict[str, Any] | None = None
     owner_login = "octocat"
     owner_email = "octocat@example.com"
     metadata: dict[str, Any] = {}
@@ -24,6 +28,30 @@ class _Registry:
 
     async def update_meta(self, thread_id: str, **fields: Any) -> _RegistryRow:
         return self.row
+
+
+@pytest.mark.asyncio
+async def test_handoff_rejects_checkpoint_for_another_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_Registry.row, "environment", "local")
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.handoff_dashboard_thread(
+            "thread-1",
+            "octocat",
+            thread_api.ThreadHandoffBody(
+                target="cloud",
+                git_checkpoint={
+                    "repo": "octo/other",
+                    "ref": "a" * 40,
+                    "branch": "open-swe/thread-1",
+                    "pushed": True,
+                },
+            ),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "repository does not match" in str(exc_info.value.detail)
 
 
 @pytest.fixture(autouse=True)

@@ -302,6 +302,16 @@ class BackendSupervisor {
     return response.ok ? response.json() : null;
   }
 
+  async cancelRun(threadId, runId) {
+    const response = await this.request(
+      `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/cancel?wait=1&action=interrupt`,
+      { method: "POST" },
+    );
+    if (![200, 202, 204].includes(response.status)) {
+      throw new Error(`Could not interrupt local run (${response.status})`);
+    }
+  }
+
   async getThreadState(threadId) {
     const response = await this.request(
       `/threads/${encodeURIComponent(threadId)}/state`,
@@ -315,12 +325,20 @@ class BackendSupervisor {
         .map((message) => {
           const content = Array.isArray(message?.chunks)
             ? message.chunks
-                .filter((chunk) => chunk?.kind === "text" && typeof chunk.text === "string")
+                .filter(
+                  (chunk) =>
+                    chunk?.kind === "text" && typeof chunk.text === "string",
+                )
                 .map((chunk) => chunk.text)
                 .join("\n")
             : "";
           if (!content) return null;
-          const type = message.author === "user" ? "human" : message.author === "agent" ? "ai" : "system";
+          const type =
+            message.author === "user"
+              ? "human"
+              : message.author === "agent"
+                ? "ai"
+                : "system";
           return { type, content, id: message.id };
         })
         .filter(Boolean),
@@ -334,7 +352,9 @@ class BackendSupervisor {
       },
     );
     if (!response.ok) {
-      throw new Error(`Could not seed local thread history (${response.status})`);
+      throw new Error(
+        `Could not seed local thread history (${response.status})`,
+      );
     }
   }
 

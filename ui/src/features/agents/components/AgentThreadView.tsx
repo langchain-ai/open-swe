@@ -86,6 +86,9 @@ export function AgentThreadView({
     setHandoffError(null)
     try {
       if (thread.status === "queued" || thread.status === "running") {
+        if (thread.environment === "local") {
+          await window.openSweDesktop.interruptLocalThread(thread.id)
+        }
         await agentsApi.cancelThread(thread.id)
       }
       const target = thread.environment === "local" ? "cloud" : "local"
@@ -114,7 +117,9 @@ export function AgentThreadView({
       }
       queryClient.setQueryData(agentThreadKeys.detail(thread.id), updated)
     } catch (error) {
-      setHandoffError(error instanceof Error ? error.message : "Could not hand off thread")
+      setHandoffError(
+        error instanceof Error ? error.message : "Could not hand off thread"
+      )
     } finally {
       setHandoffPending(false)
     }
@@ -325,7 +330,11 @@ export function AgentThreadView({
               <button
                 type="button"
                 className="shrink-0 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                disabled={handoffPending || (thread.environment === "cloud" && !window.openSweDesktop?.deviceId)}
+                disabled={
+                  handoffPending ||
+                  (thread.environment === "cloud" &&
+                    !window.openSweDesktop?.deviceId)
+                }
                 onClick={() => void handoff()}
               >
                 {handoffPending

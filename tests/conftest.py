@@ -9,6 +9,18 @@ from agent.webhooks import common as webhook_common
 
 
 @pytest.fixture(autouse=True)
+async def _isolated_thread_registry(monkeypatch: pytest.MonkeyPatch):
+    from agent.dashboard.thread_registry import close_thread_registry
+
+    monkeypatch.setenv("OPEN_SWE_REGISTRY_SQLITE_PATH", ":memory:")
+    await close_thread_registry()
+    try:
+        yield
+    finally:
+        await close_thread_registry()
+
+
+@pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
     """Keep the process-global TTL cache from leaking team settings between tests."""
     ttl_cache.clear()

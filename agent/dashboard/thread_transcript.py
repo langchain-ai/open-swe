@@ -8,7 +8,11 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 
 def _timestamp(message: object) -> str:
-    response_metadata = getattr(message, "response_metadata", None)
+    response_metadata = (
+        message.get("response_metadata")
+        if isinstance(message, Mapping)
+        else getattr(message, "response_metadata", None)
+    )
     if isinstance(response_metadata, Mapping):
         for key in ("timestamp", "created_at"):
             value = response_metadata.get(key)
@@ -26,8 +30,15 @@ def _author(message: object) -> str:
         return "tool"
     if isinstance(message, SystemMessage):
         return "system"
-    kind = message.get("type") if isinstance(message, Mapping) else None
-    return {"human": "user", "ai": "agent"}.get(str(kind), str(kind or "system"))
+    kind = (message.get("type") or message.get("role")) if isinstance(message, Mapping) else None
+    return {
+        "human": "user",
+        "user": "user",
+        "ai": "agent",
+        "assistant": "agent",
+        "tool": "tool",
+        "system": "system",
+    }.get(str(kind), "system")
 
 
 def _chunks(content: object) -> list[dict[str, Any]]:
@@ -67,7 +78,11 @@ def message_to_ui(message: object) -> dict[str, Any] | None:
     else:
         return None
     chunks = _chunks(content)
-    tool_calls = getattr(message, "tool_calls", None)
+    tool_calls = (
+        message.get("tool_calls")
+        if isinstance(message, Mapping)
+        else getattr(message, "tool_calls", None)
+    )
     if isinstance(tool_calls, list):
         for call in tool_calls:
             if not isinstance(call, Mapping):

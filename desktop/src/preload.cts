@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
   getLocalThread: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-thread", threadId),
+  interruptLocalThread: (threadId) =>
+    ipcRenderer.invoke("desktop:interrupt-local-thread", threadId),
   prepareCloudHandoff: (threadId) =>
     ipcRenderer.invoke("desktop:prepare-cloud-handoff", threadId),
   prepareLocalHandoff: (input) =>

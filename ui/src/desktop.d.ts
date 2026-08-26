@@ -18,12 +18,10 @@ export interface DesktopProject {
 export interface DesktopLocalExecutionContext {
   id: string
   cwd: string
-  title: string
-  viewed: boolean
-  createdAt: number
-  updatedAt: number
   modelId: string | null
   effort: string | null
+  checkpoint: { repo: string | null; ref: string | null; branch: string | null }
+  managedWorktree: boolean
   pending?: DesktopLocalPromptInput | null
 }
 
@@ -187,6 +185,7 @@ declare global {
       getLocalThread: (
         threadId: string
       ) => Promise<DesktopLocalExecutionContext | null>
+      interruptLocalThread: (threadId: string) => Promise<void>
       prepareCloudHandoff: (threadId: string) => Promise<{
         repo: string
         ref: string
@@ -197,7 +196,12 @@ declare global {
         threadId: string
         deviceId: string
         repoFullName: string
-        gitCheckpoint: { repo: string; ref: string; branch: string; pushed: boolean }
+        gitCheckpoint: {
+          repo: string
+          ref: string
+          branch: string
+          pushed: boolean
+        }
         modelId?: string | null
         effort?: string | null
         messages?: Array<Message>

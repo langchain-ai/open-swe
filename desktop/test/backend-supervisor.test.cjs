@@ -110,6 +110,23 @@ test("rejects a failed local LangGraph thread creation", async () => {
   );
 });
 
+test("interrupts a local run through the authenticated backend", async () => {
+  const supervisor = new BackendSupervisor({});
+  let request;
+  supervisor.request = async (pathname, init) => {
+    request = { pathname, init };
+    return new Response(null, { status: 204 });
+  };
+
+  await supervisor.cancelRun("thread/1", "run/1");
+
+  assert.equal(
+    request.pathname,
+    "/threads/thread%2F1/runs/run%2F1/cancel?wait=1&action=interrupt",
+  );
+  assert.equal(request.init.method, "POST");
+});
+
 test("derives thread activity from the backend without starting it", async () => {
   const idle = new BackendSupervisor({
     fetch: () => assert.fail("must not reach a backend that is not running"),

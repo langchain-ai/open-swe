@@ -1,26 +1,16 @@
-function uiMessages(state) {
+function rawMessages(state) {
   const messages = state?.values?.messages;
-  if (!Array.isArray(messages)) return [];
-  return messages.map((message, index) => {
-    const kind = message?.type || message?.role;
-    const author = kind === "human" || kind === "user" ? "user" : kind === "ai" || kind === "assistant" ? "agent" : kind === "tool" ? "tool" : "system";
-    const content = message?.content;
-    const chunks = typeof content === "string"
-      ? [{ kind: "text", text: content }]
-      : Array.isArray(content)
-        ? content.filter((item) => item?.type === "text" && typeof item.text === "string").map((item) => ({ kind: "text", text: item.text }))
-        : [];
-    return {
-      id: String(message?.id || `${author}-${index}`),
-      author,
-      timestamp: new Date().toISOString(),
-      chunks,
-    };
-  });
+  return Array.isArray(messages) ? messages.slice(-100) : [];
 }
 
 class LocalRunReporter {
-  constructor({ supervisor, device, report, intervalMs = 1000, heartbeatIntervalMs = 30_000 }) {
+  constructor({
+    supervisor,
+    device,
+    report,
+    intervalMs = 1000,
+    heartbeatIntervalMs = 30_000,
+  }) {
     this.supervisor = supervisor;
     this.device = device;
     this.report = report;
@@ -28,6 +18,7 @@ class LocalRunReporter {
     this.heartbeatIntervalMs = heartbeatIntervalMs;
     this.lastHeartbeat = 0;
     this.runs = new Map();
+    this.interrupting = new Set();
     this.timer = null;
   }
 
@@ -69,6 +60,7 @@ class LocalRunReporter {
     const activity = await this.supervisor.threadActivity();
     if (!activity) return;
     for (const [threadId, tracked] of this.runs) {
+      if (this.interrupting.has(threadId)) continue;
       if (activity[threadId] === "running") {
         if (tracked.status !== "running") {
           tracked.status = "running";
@@ -77,13 +69,36 @@ class LocalRunReporter {
         continue;
       }
       const run = await this.supervisor.getRun(threadId, tracked.runId);
-      const status = run?.status === "success" ? "finished" : run?.status === "interrupted" ? "interrupted" : "error";
+      const status =
+        run?.status === "success"
+          ? "finished"
+          : run?.status === "interrupted"
+            ? "interrupted"
+            : "error";
       const state = await this.supervisor.getThreadState(threadId);
       await this.send(threadId, tracked.runId, status, {
-        ...(status === "error" ? { error: String(run?.error || run?.status || "local run failed") } : {}),
-        messages: uiMessages(state),
+        ...(status === "error"
+          ? { error: String(run?.error || run?.status || "local run failed") }
+          : {}),
+        messages: rawMessages(state),
       });
       this.runs.delete(threadId);
+    }
+  }
+
+  async interrupt(threadId) {
+    const tracked = this.runs.get(threadId);
+    if (!tracked) throw new Error("The active local run is unavailable");
+    this.interrupting.add(threadId);
+    try {
+      await this.supervisor.cancelRun(threadId, tracked.runId);
+      const state = await this.supervisor.getThreadState(threadId);
+      await this.send(threadId, tracked.runId, "interrupted", {
+        messages: rawMessages(state),
+      });
+      this.runs.delete(threadId);
+    } finally {
+      this.interrupting.delete(threadId);
     }
   }
 
@@ -93,4 +108,4 @@ class LocalRunReporter {
   }
 }
 
-module.exports = { LocalRunReporter, uiMessages };
+module.exports = { LocalRunReporter };

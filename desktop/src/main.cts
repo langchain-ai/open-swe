@@ -221,7 +221,9 @@ async function prepareLocalHandoff(input) {
   if (existing) return existing;
   const repo = await projectForRepository(input.repoFullName);
   if (!repo)
-    throw new Error(`Add a local checkout of ${input.repoFullName} before continuing`);
+    throw new Error(
+      `Add a local checkout of ${input.repoFullName} before continuing`,
+    );
   const destination = path.join(
     app.getPath("userData"),
     "worktrees",
@@ -406,13 +408,24 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     const thread = localExecutionContext.get(threadId);
     if (!thread) return null;
-    await backendSupervisor.createThread(thread.id);
+    await backendSupervisor.createThread(thread.id, {
+      graph_id: "agent",
+      execution_environment: "local",
+      device_id: deviceIdentity.id,
+      device_name: deviceIdentity.name,
+      local_project_path: thread.cwd,
+    });
     return thread;
+  });
+  ipcMain.handle("desktop:interrupt-local-thread", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    await localRunReporter.interrupt(threadId);
   });
   ipcMain.handle("desktop:prepare-cloud-handoff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
     const thread = localExecutionContext.get(threadId);
-    if (!thread) throw new Error("This local thread is unavailable on this device");
+    if (!thread)
+      throw new Error("This local thread is unavailable on this device");
     const activity = await backendSupervisor.threadActivity();
     if (activity?.[threadId] === "running")
       throw new Error("Interrupt the local run before handing it off");
@@ -1080,7 +1093,9 @@ if (!hasSingleInstanceLock) {
       path.join(app.getPath("userData"), "device-identity.json"),
     );
     process.env.OPEN_SWE_DEVICE_ID = deviceIdentity.id;
-    localExecutionContext = new LocalExecutionContext();
+    localExecutionContext = new LocalExecutionContext(
+      path.join(app.getPath("userData"), "local-execution-context.json"),
+    );
     openAiOAuth = new OpenAiOAuthManager({
       storagePath: path.join(app.getPath("userData"), "openai-auth.bin"),
       encryptString: (value) => {
@@ -1124,7 +1139,9 @@ if (!hasSingleInstanceLock) {
         );
         const response = await proxyRegistryRequest(request);
         if (!response.ok) {
-          throw new Error(`Registry rejected local run report (${response.status})`);
+          throw new Error(
+            `Registry rejected local run report (${response.status})`,
+          );
         }
       },
     });

@@ -68,7 +68,7 @@ from .thread_registry import (
     get_thread_registry,
     utcnow,
 )
-from .thread_transcript import ui_messages_to_state
+from .thread_transcript import messages_to_ui, ui_messages_to_state
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
 
@@ -2018,7 +2018,7 @@ async def report_local_run(
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
     if body.messages:
-        await registry.append_messages(body.thread_id, body.run_id, body.messages)
+        await registry.append_messages(body.thread_id, body.run_id, messages_to_ui(body.messages))
     if body.git_checkpoint is not None:
         checkpoint = body.git_checkpoint
         if not all(
@@ -2132,6 +2132,8 @@ async def handoff_dashboard_thread(
         for key in ("repo", "ref", "branch")
     ):
         raise HTTPException(422, "invalid git checkpoint")
+    if checkpoint["repo"] != row.repo_full_name:
+        raise HTTPException(422, "git checkpoint repository does not match thread repository")
     fields: dict[str, Any] = {
         "environment": body.target,
         "git_checkpoint": checkpoint,
