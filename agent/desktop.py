@@ -39,7 +39,7 @@ def resolve_desktop_project(configurable: dict[str, Any]) -> str:
 def create_desktop_backend(configurable: dict[str, Any]) -> LocalShellBackend:
     return LocalShellBackend(
         root_dir=resolve_desktop_project(configurable),
-        virtual_mode=True,
+        virtual_mode=False,
         env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},
     )
 
