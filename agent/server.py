@@ -1653,6 +1653,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
