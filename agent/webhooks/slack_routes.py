@@ -15,6 +15,20 @@ from . import slack as service
 router = APIRouter()
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
+_EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external participants."
+
+
+def _event_channel_id(event: dict[str, Any]) -> str:
+    channel = event.get("channel")
+    if isinstance(channel, str):
+        return channel
+    if isinstance(channel, dict) and isinstance(channel.get("id"), str):
+        return channel["id"]
+    item = event.get("item")
+    if isinstance(item, dict) and isinstance(item.get("channel"), str):
+        return item["channel"]
+    channel_id = event.get("channel_id")
+    return channel_id if isinstance(channel_id, str) else ""
 
 
 def _synthetic_slack_ts() -> str:
@@ -137,11 +151,14 @@ async def _process_slack_message_update(
             message_ts,
         )
         return
+    channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+    if not common.slack_channel_allows_operations(channel_context):
+        common.logger.warning("Blocked Slack message update in ineligible channel=%s", channel_id)
+        return
     event_data["thread_id"] = thread_id
     event_data["thread_version"] = await common.increment_slack_thread_version(
         langgraph_client, channel_id, thread_ts, str(event_data.get("event_ts") or "")
     )
-    channel_context = await common._get_slack_channel_context(channel_id)
     event_data["channel_context"] = channel_context
     repo_config = await common.get_slack_repo_config(
         channel_id,
@@ -185,7 +202,38 @@ async def slack_webhook(
         return {"status": "ignored", "reason": "Not an event callback"}
 
     event = payload.get("event", {})
+    if not isinstance(event, dict):
+        return {"status": "ignored", "reason": "Invalid Slack event"}
+
     event_id = str(payload.get("event_id") or "")
+    channel_id = _event_channel_id(event)
+    channel_context: dict[str, Any] | None = None
+    if channel_id:
+        channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+        if not common.slack_channel_allows_operations(channel_context):
+            is_external = channel_context.get("is_ext_shared") is True
+            event_ts = str(event.get("event_ts") or event.get("ts") or "")
+            thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
+            if (
+                is_external
+                and event.get("type") == "app_mention"
+                and event.get("subtype") is None
+                and isinstance(event.get("user"), str)
+                and thread_ts
+                and await common.claim_slack_event(event_id, channel_id, event_ts)
+            ):
+                background_tasks.add_task(
+                    common.post_slack_thread_reply,
+                    channel_id,
+                    thread_ts,
+                    _EXTERNAL_CHANNEL_REFUSAL,
+                )
+            common.logger.warning(
+                "Blocked Slack event in %s channel=%s",
+                "external" if is_external else "unverified",
+                channel_id,
+            )
+            return {"status": "ignored", "reason": "Slack channel is not eligible"}
 
     if event.get("type") == "code_channel_action":
         action = event.get("action") if isinstance(event.get("action"), dict) else {}
@@ -195,7 +243,7 @@ async def slack_webhook(
             user.get("id") if isinstance(user, dict) else user or event.get("user_id") or ""
         )
         channel = event.get("channel")
-        channel_id = str(
+        action_channel_id = str(
             channel.get("id")
             if isinstance(channel, dict)
             else channel or event.get("channel_id") or ""
@@ -208,12 +256,12 @@ async def slack_webhook(
         }
         return await _queue_code_channel_turn(
             background_tasks,
-            channel_id=channel_id,
+            channel_id=action_channel_id,
             user_id=user_id,
             text=_bounded_payload_text(
                 "A code channel context-bar action was selected.", action_payload
             ),
-            event_id=event_id or f"code-channel-action:{channel_id}:{event_ts}",
+            event_id=event_id or f"code-channel-action:{action_channel_id}:{event_ts}",
             event_ts=event_ts,
             explicit_request=True,
         )
@@ -273,7 +321,6 @@ async def slack_webhook(
     if not isinstance(updated_message, dict):
         return {"status": "ignored", "reason": "Invalid updated message"}
 
-    channel_id = event.get("channel")
     event_ts = event.get("event_ts") or event.get("ts")
     original_message_ts = updated_message.get("ts")
     thread_ts = updated_message.get("thread_ts") or original_message_ts
@@ -415,7 +462,8 @@ async def slack_webhook(
 
     langgraph_client = get_langgraph_client()
     thread_id: str | None = None
-    channel_context = await common._get_slack_channel_context(channel_id)
+    if channel_context is None:
+        return {"status": "ignored", "reason": "Slack channel is not eligible"}
 
     if await common._is_docs_plz_slack_channel(channel_id, channel_context):
         if await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -612,6 +660,16 @@ async def slack_interactivity(
     if action is None:
         return {"status": "ignored", "reason": "No Open SWE action"}
 
+    channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
+    container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+    channel_id = str(channel.get("id") or container.get("channel_id") or "")
+    if not channel_id:
+        return {"status": "ignored", "reason": "Slack channel is not eligible"}
+    channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+    if not common.slack_channel_allows_operations(channel_context):
+        common.logger.warning("Blocked Slack interaction in ineligible channel=%s", channel_id)
+        return {"status": "ignored", "reason": "Slack channel is not eligible"}
+
     try:
         action_value = common.json.loads(str(action.get("value") or "{}"))
     except common.json.JSONDecodeError:
@@ -636,15 +694,6 @@ async def slack_interactivity(
         )
         if not thread_id:
             return {"status": "ignored", "reason": "Slack thread is not associated"}
-        if not await common._slack_user_is_thread_owner(thread_id, user_id):
-            await common.post_slack_thread_reply(
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                text="Only the person who requested this run can approve workflow file pushes.",
-                agent_thread_id=thread_id,
-            )
-            return {"status": "ignored", "reason": "approver is not the thread owner"}
-
         if workflow_action not in {"approve", "reject"}:
             return {"status": "ignored", "reason": "Unknown workflow approval action"}
         approved = workflow_action == "approve"

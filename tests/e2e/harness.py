@@ -875,6 +875,8 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
         "id": channel,
         "name": code_channel["name"] if code_channel else "demo",
         "name_normalized": code_channel["name"] if code_channel else "demo",
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
         "topic": {"value": "Demo channel topic"},
         "purpose": {"value": "Demo channel purpose"},
     }

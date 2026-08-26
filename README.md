@@ -94,7 +94,7 @@ Open SWE's orchestration has two layers:
 
 All three companies in the article converge on **Slack as the primary invocation surface**. Open SWE does the same:
 
-- **Slack** — Mention the bot in any thread. Supports `repo:owner/name` syntax to specify which repo to work on. The agent replies in-thread with status updates and PR links.
+- **Slack** — Mention the bot in any internal thread. Slack Connect channels are refused before a run starts, and channel-verification failures fail closed. Supports `repo:owner/name` syntax to specify which repo to work on. The agent replies in-thread with status updates and PR links.
 - **Linear** — Comment `@openswe` on any issue. The agent reads the full issue context, reacts with 👀 to acknowledge, and posts results back as comments.
 - **GitHub** — Tag `@openswe` in PR comments on agent-created PRs to have it address review feedback and push fixes to the same branch.
 

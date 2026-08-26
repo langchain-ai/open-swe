@@ -1,7 +1,7 @@
 """Tests for GitHub proxy auth configuration."""
 
 import base64
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -10,6 +10,7 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.dashboard.environments import Environment
 from agent.integrations.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
     PROXY_MODEL_KEY_PLACEHOLDER,
@@ -432,17 +433,18 @@ class TestCreateSandboxWithProxy:
 
     @pytest.mark.asyncio
     async def test_passes_environment_resources_to_sandbox_creation(self) -> None:
-        environment: dict[str, Any] = {
-            "snapshot_status": "ready",
-            "snapshot_id": "env-snap",
-            "mem_bytes": 16,
-            "vcpus": 8,
-            "fs_capacity_bytes": 128,
-            "create_params": {
+        environment = Environment(
+            slug="env",
+            snapshot_status="ready",
+            snapshot_id="env-snap",
+            mem_bytes=16,
+            vcpus=8,
+            fs_capacity_bytes=128,
+            create_params={
                 "_internal_runtime": "v2",
                 "proxy_config": {"rules": [{"name": "public-api", "match_hosts": ["example.com"]}]},
             },
-        }
+        )
         with (
             patch(
                 "agent.server.resolve_environment", new_callable=AsyncMock, return_value=environment
@@ -469,12 +471,12 @@ class TestCreateSandboxWithProxy:
             mem_bytes=16,
             vcpus=8,
             fs_capacity_bytes=128,
-            create_params=environment["create_params"],
+            create_params=environment.create_params,
         )
         mock_configure_proxy.assert_awaited_once_with(
             "sandbox-123",
             "ghs_install",
-            base_proxy_config=environment["create_params"]["proxy_config"],
+            base_proxy_config=environment.create_params["proxy_config"],
         )
 
     @pytest.mark.asyncio
@@ -580,7 +582,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch(
                 "agent.server.resolve_environment",
                 new_callable=AsyncMock,
-                return_value={"create_params": {"proxy_config": {}}},
+                return_value=Environment(slug="env", create_params={"proxy_config": {}}),
             ),
             patch(
                 "agent.server.get_sandbox_id_from_metadata",

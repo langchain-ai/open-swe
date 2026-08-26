@@ -54,10 +54,6 @@ from .dashboard.agent_overrides import (
 from .dashboard.agent_usage import record_agent_run_usage
 from .dashboard.environments import (
     SandboxResources,
-    environment_prompt,
-    environment_sandbox_create_params,
-    environment_sandbox_resources,
-    environment_snapshot_id,
     resolve_environment,
 )
 from .dashboard.options import (
@@ -190,6 +186,8 @@ from .utils.auth import resolve_github_token
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
+    CollaboratorIdentity,
+    resolve_participant_identities,
     resolve_triggering_user_identity,
 )
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
@@ -198,7 +196,7 @@ from .utils.gateway import gateway_env_default
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_org_membership import is_user_active_org_member
 from .utils.github_proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
-from .utils.json_types import as_json_object
+from .utils.json_types import as_json_object, thread_metadata
 from .utils.model import (
     DEFAULT_LLM_REASONING,
     ModelKwargs,
@@ -220,6 +218,7 @@ from .utils.sandbox_state import (
     unwrap_sandbox_backend,
 )
 from .utils.startup_trace import aphase
+from .utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from .utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
@@ -308,6 +307,17 @@ async def _resolve_repo_custom_instructions(
         return None
 
 
+async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIdentity]:
+    """Git identities of everyone who has posted in this thread."""
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+        logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
+        return await resolve_participant_identities(logins)
+    except Exception:
+        logger.debug("Failed to resolve participant identities for %s", thread_id, exc_info=True)
+        return []
+
+
 async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     """Load user-level custom agent instructions for the triggering user."""
     if not login:
@@ -336,11 +346,10 @@ async def _resolve_sandbox_create_config(
 ) -> tuple[str | None, SandboxResources, dict[str, Any]]:
     """Resolve the snapshot, VM sizing, and create parameters for a new sandbox."""
     environment = await resolve_environment(environment_slug)
-    environment_snapshot = environment_snapshot_id(environment)
-    resources = environment_sandbox_resources(environment)
-    create_params = environment_sandbox_create_params(environment)
-    if environment_snapshot:
-        return environment_snapshot, resources, create_params
+    resources = environment.sandbox_resources() if environment else SandboxResources()
+    create_params = environment.sandbox_create_params() if environment else {}
+    if environment and environment.ready_snapshot_id:
+        return environment.ready_snapshot_id, resources, create_params
     return await get_admin_base_snapshot_id(), resources, create_params
 
 
@@ -1308,13 +1317,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.environment"):
             environment = await resolve_environment(_environment_slug(configurable))
         async with aphase(self._thread_id, "prepare.sender_context"):
-            sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
+            sender_instructions, participant_identities = await asyncio.gather(
+                _resolve_user_custom_instructions(self._profile_login),
+                _thread_participant_identities(self._thread_id),
+            )
             sender_context = construct_sender_context(
                 triggering_user_identity,
                 user_custom_instructions=sender_instructions,
                 draft_prs=self._draft_prs,
                 thread_url=dashboard_thread_url(self._thread_id),
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
+                participant_identities=participant_identities,
             )
         sender_messages = self._sender_context_messages(state, sender_context)
         try:
@@ -1358,8 +1371,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
                 corridor_enabled=self._corridor_enabled,
-                environment_name=(environment or {}).get("name"),
-                environment_instructions=environment_prompt(environment),
+                environment_name=environment.name if environment else None,
+                environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),
@@ -1398,15 +1411,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization and credentialed integrations, which stay personal to them.
-    # Everything else comes from the thread's own settings, resolved from the
-    # owner's profile on the first run and frozen there afterwards.
+    # Everything else comes from the thread's own settings, seeded from the first
+    # sender's profile and frozen there afterwards.
     local_run = is_desktop_run(configurable)
     profile_login = resolve_github_login(as_json_object(config))
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
         )
-    settings_login = thread_settings.get("owner_login") or profile_login
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     if local_run:
@@ -1429,7 +1441,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_team_default_model_pair("agent"),
                 _cached_thread_title_model(),
                 _cached_gateway_enabled(),
-                _cached_profile(None if thread_settings.get("model_id") else settings_login),
+                _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
             )
 
@@ -1441,12 +1453,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     title_model_id, title_effort = title_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
 
-    if settings_login and profile:
+    if profile_login and profile:
         overridden_model, overridden_effort = normalize_profile_overrides(profile)
         if overridden_model:
             logger.info(
                 "Applying dashboard profile override for %s: model=%s effort=%s",
-                settings_login,
+                profile_login,
                 overridden_model,
                 overridden_effort,
             )
@@ -1460,7 +1472,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if overridden_subagent_model:
             logger.info(
                 "Applying dashboard profile subagent override for %s: model=%s effort=%s",
-                settings_login,
+                profile_login,
                 overridden_subagent_model,
                 overridden_subagent_effort,
             )
@@ -1499,11 +1511,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_effort = per_thread_effort
 
     async with aphase(thread_id, "factory.sender_profile"):
-        sender_profile = (
-            profile
-            if profile_login == settings_login and profile is not None
-            else await _cached_profile(profile_login)
-        )
+        sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1516,7 +1524,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # Stored before the Fable gate so a deployment-wide toggle still applies on
     # every run rather than being frozen into the thread.
     resolved_settings: ThreadSettings = {
-        "owner_login": settings_login,
         "model_id": model_id,
         "effort": profile_effort,
         "subagent_model_id": subagent_model_id,

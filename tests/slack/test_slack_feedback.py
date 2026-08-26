@@ -1,5 +1,6 @@
 import json
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks
@@ -225,6 +226,11 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
     background_tasks = _FakeBackgroundTasks()
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+    )
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),
@@ -242,6 +248,11 @@ async def test_slack_webhook_queues_stop_reaction(monkeypatch: pytest.MonkeyPatc
     background_tasks = _FakeBackgroundTasks()
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+    )
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),
@@ -261,6 +272,11 @@ async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyP
     background_tasks = _FakeBackgroundTasks()
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+    )
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),
@@ -280,6 +296,11 @@ async def test_slack_webhook_ignores_untracked_reaction(monkeypatch: pytest.Monk
     background_tasks = _FakeBackgroundTasks()
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+    )
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),

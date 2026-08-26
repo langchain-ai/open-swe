@@ -254,7 +254,6 @@ export interface WorkflowPushApproval {
 
 export interface WorkflowPushApprovalsResponse {
   threadId: string
-  isOwner: boolean
   approvals: Array<WorkflowPushApproval>
 }
 
@@ -333,7 +332,6 @@ export interface AgentThread {
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
-  isOwner?: boolean
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
