@@ -380,6 +380,32 @@ async def resolve_token_from_email(
         await leave_failure_comment(source, message)
         raise ValueError(f"No token found: {error}")
 
+    github_login = configurable.get("github_login")
+    if isinstance(github_login, str) and github_login.strip():
+        from ..dashboard.profiles import get_valid_access_token
+
+        try:
+            open_swe_token = await get_valid_access_token(github_login.strip())
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "legacy_github_auth_migration_impact_unknown source=%s github_login=%s",
+                source,
+                github_login.strip(),
+            )
+        else:
+            logger.info(
+                "legacy_github_auth_migration_impact source=%s github_login=%s requires_reauth=%s",
+                source,
+                github_login.strip(),
+                not open_swe_token,
+            )
+    else:
+        logger.info(
+            "legacy_github_auth_migration_impact source=%s email=%s requires_reauth=true",
+            source,
+            email,
+        )
+
     expires_at = auth_result.get("expires_at") if isinstance(auth_result, dict) else None
     return _cache_resolved_github_token(
         thread_id,
