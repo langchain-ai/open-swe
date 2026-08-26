@@ -658,7 +658,14 @@ def _participant_search_filters(
 ) -> list[dict[str, Any]]:
     if include_all:
         return [{}]
-    return participant_search_filters(login, email)
+    filters = participant_search_filters(login, email)
+    # Threads created before participants existed carry only these two keys, and
+    # object containment cannot match them. Drop both once those threads have
+    # aged out or been backfilled.
+    filters.append({"github_login": login})
+    if email and email.strip():
+        filters.append({"triggering_user_email": email.strip().lower()})
+    return filters
 
 
 def _search_metadata_filter(
@@ -945,8 +952,8 @@ async def list_dashboard_threads_sidebar(
     count_record = counts if counts is not None else {}
     client = langgraph_client()
     searches = _participant_search_filters(login, email=email, include_all=include_all)
-    safe_active_limit = min(max(active_limit, 1), 100)
-    safe_resolved_limit = min(max(resolved_limit, 1), 100)
+    safe_active_limit = min(max(active_limit, 1), _THREADS_PAGE_SCAN_CAP)
+    safe_resolved_limit = min(max(resolved_limit, 0), _THREADS_PAGE_SCAN_CAP)
     active_target = safe_active_limit + 1
     resolved_target = safe_resolved_limit + 1
     active: dict[str, ThreadLike] = {}

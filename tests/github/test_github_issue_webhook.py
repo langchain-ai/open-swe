@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from agent.api.app import app
+from agent.thread_ids import github_issue_thread_id
 from agent.tools import request_pr_review as request_pr_review_tool
 from agent.utils import slack as slack_utils
 from agent.utils.slack import GitHubPrRef
@@ -83,9 +84,9 @@ def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Re
     )
 
 
-def test_generate_thread_id_from_github_issue_is_deterministic() -> None:
-    first = webhook_common.generate_thread_id_from_github_issue("12345")
-    second = webhook_common.generate_thread_id_from_github_issue("12345")
+def test_github_issue_thread_id_is_deterministic() -> None:
+    first = github_issue_thread_id("12345")
+    second = github_issue_thread_id("12345")
 
     assert first == second
     assert len(first) == 36

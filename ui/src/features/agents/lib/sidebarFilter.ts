@@ -219,31 +219,31 @@ export function groupThreadsByMode(
   }
 
   if (mode === "date") {
-    const groups = groupThreads(threads, "createdAt")
+    const groups = groupThreads(threads, "updatedAt")
     return (
       [
         {
           key: "today",
           label: "Today",
-          threads: groups.today,
+          threads: sortedByCreation(groups.today),
           collapsed: false,
         },
         {
           key: "last7",
           label: "Last 7 days",
-          threads: groups.last7,
+          threads: sortedByCreation(groups.last7),
           collapsed: true,
         },
         {
           key: "last30",
           label: "Last 30 days",
-          threads: groups.last30,
+          threads: sortedByCreation(groups.last30),
           collapsed: true,
         },
         {
           key: "older",
           label: "Older",
-          threads: groups.older,
+          threads: sortedByCreation(groups.older),
           collapsed: false,
         },
       ] as const

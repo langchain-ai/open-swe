@@ -8,11 +8,11 @@ configuration in one place. Per-repo style prompts live in
 import logging
 import os
 import re
-from datetime import UTC, datetime
 from typing import Any, Literal
 
-from langgraph_sdk import get_client
 from pydantic import BaseModel, field_validator, model_validator
+
+from agent.store import get_value, now_iso, put_value
 
 from ..utils.gateway import resolve_gateway_enabled
 from .options import (
@@ -252,10 +252,6 @@ def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, 
     return value
 
 
-def _client():
-    return get_client()
-
-
 def _env_default_repo() -> str | None:
     owner = os.environ.get("DEFAULT_REPO_OWNER", "").strip()
     name = os.environ.get("DEFAULT_REPO_NAME", "").strip()
@@ -305,16 +301,19 @@ def _default_settings() -> dict[str, Any]:
 
 
 async def get_team_settings() -> dict[str, Any]:
+    """The team record merged over the hardcoded defaults.
+
+    Fail-soft on purpose: the agent, the reviewer, and every webhook read this
+    to pick a model, so an unreachable store must degrade to the defaults
+    rather than fail every run at once.
+    """
     defaults = _default_settings()
     try:
-        item = await _client().store.get_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY)
-    except Exception as e:
-        logger.debug("team settings lookup failed: %s", e)
+        value = await get_value(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY)
+    except Exception:
+        logger.warning("team settings lookup failed; using defaults", exc_info=True)
         return defaults
-    if item is None:
-        return defaults
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    if not isinstance(value, dict):
+    if value is None:
         return defaults
     # Skip None-valued model fields so legacy records (or PUTs that cleared the
     # selection) still surface the hardcoded default instead of a null.
@@ -356,9 +355,9 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
         "default_thread_title_model": update.default_thread_title_model,
         "default_thread_title_reasoning_effort": update.default_thread_title_reasoning_effort,
-        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_at": now_iso(),
     }
-    await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
+    await put_value(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
     return value
 
 

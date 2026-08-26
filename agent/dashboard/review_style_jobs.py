@@ -7,12 +7,13 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.thread_ids import review_style_thread_id
+
 from ..dispatch import create_durable_run
 from ..input_messages import RunInput, build_run_input
 from ..review.style_collector import (
     collect_review_samples,
     format_samples_for_analyzer,
-    generate_review_style_thread_id,
 )
 from ..utils.analyzer_skills import build_skill_files
 from .review_styles import (
@@ -73,7 +74,7 @@ def build_continual_run_configurable(full_name: str) -> dict[str, Any]:
     """
     owner, repo = full_name.split("/", 1)
     return {
-        "thread_id": generate_review_style_thread_id(owner, repo),
+        "thread_id": review_style_thread_id(owner, repo),
         "review_style_full_name": full_name,
         "analyzer_mode": "continual",
     }
@@ -100,7 +101,7 @@ async def start_bootstrap_analysis(
         }
 
     samples_text = format_samples_for_analyzer(samples)
-    thread_id = generate_review_style_thread_id(owner, repo)
+    thread_id = review_style_thread_id(owner, repo)
 
     client = _client()
     configurable: dict[str, Any] = {

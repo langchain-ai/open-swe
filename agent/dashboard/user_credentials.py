@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from langgraph_sdk import get_client
 from pydantic import BaseModel, ConfigDict, field_validator
+
+from agent.store import delete_value, get_value, now_iso, put_value
 
 from ..encryption import decrypt_token, encrypt_token
 from .notion_oauth import is_reauth_required_error, refresh_notion_access_token
@@ -24,35 +25,39 @@ CURRENTS_API_BASE = "https://api.currents.dev/v1"
 _NOTION_TOKEN_EXPIRY_SKEW_SECONDS = 300
 
 
-def _client():
-    return get_client()
-
-
 def _last4(value: str) -> str:
     return value[-4:] if len(value) >= 4 else value
 
 
+def _namespace(login: str) -> list[str]:
+    return [*USER_CREDENTIALS_NAMESPACE, login]
+
+
 async def _get_provider(login: str, key: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item([*USER_CREDENTIALS_NAMESPACE, login], key)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("user credentials lookup failed for %s/%s: %s", login, key, e)
-        return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
+    return await get_value(_namespace(login), key)
 
 
 async def _put_provider(login: str, key: str, value: dict[str, Any]) -> None:
-    await _client().store.put_item([*USER_CREDENTIALS_NAMESPACE, login], key, value)
+    await put_value(_namespace(login), key, value)
 
 
 async def _delete_provider(login: str, key: str) -> None:
+    await delete_value(_namespace(login), key)
+
+
+async def _provider_for_tool_loading(login: str, key: str) -> dict[str, Any] | None:
+    """Read a provider record on the agent's tool-loading path.
+
+    Fail-soft on purpose: these credentials only decide whether an optional
+    integration's tools get loaded, so an unreachable store must cost a run
+    those tools rather than the run itself. Dashboard reads go through
+    :func:`_get_provider` and surface the failure.
+    """
     try:
-        await _client().store.delete_item([*USER_CREDENTIALS_NAMESPACE, login], key)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("user credentials delete failed for %s/%s: %s", login, key, e)
+        return await _get_provider(login, key)
+    except Exception:
+        logger.warning("user credentials lookup failed for %s/%s", login, key, exc_info=True)
+        return None
 
 
 class CurrentsCredentialsUpdate(BaseModel):
@@ -142,7 +147,7 @@ def _notion_record_from_response(
         "encrypted_access_token": encrypt_token(access_token),
         "client_id": client_id or existing.get("client_id", ""),
         "token_endpoint": token_endpoint or existing.get("token_endpoint", ""),
-        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_at": now_iso(),
     }
     token_type = data.get("token_type")
     if isinstance(token_type, str):
@@ -250,7 +255,22 @@ async def _refresh_stored_notion_token(
 async def get_notion_credentials(
     login: str, *, force_refresh: bool = False
 ) -> NotionCredentials | None:
-    """Return a valid Notion MCP credential set for a user."""
+    """Return a valid Notion MCP credential set for a user.
+
+    Fail-soft on purpose: this gates whether the Notion MCP tools get loaded
+    into a run, so a store (or refresh) failure must cost the run those tools
+    rather than the run itself.
+    """
+    try:
+        return await _load_notion_credentials(login, force_refresh=force_refresh)
+    except Exception:
+        logger.warning("Notion credential lookup failed for %s", login, exc_info=True)
+        return None
+
+
+async def _load_notion_credentials(
+    login: str, *, force_refresh: bool = False
+) -> NotionCredentials | None:
     record = await _get_provider(login, NOTION_KEY)
     if not record:
         return None
@@ -344,7 +364,7 @@ async def connect_currents(login: str, update: CurrentsCredentialsUpdate) -> dic
         {
             "encrypted_api_key": encrypt_token(update.api_key),
             "api_key_last4": _last4(update.api_key),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_at": now_iso(),
         },
     )
     return await get_currents_status(login)
@@ -357,7 +377,7 @@ async def disconnect_currents(login: str) -> dict[str, Any]:
 
 async def get_currents_api_key(login: str) -> str | None:
     """Return the decrypted Currents API key, or ``None`` when not connected."""
-    currents = await _get_provider(login, CURRENTS_KEY)
+    currents = await _provider_for_tool_loading(login, CURRENTS_KEY)
     if not isinstance(currents, dict):
         return None
     api_key = decrypt_token(currents.get("encrypted_api_key", ""))
@@ -385,7 +405,7 @@ async def connect_langsmith(login: str, update: UserLangSmithCredentialsUpdate) 
         {
             "encrypted_api_key": encrypt_token(update.api_key),
             "api_key_last4": _last4(update.api_key),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_at": now_iso(),
         },
     )
     return await get_langsmith_status(login)
@@ -398,7 +418,7 @@ async def disconnect_langsmith(login: str) -> dict[str, Any]:
 
 async def get_langsmith_credentials(login: str) -> LangSmithCredentials | None:
     """Return decrypted LangSmith credentials, or ``None`` when not connected."""
-    langsmith = await _get_provider(login, LANGSMITH_KEY)
+    langsmith = await _provider_for_tool_loading(login, LANGSMITH_KEY)
     if not isinstance(langsmith, dict):
         return None
     api_key = decrypt_token(langsmith.get("encrypted_api_key", ""))

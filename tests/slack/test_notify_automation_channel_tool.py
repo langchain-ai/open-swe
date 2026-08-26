@@ -3,6 +3,8 @@ from typing import Any
 
 import pytest
 
+from agent import store as agent_store
+
 notification_tool = importlib.import_module("agent.tools.notify_automation_channel")
 
 
@@ -60,6 +62,7 @@ def test_notify_automation_channel_exported() -> None:
 @pytest.fixture
 def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     client = _FakeClient()
+    monkeypatch.setattr(agent_store, "store_client", lambda: client)
     monkeypatch.setattr(notification_tool, "get_client", lambda: client)
     monkeypatch.setattr(
         notification_tool,

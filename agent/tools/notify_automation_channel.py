@@ -1,12 +1,13 @@
 import asyncio
 import logging
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import Any
 from weakref import WeakValueDictionary
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+
+from agent.store import delete_value, get_value, now_iso, put_value
 
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.slack import append_slack_web_link_footer, post_slack_top_level_message_with_ts
@@ -26,24 +27,16 @@ def _notification_lock(thread_id: str) -> asyncio.Lock:
     return lock
 
 
-def _stored_value(item: object) -> Mapping[str, Any] | None:
-    if isinstance(item, Mapping):
-        value = item.get("value")
-    else:
-        value = getattr(item, "value", None)
-    return value if isinstance(value, Mapping) else None
-
-
-async def _release_reservation(client: Any, thread_id: str) -> None:
+async def _release_reservation(thread_id: str) -> None:
     try:
-        await client.store.delete_item(_NOTIFICATION_NAMESPACE, thread_id)
+        await delete_value(_NOTIFICATION_NAMESPACE, thread_id)
     except Exception:
         logger.exception("Failed to release automation notification for %s", thread_id)
 
 
-async def _mark_action_posted(client: Any, thread_id: str, notified_at: str) -> None:
+async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
     try:
-        await client.threads.update(
+        await get_client().threads.update(
             thread_id=thread_id,
             metadata={"automation_action_posted_at": notified_at},
         )
@@ -86,18 +79,16 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             "error": f"Message must be at most {_MAX_MESSAGE_CHARS} characters",
         }
 
-    client = get_client()
     async with _notification_lock(thread_id):
         try:
-            item = await client.store.get_item(_NOTIFICATION_NAMESPACE, thread_id)
+            existing = await get_value(_NOTIFICATION_NAMESPACE, thread_id)
         except Exception:
             logger.exception("Failed to check automation notification for %s", thread_id)
             return {"success": False, "error": "Could not check the Slack notification state"}
-        existing = _stored_value(item)
         if existing is not None:
             notified_at = existing.get("notified_at")
             if existing.get("status") == "delivered" and isinstance(notified_at, str):
-                await _mark_action_posted(client, thread_id, notified_at)
+                await _mark_action_posted(thread_id, notified_at)
             return {
                 "success": True,
                 "already_notified": True,
@@ -110,7 +101,7 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             "schedule_id": schedule_id,
         }
         try:
-            await client.store.put_item(_NOTIFICATION_NAMESPACE, thread_id, pending)
+            await put_value(_NOTIFICATION_NAMESPACE, thread_id, pending)
         except Exception:
             logger.exception("Failed to reserve automation notification for %s", thread_id)
             return {"success": False, "error": "Could not reserve the Slack notification"}
@@ -128,10 +119,10 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             )
         except Exception:
             logger.exception("Automation Slack post raised for %s", thread_id)
-            await _release_reservation(client, thread_id)
+            await _release_reservation(thread_id)
             return {"success": False, "error": "Slack post failed unexpectedly"}
         if message_ts is None:
-            await _release_reservation(client, thread_id)
+            await _release_reservation(thread_id)
             return {
                 "success": False,
                 "error": f"Slack post failed: {slack_error or 'unknown error'}",
@@ -142,11 +133,11 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             **pending,
             "status": "delivered",
             "message_ts": message_ts,
-            "notified_at": datetime.now(UTC).isoformat(),
+            "notified_at": now_iso(),
         }
         try:
-            await client.store.put_item(_NOTIFICATION_NAMESPACE, thread_id, delivered)
+            await put_value(_NOTIFICATION_NAMESPACE, thread_id, delivered)
         except Exception:
             logger.exception("Failed to finalize automation notification for %s", thread_id)
-        await _mark_action_posted(client, thread_id, delivered["notified_at"])
+        await _mark_action_posted(thread_id, delivered["notified_at"])
         return {"success": True, "message_ts": message_ts}

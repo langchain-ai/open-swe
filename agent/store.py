@@ -1,0 +1,170 @@
+"""The one way to read and write the LangGraph Store.
+
+Error policy, applied everywhere: **a missing item reads as ``None``; every
+other failure raises.** A store outage is not the same thing as an empty
+record, and collapsing the two hides data loss behind an empty dashboard.
+
+Call sites that genuinely must survive an outage — the ones on the agent's
+critical path, where failing a run is worse than falling back to a default —
+wrap their call in their own ``try``/``except`` and say in a comment why.
+That keeps the swallow visible at the point where the choice is made.
+"""
+
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+from langgraph_sdk import get_client
+from langgraph_sdk.client import LangGraphClient
+
+Namespace = Sequence[str]
+
+_DEFAULT_PAGE_SIZE = 100
+
+
+def store_client() -> LangGraphClient:
+    """The LangGraph client every store access goes through (one patch point)."""
+    return get_client()
+
+
+def now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def now_ms() -> int:
+    return int(datetime.now(UTC).timestamp() * 1000)
+
+
+def _is_not_found(exc: httpx.HTTPStatusError) -> bool:
+    return getattr(exc.response, "status_code", None) == 404
+
+
+def _unwrap(item: Any) -> dict[str, Any] | None:
+    """The item's ``value`` — the SDK returns dicts or objects depending on transport."""
+    if item is None:
+        return None
+    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+    return value if isinstance(value, dict) else None
+
+
+async def get_value(namespace: Namespace, key: str) -> dict[str, Any] | None:
+    try:
+        item = await store_client().store.get_item(list(namespace), key)
+    except httpx.HTTPStatusError as exc:
+        if _is_not_found(exc):
+            return None
+        raise
+    return _unwrap(item)
+
+
+async def put_value(namespace: Namespace, key: str, value: Mapping[str, Any]) -> None:
+    await store_client().store.put_item(list(namespace), key, value)
+
+
+async def delete_value(namespace: Namespace, key: str) -> None:
+    """Delete an item. Deleting one that is already gone is not an error."""
+    try:
+        await store_client().store.delete_item(list(namespace), key)
+    except httpx.HTTPStatusError as exc:
+        if not _is_not_found(exc):
+            raise
+
+
+async def _search_items(
+    namespace: Namespace,
+    filter: dict[str, Any] | None,
+    limit: int,
+    offset: int,
+) -> list[Any]:
+    result = await store_client().store.search_items(
+        list(namespace), filter=filter, limit=limit, offset=offset
+    )
+    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
+    return list(items or [])
+
+
+async def search_values(
+    namespace: Namespace,
+    *,
+    filter: dict[str, Any] | None = None,
+    limit: int = _DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """One page of values in ``namespace``, in store order."""
+    items = await _search_items(namespace, filter, limit, offset)
+    return [value for item in items if (value := _unwrap(item)) is not None]
+
+
+async def search_all_values(
+    namespace: Namespace,
+    *,
+    filter: dict[str, Any] | None = None,
+    page_size: int = _DEFAULT_PAGE_SIZE,
+) -> list[dict[str, Any]]:
+    """Every value in ``namespace``, paging until the store runs out."""
+    values: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        items = await _search_items(namespace, filter, page_size, offset)
+        if not items:
+            return values
+        values.extend(value for item in items if (value := _unwrap(item)) is not None)
+        if len(items) < page_size:
+            return values
+        offset += len(items)
+
+
+class KeyedRecordStore:
+    """Records keyed by a stable id, each stamped with ``created_at``/``updated_at``.
+
+    ``default_factory(key, created_by)`` seeds a record that does not exist yet,
+    so ``create`` is idempotent and ``update`` can patch a record the dashboard
+    never explicitly created.
+    """
+
+    def __init__(
+        self,
+        namespace: Namespace,
+        *,
+        sort_key: str | None = None,
+        default_factory: Callable[[str, str], dict[str, Any]] | None = None,
+    ) -> None:
+        self.namespace = list(namespace)
+        self._sort_key = sort_key
+        self._default_factory = default_factory
+
+    def _default_record(self, key: str, created_by: str) -> dict[str, Any]:
+        if self._default_factory is None:
+            raise RuntimeError(f"{self.namespace} has no default record factory")
+        return self._default_factory(key, created_by)
+
+    async def get(self, key: str) -> dict[str, Any] | None:
+        return await get_value(self.namespace, key)
+
+    async def list(self) -> list[dict[str, Any]]:
+        records = await search_values(self.namespace, limit=1000)
+        if self._sort_key is not None:
+            sort_key = self._sort_key
+            records.sort(key=lambda record: str(record.get(sort_key, "")))
+        return records
+
+    async def put(self, key: str, record: dict[str, Any]) -> dict[str, Any]:
+        await put_value(self.namespace, key, record)
+        return record
+
+    async def create(self, key: str, created_by: str = "") -> dict[str, Any]:
+        existing = await self.get(key)
+        if existing:
+            return existing
+        return await self.put(key, self._default_record(key, created_by))
+
+    async def update(self, key: str, patch: dict[str, Any]) -> dict[str, Any]:
+        created_by = patch.get("created_by")
+        existing = await self.get(key) or self._default_record(
+            key, created_by if isinstance(created_by, str) else ""
+        )
+        return await self.put(key, {**existing, **patch, "updated_at": now_iso()})
+
+    async def delete(self, key: str) -> None:
+        await delete_value(self.namespace, key)

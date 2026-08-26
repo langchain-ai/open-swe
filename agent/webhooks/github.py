@@ -4,8 +4,14 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-import uuid
 from typing import Any
+
+from agent.thread_ids import (
+    github_issue_thread_id,
+    pr_comment_thread_id,
+    reviewer_thread_id,
+    thread_id_from_branch,
+)
 
 from ..baby_sit import handle_ci_webhook
 from ..input_messages import (
@@ -268,7 +274,7 @@ async def trigger_pr_review_from_ref(
         common.logger.warning("Missing base/head SHA for Slack PR review request")
         return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
 
-    thread_id = common.generate_reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common._ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return {"success": False, "error": "Could not create reviewer thread"}
@@ -369,7 +375,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         common.logger.warning("Missing PR context for reviewer dispatch, skipping run")
         return
 
-    thread_id = common.generate_reviewer_thread_id(
+    thread_id = reviewer_thread_id(
         repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
     )
 
@@ -511,7 +517,7 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     if not pr_number or not isinstance(pr_number, int):
         return
 
-    thread_id = common.generate_reviewer_thread_id(
+    thread_id = reviewer_thread_id(
         repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
     )
     metadata = await common._get_thread_metadata_safe(thread_id)
@@ -630,9 +636,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
-    thread_id = common.generate_reviewer_thread_id(
-        repo_config["owner"], repo_config["name"], pr_number
-    )
+    thread_id = reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
     metadata = await common._get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
         common.logger.info(
@@ -820,7 +824,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         branch_name,
     )
 
-    thread_id = common.get_thread_id_from_branch(branch_name) if branch_name else None
+    thread_id = thread_id_from_branch(branch_name) if branch_name else None
     if not thread_id:
         if not pr_number:
             common.logger.warning(
@@ -828,10 +832,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                 branch_name,
             )
             return
-        owner = repo_config.get("owner", "")
-        name = repo_config.get("name", "")
-        stable_key = f"{owner}/{name}/pr/{pr_number}"
-        thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+        thread_id = pr_comment_thread_id(
+            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+        )
         common.logger.info(
             "Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name
         )
@@ -965,7 +968,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     if not isinstance(pr_number, int):
         return
 
-    thread_id = common.generate_reviewer_thread_id(
+    thread_id = reviewer_thread_id(
         repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
     )
     metadata = await common._get_thread_metadata_safe(thread_id)
@@ -1105,7 +1108,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
 
-    thread_id = common.generate_thread_id_from_github_issue(issue_id)
+    thread_id = github_issue_thread_id(issue_id)
     existing_thread = await common._thread_exists(thread_id)
     github_token = await common._get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()

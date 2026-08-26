@@ -16,7 +16,7 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
             new_callable=AsyncMock,
             return_value={"draft_prs": False},
         ),
-        patch("agent.dashboard.profiles._client") as client,
+        patch("agent.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
         profile = await upsert_profile("octocat", "octocat@example.com", update)
@@ -37,7 +37,7 @@ async def test_explicit_draft_preference_is_persisted() -> None:
 
     with (
         patch("agent.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
-        patch("agent.dashboard.profiles._client") as client,
+        patch("agent.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
         profile = await upsert_profile("octocat", "octocat@example.com", update)
@@ -64,7 +64,7 @@ async def test_profile_save_removes_legacy_create_prs_setting() -> None:
             new_callable=AsyncMock,
             return_value={"create_prs": True},
         ),
-        patch("agent.dashboard.profiles._client") as client,
+        patch("agent.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
         profile = await upsert_profile("octocat", "octocat@example.com", update)

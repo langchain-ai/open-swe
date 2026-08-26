@@ -1853,7 +1853,11 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
         surfaced_only=True,
     )
 
-    assert searches == [{"participant_logins": {"other-user": True}}]
+    # The legacy owner filter rides along until pre-participant threads age out.
+    assert searches == [
+        {"participant_logins": {"other-user": True}},
+        {"github_login": "other-user"},
+    ]
     assert [item["id"] for item in result["items"]] == ["surfaced"]
 
 
@@ -1890,6 +1894,63 @@ async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(mo
     assert result["active"]["hasMore"] is True
     assert result["resolved"]["hasMore"] is True
     assert {call["offset"] for call in searches} == {0, page_size}
+
+
+async def test_list_dashboard_threads_sidebar_allows_limits_beyond_100(monkeypatch) -> None:
+    threads = _make_threads(120, resolved_before=0)
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=110, resolved_limit=0
+    )
+
+    assert result["active"]["limit"] == 110
+    assert len(result["active"]["items"]) == 110
+    assert result["active"]["hasMore"] is True
+
+
+async def test_list_dashboard_threads_sidebar_accepts_zero_resolved_limit(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=1)
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=1, resolved_limit=0
+    )
+
+    assert result["active"]["limit"] == 1
+    assert result["resolved"] == {"items": [], "limit": 0, "hasMore": True}
 
 
 async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiting(
@@ -2120,7 +2181,7 @@ async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch
         "octocat", email=None, limit=2, offset=0, sort_by="created_at"
     )
 
-    assert requested_sorts == ["created_at"]
+    assert set(requested_sorts) == {"created_at"}
     assert [item["id"] for item in result["items"]] == ["t1", "t0"]
 
 

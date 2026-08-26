@@ -12,9 +12,8 @@ from agent.dashboard.review_api import (
     _thread_review_summary,
     classify_finding,
     get_pr_head_sha,
-    reviewer_thread_id,
 )
-from agent.webhooks.common import generate_reviewer_thread_id
+from agent.thread_ids import reviewer_thread_id
 
 
 def test_classify_finding():
@@ -147,8 +146,8 @@ async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
     await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png", "tok")
 
 
-def test_reviewer_thread_id_matches_webapp():
-    assert reviewer_thread_id("acme", "repo", 7) == generate_reviewer_thread_id("acme", "repo", 7)
+def test_review_api_uses_canonical_reviewer_thread_id():
+    assert review_api.reviewer_thread_id is reviewer_thread_id
 
 
 def test_serialize_diff_groups_assigns_index_and_drops_invalid():

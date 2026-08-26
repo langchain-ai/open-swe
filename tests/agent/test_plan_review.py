@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent import store as agent_store
+
 
 def test_dashboard_plan_url_uses_plan_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://example.test")
@@ -75,7 +77,7 @@ async def test_list_plan_comments_swallows_errors_by_default(
         async def search_items(self, *a: Any, **k: Any) -> Any:
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     assert await plan_store.list_plan_comments("t") == []
 
 
@@ -86,7 +88,7 @@ async def test_list_plan_comments_raises_with_flag(monkeypatch: pytest.MonkeyPat
         async def search_items(self, *a: Any, **k: Any) -> Any:
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     with pytest.raises(RuntimeError):
         await plan_store.list_plan_comments("t", raise_on_error=True)
 
@@ -103,7 +105,7 @@ async def test_clear_plan_comments_deletes_each(monkeypatch: pytest.MonkeyPatch)
         async def delete_item(self, _ns: Any, key: str) -> None:
             deleted.append(key)
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     await plan_store.clear_plan_comments("t")
     assert deleted == ["a", "b"]
 
@@ -482,7 +484,7 @@ async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.Monk
     async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
         return None
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
 
     await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_REVISING, plan_mode=True)
@@ -512,7 +514,7 @@ async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.Monkey
     async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
         merged.update(metadata)
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
 
     await plan_store.set_plan_status(
@@ -557,7 +559,7 @@ async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
     async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
         merged.update(metadata)
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
 
     await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_PLANNING, plan_mode=True)
@@ -581,7 +583,7 @@ async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyP
     async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
         return None
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     monkeypatch.setattr(plan_store, "clear_plan_comments", fake_clear)
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
 
@@ -609,7 +611,7 @@ async def test_save_plan_content_can_skip_plan_mode_metadata(
     async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
         merged.update(metadata)
 
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
     monkeypatch.setattr(plan_store, "clear_plan_comments", fake_clear)
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
 
