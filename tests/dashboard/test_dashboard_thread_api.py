@@ -19,6 +19,14 @@ _FABLE = "anthropic:claude-fable-5"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
+@pytest.fixture(autouse=True)
+def _empty_thread_pins(monkeypatch) -> None:
+    async def empty_pins(login: str) -> list[str]:
+        return []
+
+    monkeypatch.setattr(thread_api, "list_thread_pin_ids", empty_pins)
+
+
 def _image() -> thread_api.DashboardImageBody:
     return thread_api.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),
@@ -2051,6 +2059,94 @@ async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiti
         f"t{index}" for index in range(page_size, page_size + 5)
     ]
     assert set(offsets) == {0, page_size}
+
+
+async def test_pin_dashboard_thread_allows_readable_non_owner(monkeypatch) -> None:
+    pinned: list[tuple[str, str]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id):
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "slack", "github_login": "other"},
+            }
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    async def fake_pin(login: str, thread_id: str) -> None:
+        pinned.append((login, thread_id))
+
+    monkeypatch.setattr(thread_api, "pin_thread", fake_pin)
+
+    await thread_api.pin_dashboard_thread("shared-thread", "octocat")
+
+    assert pinned == [("octocat", "shared-thread")]
+
+
+async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id):
+            return {"thread_id": thread_id, "metadata": {"source": "internal"}}
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.pin_dashboard_thread("private-thread", "octocat")
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_list_dashboard_threads_sidebar_includes_pinned_non_owner(monkeypatch) -> None:
+    owned = _make_threads(1, resolved_before=0)
+    shared = {
+        "thread_id": "shared-thread",
+        "metadata": {
+            "source": "slack",
+            "github_login": "teammate",
+            "title": "Pinned teammate thread",
+            "updated_at_ms": 100,
+            "latest_run_status": "success",
+        },
+    }
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return owned[offset : offset + limit]
+
+        async def get(self, thread_id):
+            assert thread_id == "shared-thread"
+            return shared
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
+    )
+
+    async def fake_pin_ids(login: str) -> list[str]:
+        assert login == "octocat"
+        return ["shared-thread"]
+
+    monkeypatch.setattr(thread_api, "list_thread_pin_ids", fake_pin_ids)
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", active_limit=5, resolved_limit=0
+    )
+
+    assert [item["id"] for item in result["pinned"]] == ["shared-thread"]
+    assert result["pinned"][0]["isOwner"] is False
 
 
 async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(
