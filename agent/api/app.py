@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..dashboard import router as dashboard_router
+from ..dashboard.inline_review_api import inline_review_router
 from ..dashboard.plan_api import plan_router
 from ..dashboard.workflow_approval_api import workflow_approval_router
 from ..utils.event_loop import pin_single_event_loop
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
         )
     app.include_router(dashboard_router)
     app.include_router(plan_router)
+    app.include_router(inline_review_router)
     app.include_router(workflow_approval_router)
     app.include_router(linear_webhook_router)
     app.include_router(slack_webhook_router)

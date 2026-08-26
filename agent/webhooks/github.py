@@ -480,10 +480,25 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
 async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     """Auto-review a PR that has just been opened or marked ready-for-review.
 
-    Drafts are gated by the PR author's ``review_draft_prs`` profile flag
-    (with the team-wide setting as a fallback).
+    PRs the agent authored are reviewed inline by the authoring thread, so this
+    stands down for them. Drafts are gated by the PR author's
+    ``review_draft_prs`` profile flag (with the team-wide setting as a fallback).
     """
+    repo = payload.get("repository", {})
     pull_request = payload.get("pull_request", {})
+    pr_number = pull_request.get("number")
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", ""),
+        "name": repo.get("name", ""),
+    }
+    if isinstance(pr_number, int) and await common.inline_review_owns_pr(repo_config, pr_number):
+        common.logger.info(
+            "Skipping auto-review of %s/%s#%s: reviewed inline by the authoring thread",
+            repo_config["owner"],
+            repo_config["name"],
+            pr_number,
+        )
+        return
     is_draft = bool(pull_request.get("draft"))
     if is_draft:
         author = pull_request.get("user") or {}

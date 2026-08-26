@@ -53,6 +53,7 @@ from ..review.findings import (
 from ..review.findings import (
     list_findings as list_reviewer_findings,  # noqa: F401
 )
+from ..review.inline_review import REVIEWS, review_key
 from ..review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from ..review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
 from ..utils.auth import (
@@ -186,6 +187,7 @@ __all__ = [
     "_is_pr_diff_unchanged_since_last_review",
     "_is_repo_allowed",
     "_is_repo_auto_review_enabled",
+    "inline_review_owns_pr",
     "_post_account_link_prompt",
     "_refresh_thread_github_token_after_401",
     "_repo_id_from_payload",
@@ -573,6 +575,34 @@ def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
 async def _is_repo_auto_review_enabled(repo_config: dict[str, str]) -> bool:
     """Return whether automatic reviews are enabled for a repository."""
     return await is_review_repo_enabled(repo_config.get("owner", ""), repo_config.get("name", ""))
+
+
+async def inline_review_owns_pr(repo_config: dict[str, str], pr_number: int) -> bool:
+    """Whether the authoring thread reviews this PR itself, in its own run.
+
+    Open SWE's own PRs get reviewed inside the run that wrote them, where the
+    agent can act on a finding instead of leaving a comment for its author to
+    read. Publishing the same findings again as PR comments would double them
+    onto the human review surface, so the webhook reviewer stands down.
+
+    Reads as False on a store failure: a duplicate review beats no review.
+    """
+    if not pr_number:
+        return False
+    try:
+        review = await REVIEWS.get(
+            review_key(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
+        )
+    except Exception:
+        logger.warning(
+            "Failed to read inline-review claim for %s/%s#%s",
+            repo_config.get("owner"),
+            repo_config.get("name"),
+            pr_number,
+            exc_info=True,
+        )
+        return False
+    return review is not None
 
 
 _PUBLIC_REPO_GATE_REJECTION = {

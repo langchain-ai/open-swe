@@ -124,6 +124,7 @@ from .middleware import (
 from .middleware.prepare_run import PrepareRunState
 from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from .prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
+from .review.review_bar import REVIEW_BAR_SECTIONS, SEVERITY_RUBRIC_SECTION
 from .runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -144,6 +145,7 @@ from .tools import (
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
+    fetch_self_review_diff,
     fetch_url,
     get_thread,
     http_request,
@@ -156,6 +158,7 @@ from .tools import (
     linear_search_issues,
     linear_update_issue,
     list_environments,
+    list_inline_findings,
     list_threads,
     manage_baby_sit,
     manage_thread,
@@ -163,6 +166,7 @@ from .tools import (
     open_pull_request,
     output_iframe,
     read_user_settings,
+    record_inline_finding,
     recreate_sandbox,
     report_platform_issue,
     request_pr_review,
@@ -173,6 +177,7 @@ from .tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    set_inline_finding_disposition,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -909,6 +914,56 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
     }
 
 
+PR_SELF_REVIEW_SUBAGENT_DESCRIPTION = (
+    "Reviews the pull request this thread just opened or updated, applying the "
+    "same bar as the PR reviewer, and records what it finds with "
+    "`record_inline_finding`. Delegate here once per delivery, after "
+    "`open_pull_request` succeeds. It only reports — you decide what to do with "
+    "each finding."
+)
+
+PR_SELF_REVIEW_SYSTEM_PROMPT = (
+    """You are reviewing a pull request the parent agent authored in this same \
+thread. The findings stay in the thread: they are never posted to the PR, so a \
+weak finding wastes the author's attention instead of a human reviewer's.
+
+Call `fetch_self_review_diff` first. It writes the PR's diff to a file in the \
+sandbox and returns the path and changed-file list — `grep` and paginated \
+`read_file` that file instead of printing it. The repo is already checked out at \
+the branch, so read full file context directly.
+
+Record each finding with `record_inline_finding`. Where the rules below say \
+`add_finding`, use `record_inline_finding`: it does not validate diff anchors, \
+so you enforce the diff-anchor rule yourself — check the line against the diff \
+file before recording.
+
+Read-only. Never edit a file, commit, push, or comment on the PR.
+
+"""
+    + REVIEW_BAR_SECTIONS
+    + SEVERITY_RUBRIC_SECTION
+    + """# Before you finish
+
+1. Collapse duplicates and same-defect fan-out into one finding each.
+2. Keep the strongest few. Recording nothing is the right answer when nothing
+   passes the bar; say so plainly.
+3. Return one line per recorded finding — id, severity, anchor, failure mode —
+   and nothing else. No preamble, no diff summary, no praise for the PR.
+"""
+).format(historical_review_guidance="")
+
+
+def _pr_self_review_subagent(model: BaseChatModel) -> SubAgent:
+    return {
+        "name": "pr-self-review",
+        "description": PR_SELF_REVIEW_SUBAGENT_DESCRIPTION,
+        "system_prompt": PR_SELF_REVIEW_SYSTEM_PROMPT,
+        "tools": [fetch_self_review_diff, record_inline_finding],
+        "model": model,
+        "middleware": _subagent_model_middleware(),
+    }
+
+
 def _get_cached_sandbox_backend(
     thread_id: str,
     *,
@@ -1638,6 +1693,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_list_teams,
         linear_search_issues,
         linear_update_issue,
+        list_inline_findings,
+        set_inline_finding_disposition,
         list_threads,
         get_thread,
         manage_thread,
@@ -1741,6 +1798,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
+            *([] if local_run or stop_summary_mode else [_pr_self_review_subagent(subagent_model)]),
         ],
         skills=skill_sources,
         backend=agent_backend,

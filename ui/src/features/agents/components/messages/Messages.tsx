@@ -17,6 +17,7 @@ import { UserMessage } from "./UserMessage"
 import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
+import { SelfReviewCard } from "@/features/agents/components/SelfReviewCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
@@ -67,6 +68,8 @@ export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
   showPlanArtifact = false,
+  showSelfReview = false,
+  onOpenSelfReview,
   queuedMessages = [],
   isStreaming,
   streamIsLoading,
@@ -303,6 +306,12 @@ export const Messages = memo(function MessagesComponent({
             })}
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
+            )}
+            {threadId && showSelfReview && (
+              <SelfReviewCard
+                threadId={threadId}
+                {...(onOpenSelfReview ? { onOpen: onOpenSelfReview } : {})}
+              />
             )}
             <QueuedMessages queuedMessages={queuedMessages} />
             <ThinkingSpinner

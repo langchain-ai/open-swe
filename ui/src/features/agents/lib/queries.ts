@@ -44,6 +44,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
+  selfReview: (threadId: string) =>
+    ["agent-threads", threadId, "self-review"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
@@ -611,6 +613,16 @@ export function useWorkflowApprovals(
       )
         ? 3000
         : false,
+    retry: false,
+  })
+}
+
+/** The self-review findings attached to this thread, if it authored a PR. */
+export function useThreadSelfReview(threadId: string, enabled = true) {
+  return useQuery({
+    queryKey: agentThreadKeys.selfReview(threadId),
+    queryFn: () => agentsApi.getSelfReview(threadId),
+    enabled: Boolean(threadId) && enabled,
     retry: false,
   })
 }

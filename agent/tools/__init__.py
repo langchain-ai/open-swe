@@ -12,6 +12,7 @@ _TOOL_MODULES = {
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
+    "fetch_self_review_diff": ".inline_review",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
@@ -25,6 +26,7 @@ _TOOL_MODULES = {
     "linear_update_issue": ".linear_update_issue",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
+    "list_inline_findings": ".inline_review",
     "list_review_findings": ".list_review_findings",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
@@ -34,6 +36,7 @@ _TOOL_MODULES = {
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
+    "record_inline_finding": ".inline_review",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
@@ -50,6 +53,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
+    "set_inline_finding_disposition": ".inline_review",
     "slack_add_reaction": ".slack_add_reaction",
     "slack_attach_html": ".slack_attach_html",
     "slack_move_thread": ".slack_move_thread",
@@ -70,6 +74,7 @@ __all__ = [
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
+    "fetch_self_review_diff",
     "fetch_url",
     "get_thread",
     "http_request",
@@ -83,6 +88,7 @@ __all__ = [
     "linear_update_issue",
     "list_environments",
     "list_findings",
+    "list_inline_findings",
     "list_review_findings",
     "list_threads",
     "manage_baby_sit",
@@ -93,6 +99,7 @@ __all__ = [
     "publish_review",
     "read_repo_file",
     "read_user_settings",
+    "record_inline_finding",
     "recreate_sandbox",
     "report_platform_issue",
     "request_pr_review",
@@ -108,6 +115,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
+    "set_inline_finding_disposition",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
@@ -133,6 +141,12 @@ if TYPE_CHECKING:
     from .fetch_review_diff import fetch_review_diff
     from .fetch_url import fetch_url
     from .http_request import http_request
+    from .inline_review import (
+        fetch_self_review_diff,
+        list_inline_findings,
+        record_inline_finding,
+        set_inline_finding_disposition,
+    )
     from .linear_comment import linear_comment
     from .linear_create_issue import linear_create_issue
     from .linear_delete_issue import linear_delete_issue

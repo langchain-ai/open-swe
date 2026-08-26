@@ -4,6 +4,7 @@ import type {
   AgentThread,
   ImageChunk,
   Message,
+  SelfReviewResponse,
   SlackNotificationMode,
   WorkflowPushApprovalsResponse,
 } from "./types"
@@ -307,6 +308,10 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
+    ),
+  getSelfReview: (threadId: string) =>
+    agentsRequest<SelfReviewResponse>(
+      `/inline-review/${encodeURIComponent(threadId)}`
     ),
   listWorkflowApprovals: (threadId: string) =>
     agentsRequest<WorkflowPushApprovalsResponse>(
