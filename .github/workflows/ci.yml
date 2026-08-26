@@ -45,8 +45,11 @@ jobs:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
+      - run: corepack enable
       - name: Install dependencies
-        run: uv sync --locked --extra dev
+        run: |
+          uv sync --locked --extra dev
+          pnpm install --frozen-lockfile --filter open-swe
       - name: Run typecheck
         run: make typecheck
 
@@ -182,13 +185,13 @@ jobs:
       - name: Install workspace dependencies
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
-      - name: Install Playwright + Chromium
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe --filter open-swe-e2e
+      - name: Install Chromium
         run: |
           sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
           pnpm run test:e2e:install
       - name: Run browser E2E
-        run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/3
+        run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -216,8 +219,6 @@ jobs:
       - run: corepack enable
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install Playwright
-        run: npm --prefix tests/e2e ci
       - name: Run Desktop E2E
         run: xvfb-run --auto-servernum pnpm run test:e2e:desktop
       - name: Upload Playwright report
