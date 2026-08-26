@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from langchain_core.tools import tool
 
+from ..utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 from .create_sandbox_file_download_url import (
     _resolve_sandbox_file,
     create_sandbox_file_download_url,
@@ -40,10 +41,15 @@ async def _output_iframe(
     snapshot_path = posixpath.join(snapshot_dir, filename)
     quoted_snapshot = shlex.quote(snapshot_path)
     cleanup_command = f"rm -f -- {quoted_snapshot}"
+    prefix, suffix = artifact_skeleton(title)
     copied = await backend.aexecute(
         f"mkdir -p -- {shlex.quote(snapshot_dir)} && "
-        f"head -c {_MAX_HTML_BYTES + 1} -- {quoted_source} > {quoted_snapshot} && "
-        f"stat -c %s -- {quoted_snapshot}",
+        + sandbox_wrap_command(
+            source_path,
+            snapshot_path,
+            limit=_MAX_HTML_BYTES + 1,
+            title=title,
+        ),
         timeout=10,
     )
     if copied.exit_code != 0:
@@ -54,7 +60,7 @@ async def _output_iframe(
     except (AttributeError, ValueError) as exc:
         await backend.aexecute(cleanup_command, timeout=10)
         raise ValueError("failed to determine the HTML snapshot size") from exc
-    if snapshot_size > _MAX_HTML_BYTES:
+    if snapshot_size > _MAX_HTML_BYTES + len(prefix.encode()) + len(suffix.encode()):
         await backend.aexecute(cleanup_command, timeout=10)
         raise ValueError("HTML file exceeds the 1 MB limit")
 
@@ -85,8 +91,9 @@ output_iframe = tool(
     "output_iframe",
     description="""Display a self-contained HTML file from the sandbox in an isolated dashboard
 iframe. Use this for visualizations, diagrams, interactive demos, SVG graphics, and small HTML
-apps. The file may contain inline scripts, styles, and data-URI assets. Relative paths are resolved
-from the sandbox working directory. Do not use this for regular text responses or file
-operations.""",
+apps. Read the `html-artifacts` skill for the authoring rules: inline scripts, styles, Canvas,
+WebGL, and data-URI assets all run, and omitting `<html>`/`<head>`/`<body>` wraps the content
+in that skeleton with a minimal CSS reset. Relative paths are resolved from the sandbox
+working directory. Do not use this for regular text responses or file operations.""",
     response_format="content_and_artifact",
 )(_output_iframe)
