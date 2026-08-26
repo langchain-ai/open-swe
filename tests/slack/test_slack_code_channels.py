@@ -147,6 +147,20 @@ def test_repo_context_bar_items_use_supported_icons_and_branch_link() -> None:
     }
 
 
+def test_repo_context_bar_items_include_web_thread_link() -> None:
+    items = slack_code_channels.repo_context_bar_items(
+        {"owner": "langchain-ai", "name": "open-swe"},
+        dashboard_url="https://app.example.com/agents/thread-1",
+    )
+
+    assert items[-1] == {
+        "key": "web",
+        "label": "Open in Web",
+        "icon": "globe",
+        "url": "https://app.example.com/agents/thread-1",
+    }
+
+
 def test_untagged_code_channel_message_does_not_interrupt_active_work() -> None:
     assert not slack_service._interrupts_active_run(
         "talking to a teammate",

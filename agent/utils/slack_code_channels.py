@@ -477,9 +477,13 @@ async def archive_code_channel(
 
 
 def repo_context_bar_items(
-    repo: dict[str, str] | None, *, branch: str = "", pr_url: str = ""
+    repo: dict[str, str] | None,
+    *,
+    branch: str = "",
+    pr_url: str = "",
+    dashboard_url: str = "",
 ) -> list[dict[str, Any]]:
-    """Build the standard repo/branch/PR context bar for an Open SWE session."""
+    """Build the standard context bar for an Open SWE session."""
     items: list[dict[str, Any]] = []
     owner = (repo or {}).get("owner", "")
     name = (repo or {}).get("name", "")
@@ -499,4 +503,6 @@ def repo_context_bar_items(
         items.append(item)
     if pr_url.startswith("https://"):
         items.append({"key": "pr", "label": "Pull request", "icon": "hierarchy", "url": pr_url})
+    if dashboard_url.startswith("https://"):
+        items.append({"key": "web", "label": "Open in Web", "icon": "globe", "url": dashboard_url})
     return items

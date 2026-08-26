@@ -346,7 +346,9 @@ async def _create(
     _, status_error = await set_session_status_result(channel_id, "processing")
     if status_error:
         warnings.append(f"Could not set processing status: {status_error}")
-    context_items = repo_context_bar_items(repo)
+    context_items = repo_context_bar_items(
+        repo, dashboard_url=dashboard_thread_url(thread_id) or ""
+    )
     if context_items:
         _, context_error = await set_context_bar(channel_id, context_items)
         if context_error:

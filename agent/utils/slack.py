@@ -627,11 +627,17 @@ async def post_slack_thread_reply_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
+    include_web_footer: bool | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
-    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    text = append_slack_web_link_footer(text, dashboard_url, usage)
+    from .slack_code_channels import is_code_channel_session
+
+    if include_web_footer is None:
+        include_web_footer = not is_code_channel_session(thread_ts)
+    if include_web_footer:
+        dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
+        blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+        text = append_slack_web_link_footer(text, dashboard_url, usage)
     return await _post_slack_message_with_ts(
         channel_id,
         text,

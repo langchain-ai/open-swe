@@ -114,6 +114,7 @@ async def slack_thread_reply(
             blocks=slack_blocks,
             usage=usage,
             post_thread_ts=post_thread_ts,
+            include_web_footer=not is_code_channel_session(str(thread_ts)),
             agent_thread_id=thread_id if isinstance(thread_id, str) else None,
             langgraph_client=client,
             run_id=run_id,
@@ -244,6 +245,7 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
+    include_web_footer: bool | None = None,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -252,6 +254,7 @@ async def _post_and_store_mapping(
         blocks=blocks,
         usage=usage,
         agent_thread_id=agent_thread_id,
+        include_web_footer=include_web_footer,
     )
     if message_ts:
         resolved_client = langgraph_client or get_langgraph_client()
