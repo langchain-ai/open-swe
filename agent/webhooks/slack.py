@@ -51,6 +51,16 @@ _UNTAGGED_REPLY_PREAMBLE = (
     "addressed to you, handle it exactly as you would a direct mention.\n\n"
 )
 
+_CODE_CHANNEL_CONTEXT = (
+    "## Slack Code Channel\n"
+    "This channel is a dedicated code channel: the whole channel is one session with you. "
+    "Reply with top-level channel messages (`slack_thread_reply` already posts them in-channel) "
+    "and treat every message here as addressed to you unless it is clearly aimed at another "
+    "person. Keep the channel chrome current with `manage_code_channel`: set context bar items "
+    "for the repo/branch/PR you settle on, publish a `diff` view when you have changes to review, "
+    "and archive the channel with your closing summary once the task is finished."
+)
+
 _MESSAGE_UPDATE_PREAMBLE = (
     "A Slack message previously delivered to this thread was edited. Treat the updated text "
     "below as the current version and as an explicit correction to the earlier message. Do not "
@@ -618,6 +628,7 @@ async def _process_slack_mention_impl(
 
     treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
     untagged_reply = bool(event_data.get("untagged_reply"))
+    code_channel = bool(event_data.get("code_channel"))
     context_messages, context_mode = common.select_slack_context_messages(
         thread_messages,
         event_ts,
@@ -690,6 +701,7 @@ async def _process_slack_mention_impl(
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
+        + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
@@ -853,6 +865,9 @@ async def _process_slack_mention_impl(
         request_blocks=content_blocks,
         operational_context=operational_context,
     )
+    if code_channel:
+        await common.set_session_status(channel_id, "processing")
+        await common.set_context_bar(channel_id, common.repo_context_bar_items(repo_config))
     run = await _dispatch_or_queue_slack_run(
         langgraph_client,
         thread_id,

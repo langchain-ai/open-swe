@@ -26,6 +26,7 @@ from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
 from .utils.slack import post_slack_thread_reply
+from .utils.slack_code_channels import is_code_channel_session, set_session_status
 from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
 
@@ -212,14 +213,19 @@ def _prepare_run_id(payload: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+async def _settle_code_channel_session(metadata: dict[str, Any]) -> None:
+    """Return a code channel session to ``active`` once its run stops working."""
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None or not is_code_channel_session(slack_thread.thread_ts):
+        return
+    await set_session_status(slack_thread.channel_id, "active")
+
+
 async def _schedule_success_cost_refresh(
     thread_id: str, run_id: str | None, payload: dict[str, Any]
 ) -> dict[str, str]:
     if run_id is None:
         return {"status": "ignored", "reason": "missing run_id"}
-    prepare_run_id = _prepare_run_id(payload)
-    if prepare_run_id is None:
-        return {"status": "ignored", "reason": "missing prepare_run_id"}
 
     client = langgraph_client()
     try:
@@ -231,6 +237,10 @@ async def _schedule_success_cost_refresh(
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
+    await _settle_code_channel_session(metadata)
+    prepare_run_id = _prepare_run_id(payload)
+    if prepare_run_id is None:
+        return {"status": "ignored", "reason": "missing prepare_run_id"}
     if run_id in _scheduled_cost_run_ids(metadata):
         return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
 
@@ -297,6 +307,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     await _settle_failed_reviewer_check(thread_id, metadata)
+    await _settle_code_channel_session(metadata)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

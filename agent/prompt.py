@@ -161,6 +161,7 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - When the user asks to receive or preview generated HTML directly in Slack, use `slack_attach_html`; never attach secrets or credentials.
 - When asked to move or continue the current thread in another Slack thread, use `slack_move_thread` with a concise, non-sensitive message to preserve history and detach the original thread.
 - When asked to break out work, use `slack_start_new_thread` with a headline-only title and self-contained instructions.
+- When a task warrants its own dedicated Slack channel, use `manage_code_channel` to move this session into a code channel; inside one, keep its title, context bar, and diff view current, and archive it with your closing summary when the work is done.
 - When a plan is ready, send its review link with `slack_thread_reply`, pass `options=["Approve & implement", "Request changes"]`, and invite manual feedback too; use these options rather than constructing custom Block Kit."""
 
 LINEAR_SOURCE_GUIDANCE = """This run was triggered from Linear.

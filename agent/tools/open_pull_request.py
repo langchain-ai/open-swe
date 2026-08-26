@@ -14,6 +14,13 @@ from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
+from ..utils.slack_code_channels import (
+    VIEW_CONTENT_MAX_CHARS,
+    is_code_channel_session,
+    repo_context_bar_items,
+    set_context_bar,
+    set_view,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -520,6 +527,47 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     ]
 
 
+async def _publish_code_channel_pr(
+    client: httpx.AsyncClient,
+    token: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    *,
+    pr_url: str,
+    head: str,
+    base: str,
+    configurable: dict[str, Any],
+) -> None:
+    """Mirror a new PR into the session's Slack code channel chrome."""
+    thread_id = configurable.get("thread_id")
+    slack_thread = configurable.get("slack_thread")
+    active = await get_active_slack_thread(
+        get_client(),
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread if isinstance(slack_thread, dict) else None,
+    )
+    if not active or not is_code_channel_session(str(active.get("thread_ts") or "")):
+        return
+    channel_id = str(active.get("channel_id") or "")
+    await set_context_bar(
+        channel_id,
+        repo_context_bar_items({"owner": owner, "name": repo}, branch=head, pr_url=pr_url),
+    )
+    resp = await client.get(
+        f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
+        headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},
+    )
+    if resp.status_code == 200 and resp.text.strip():
+        await set_view(
+            channel_id,
+            "diff",
+            resp.text[:VIEW_CONTENT_MAX_CHARS],
+            base_branch=base,
+            head_branch=head,
+        )
+
+
 async def _record_pr_telemetry(
     *,
     client: httpx.AsyncClient,
@@ -630,6 +678,17 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            await _publish_code_channel_pr(
+                client,
+                token,
+                owner,
+                repo,
+                pr_number,
+                pr_url=pr_url if isinstance(pr_url, str) else "",
+                head=head,
+                base=base,
+                configurable=configurable,
+            )
     except Exception:
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True

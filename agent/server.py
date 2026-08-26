@@ -162,6 +162,7 @@ from .tools import (
     list_environments,
     list_threads,
     manage_baby_sit,
+    manage_code_channel,
     manage_thread,
     notify_automation_channel,
     open_pull_request,
@@ -830,6 +831,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
     return name.startswith("slack_") or name in {
         "get_thread",
+        "manage_code_channel",
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
@@ -1632,6 +1634,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     slack_tools = [
+        manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,

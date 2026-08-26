@@ -139,6 +139,12 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Reaction removal queued"}
         return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
 
+    if event.get("type") in ("agent_session_stopped", "message_stream_stopped"):
+        background_tasks.add_task(
+            common.process_agent_session_stopped, event, str(payload.get("event_id") or "")
+        )
+        return {"status": "accepted", "message": "Session stop queued"}
+
     event_id = str(payload.get("event_id") or "")
     retry_num = request.headers.get("X-Slack-Retry-Num", "")
     if retry_num and await common.slack_event_already_seen(event_id):
@@ -202,11 +208,17 @@ async def slack_webhook(
         ):
             return {"status": "ignored", "reason": "Updated message identity changed"}
 
+    # A code channel is one session for the whole channel, so every message in it
+    # routes to the same agent thread and is treated as directed at the agent.
+    in_code_channel = await common.is_code_channel(channel_id)
+    if in_code_channel:
+        thread_ts = common.CODE_CHANNEL_SESSION_TS
+
     is_direct_message = (
         not is_message_update and event.get("channel_type") == "im" and bool(user_id)
     )
     is_untagged_two_party_reply = False
-    if event.get("type") != "app_mention" and not is_message_update:
+    if event.get("type") != "app_mention" and not is_message_update and not in_code_channel:
         has_username_mention = bool(
             common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
         )
@@ -283,6 +295,7 @@ async def slack_webhook(
                 "attachments": attachments,
                 "bot_user_id": bot_user_id,
                 "message_update": True,
+                "code_channel": in_code_channel,
             }
             background_tasks.add_task(
                 _process_slack_message_update,
@@ -333,9 +346,10 @@ async def slack_webhook(
             "attachments": attachments,
             "bot_user_id": bot_user_id,
             "thread_id": thread_id,
-            "treat_all_messages_as_mentions": is_direct_message,
+            "treat_all_messages_as_mentions": is_direct_message or in_code_channel,
             "untagged_reply": is_untagged_two_party_reply,
             "message_update": is_message_update,
+            "code_channel": in_code_channel,
         }
         repo_config = await common.get_slack_repo_config(
             channel_id,

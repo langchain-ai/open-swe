@@ -367,6 +367,9 @@ Users can also override the team/project mapping per-comment by including `repo:
         "bot_user": {
             "display_name": "Open SWE",
             "always_online": true
+        },
+        "code_channels": {
+            "enabled": true
         }
     },
     "oauth_config": {
@@ -381,6 +384,7 @@ Users can also override the team/project mapping per-comment by including `repo:
                 "channels:history",
                 "channels:read",
                 "chat:write",
+                "code_channels:manage",
                 "files:write",
                 "groups:history",
                 "groups:read",
@@ -400,8 +404,10 @@ Users can also override the team/project mapping per-comment by including `repo:
             "request_url": "https://<your-ngrok-url>/webhooks/slack",
             "bot_events": [
                 "app_mention",
+                "agent_session_stopped",
                 "message.im",
-                "message.mpim"
+                "message.mpim",
+                "message.session"
             ]
         },
         "interactivity": {
@@ -427,6 +433,12 @@ Both Slack URLs must point at the Open SWE backend that serves `agent.webapp:app
 - **Interactivity & Shortcuts → Interactivity Request URL:** `https://<your-backend-url>/webhooks/slack/interactivity`
 
 Slack Block Kit option buttons only work when Interactivity is enabled and pointed at `/webhooks/slack/interactivity`.
+
+**Code channels (early access):**
+
+The manifest above enables Slack [code channels](https://api.slack.com/partners/code-channels) — one Slack channel dedicated to one Open SWE session. In a code channel the whole channel is the session, so Open SWE answers every message without needing an `@`-mention, replies as top-level channel messages, reports its session status, and keeps the context bar (repo, branch, PR) and the diff tab current as it works. The agent can promote a normal Slack thread into a code channel, retitle it, publish views, and archive it with `manage_code_channel`.
+
+This requires the `code_channels:manage` bot scope, the `message.session` and `agent_session_stopped` bot events, and `features.code_channels.enabled`. Code channels are in early access: if your workspace is not enrolled, leave `features.code_channels` out of the manifest — everything else keeps working unchanged.
 
 **Credentials you'll need:**
 

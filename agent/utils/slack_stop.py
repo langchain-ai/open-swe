@@ -13,6 +13,7 @@ from agent.dispatch import dispatch_agent_run
 from agent.source_context import SourceContext
 
 from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
+from .slack_code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from .slack_events import claim_slack_event
 
 logger = logging.getLogger(__name__)
@@ -222,3 +223,48 @@ async def process_slack_stop_reaction(event: dict[str, Any], event_id: str = "")
         await _process_slack_stop_reaction(event, event_id)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to stop Open SWE from Slack reaction")
+
+
+async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -> None:
+    channel_id = event.get("channel") or event.get("channel_id")
+    if not isinstance(channel_id, str) or not channel_id:
+        return
+    thread_ts = event.get("thread_ts")
+    if not isinstance(thread_ts, str) or not thread_ts:
+        thread_ts = CODE_CHANNEL_SESSION_TS
+
+    client = get_client(url=LANGGRAPH_URL)
+    thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+    if not thread_id:
+        return
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Ignoring session stop for unknown thread %s", thread_id)
+        return
+    if _matching_slack_context(_thread_metadata(thread), channel_id, thread_ts) is None:
+        logger.warning("Ignoring session stop with mismatched thread metadata: %s", thread_id)
+        return
+    if event_id and not await claim_slack_event(event_id):
+        return
+
+    run_ids = await _active_run_ids(client, thread_id)
+    if run_ids:
+        await client.runs.cancel_many(thread_id=thread_id, run_ids=run_ids, action="interrupt")
+    await _clear_deferred_work(client, thread_id)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={
+            "latest_run_status": "interrupted",
+            "stop_requested_at_ms": int(datetime.now(UTC).timestamp() * 1000),
+        },
+    )
+    await set_session_status(channel_id, "active", thread_ts=thread_ts)
+
+
+async def process_agent_session_stopped(event: dict[str, Any], event_id: str = "") -> None:
+    """Stop work immediately when Slack signals the session was stopped."""
+    try:
+        await _process_agent_session_stopped(event, event_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to stop Open SWE from a Slack session stop event")

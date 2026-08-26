@@ -397,13 +397,17 @@ async def _post_slack_message_with_ts(
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
 
+    from .slack_code_channels import is_code_channel_session
+
     payload: dict[str, Any] = {
         "channel": channel_id,
         "text": text,
         "unfurl_links": unfurl_links,
         "unfurl_media": unfurl_media,
     }
-    if thread_ts is not None:
+    # A code channel is one flowing session: replies belong in the channel, not
+    # in a thread hanging off it.
+    if thread_ts is not None and not is_code_channel_session(thread_ts):
         payload["thread_ts"] = thread_ts
     if blocks:
         payload["blocks"] = blocks
@@ -1087,30 +1091,38 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     if not SLACK_BOT_TOKEN:
         return []
 
+    from .slack_code_channels import is_code_channel_session
+
+    # A code channel session spans the whole channel rather than one thread.
+    session_channel = is_code_channel_session(thread_ts)
+    method = "conversations.history" if session_channel else "conversations.replies"
+
     messages: list[dict[str, Any]] = []
     cursor: str | None = None
     truncated = False
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         while True:
-            params: dict[str, str | int] = {"channel": channel_id, "ts": thread_ts, "limit": 200}
+            params: dict[str, str | int] = {"channel": channel_id, "limit": 200}
+            if not session_channel:
+                params["ts"] = thread_ts
             if cursor:
                 params["cursor"] = cursor
 
             try:
                 response = await http_client.get(
-                    f"{SLACK_API_BASE_URL}/conversations.replies",
+                    f"{SLACK_API_BASE_URL}/{method}",
                     headers=_slack_headers(),
                     params=params,
                 )
                 response.raise_for_status()
                 payload = response.json()
             except httpx.HTTPError:
-                logger.exception("Slack conversations.replies request failed")
+                logger.exception("Slack %s request failed", method)
                 break
 
             if not payload.get("ok"):
-                logger.warning("Slack conversations.replies failed: %s", payload.get("error"))
+                logger.warning("Slack %s failed: %s", method, payload.get("error"))
                 break
 
             batch = payload.get("messages", [])
@@ -1134,9 +1146,9 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             if not cursor:
                 break
 
+    messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     if truncated:
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
-    messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
 
 
