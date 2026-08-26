@@ -54,10 +54,6 @@ from .dashboard.agent_overrides import (
 from .dashboard.agent_usage import record_agent_run_usage
 from .dashboard.environments import (
     SandboxResources,
-    environment_prompt,
-    environment_sandbox_create_params,
-    environment_sandbox_resources,
-    environment_snapshot_id,
     resolve_environment,
 )
 from .dashboard.options import (
@@ -349,11 +345,10 @@ async def _resolve_sandbox_create_config(
 ) -> tuple[str | None, SandboxResources, dict[str, Any]]:
     """Resolve the snapshot, VM sizing, and create parameters for a new sandbox."""
     environment = await resolve_environment(environment_slug)
-    environment_snapshot = environment_snapshot_id(environment)
-    resources = environment_sandbox_resources(environment)
-    create_params = environment_sandbox_create_params(environment)
-    if environment_snapshot:
-        return environment_snapshot, resources, create_params
+    resources = environment.sandbox_resources() if environment else SandboxResources()
+    create_params = environment.sandbox_create_params() if environment else {}
+    if environment and environment.ready_snapshot_id:
+        return environment.ready_snapshot_id, resources, create_params
     return await get_admin_base_snapshot_id(), resources, create_params
 
 
@@ -1374,8 +1369,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
                 corridor_enabled=self._corridor_enabled,
-                environment_name=(environment or {}).get("name"),
-                environment_instructions=environment_prompt(environment),
+                environment_name=environment.name if environment else None,
+                environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),

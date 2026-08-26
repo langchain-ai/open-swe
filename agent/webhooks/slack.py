@@ -11,7 +11,7 @@ from typing import Any, cast
 import httpx
 from langchain_core.messages.content import create_text_block
 
-from agent.dashboard.environments import get_environment, parse_environment_tag
+from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -659,7 +659,7 @@ async def _process_slack_mention_impl(
     environment_slug: str | None = None
     if is_first_mention:
         tagged_slug, text_without_tag = parse_environment_tag(clean_text)
-        if tagged_slug and await get_environment(tagged_slug) is not None:
+        if tagged_slug and await ENVIRONMENTS.get(tagged_slug) is not None:
             environment_slug = tagged_slug
             clean_text = text_without_tag or "(no text in mention)"
         elif tagged_slug:

@@ -41,15 +41,12 @@ from .enabled_repos import (
 )
 from .environments import (
     DEFAULT_ENVIRONMENT_SLUG,
+    ENVIRONMENTS,
+    Environment,
     EnvironmentCreate,
     EnvironmentUpdate,
-    create_environment,
-    delete_environment,
-    get_environment,
     list_environment_options,
-    list_environments,
     slugify,
-    update_environment,
 )
 from .eval_jobs import (
     get_reviewer_eval_status,
@@ -968,7 +965,7 @@ async def api_list_environments(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return {
-        "environments": await list_environments(),
+        "environments": await ENVIRONMENTS.list_all(),
         "default_slug": DEFAULT_ENVIRONMENT_SLUG,
     }
 
@@ -977,9 +974,9 @@ async def api_list_environments(
 async def api_create_environment(
     body: EnvironmentCreate,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
+) -> Environment:
     try:
-        return await create_environment(body, _admin["sub"])
+        return await ENVIRONMENTS.create(body, _admin["sub"])
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
 
@@ -999,8 +996,8 @@ async def api_environment_options(
 async def api_get_environment(
     slug: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    record = await get_environment(_normalized_slug(slug))
+) -> Environment:
+    record = await ENVIRONMENTS.get(_normalized_slug(slug))
     if not record:
         raise HTTPException(404, "environment not found")
     return record
@@ -1011,9 +1008,9 @@ async def api_update_environment(
     slug: str,
     body: EnvironmentUpdate,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
+) -> Environment:
     try:
-        return await update_environment(_normalized_slug(slug), body)
+        return await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -1023,7 +1020,7 @@ async def api_delete_environment(
     slug: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Response:
-    if not await delete_environment(_normalized_slug(slug)):
+    if not await ENVIRONMENTS.remove(_normalized_slug(slug)):
         raise HTTPException(404, "environment not found")
     return Response(status_code=204)
 
