@@ -2,9 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest"
 
-import {
-  isDesktopLocalModeEnabled,
-} from "./desktop-local-mode"
+import { isDesktopLocalModeEnabled } from "./desktop-local-mode"
 
 beforeEach(() => {
   window.openSweDesktop = undefined

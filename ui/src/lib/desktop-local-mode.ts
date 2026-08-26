@@ -1,7 +1,6 @@
 export function isDesktopLocalModeEnabled(): boolean {
   return (
-    typeof window !== "undefined" &&
-    window.openSweDesktop?.localOnly === true
+    typeof window !== "undefined" && window.openSweDesktop?.localOnly === true
   )
 }
 

@@ -454,9 +454,8 @@ def _transition_is_stale(
 
 
 def _bounded_payload(message: Mapping[str, Any]) -> tuple[str, str, str | None]:
-    payload = (
-        dict(message.get("payload")) if isinstance(message.get("payload"), dict) else dict(message)
-    )
+    raw_payload = message.get("payload")
+    payload = dict(raw_payload) if isinstance(raw_payload, Mapping) else dict(message)
     author = message.get("author") or payload.get("author") or "system"
     if author not in {"user", "agent", "system", "tool"}:
         author = "system"

@@ -78,7 +78,8 @@ export function useSubmitAgentMessage(threadId: string) {
       )
       if (thread?.environment === "local") {
         const context = await window.openSweDesktop?.getLocalThread(threadId)
-        if (!context) throw new Error("This local thread is unavailable on this device")
+        if (!context)
+          throw new Error("This local thread is unavailable on this device")
         void stream.submit(
           { messages: [{ type: "human", content: messageContent(vars) }] },
           {

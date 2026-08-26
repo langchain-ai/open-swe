@@ -203,7 +203,9 @@ export function AgentsHome() {
         return
       }
       if (!desktop.deviceId) {
-        setLocalError("This device has not finished registering. Restart Open SWE and try again.")
+        setLocalError(
+          "This device has not finished registering. Restart Open SWE and try again."
+        )
         return
       }
       setSubmitting(true)

@@ -46,7 +46,9 @@ import {
   reconcilePinnedAttentionThread,
 } from "@/features/agents/lib/sidebarFilter"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
+import { agentsApi } from "@/features/agents/lib/api"
 import {
+  agentThreadKeys,
   useDeleteAgentThread,
   useResolveAgentThread,
   useSidebarThreads,
@@ -279,80 +281,78 @@ export function AgentsSidebar({
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
         <div className="min-h-0 flex-1 overflow-y-auto">
-            {sidebar.isPending && (
-              <ThreadListSkeleton compact={prefs.compact} />
-            )}
-            {!sidebar.isPending &&
-              (prefs.group === "none"
-                ? sections[0]?.threads.map((thread) => (
-                    <ThreadRow
-                      key={thread.id}
-                      thread={thread}
-                      isActive={thread.id === activeThreadId}
-                      onNavigate={layout.closeOnMobile}
-                      compact={prefs.compact}
-                    />
-                  ))
-                : sections.map((section) => (
-                    <ThreadGroup
-                      key={`${prefs.group}:${section.key}`}
-                      label={section.label}
-                      threads={section.threads}
-                      activeThreadId={activeThreadId}
-                      onNavigate={layout.closeOnMobile}
-                      defaultCollapsed={section.defaultCollapsed}
-                      compact={prefs.compact}
-                      hasMore={
-                        prefs.group === "focus" && section.key === "done"
-                          ? resolvedHasMore
-                          : false
-                      }
-                      count={
-                        prefs.group === "focus" && section.key === "done"
-                          ? filteredResolved.length
-                          : section.threads.length
-                      }
-                    />
-                  )))}
-            {!sidebar.isPending && activeHasMore && (
+          {sidebar.isPending && <ThreadListSkeleton compact={prefs.compact} />}
+          {!sidebar.isPending &&
+            (prefs.group === "none"
+              ? sections[0]?.threads.map((thread) => (
+                  <ThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    isActive={thread.id === activeThreadId}
+                    onNavigate={layout.closeOnMobile}
+                    compact={prefs.compact}
+                  />
+                ))
+              : sections.map((section) => (
+                  <ThreadGroup
+                    key={`${prefs.group}:${section.key}`}
+                    label={section.label}
+                    threads={section.threads}
+                    activeThreadId={activeThreadId}
+                    onNavigate={layout.closeOnMobile}
+                    defaultCollapsed={section.defaultCollapsed}
+                    compact={prefs.compact}
+                    hasMore={
+                      prefs.group === "focus" && section.key === "done"
+                        ? resolvedHasMore
+                        : false
+                    }
+                    count={
+                      prefs.group === "focus" && section.key === "done"
+                        ? filteredResolved.length
+                        : section.threads.length
+                    }
+                  />
+                )))}
+          {!sidebar.isPending && activeHasMore && (
+            <LoadMoreThreadsButton
+              label="Load more threads"
+              loading={sidebar.activeQuery.isFetchingNextPage}
+              onClick={() => void sidebar.activeQuery.fetchNextPage()}
+            />
+          )}
+          {!sidebar.isPending &&
+            showResolved &&
+            prefs.group === "focus" &&
+            resolvedHasMore && (
               <LoadMoreThreadsButton
-                label="Load more threads"
-                loading={sidebar.activeQuery.isFetchingNextPage}
-                onClick={() => void sidebar.activeQuery.fetchNextPage()}
+                label="Load more resolved threads"
+                loading={sidebar.resolvedQuery.isFetchingNextPage}
+                onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
               />
             )}
-            {!sidebar.isPending &&
-              showResolved &&
-              prefs.group === "focus" &&
-              resolvedHasMore && (
-                <LoadMoreThreadsButton
-                  label="Load more resolved threads"
-                  loading={sidebar.resolvedQuery.isFetchingNextPage}
-                  onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
-                />
-              )}
-            {showResolved && prefs.group !== "focus" && (
-              <ResolvedThreadGroup
-                threads={filteredResolved}
-                hasMore={resolvedHasMore}
-                activeThreadId={activeThreadId}
-                onNavigate={layout.closeOnMobile}
-                compact={prefs.compact}
-                onLoadMore={() => void sidebar.resolvedQuery.fetchNextPage()}
-                isLoadingMore={sidebar.resolvedQuery.isFetchingNextPage}
-              />
-            )}
-            {resolvedLoading && (
-              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-                <CircleNotchIcon className="size-3.5 animate-spin" />
-                Loading resolved threads…
-              </div>
-            )}
-            {isCloudEmpty && (
-              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
-                No threads match these filters.
-              </p>
-            )}
+          {showResolved && prefs.group !== "focus" && (
+            <ResolvedThreadGroup
+              threads={filteredResolved}
+              hasMore={resolvedHasMore}
+              activeThreadId={activeThreadId}
+              onNavigate={layout.closeOnMobile}
+              compact={prefs.compact}
+              onLoadMore={() => void sidebar.resolvedQuery.fetchNextPage()}
+              isLoadingMore={sidebar.resolvedQuery.isFetchingNextPage}
+            />
+          )}
+          {resolvedLoading && (
+            <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+              <CircleNotchIcon className="size-3.5 animate-spin" />
+              Loading resolved threads…
+            </div>
+          )}
+          {isCloudEmpty && (
+            <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+              No threads match these filters.
+            </p>
+          )}
         </div>
       </div>
 
@@ -626,8 +626,8 @@ function ThreadRow({
   compact?: boolean
 }) {
   const { data: thread = listedThread } = useQuery({
-    queryKey: ["thread", listedThread.id],
-    queryFn: async () => listedThread,
+    queryKey: agentThreadKeys.detail(listedThread.id),
+    queryFn: () => agentsApi.getThread(listedThread.id, { markViewed: false }),
     initialData: listedThread,
     enabled: false,
   })

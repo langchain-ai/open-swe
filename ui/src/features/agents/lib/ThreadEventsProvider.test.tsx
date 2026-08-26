@@ -116,17 +116,20 @@ describe("ThreadEventsProvider", () => {
     render(<div />, { wrapper: provider(client) })
     const events = await source()
 
-    act(() => events.emit("thread.status", existing.id, thread({ status: "running" })))
+    act(() =>
+      events.emit("thread.status", existing.id, thread({ status: "running" }))
+    )
     await waitFor(() =>
-      expect(client.getQueryData<AgentThread>(agentThreadKeys.detail(existing.id))?.status).toBe(
-        "running"
-      )
+      expect(
+        client.getQueryData<AgentThread>(agentThreadKeys.detail(existing.id))
+          ?.status
+      ).toBe("running")
     )
 
     expect(client.getQueryData<IdPage>(pageKey)?.ids).toEqual([existing.id])
-    expect(client.getQueryData<InfiniteData<IdPage>>(infiniteKey)?.pages[0]?.ids).toEqual([
-      existing.id,
-    ])
+    expect(
+      client.getQueryData<InfiniteData<IdPage>>(infiniteKey)?.pages[0]?.ids
+    ).toEqual([existing.id])
     expect(invalidate).not.toHaveBeenCalled()
   })
 
@@ -145,11 +148,23 @@ describe("ThreadEventsProvider", () => {
     render(<div />, { wrapper: provider(client) })
     const events = await source()
 
-    act(() => events.emit("thread.created", "thread-1", thread({ environment: "local" })))
+    act(() =>
+      events.emit(
+        "thread.created",
+        "thread-1",
+        thread({ environment: "local" })
+      )
+    )
     expect(client.getQueryData<IdPage>(localKey)?.ids).toEqual(["thread-1"])
     expect(client.getQueryData<IdPage>(cloudKey)?.ids).toEqual([])
 
-    act(() => events.emit("thread.handoff", "thread-1", thread({ environment: "cloud" })))
+    act(() =>
+      events.emit(
+        "thread.handoff",
+        "thread-1",
+        thread({ environment: "cloud" })
+      )
+    )
     expect(client.getQueryData<IdPage>(localKey)?.ids).toEqual([])
     expect(client.getQueryData<IdPage>(cloudKey)?.ids).toEqual(["thread-1"])
   })
@@ -178,15 +193,32 @@ describe("ThreadEventsProvider", () => {
     const view = render(<div />, { wrapper: Wrapper })
     const events = await source()
 
-    act(() => events.emit("thread.message", "thread-2", { thread_id: "thread-2", seq: 1 }))
+    act(() =>
+      events.emit("thread.message", "thread-2", {
+        thread_id: "thread-2",
+        seq: 1,
+      })
+    )
     expect(invalidate).not.toHaveBeenCalled()
-    act(() => events.emit("thread.message", "thread-1", { thread_id: "thread-1", seq: 1 }))
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: agentThreadKeys.messages("thread-1") })
+    act(() =>
+      events.emit("thread.message", "thread-1", {
+        thread_id: "thread-1",
+        seq: 1,
+      })
+    )
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: agentThreadKeys.messages("thread-1"),
+    })
 
     invalidate.mockClear()
     streamState.isLoading = true
     view.rerender(<div />)
-    act(() => events.emit("thread.message", "thread-1", { thread_id: "thread-1", seq: 2 }))
+    act(() =>
+      events.emit("thread.message", "thread-1", {
+        thread_id: "thread-1",
+        seq: 2,
+      })
+    )
     expect(invalidate).not.toHaveBeenCalled()
   })
 })

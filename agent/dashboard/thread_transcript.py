@@ -117,7 +117,8 @@ def messages_to_ui(messages: object) -> list[dict[str, Any]]:
 def ui_messages_to_state(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     seeded: list[dict[str, Any]] = []
     for message in messages:
-        payload = message.get("payload") if isinstance(message.get("payload"), Mapping) else message
+        raw_payload = message.get("payload")
+        payload: Mapping[str, Any] = raw_payload if isinstance(raw_payload, Mapping) else message
         author = payload.get("author")
         chunks = payload.get("chunks")
         if not isinstance(chunks, Sequence):

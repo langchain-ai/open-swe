@@ -4,7 +4,11 @@ import { useQuery } from "@tanstack/react-query"
 import type { DesktopLocalActivity, DesktopLocalDiff } from "@/desktop"
 
 const NO_ACTIVITY: DesktopLocalActivity = {}
-const NO_DIFF: DesktopLocalDiff = { status: "missing", truncated: false, files: [] }
+const NO_DIFF: DesktopLocalDiff = {
+  status: "missing",
+  truncated: false,
+  files: [],
+}
 
 export const desktopExecutionKeys = {
   activity: ["desktop-execution", "activity"] as const,
@@ -56,8 +60,8 @@ function useDesktopDiff(
       : desktopExecutionKeys.diff(threadId),
     queryFn: () =>
       branch
-        ? window.openSweDesktop?.getLocalPrDiff(threadId) ?? NO_DIFF
-        : window.openSweDesktop?.getLocalDiff(threadId) ?? NO_DIFF,
+        ? (window.openSweDesktop?.getLocalPrDiff(threadId) ?? NO_DIFF)
+        : (window.openSweDesktop?.getLocalDiff(threadId) ?? NO_DIFF),
     enabled,
     refetchInterval: isRunning ? 5000 : false,
   })

@@ -61,11 +61,10 @@ export function AgentThreadStreamProvider({
     enabled: Boolean(threadId),
     staleTime: 30_000,
   })
-  const environment = transportOverride ?? threadQuery.data?.environment ?? "cloud"
+  const environment =
+    transportOverride ?? threadQuery.data?.environment ?? "cloud"
   const transport = transportForThread(
-    threadQuery.data
-      ? { ...threadQuery.data, environment }
-      : undefined
+    threadQuery.data ? { ...threadQuery.data, environment } : undefined
   )
   const base = transport.streamBase(threadQuery.data)
   const apiUrl =

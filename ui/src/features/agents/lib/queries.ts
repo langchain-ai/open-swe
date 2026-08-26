@@ -15,12 +15,7 @@ import type {
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
-import type {
-  AgentThread,
-  Chunk,
-  ImageChunk,
-  Message,
-} from "./types"
+import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
@@ -43,8 +38,7 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
-  page: (params: ThreadsPageParams) =>
-    ["thread-list", "page", params] as const,
+  page: (params: ThreadsPageParams) => ["thread-list", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "cursor">) =>
     ["thread-list", "infinite-pages", params] as const,
 }
@@ -230,24 +224,24 @@ function infinitePageThreads(
 
 type CachedThreadsPage = Omit<ThreadsPage, "items">
 
+function combineThreadEntities(
+  results: Array<{ data?: readonly [string, AgentThread] }>
+): Map<string, AgentThread> {
+  return new Map(
+    results.flatMap((result) => (result.data ? [result.data] : []))
+  )
+}
+
 function useCachedThreadEntities(ids: Array<string>): Map<string, AgentThread> {
-  const results = useQueries({
+  return useQueries({
     queries: ids.map((id) => ({
       queryKey: agentThreadKeys.detail(id),
       queryFn: () => agentsApi.getThread(id, { markViewed: false }),
+      select: (thread: AgentThread) => [thread.id, thread] as const,
       enabled: false,
     })),
+    combine: combineThreadEntities,
   })
-  return useMemo(
-    () =>
-      new Map(
-        results.flatMap((result, index) => {
-          const id = ids[index]
-          return result.data && id ? ([[id, result.data]] as const) : []
-        })
-      ),
-    [ids, results]
-  )
 }
 
 export function useSidebarThreads({
@@ -661,7 +655,9 @@ export function useInfiniteThreadsPages(
       : {}),
   })
   const ids = useMemo(
-    () => [...new Set(pagesQuery.data?.pages.flatMap((page) => page.ids) ?? [])],
+    () => [
+      ...new Set(pagesQuery.data?.pages.flatMap((page) => page.ids) ?? []),
+    ],
     [pagesQuery.data?.pages]
   )
   const entities = useCachedThreadEntities(ids)

@@ -315,7 +315,9 @@ export function AgentsThreadsPage({
 
         {items.length > 0 && (
           <div className="flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
-            <span>{items.length} thread{items.length === 1 ? "" : "s"}</span>
+            <span>
+              {items.length} thread{items.length === 1 ? "" : "s"}
+            </span>
             {query.hasNextPage && (
               <Button
                 size="sm"

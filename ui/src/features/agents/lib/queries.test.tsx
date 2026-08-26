@@ -316,7 +316,10 @@ describe("normalized thread queries", () => {
     const key = agentThreadKeys.page({ resolved: false })
     client.setQueryData(key, membership)
     let mutateAsync:
-      | ((vars: { threadId: string; resolved: boolean }) => Promise<AgentThread>)
+      | ((vars: {
+          threadId: string
+          resolved: boolean
+        }) => Promise<AgentThread>)
       | undefined
 
     function Probe() {

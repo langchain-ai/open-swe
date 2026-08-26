@@ -7,7 +7,10 @@ export interface ThreadTransport {
 }
 
 export const cloudThreadTransport: ThreadTransport = {
-  streamBase: () => ({ apiUrl: agentsApi.langGraphApiUrl, assistantId: "agent" }),
+  streamBase: () => ({
+    apiUrl: agentsApi.langGraphApiUrl,
+    assistantId: "agent",
+  }),
   canExecuteHere: () => true,
 }
 
@@ -16,8 +19,8 @@ export const localThreadTransport: ThreadTransport = {
   canExecuteHere: (thread) =>
     Boolean(
       window.openSweDesktop &&
-        thread.deviceId &&
-        window.openSweDesktop.deviceId === thread.deviceId
+      thread.deviceId &&
+      window.openSweDesktop.deviceId === thread.deviceId
     ),
 }
 

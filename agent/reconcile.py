@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .dashboard.thread_registry import ThreadRow, get_thread_registry
+from .dashboard.thread_registry import RunStatus, ThreadRow, get_thread_registry
 from .utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -63,19 +63,20 @@ async def reconcile_stale_runs(*, max_age_seconds: int = 1800) -> dict[str, int]
                 return
             run = await client.runs.get(thread.id, thread.status_run_id)
             raw_status = run.get("status") if isinstance(run, dict) else None
-            mapped = {
+            status_map: dict[str, RunStatus] = {
                 "pending": "queued",
                 "running": "running",
                 "success": "finished",
                 "interrupted": "interrupted",
                 "error": "error",
                 "timeout": "error",
-            }.get(raw_status)
+            }
+            mapped = status_map.get(raw_status) if isinstance(raw_status, str) else None
             if mapped and mapped != thread.status:
                 await registry.transition(
                     thread.id,
                     thread.status_run_id,
-                    mapped,  # type: ignore[arg-type]
+                    mapped,
                     environment="cloud",
                     error=str(raw_status) if mapped == "error" else None,
                 )

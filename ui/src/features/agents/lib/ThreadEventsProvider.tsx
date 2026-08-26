@@ -26,13 +26,19 @@ function matchesList(thread: AgentThread, key: QueryKey): boolean {
   const params = key[2]
   if (!params || typeof params !== "object") return true
   const filters = params as Record<string, unknown>
-  if (typeof filters.resolved === "boolean" && Boolean(thread.resolved) !== filters.resolved)
+  if (
+    typeof filters.resolved === "boolean" &&
+    Boolean(thread.resolved) !== filters.resolved
+  )
     return false
-  if (filters.environment && thread.environment !== filters.environment) return false
+  if (filters.environment && thread.environment !== filters.environment)
+    return false
   if (filters.source && thread.source !== filters.source) return false
   if (filters.status && thread.status !== filters.status) return false
-  if (filters.scope === "interactive" && thread.threadCategory === "automation") return false
-  if (filters.scope === "automation" && thread.threadCategory !== "automation") return false
+  if (filters.scope === "interactive" && thread.threadCategory === "automation")
+    return false
+  if (filters.scope === "automation" && thread.threadCategory !== "automation")
+    return false
   if (
     typeof filters.q === "string" &&
     !thread.title.toLowerCase().includes(filters.q.toLowerCase())

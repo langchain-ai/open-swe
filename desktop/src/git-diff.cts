@@ -301,11 +301,15 @@ function handoffBranch(threadId) {
 async function pushHandoffCheckpoint(repo, threadId) {
   const repository = await remoteRepository(repo);
   if (!repository) {
-    throw new Error("This project needs a GitHub origin before it can be handed off");
+    throw new Error(
+      "This project needs a GitHub origin before it can be handed off",
+    );
   }
   const ref = checkpointRef(threadId);
   await captureCheckpoint(repo, ref);
-  const commit = text(await git(repo, ["rev-parse", "--verify", `${ref}^{commit}`]));
+  const commit = text(
+    await git(repo, ["rev-parse", "--verify", `${ref}^{commit}`]),
+  );
   const current = await currentBranch(repo);
   const branch =
     current && !["main", "master"].includes(current)
@@ -336,7 +340,12 @@ async function createManagedWorktree(repo, destination, checkpoint) {
   ) {
     throw new Error("The handoff checkpoint is invalid");
   }
-  await git(repo, ["check-ref-format", "--branch", checkpoint.branch], null, 5_000);
+  await git(
+    repo,
+    ["check-ref-format", "--branch", checkpoint.branch],
+    null,
+    5_000,
+  );
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   if (fs.existsSync(destination)) {
     const root = await repoRoot(destination);
@@ -349,17 +358,31 @@ async function createManagedWorktree(repo, destination, checkpoint) {
     { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     120_000,
   );
-  const fetched = text(await git(repo, ["rev-parse", "--verify", "FETCH_HEAD^{commit}"]));
+  const fetched = text(
+    await git(repo, ["rev-parse", "--verify", "FETCH_HEAD^{commit}"]),
+  );
   if (fetched.toLowerCase() !== checkpoint.ref.toLowerCase()) {
-    throw new Error("The pushed checkpoint no longer matches the requested ref");
+    throw new Error(
+      "The pushed checkpoint no longer matches the requested ref",
+    );
   }
-  await git(repo, ["worktree", "add", "--detach", destination, fetched], null, 120_000);
+  await git(
+    repo,
+    ["worktree", "add", "--detach", destination, fetched],
+    null,
+    120_000,
+  );
   return destination;
 }
 
 async function removeManagedWorktree(repo, destination) {
   try {
-    await git(repo, ["worktree", "remove", "--force", destination], null, 30_000);
+    await git(
+      repo,
+      ["worktree", "remove", "--force", destination],
+      null,
+      30_000,
+    );
   } catch {}
 }
 

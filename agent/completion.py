@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Any
 
-from .dashboard.thread_registry import get_thread_registry
+from .dashboard.thread_registry import RunStatus, get_thread_registry
 from .dashboard.thread_transcript import messages_to_ui
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
@@ -279,25 +279,27 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     Enqueues successful Slack cost refreshes and posts failure replies idempotently.
     """
-    status = payload.get("status")
+    raw_status = payload.get("status")
+    status = raw_status if isinstance(raw_status, str) else ""
     thread_id = payload.get("thread_id")
     raw_run_id = payload.get("run_id")
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
-    registry_status = {
+    status_map: dict[str, RunStatus] = {
         "success": "finished",
         "interrupted": "interrupted",
         "error": "error",
         "timeout": "error",
-    }.get(status)
+    }
+    registry_status = status_map.get(status)
     if registry_status and run_id:
         try:
             registry = await get_thread_registry()
             await registry.transition(
                 thread_id,
                 run_id,
-                registry_status,  # type: ignore[arg-type]
+                registry_status,
                 environment="cloud",
                 error=str(payload.get("error") or status) if registry_status == "error" else None,
             )

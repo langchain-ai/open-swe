@@ -4,7 +4,10 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import { agentThreadKeys, useCancelAgentThread } from "@/features/agents/lib/queries"
+import {
+  agentThreadKeys,
+  useCancelAgentThread,
+} from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
 
 export interface ActiveRun {
