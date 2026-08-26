@@ -11,11 +11,13 @@ import { selfReviewSummary } from "@/features/agents/components/SelfReviewPanel"
 export function SelfReviewCard({
   threadId,
   onOpen,
+  pollWhileActive = false,
 }: {
   threadId: string
   onOpen?: () => void
+  pollWhileActive?: boolean
 }) {
-  const query = useThreadSelfReview(threadId)
+  const query = useThreadSelfReview(threadId, { pollWhileActive })
   const review = query.data?.reviews[0]
   if (!review) return null
 

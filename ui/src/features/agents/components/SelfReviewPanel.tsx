@@ -129,11 +129,13 @@ function FindingRow({
 export function SelfReviewPanel({
   threadId,
   onOpenFile,
+  pollWhileActive = false,
 }: {
   threadId: string
   onOpenFile?: (path: string, line: number | null) => void
+  pollWhileActive?: boolean
 }) {
-  const query = useThreadSelfReview(threadId)
+  const query = useThreadSelfReview(threadId, { pollWhileActive })
   const reviews = query.data?.reviews ?? []
 
   if (query.isPending) {

@@ -310,6 +310,7 @@ export const Messages = memo(function MessagesComponent({
             {threadId && showSelfReview && (
               <SelfReviewCard
                 threadId={threadId}
+                pollWhileActive={Boolean(isStreaming || streamIsLoading)}
                 {...(onOpenSelfReview ? { onOpen: onOpenSelfReview } : {})}
               />
             )}

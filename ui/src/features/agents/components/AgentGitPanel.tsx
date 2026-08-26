@@ -155,6 +155,7 @@ export function AgentGitPanel({
       renderReview={() => (
         <SelfReviewPanel
           threadId={thread.id}
+          pollWhileActive={thread.status === "running"}
           onOpenFile={(path, line) =>
             openFileSurface(threadRef, path, line ?? undefined)
           }

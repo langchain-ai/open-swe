@@ -585,6 +585,10 @@ async def inline_review_owns_pr(repo_config: dict[str, str], pr_number: int) -> 
     read. Publishing the same findings again as PR comments would double them
     onto the human review surface, so the webhook reviewer stands down.
 
+    An unfinished claim only holds for ``CLAIM_GRACE`` (see
+    :meth:`InlineReview.suppresses_pr_review`): a run that opens the PR and then
+    dies must not leave it with no review at all.
+
     Reads as False on a store failure: a duplicate review beats no review.
     """
     if not pr_number:
@@ -602,7 +606,7 @@ async def inline_review_owns_pr(repo_config: dict[str, str], pr_number: int) -> 
             exc_info=True,
         )
         return False
-    return review is not None
+    return review is not None and review.suppresses_pr_review()
 
 
 _PUBLIC_REPO_GATE_REJECTION = {

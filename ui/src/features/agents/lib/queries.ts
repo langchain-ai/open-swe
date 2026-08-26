@@ -617,12 +617,25 @@ export function useWorkflowApprovals(
   })
 }
 
-/** The self-review findings attached to this thread, if it authored a PR. */
-export function useThreadSelfReview(threadId: string, enabled = true) {
+/**
+ * The self-review findings attached to this thread, if it authored a PR.
+ *
+ * Polls while the run is active: the review is written mid-run, so a mount that
+ * happens first would otherwise cache an empty list and keep serving it.
+ */
+export function useThreadSelfReview(
+  threadId: string,
+  options: { pollWhileActive?: boolean } = {}
+) {
   return useQuery({
     queryKey: agentThreadKeys.selfReview(threadId),
     queryFn: () => agentsApi.getSelfReview(threadId),
-    enabled: Boolean(threadId) && enabled,
+    enabled: Boolean(threadId),
+    refetchInterval: (query) =>
+      options.pollWhileActive ||
+      query.state.data?.reviews.some((review) => review.status !== "complete")
+        ? 3000
+        : false,
     retry: false,
   })
 }

@@ -1,6 +1,6 @@
 """Self-review findings for a PR Open SWE authored, kept off the PR itself.
 
-The record claims review ownership of a PR: while it exists, the webhook
+The record claims review ownership of a PR: while the claim holds, the webhook
 auto-reviewer stands down (``agent.webhooks.common.inline_review_owns_pr``) and
 the findings surface in the authoring thread instead of as GitHub review
 comments. That keeps a machine reviewing its own machine-written PR out of the
@@ -13,6 +13,7 @@ which is a filtered search.
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +32,12 @@ ReviewStatus = Literal["claimed", "reviewing", "complete"]
 SEVERITY_ORDER: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 MAX_INLINE_FINDINGS = 12
+
+# How long a claim suppresses the PR reviewer before the inline review has
+# finished. A run that opens the PR and then dies would otherwise hold the claim
+# forever and the PR would get no review at all, so the claim expires and the
+# normal reviewer takes over.
+CLAIM_GRACE = timedelta(minutes=30)
 
 _DISPOSITION_LABELS: dict[str, str] = {
     "pending": "not addressed yet",
@@ -90,6 +97,23 @@ class InlineReview(BaseModel):
 
     def finding(self, finding_id: str) -> InlineFinding | None:
         return next((f for f in self.findings if f.id == finding_id), None)
+
+    def suppresses_pr_review(self, *, now: datetime | None = None) -> bool:
+        """Whether this claim should keep the webhook reviewer off the PR.
+
+        A finished self-review owns the PR for good. An unfinished one owns it
+        only for ``CLAIM_GRACE``: past that the authoring run is presumed dead,
+        and no review at all is worse than a duplicate one.
+        """
+        if self.status == "complete":
+            return True
+        try:
+            updated = datetime.fromisoformat(self.updated_at)
+        except ValueError:
+            return False
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=UTC)
+        return (now or datetime.now(UTC)) - updated < CLAIM_GRACE
 
     def sorted_findings(self) -> list[InlineFinding]:
         return sorted(

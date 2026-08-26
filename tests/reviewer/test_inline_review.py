@@ -1,11 +1,13 @@
 """Tests for the self-review record, its tools, and the auto-review stand-down."""
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agent.review.inline_review import (
+    CLAIM_GRACE,
     INLINE_REVIEW_NAMESPACE,
     REVIEWS,
     InlineFinding,
@@ -206,6 +208,41 @@ async def test_gate_is_true_only_for_a_claimed_pr(fake_store: FakeStore) -> None
     assert await webhook_common.inline_review_owns_pr(repo_config, 7) is True
     assert await webhook_common.inline_review_owns_pr(repo_config, 8) is False
     assert await webhook_common.inline_review_owns_pr(repo_config, 0) is False
+
+
+def test_an_unfinished_claim_expires() -> None:
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    stale = InlineReview(
+        key="o/r#1",
+        status="reviewing",
+        updated_at=(now - CLAIM_GRACE - timedelta(minutes=1)).isoformat(),
+    )
+    fresh = InlineReview(key="o/r#1", status="claimed", updated_at=(now).isoformat())
+    finished = InlineReview(
+        key="o/r#1",
+        status="complete",
+        updated_at=(now - CLAIM_GRACE * 100).isoformat(),
+    )
+
+    assert stale.suppresses_pr_review(now=now) is False
+    assert fresh.suppresses_pr_review(now=now) is True
+    # A finished self-review owns the PR however long ago it ran.
+    assert finished.suppresses_pr_review(now=now) is True
+
+
+@pytest.mark.asyncio
+async def test_gate_releases_a_pr_whose_authoring_run_died(fake_store: FakeStore) -> None:
+    review = await _claim()
+    review.status = "reviewing"
+    await REVIEWS.save(review)
+    review.updated_at = (datetime.now(UTC) - CLAIM_GRACE - timedelta(minutes=1)).isoformat()
+    await REVIEWS.put(review.key, review)
+
+    owns = await webhook_common.inline_review_owns_pr(
+        {"owner": "langchain-ai", "name": "open-swe"}, 7
+    )
+
+    assert owns is False
 
 
 @pytest.mark.asyncio
