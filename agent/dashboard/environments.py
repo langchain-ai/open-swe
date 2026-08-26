@@ -16,8 +16,7 @@ is ready, so an environment resolves to exactly one live snapshot.
 A run uses the environment it selected — from the dashboard picker, or an
 ``env:<name>`` tag on the Slack message that opened the thread — and otherwise
 the one named ``default``. Nothing here is required: with no environment, or one
-whose snapshot is not ready, runs fall back to the per-repo snapshot and then to
-the configured base snapshot.
+whose snapshot is not ready, runs fall back to the configured base snapshot.
 """
 
 import json

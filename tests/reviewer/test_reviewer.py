@@ -158,7 +158,6 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
         "reviewer-thread-id",
         github_proxy_token="app-token",
         github_proxy_repositories=["repo"],
-        repo={"owner": "acme", "name": "repo"},
         allow_replacement=True,
     )
 

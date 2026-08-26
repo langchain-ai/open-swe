@@ -95,24 +95,10 @@ async def test_upsert_persists_and_returns_effective() -> None:
     assert result["effective_base_snapshot_id"] == "admin-snap"
 
 
-async def test_server_prefers_repo_snapshot_then_admin_base() -> None:
+async def test_server_uses_admin_base_snapshot() -> None:
     from agent import server
 
-    with (
-        patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
-        patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
-        ),
+    with patch.object(
+        server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
-
-    with (
-        patch.object(server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value=None),
-        patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
-        ),
-    ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "admin-snap"
-        assert await server._resolve_snapshot_id(None) == "admin-snap"
+        assert await server._resolve_snapshot_id() == "admin-snap"
