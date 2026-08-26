@@ -206,6 +206,46 @@ async def test_save_plan_reads_html_file_from_sandbox(
     }
 
 
+async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    save_plan_tool = importlib.import_module("agent.tools.save_plan")
+
+    saved: dict[str, Any] = {}
+
+    class _Backend:
+        async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
+            return {
+                "file_data": {
+                    "encoding": "utf-8",
+                    "content": "<h1>Plan</h1><script>go()</script>",
+                }
+            }
+
+    async def fake_backend(thread_id: str) -> _Backend:
+        return _Backend()
+
+    async def fake_save_content(thread_id: str, **kwargs: Any) -> None:
+        saved.update(kwargs)
+
+    monkeypatch.setattr(
+        save_plan_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "thread-1"}},
+    )
+    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
+    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
+
+    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-add-webhook-retries.html")
+
+    assert result["success"] is True
+    assert saved["html"].startswith("<!doctype html>")
+    assert "<title>Add webhook retries</title>" in saved["html"]
+    assert "<script>go()</script>" in saved["html"]
+
+
 async def test_save_plan_preserves_plan_mode_from_state_when_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -351,7 +391,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
     assert exc.value.status_code == 404
 
 
-async def test_list_workflow_approvals_returns_owner_and_records(
+async def test_list_workflow_approvals_returns_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent.dashboard import workflow_approval_api
@@ -379,7 +419,6 @@ async def test_list_workflow_approvals_returns_owner_and_records(
         "thread-1", {"sub": "octocat", "email": "octo@example.com"}
     )
 
-    assert result["isOwner"] is True
     assert result["approvals"][0]["fingerprint"] == "abc"
     assert result["approvals"][0]["diffStats"] == {"files": 1, "additions": 1, "deletions": 0}
 
@@ -643,7 +682,6 @@ async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyP
         session={"sub": "reviewer", "email": None, "name": "Reviewer"},
     )
 
-    assert result["isOwner"] is False
     assert result["approvedBy"] == {
         "id": "reviewer",
         "name": "Reviewer",
@@ -656,7 +694,6 @@ def _patch_update_plan_deps(
     monkeypatch: pytest.MonkeyPatch,
     *,
     metadata: dict[str, Any],
-    owner: bool,
     content: dict[str, Any],
     saved: dict[str, Any],
     sandbox: dict[str, Any],
@@ -690,13 +727,12 @@ def _patch_update_plan_deps(
         return plan_file_path or "/workspace/plans/fallback.html"
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: owner)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "save_plan_content", fake_save)
     monkeypatch.setattr(plan_api, "write_plan_to_sandbox", fake_write)
 
 
-async def test_update_plan_owner_saves_and_mirrors_sandbox(
+async def test_update_plan_saves_and_mirrors_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent.dashboard import plan_api
@@ -706,7 +742,6 @@ async def test_update_plan_owner_saves_and_mirrors_sandbox(
     _patch_update_plan_deps(
         monkeypatch,
         metadata={"plan_status": "ready"},
-        owner=True,
         content={
             "html": "old",
             "status": "ready",
@@ -727,25 +762,12 @@ async def test_update_plan_owner_saves_and_mirrors_sandbox(
     assert sandbox["plan_file_path"] == "/workspace/plans/2026-06-29-existing.html"
 
 
-async def test_update_plan_rejects_non_owner(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fastapi import HTTPException
-
-    from agent.dashboard import plan_api
-
-    _patch_update_plan_deps(monkeypatch, metadata={}, owner=False, content={}, saved={}, sandbox={})
-    with pytest.raises(HTTPException) as exc:
-        await plan_api.update_plan(
-            "t1", plan_api.PlanUpdate(html="x"), session={"sub": "b", "email": None}
-        )
-    assert exc.value.status_code == 403
-
-
 async def test_update_plan_rejects_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import HTTPException
 
     from agent.dashboard import plan_api
 
-    _patch_update_plan_deps(monkeypatch, metadata={}, owner=True, content={}, saved={}, sandbox={})
+    _patch_update_plan_deps(monkeypatch, metadata={}, content={}, saved={}, sandbox={})
     with pytest.raises(HTTPException) as exc:
         await plan_api.update_plan(
             "t1", plan_api.PlanUpdate(html="   "), session={"sub": "a", "email": None}
@@ -761,7 +783,6 @@ async def test_update_plan_blocked_once_approved(monkeypatch: pytest.MonkeyPatch
     _patch_update_plan_deps(
         monkeypatch,
         metadata={"plan_status": "approved"},
-        owner=True,
         content={"html": "old", "status": "approved"},
         saved={},
         sandbox={},
@@ -789,7 +810,7 @@ async def test_approve_plan_hides_unreadable_thread(monkeypatch: pytest.MonkeyPa
     assert exc.value.status_code == 404
 
 
-async def test_non_owner_can_approve_and_dispatch_published_html(
+async def test_any_participant_can_approve_and_dispatch_published_html(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent.dashboard import plan_api
@@ -821,7 +842,6 @@ async def test_non_owner_can_approve_and_dispatch_published_html(
         return {"run_id": "run-1"}
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
@@ -1005,7 +1025,6 @@ async def test_approve_plan_posts_slack_approval_notice(
         return {"run_id": "run-1"}
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
@@ -1065,7 +1084,6 @@ async def test_approve_plan_aborts_when_plan_read_fails(
         dispatched.append((a, k))
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
     monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
@@ -1094,7 +1112,6 @@ async def test_approve_plan_rejects_shared_content(
         dispatched.append((a, k))
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
 

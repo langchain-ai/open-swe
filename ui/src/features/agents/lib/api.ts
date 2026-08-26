@@ -143,6 +143,7 @@ export interface SidebarThreadsGroup {
 export interface SidebarThreads {
   active: SidebarThreadsGroup
   resolved: SidebarThreadsGroup
+  pinned?: Array<AgentThread>
 }
 
 const API_BASE = dashboardApiBase()
@@ -275,6 +276,10 @@ export const agentsApi = {
         body: JSON.stringify({ resolved }),
       }
     ),
+  pinThread: (threadId: string, pinned: boolean) =>
+    agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}/pin`, {
+      method: pinned ? "POST" : "DELETE",
+    }),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
   createSchedule: (body: ScheduleCreateRequest) =>
     agentsRequest<AgentSchedule>("/schedules", {

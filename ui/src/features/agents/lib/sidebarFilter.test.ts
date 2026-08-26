@@ -26,7 +26,6 @@ function makeThread(overrides: Partial<AgentThread> = {}): AgentThread {
     source: "dashboard",
     status: "idle",
     viewed: true,
-    isOwner: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     messages: [],
@@ -70,20 +69,6 @@ describe("filterThreads", () => {
     expect(
       filterThreads([ordinary, automation], filters({ sources: ["schedule"] }))
     ).toEqual([automation])
-  })
-
-  it("filters by ownership", () => {
-    const mine = makeThread({ isOwner: true })
-    const shared = makeThread({ isOwner: false })
-    const unknown = makeThread({ isOwner: undefined })
-    const all = [mine, shared, unknown]
-    expect(filterThreads(all, filters({ ownership: "mine" }))).toEqual([
-      mine,
-      unknown,
-    ])
-    expect(filterThreads(all, filters({ ownership: "shared" }))).toEqual([
-      shared,
-    ])
   })
 
   it("filters by status (multi-select)", () => {
@@ -249,13 +234,13 @@ describe("groupThreadsByMode", () => {
     ).toBeUndefined()
   })
 
-  it("buckets by date and drops empty buckets", () => {
+  it("buckets by last activity and drops empty buckets", () => {
     const now = Date.now()
     const sections = groupThreadsByMode(
       [
-        makeThread({ createdAt: now }),
-        makeThread({ createdAt: now - 3 * DAY }),
-        makeThread({ createdAt: now - 40 * DAY }),
+        makeThread({ createdAt: now - 40 * DAY, updatedAt: now }),
+        makeThread({ updatedAt: now - 3 * DAY }),
+        makeThread({ updatedAt: now - 40 * DAY }),
       ],
       "date"
     )
@@ -264,6 +249,14 @@ describe("groupThreadsByMode", () => {
     expect(sections.find((s) => s.key === "today")?.defaultCollapsed).toBe(
       false
     )
+  })
+
+  it("keeps creation order within a date bucket", () => {
+    const now = Date.now()
+    const older = makeThread({ createdAt: 1, updatedAt: now })
+    const newer = makeThread({ createdAt: 2, updatedAt: now - 1 })
+    const [section] = groupThreadsByMode([older, newer], "date")
+    expect(section?.threads).toEqual([newer, older])
   })
 
   it("groups by status in a fixed order", () => {
@@ -308,7 +301,6 @@ describe("hasActiveFilters", () => {
   })
 
   it("is true when any dimension changes", () => {
-    expect(hasActiveFilters(filters({ ownership: "mine" }))).toBe(true)
     expect(hasActiveFilters(filters({ statuses: ["running"] }))).toBe(true)
     expect(hasActiveFilters(filters({ includeAutomations: true }))).toBe(true)
     expect(hasActiveFilters(filters({ includeResolved: true }))).toBe(true)

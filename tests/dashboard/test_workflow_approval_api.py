@@ -1,35 +1,10 @@
 from agent.dashboard import workflow_approval_api
 
 
-async def test_list_workflow_push_approvals_returns_records_for_non_owner(monkeypatch) -> None:
+async def test_list_workflow_push_approvals_returns_records(monkeypatch) -> None:
     async def fake_thread_metadata(thread_id: str) -> dict:
         assert thread_id == "thread-1"
-        return {"source": "dashboard", "github_login": "owner"}
-
-    async def fake_get_workflow_push_approvals(thread_id: str) -> dict:
-        assert thread_id == "thread-1"
-        return {"fp-1": {"fingerprint": "fp-1", "status": "pending"}}
-
-    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_thread_metadata)
-    monkeypatch.setattr(
-        workflow_approval_api,
-        "get_workflow_push_approvals",
-        fake_get_workflow_push_approvals,
-    )
-
-    response = await workflow_approval_api.list_workflow_push_approvals(
-        "thread-1",
-        session={"sub": "other", "email": "other@example.com"},
-    )
-
-    assert response["isOwner"] is False
-    assert response["approvals"][0]["fingerprint"] == "fp-1"
-
-
-async def test_list_workflow_push_approvals_returns_records_for_owner(monkeypatch) -> None:
-    async def fake_thread_metadata(thread_id: str) -> dict:
-        assert thread_id == "thread-1"
-        return {"source": "dashboard", "github_login": "owner"}
+        return {"source": "dashboard"}
 
     async def fake_get_workflow_push_approvals(thread_id: str) -> dict:
         assert thread_id == "thread-1"
@@ -61,7 +36,6 @@ async def test_list_workflow_push_approvals_returns_records_for_owner(monkeypatc
     )
 
     assert response["threadId"] == "thread-1"
-    assert response["isOwner"] is True
     assert response["approvals"] == [
         {
             "fingerprint": "fp-1",

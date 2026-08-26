@@ -315,13 +315,20 @@ async def background_execute(
         state = await _execute(backend, _launch_command(task_id, command, timeout))
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
-            state["warning"] = "automatic completion monitoring is busy"
-        else:
-            try:
-                await ensure_background_task_cron(thread_id)
-            except Exception:
-                logger.warning("Failed to schedule background-task monitor", exc_info=True)
-                state["warning"] = "automatic completion monitoring could not be scheduled"
+            return {
+                "success": False,
+                **state,
+                "error": "command started, but automatic completion monitoring is busy",
+            }
+        try:
+            await ensure_background_task_cron(thread_id)
+        except Exception:
+            logger.warning("Failed to schedule background-task monitor", exc_info=True)
+            return {
+                "success": False,
+                **state,
+                "error": "command started, but automatic completion monitoring could not be scheduled",
+            }
         return {"success": True, **state}
     except Exception as exc:
         logger.exception("Failed to start background command")

@@ -1,9 +1,10 @@
 """Per-thread snapshot of the profile settings a conversation runs under.
 
-Threads are multi-party and long-lived: anyone can reply, and the owner can edit
-their dashboard profile at any time. Thread-level model and repository settings
-are therefore resolved once on the first run and stored on the thread. Sender
-identity, personal instructions, and PR preferences remain per-message context.
+Threads are multi-party and long-lived: anyone can reply, and any participant can
+edit their dashboard profile at any time. Thread-level model and repository
+settings are therefore resolved once on the first run and stored on the thread.
+Sender identity, personal instructions, and PR preferences remain per-message
+context.
 
 Later changes reach a thread only when something explicitly rewrites the
 snapshot, which today means a per-run model override.
@@ -22,7 +23,6 @@ _CACHE_TTL_SECONDS = 300
 
 
 class ThreadSettings(TypedDict, total=False):
-    owner_login: str | None
     model_id: str
     effort: str | None
     subagent_model_id: str
@@ -40,6 +40,7 @@ def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettin
         "commit_name",
         "commit_email",
         "display_name",
+        "owner_login",
     }
     changed = not removed.isdisjoint(value)
     for key in removed:
@@ -59,10 +60,6 @@ async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
         metadata = thread.get("metadata") or {}
         stored = metadata.get(THREAD_SETTINGS_KEY)
         settings: ThreadSettings = dict(stored) if isinstance(stored, dict) else {}  # type: ignore[assignment]
-        if not settings.get("owner_login"):
-            owner = metadata.get("github_login")
-            if isinstance(owner, str) and owner.strip():
-                settings["owner_login"] = owner.strip()
         return settings
 
     try:

@@ -7,7 +7,6 @@ interface InstructionsEditorProps {
   onChange: (value: string) => void
   disabled?: boolean
   placeholder?: string
-  language?: string
 }
 
 /** Monaco-backed code editor that falls back to a textarea before mount (SSR-safe). */
@@ -16,7 +15,6 @@ export function InstructionsEditor({
   onChange,
   disabled,
   placeholder,
-  language = "markdown",
 }: InstructionsEditorProps) {
   const mounted = useIsHydrated()
 
@@ -36,7 +34,7 @@ export function InstructionsEditor({
     <div className="overflow-hidden rounded-md border border-border">
       <Editor
         height="360px"
-        language={language}
+        language="markdown"
         value={value}
         onChange={(v) => onChange(v ?? "")}
         options={{

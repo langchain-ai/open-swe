@@ -54,7 +54,6 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
         None,
         thread_id=thread_id,
         github_proxy_repositories=None,
-        repo=None,
         environment_slug="large",
     )
     # The stale id is cleared by persisting the replacement, so later runs stop

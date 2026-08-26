@@ -20,7 +20,7 @@ export default defineConfig({
   use: {
     baseURL,
     // Locally, always capture the replayable artifacts: a trace (DOM snapshots,
-    // network, console, source — open with `npx playwright show-trace`) and a
+    // network, console, source — open with `pnpm exec playwright show-trace`) and a
     // screen recording. Recording costs real time per spec, so CI records
     // nothing on the first attempt and captures both on the retry a failure
     // gets. `retain-on-failure` would not do: it still records everything and
@@ -28,7 +28,7 @@ export default defineConfig({
     trace: process.env.CI ? "on-first-retry" : "on",
     video: process.env.CI ? "on-first-retry" : "on",
     screenshot: "only-on-failure",
-    // SLOW_MO=700 npx playwright test --headed  → watch it run in human time.
+    // SLOW_MO=700 pnpm exec playwright test --headed  → watch it run in human time.
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

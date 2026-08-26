@@ -8,13 +8,12 @@ import os
 import posixpath
 import shlex
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Query,
@@ -29,13 +28,10 @@ from ..utils.thread_ops import langgraph_url
 from ..utils.timing import server_timing_header
 from .admin import is_admin
 from .agent_instructions import (
+    AGENT_INSTRUCTIONS,
+    AgentInstructions,
     AgentInstructionsCreate,
     AgentInstructionsUpdate,
-    create_agent_instructions,
-    delete_agent_instructions,
-    get_agent_instructions,
-    list_agent_instructions,
-    set_agent_instructions,
 )
 from .agent_usage import list_agent_usage_leaderboard
 from .analyzer_cron import remove_continual_cron
@@ -111,20 +107,6 @@ from .repo_cache import (
     schedule_repo_cache_refresh,
     write_cached_repos,
 )
-from .repo_snapshots import (
-    RepoSnapshotConfigError,
-    RepoSnapshotCreate,
-    RepoSnapshotUpdate,
-    create_repo_snapshot,
-    delete_repo_snapshot,
-    generate_dockerfile_template,
-    get_repo_snapshot,
-    is_repo_snapshot_build_stale,
-    list_repo_snapshots,
-    mark_repo_snapshot_building,
-    run_snapshot_build,
-    update_repo_snapshot,
-)
 from .review_api import (
     create_review_comment,
     dry_run_trace_resolution,
@@ -151,14 +133,11 @@ from .review_style_jobs import (
     sync_review_style_run_status,
 )
 from .review_styles import (
+    REVIEW_STYLES,
+    ReviewStyle,
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
-    create_review_style,
-    delete_review_style,
-    get_review_style,
-    list_review_styles,
     normalize_repo_full_name,
-    set_custom_prompt,
 )
 from .sandbox_settings import (
     SandboxSettingsUpdate,
@@ -231,6 +210,7 @@ from .thread_api import (
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
+    pin_dashboard_thread,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
@@ -238,6 +218,7 @@ from .thread_api import (
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
+    unpin_dashboard_thread,
 )
 from .user_credentials import (
     CurrentsCredentialsUpdate,
@@ -333,6 +314,29 @@ async def _filter_repo_records_for_user(
             continue
         try:
             await require_repo_access_for_user(login, full_name)
+        except HTTPException as exc:
+            if exc.status_code in {403, 404}:
+                continue
+            raise
+        out.append(record)
+    return out
+
+
+class _RepoScopedRecord(Protocol):
+    full_name: str
+
+
+RepoRecordT = TypeVar("RepoRecordT", bound=_RepoScopedRecord)
+
+
+async def _filter_repo_models_for_user(
+    login: str,
+    records: list[RepoRecordT],
+) -> list[RepoRecordT]:
+    out: list[RepoRecordT] = []
+    for record in records:
+        try:
+            await require_repo_access_for_user(login, record.full_name)
         except HTTPException as exc:
             if exc.status_code in {403, 404}:
                 continue
@@ -952,87 +956,6 @@ async def api_set_sandbox_settings(
     return await upsert_sandbox_settings(body, updated_by=_admin.get("sub"))
 
 
-@router.get("/repo-snapshots")
-async def api_list_repo_snapshots(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> list[dict[str, Any]]:
-    return await list_repo_snapshots()
-
-
-@router.get("/repo-snapshots/template")
-async def api_repo_snapshot_template(
-    full_name: str,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, str]:
-    try:
-        return {"dockerfile": generate_dockerfile_template(normalize_repo_full_name(full_name))}
-    except RepoSnapshotConfigError as e:
-        raise HTTPException(500, str(e)) from e
-
-
-@router.post("/repo-snapshots")
-async def api_create_repo_snapshot(
-    body: RepoSnapshotCreate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    try:
-        return await create_repo_snapshot(body.full_name, _admin["sub"])
-    except RepoSnapshotConfigError as e:
-        raise HTTPException(500, str(e)) from e
-
-
-@router.get("/repo-snapshots/{full_name:path}")
-async def api_get_repo_snapshot(
-    full_name: str,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    record = await get_repo_snapshot(normalize_repo_full_name(full_name))
-    if not record:
-        raise HTTPException(404, "repo snapshot not found")
-    return record
-
-
-@router.put("/repo-snapshots/{full_name:path}")
-async def api_update_repo_snapshot(
-    full_name: str,
-    body: RepoSnapshotUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await update_repo_snapshot(normalize_repo_full_name(full_name), body)
-
-
-@router.post("/repo-snapshots/{full_name:path}/build")
-async def api_build_repo_snapshot(
-    full_name: str,
-    background_tasks: BackgroundTasks,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    full_name = normalize_repo_full_name(full_name)
-    record = await get_repo_snapshot(full_name)
-    if not record:
-        raise HTTPException(404, "repo snapshot not found")
-    if not (record.get("dockerfile") or "").strip():
-        raise HTTPException(400, "dockerfile is empty")
-    if record.get("status") == "building" and not is_repo_snapshot_build_stale(record):
-        raise HTTPException(409, "a build is already in progress")
-    record = await mark_repo_snapshot_building(full_name)
-    background_tasks.add_task(run_snapshot_build, full_name)
-    return record
-
-
-@router.delete("/repo-snapshots/{full_name:path}")
-async def api_delete_repo_snapshot(
-    full_name: str,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> Response:
-    full_name = normalize_repo_full_name(full_name)
-    record = await get_repo_snapshot(full_name)
-    if not record:
-        raise HTTPException(404, "repo snapshot not found")
-    await delete_repo_snapshot(full_name)
-    return Response(status_code=204)
-
-
 def _normalized_slug(raw: str) -> str:
     try:
         return slugify(raw)
@@ -1332,16 +1255,14 @@ async def list_repos(
 @router.get("/review-styles")
 async def api_list_review_styles(
     session: dict[str, Any] = _SESSION_DEP,
-) -> list[dict[str, Any]]:
-    records = await _filter_repo_records_for_user(session["sub"], await list_review_styles())
-    out: list[dict[str, Any]] = []
-    for record in records:
-        if record.get("status") == "running":
-            synced = await sync_review_style_run_status(record["full_name"])
-            out.append(synced)
-        else:
-            out.append(record)
-    return out
+) -> list[ReviewStyle]:
+    records = await _filter_repo_models_for_user(session["sub"], await REVIEW_STYLES.list_all())
+    return [
+        await sync_review_style_run_status(record.full_name)
+        if record.status == "running"
+        else record
+        for record in records
+    ]
 
 
 REVIEWS_PAGE_SIZE = 20
@@ -1641,22 +1562,22 @@ async def api_review_chat_history(
 async def api_create_review_style(
     body: ReviewStyleCreate,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> ReviewStyle:
     await require_repo_access_for_user(session["sub"], body.full_name)
-    return await create_review_style(body.full_name, session["sub"])
+    return await REVIEW_STYLES.create(body.full_name, session["sub"])
 
 
 @router.get("/review-styles/{full_name:path}")
 async def api_get_review_style(
     full_name: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> ReviewStyle:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
-    record = await get_review_style(full_name)
+    record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    if record.get("status") == "running":
+    if record.status == "running":
         record = await sync_review_style_run_status(full_name)
     return record
 
@@ -1666,28 +1587,27 @@ async def api_update_review_style_prompt(
     full_name: str,
     body: ReviewStylePromptUpdate,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> ReviewStyle:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
-    record = await get_review_style(full_name)
-    if not record:
+    if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
-    return await set_custom_prompt(full_name, body.custom_prompt)
+    return await REVIEW_STYLES.set_custom_prompt(full_name, body.custom_prompt)
 
 
 @router.post("/review-styles/{full_name:path}/analyze")
 async def api_analyze_review_style(
     full_name: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> ReviewStyle:
     full_name = normalize_repo_full_name(full_name)
     token = await require_repo_access_for_user(session["sub"], full_name)
-    record = await get_review_style(full_name)
-    if not record:
-        record = await create_review_style(full_name, session["sub"])
-    if record.get("status") == "running":
+    record = await REVIEW_STYLES.get(full_name) or await REVIEW_STYLES.create(
+        full_name, session["sub"]
+    )
+    if record.status == "running":
         record = await sync_review_style_run_status(full_name)
-        if record.get("status") == "running":
+        if record.status == "running":
             raise HTTPException(409, "analysis already running")
     return await start_bootstrap_analysis(
         full_name,
@@ -1700,11 +1620,10 @@ async def api_analyze_review_style(
 async def api_cancel_review_style(
     full_name: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> ReviewStyle:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
-    record = await get_review_style(full_name)
-    if not record:
+    if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
     return await cancel_review_style_analysis(full_name)
 
@@ -1716,40 +1635,40 @@ async def api_delete_review_style(
 ) -> Response:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
-    record = await get_review_style(full_name)
+    record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    if record.get("status") == "running":
+    if record.status == "running":
         await cancel_review_style_analysis(full_name)
     await remove_continual_cron(full_name)
-    await delete_review_style(full_name)
+    await REVIEW_STYLES.delete(full_name)
     return Response(status_code=204)
 
 
 @router.get("/agent-instructions")
 async def api_list_agent_instructions(
     session: dict[str, Any] = _SESSION_DEP,
-) -> list[dict[str, Any]]:
-    return await _filter_repo_records_for_user(session["sub"], await list_agent_instructions())
+) -> list[AgentInstructions]:
+    return await _filter_repo_models_for_user(session["sub"], await AGENT_INSTRUCTIONS.list_all())
 
 
 @router.post("/agent-instructions")
 async def api_create_agent_instructions(
     body: AgentInstructionsCreate,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> AgentInstructions:
     await require_repo_access_for_user(session["sub"], body.full_name)
-    return await create_agent_instructions(body.full_name, session["sub"])
+    return await AGENT_INSTRUCTIONS.create(body.full_name, session["sub"])
 
 
 @router.get("/agent-instructions/{full_name:path}")
 async def api_get_agent_instructions(
     full_name: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> AgentInstructions:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
-    record = await get_agent_instructions(full_name)
+    record = await AGENT_INSTRUCTIONS.get(full_name)
     if not record:
         raise HTTPException(404, "agent instructions not found")
     return record
@@ -1760,10 +1679,10 @@ async def api_update_agent_instructions(
     full_name: str,
     body: AgentInstructionsUpdate,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> AgentInstructions:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
-    return await set_agent_instructions(full_name, body.instructions)
+    return await AGENT_INSTRUCTIONS.set_instructions(full_name, body.instructions)
 
 
 @router.delete("/agent-instructions/{full_name:path}")
@@ -1773,10 +1692,10 @@ async def api_delete_agent_instructions(
 ) -> Response:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
-    record = await get_agent_instructions(full_name)
+    record = await AGENT_INSTRUCTIONS.get(full_name)
     if not record:
         raise HTTPException(404, "agent instructions not found")
-    await delete_agent_instructions(full_name)
+    await AGENT_INSTRUCTIONS.delete(full_name)
     return Response(status_code=204)
 
 
@@ -1955,6 +1874,24 @@ async def api_list_threads_sidebar(
     header = server_timing_header(timings, counts)
     logger.info("thread sidebar timings login=%s %s", session["sub"], header)
     return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.post("/threads/{thread_id}/pin", status_code=204)
+async def api_pin_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await pin_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
+
+
+@router.delete("/threads/{thread_id}/pin", status_code=204)
+async def api_unpin_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await unpin_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
 
 
 @router.get("/threads/page")

@@ -52,8 +52,7 @@ export function AgentGitPanel({
     if (revealChangesKey > 0) openSurface(threadRef, "diff")
   }, [openSurface, revealChangesKey, threadRef])
 
-  const terminalAvailable =
-    thread.isOwner !== false && Boolean(thread.sandboxId)
+  const terminalAvailable = Boolean(thread.sandboxId)
 
   // Served from GitHub, so it needs a repository — with or without a PR.
   const branchScopeAvailable =
@@ -114,8 +113,7 @@ export function AgentGitPanel({
 
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
-  const canDownloadRecovery =
-    thread.status !== "running" && thread.isOwner !== false
+  const canDownloadRecovery = thread.status !== "running"
   const downloadRecoveryPatch = useCallback(async () => {
     setRecoveringPatch(true)
     setRecoveryError(null)

@@ -6,6 +6,7 @@ from typing import Any, Literal
 from langgraph.config import get_config
 
 from ..baby_sit import record_retry, start_watch, stop_watch, watch_key
+from ..source_context import SourceContext
 from ..utils.auth import resolve_github_token
 from ..utils.github_app import get_github_app_installation_id_for_repo
 from ..utils.github_ci import fetch_pr
@@ -47,13 +48,13 @@ def _run_config(configurable: dict[str, Any], thread_id: str) -> dict[str, Any]:
     return result
 
 
-def _source_context(configurable: dict[str, Any]) -> dict[str, Any]:
-    context: dict[str, Any] = {}
-    for key in ("slack_thread", "linear_issue", "github_issue"):
-        value = configurable.get(key)
-        if isinstance(value, Mapping):
-            context[key] = dict(value)
-    return context
+def _source_context(configurable: dict[str, Any]) -> SourceContext:
+    raw = {
+        key: dict(value)
+        for key in ("slack_thread", "linear_issue", "github_issue")
+        if isinstance(value := configurable.get(key), Mapping)
+    }
+    return SourceContext.parse(raw)
 
 
 async def manage_baby_sit(
@@ -78,10 +79,10 @@ async def manage_baby_sit(
 
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if action == "stop":
-        from ..baby_sit import get_watch
+        from ..baby_sit import WATCHES
 
-        watch = await get_watch(key)
-        if watch and watch.get("thread_id") != thread_id:
+        watch = await WATCHES.get(key)
+        if watch and watch.thread_id != thread_id:
             return {"success": False, "error": "This watch belongs to another agent thread"}
         stopped = await stop_watch(key)
         return {"success": True, "stopped": stopped, "watch_key": key}
@@ -143,9 +144,9 @@ async def manage_baby_sit(
         return {"success": False, "error": f"Could not start baby-sit watch: {exc}"}
     return {
         "success": True,
-        "watch_key": watch["key"],
-        "pr_url": watch["pr_url"],
-        "head_sha": watch["head_sha"],
+        "watch_key": watch.key,
+        "pr_url": watch.pr_url,
+        "head_sha": watch.head_sha,
         "poll_schedule": "every 10 minutes",
         "webhook_first": True,
     }
