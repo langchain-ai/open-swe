@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 CODE_CHANNEL_SESSION_TS = "0"
 VIEW_CONTENT_MAX_BYTES = 1_000_000
-VIEW_CONTENT_MAX_CHARS = VIEW_CONTENT_MAX_BYTES
 
 SessionStatus = Literal["processing", "active", "suspended", "closed"]
 ViewType = Literal["html", "diff", "block_kit", "canvas"]
@@ -99,17 +98,6 @@ async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | 
             logger.warning("Slack %s failed: %s", method, error)
             return None, error
         return data, None
-
-
-async def _call_canvas_method(
-    method: str, payload: dict[str, Any]
-) -> tuple[dict[str, Any] | None, str | None]:
-    data, error = await _call(method, payload)
-    if error not in {"invalid_arguments", "missing_required_arg"}:
-        return data, error
-    legacy_payload = dict(payload)
-    legacy_payload["channel"] = legacy_payload.pop("channel_id")
-    return await _call(method, legacy_payload)
 
 
 def _content_error(content: str) -> str | None:
@@ -426,24 +414,6 @@ async def set_view(
     return await _call("agents.conversations.setView", payload)
 
 
-async def set_diff_view(
-    channel_id: str,
-    content: str,
-    *,
-    base_branch: str = "",
-    head_branch: str = "",
-) -> tuple[bool, str | None]:
-    """Create or replace the singleton diff tab on a code channel."""
-    _, error = await set_view(
-        channel_id,
-        "diff",
-        content=content,
-        base_branch=base_branch,
-        head_branch=head_branch,
-    )
-    return error is None, error
-
-
 async def list_views(
     channel_id: str,
 ) -> tuple[list[dict[str, Any]] | None, str | None]:
@@ -471,7 +441,7 @@ async def get_canvas(
 ) -> tuple[dict[str, Any] | None, str | None]:
     if not canvas_id:
         return None, "canvas_id_required"
-    return await _call_canvas_method(
+    return await _call(
         "agents.conversations.getCanvas",
         {
             "channel_id": channel_id,
@@ -489,7 +459,7 @@ async def set_canvas_content(
         return None, "canvas_id_required"
     if error := _content_error(content):
         return None, error
-    return await _call_canvas_method(
+    return await _call(
         "agents.conversations.setCanvasContent",
         {"channel_id": channel_id, "canvas_id": canvas_id, "content": content},
     )

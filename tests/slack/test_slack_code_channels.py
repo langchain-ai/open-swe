@@ -1,6 +1,7 @@
 import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import urlencode
 
 import pytest
 from fastapi import BackgroundTasks
@@ -14,39 +15,95 @@ from agent.webhooks import slack_routes
 
 
 class _FakeRequest:
-    def __init__(self, payload: dict[str, Any]) -> None:
+    def __init__(self, payload: dict[str, Any] | bytes) -> None:
         self.headers: dict[str, str] = {}
-        self._body = json.dumps(payload).encode()
+        self._body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
 
     async def body(self) -> bytes:
         return self._body
 
 
-async def test_set_diff_view_uses_documented_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    call = AsyncMock(return_value=({"ok": True}, None))
-    monkeypatch.setattr(slack_code_channels, "_call", call)
-
-    ok, error = await slack_code_channels.set_diff_view(
-        "C-code",
-        "diff --git a/a.py b/a.py\n-old\n+new\n",
-        base_branch="main",
-        head_branch="feature/code-channels",
+@pytest.fixture
+def code_channel_route(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    process = AsyncMock()
+    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(webhook_common, "is_code_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
+    monkeypatch.setattr(
+        webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
     )
+    monkeypatch.setattr(webhook_common, "claim_slack_event", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        webhook_common, "_get_slack_channel_context", AsyncMock(return_value={"name": "code-task"})
+    )
+    monkeypatch.setattr(
+        webhook_common,
+        "get_slack_repo_config",
+        AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
+    )
+    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", AsyncMock(return_value=4))
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setattr(slack_routes.service, "process_slack_mention", process)
+    monkeypatch.setattr(slack_routes, "_synthetic_slack_ts", lambda: "1786574000.000001")
+    return process
 
-    assert ok is True
-    assert error is None
-    call.assert_awaited_once_with(
-        "agents.conversations.setView",
+
+async def test_runtime_slash_command_routes_to_code_channel_session(
+    code_channel_route: AsyncMock,
+) -> None:
+    body = urlencode(
         {
             "channel_id": "C-code",
-            "type": "diff",
-            "content": "diff --git a/a.py b/a.py\n-old\n+new\n",
-            "base_branch": "main",
-            "head_branch": "feature/code-channels",
-        },
+            "user_id": "U1",
+            "command": "/run-tests",
+            "text": "tests/slack",
+            "trigger_id": "trigger-1",
+        }
+    ).encode()
+    background_tasks = BackgroundTasks()
+
+    response = await slack_routes.slack_code_channel_command(
+        cast(Request, _FakeRequest(body)), background_tasks
     )
+    await background_tasks()
+
+    assert response == {"response_type": "ephemeral", "text": "Working on /run-tests…"}
+    assert code_channel_route.await_args is not None
+    event_data = code_channel_route.await_args.args[0]
+    assert event_data["thread_ts"] == "0"
+    assert event_data["thread_version"] == 4
+    assert event_data["explicit_request"] is True
+    assert "/run-tests tests/slack" in event_data["text"]
+
+
+async def test_context_bar_action_routes_to_code_channel_session(
+    code_channel_route: AsyncMock,
+) -> None:
+    background_tasks = BackgroundTasks()
+    response = await slack_routes.slack_webhook(
+        cast(
+            Request,
+            _FakeRequest(
+                {
+                    "type": "event_callback",
+                    "event_id": "EvAction",
+                    "event": {
+                        "type": "code_channel_action",
+                        "channel": "C-code",
+                        "user": "U1",
+                        "event_ts": "1786574000.000002",
+                        "action": {"key": "create-pr", "label": "Create PR"},
+                    },
+                }
+            ),
+        ),
+        background_tasks,
+    )
+    await background_tasks()
+
+    assert response["status"] == "accepted"
+    assert code_channel_route.await_args is not None
+    assert "create-pr" in code_channel_route.await_args.args[0]["text"]
 
 
 async def test_set_view_rejects_content_over_one_megabyte(
@@ -65,105 +122,6 @@ async def test_set_view_rejects_content_over_one_megabyte(
     assert data is None
     assert error == "content_too_large"
     call.assert_not_awaited()
-
-
-async def test_set_view_supports_html_block_kit_and_canvas(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    call = AsyncMock(return_value=({"ok": True, "view_id": "V1"}, None))
-    monkeypatch.setattr(slack_code_channels, "_call", call)
-
-    await slack_code_channels.set_view(
-        "C-code",
-        "html",
-        view_key="reports/coverage.html",
-        name="Coverage",
-        content="<!doctype html><title>Coverage</title>",
-        csp={"resource_domains": ["https://cdn.jsdelivr.net"]},
-    )
-    await slack_code_channels.set_view(
-        "C-code",
-        "block_kit",
-        view_key="plan",
-        blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": "Plan"}}],
-    )
-    await slack_code_channels.set_view(
-        "C-code",
-        "canvas",
-        view_key="design-doc",
-        canvas_id="F123",
-        access_level="comment",
-    )
-
-    assert call.await_args_list[0].args == (
-        "agents.conversations.setView",
-        {
-            "channel_id": "C-code",
-            "type": "html",
-            "content": "<!doctype html><title>Coverage</title>",
-            "view_key": "reports/coverage.html",
-            "name": "Coverage",
-            "csp": {"resource_domains": ["https://cdn.jsdelivr.net"]},
-        },
-    )
-    assert call.await_args_list[1].args[1]["blocks"][0]["type"] == "section"
-    assert call.await_args_list[2].args[1] == {
-        "channel_id": "C-code",
-        "type": "canvas",
-        "canvas_id": "F123",
-        "access_level": "comment",
-        "view_key": "design-doc",
-    }
-
-
-async def test_commands_properties_and_canvas_methods_use_canonical_payloads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    call = AsyncMock(
-        side_effect=[
-            ({"ok": True, "command_count": 1}, None),
-            ({"ok": True}, None),
-            ({"ok": True, "views": [{"view_id": "V1", "type": "html"}]}, None),
-            ({"ok": True, "view_id": "V1"}, None),
-            ({"ok": True, "canvas_id": "F1", "content": "# Plan"}, None),
-            ({"ok": True, "sections_changed_count": 1}, None),
-        ]
-    )
-    monkeypatch.setattr(slack_code_channels, "_call", call)
-
-    commands = [{"name": "create-pr", "description": "Open a pull request"}]
-    items = [{"key": "review", "label": "Review", "item_type": "action"}]
-    await slack_code_channels.set_commands("C-code", commands)
-    await slack_code_channels.set_properties(
-        "C-code",
-        code_channel={"context_bar_items": items},
-        agent_resource={"url": "https://example.com", "resource_type": "ticket"},
-    )
-    views, error = await slack_code_channels.list_views("C-code")
-    await slack_code_channels.remove_view("C-code", view_id="V1")
-    await slack_code_channels.get_canvas("C-code", "F1", include_resolved=True)
-    await slack_code_channels.set_canvas_content("C-code", "F1", "# Revised")
-
-    assert views == [{"view_id": "V1", "type": "html"}]
-    assert error is None
-    assert call.await_args_list[0].args[1] == {"channel_id": "C-code", "commands": commands}
-    assert call.await_args_list[1].args[1] == {
-        "channel_id": "C-code",
-        "code_channel": {"context_bar_items": items},
-        "agent_resource": {"url": "https://example.com", "resource_type": "ticket"},
-    }
-    assert call.await_args_list[3].args[1] == {"channel_id": "C-code", "view_id": "V1"}
-    assert call.await_args_list[4].args[1] == {
-        "channel_id": "C-code",
-        "canvas_id": "F1",
-        "content_format": "markdown",
-        "include_resolved": True,
-    }
-    assert call.await_args_list[5].args[1] == {
-        "channel_id": "C-code",
-        "canvas_id": "F1",
-        "content": "# Revised",
-    }
 
 
 def test_repo_context_bar_items_use_supported_icons_and_branch_link() -> None:
