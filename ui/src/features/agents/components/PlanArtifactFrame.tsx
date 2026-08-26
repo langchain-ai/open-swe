@@ -211,7 +211,7 @@ function withViewerPolicy(
     "connect-src 'none'",
   ].join("; ")
   const head = `<meta http-equiv="Content-Security-Policy" content="${policy}"><style>::highlight(plan-comments){background:#facc15;color:inherit}.plan-annotation-marker{position:fixed;z-index:2147483647;width:24px;height:24px;padding:0;border:2px solid white;border-radius:999px;background:#2563eb;color:white;font:700 12px/20px system-ui;box-shadow:0 2px 8px #0005;cursor:pointer}.plan-annotation-marker-active{animation:plan-comment-pulse 1.2s ease-out}@keyframes plan-comment-pulse{0%{box-shadow:0 0 0 0 #2563ebaa}100%{box-shadow:0 0 0 12px transparent}}</style>`
-  const script = `<script nonce="${nonce}">${frameScript(channel)}<\/script>`
+  const script = `<script nonce="${nonce}">${frameScript(channel)}</script>`
   const themed = html
     .replace(
       /<meta\s+[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi,

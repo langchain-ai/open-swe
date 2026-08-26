@@ -54,13 +54,13 @@ def test_format_comments_includes_selected_quote() -> None:
 
 
 def test_format_comments_empty() -> None:
-    from agent.dashboard.plan_api import CommentBody, _format_comments
+    from agent.dashboard.plan_api import CommentBody, TextAnchor, _format_comments
 
     assert _format_comments([]) == ""
     with pytest.raises(ValueError, match="anchor range"):
         CommentBody(
             body="comment",
-            anchor={"exact": "text", "prefix": "", "suffix": "", "start": 0, "end": 3},
+            anchor=TextAnchor(exact="text", prefix="", suffix="", start=0, end=3),
         )
 
 

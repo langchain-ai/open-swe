@@ -230,7 +230,9 @@ test.describe("Plan review", () => {
     await expect(owner.getByTestId("plan-comments")).toBeVisible();
 
     // Highlight text in the sandboxed HTML preview and attach a comment.
-    const verificationHeading = ownerArtifact.contentFrame().getByText("Verification");
+    const verificationHeading = ownerArtifact
+      .contentFrame()
+      .getByText("Verification");
     await verificationHeading.evaluate((element) => {
       const range = document.createRange();
       range.selectNodeContents(element);
@@ -242,7 +244,9 @@ test.describe("Plan review", () => {
     await expect(owner.getByTestId("comment-composer")).toContainText(
       "Verification",
     );
-    await owner.getByTestId("comment-input").fill("Clarify the expected output.");
+    await owner
+      .getByTestId("comment-input")
+      .fill("Clarify the expected output.");
     await owner.getByTestId("comment-submit").click();
     await expect(owner.getByTestId("plan-comment")).toContainText(
       "Clarify the expected output.",

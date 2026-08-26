@@ -178,7 +178,9 @@ describe("PlanReview", () => {
     )
     fireEvent.click(requestChanges)
 
-    await waitFor(() => expect(mocks.rejectPlan).toHaveBeenCalledWith("thread-1"))
+    await waitFor(() =>
+      expect(mocks.rejectPlan).toHaveBeenCalledWith("thread-1")
+    )
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/agents/$threadId",
       params: { threadId: "thread-1" },

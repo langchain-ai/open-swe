@@ -130,7 +130,9 @@ export function PlanReview({
 
   const openComment = useCallback((id: string) => {
     setFocusComment({ id, key: Date.now() })
-    commentRefs.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+    commentRefs.current
+      .get(id)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" })
   }, [])
 
   const approve = useCallback(async () => {
@@ -319,7 +321,8 @@ export function PlanReview({
                             <article
                               key={comment.id}
                               ref={(element) => {
-                                if (element) commentRefs.current.set(comment.id, element)
+                                if (element)
+                                  commentRefs.current.set(comment.id, element)
                                 else commentRefs.current.delete(comment.id)
                               }}
                               data-testid="plan-comment"
@@ -338,7 +341,7 @@ export function PlanReview({
                                     {comment.anchor.exact}
                                   </blockquote>
                                 )}
-                                <span className="mt-2 block whitespace-pre-wrap text-sm">
+                                <span className="mt-2 block text-sm whitespace-pre-wrap">
                                   {comment.body}
                                 </span>
                               </button>
