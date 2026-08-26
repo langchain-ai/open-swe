@@ -51,6 +51,10 @@ async def _capture_create_deep_agent_kwargs(
         captured.update(kwargs)
         return _DummyAgent()
 
+    def fake_make_model(model_id: str, **kwargs: object) -> MagicMock:
+        captured.setdefault("make_model_calls", []).append((model_id, kwargs))
+        return MagicMock()
+
     clear_sandbox_backend(thread_id)
     with (
         patch(
@@ -81,7 +85,7 @@ async def _capture_create_deep_agent_kwargs(
             return_value=thread_settings or {},
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[MagicMock(), MagicMock()]),
+        patch("agent.server.make_model", side_effect=fake_make_model),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
@@ -195,6 +199,24 @@ async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     assert isinstance(backend, CompositeBackend)
     assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
     assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
+
+
+@pytest.mark.asyncio
+async def test_desktop_agent_honors_gateway_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
+    config = _base_config()
+    config.setdefault("configurable", {}).update(
+        {"source": "desktop", "local_project_path": "/tmp"}
+    )
+    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+        captured = await _capture_create_deep_agent_kwargs(config)
+
+    calls = captured["make_model_calls"]
+    assert isinstance(calls, list)
+    assert calls
+    assert all(kwargs["use_gateway"] is True for _, kwargs in calls)
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ const {
   localBackendTarget,
   modelCredentialStatus,
   packagedBackendTarget,
+  resolveGatewayEnvironment,
 } = require("../src/backend-supervisor.cjs");
 
 test("development target runs the repository LangGraph app through uv", () => {
@@ -75,6 +76,112 @@ test("reports whether the selected provider is configured", () => {
     available: true,
     variable: null,
   });
+  for (const provider of ["openai", "anthropic", "fireworks", "google_genai"]) {
+    assert.deepEqual(
+      modelCredentialStatus(`${provider}:test`, {
+        LANGSMITH_GATEWAY_API_KEY: "gateway-key",
+        LANGSMITH_GATEWAY_ENABLED: "true",
+      }),
+      { available: true, variable: null },
+    );
+  }
+  assert.deepEqual(
+    modelCredentialStatus("anthropic:test", {
+      LANGSMITH_GATEWAY_API_KEY: "gateway-key",
+      LANGSMITH_GATEWAY_ENABLED: "false",
+    }),
+    { available: false, variable: "ANTHROPIC_API_KEY" },
+  );
+});
+
+test("loads the managed macOS gateway key for the local backend", () => {
+  const calls = [];
+  const resolved = resolveGatewayEnvironment(
+    {},
+    {
+      platform: "darwin",
+      execFileSync: (...args) => {
+        calls.push(args);
+        return "managed-key\n";
+      },
+    },
+  );
+
+  assert.deepEqual(resolved, {
+    LANGSMITH_GATEWAY_API_KEY: "managed-key",
+    LANGSMITH_GATEWAY_ENABLED: "true",
+  });
+  assert.deepEqual(calls[0].slice(0, 2), [
+    "/bin/launchctl",
+    ["getenv", "LC_GATEWAY_KEY"],
+  ]);
+});
+
+test("supervisor reports a managed gateway credential", () => {
+  const supervisor = new BackendSupervisor({
+    env: {},
+    gatewayEnvironment: {
+      platform: "darwin",
+      execFileSync: () => "managed-key\n",
+    },
+  });
+
+  assert.deepEqual(supervisor.credentialStatus("anthropic:test"), {
+    available: true,
+    variable: null,
+  });
+});
+
+test("preserves explicit desktop gateway configuration", () => {
+  assert.deepEqual(
+    resolveGatewayEnvironment(
+      {
+        LANGSMITH_GATEWAY_API_KEY: "explicit-key",
+        LANGSMITH_GATEWAY_ENABLED: "false",
+      },
+      {
+        platform: "darwin",
+        execFileSync: () => assert.fail("must not probe launchctl"),
+      },
+    ),
+    {},
+  );
+  assert.deepEqual(
+    resolveGatewayEnvironment(
+      { LANGSMITH_GATEWAY_ENABLED: "false" },
+      { platform: "darwin", execFileSync: () => "managed-key\n" },
+    ),
+    { LANGSMITH_GATEWAY_API_KEY: "managed-key" },
+  );
+});
+
+test("ignores unavailable managed gateway keys", () => {
+  assert.deepEqual(
+    resolveGatewayEnvironment(
+      {},
+      { platform: "linux", execFileSync: () => assert.fail("macOS only") },
+    ),
+    {},
+  );
+  assert.deepEqual(
+    resolveGatewayEnvironment(
+      {},
+      { platform: "darwin", execFileSync: () => "\n" },
+    ),
+    {},
+  );
+  assert.deepEqual(
+    resolveGatewayEnvironment(
+      {},
+      {
+        platform: "darwin",
+        execFileSync: () => {
+          throw new Error("not managed");
+        },
+      },
+    ),
+    {},
+  );
 });
 
 test("creates the local LangGraph thread before stream hydration", async () => {
