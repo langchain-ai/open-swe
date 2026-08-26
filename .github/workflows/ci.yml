@@ -42,14 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      - uses: actions/setup-node@v7.0.0
-        with:
-          node-version: 24
-      - run: corepack enable
       - name: Install dependencies
-        run: |
-          uv sync --locked --extra dev
-          pnpm install --frozen-lockfile --filter open-swe
+        run: uv sync --locked --extra dev
       - name: Run typecheck
         run: make typecheck
 

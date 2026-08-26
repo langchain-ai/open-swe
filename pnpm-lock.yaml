@@ -28,9 +28,6 @@ importers:
       '@tanstack/eslint-plugin-router':
         specifier: ^1.162.0
         version: 1.162.0(eslint@10.8.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@5.9.3)
-      basedpyright:
-        specifier: 1.39.10
-        version: 1.39.10
       oxfmt:
         specifier: ^0.64.0
         version: 0.64.0
@@ -2653,11 +2650,6 @@ packages:
 
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
-
-  basedpyright@1.39.10:
-    resolution: {integrity: sha512-9NTfbegeSey8Trhaf+Tr8++Uo/UFCtsUMzpvXA/seDfSTN3kOwfmPJ4lf/tjxPjVlr/fsHo34W9/qW+ZF+b6kg==}
-    engines: {node: '>=14.0.0'}
-    hasBin: true
 
   baseline-browser-mapping@2.11.13:
     resolution: {integrity: sha512-k9HNuUVMlqVjQ9UHzfPjIqiDbWw7WqT1AoT7GL8VwvF3r0ZfArtgiSPAlmupyNquNgOJHTuH4CKYf8ttMTWBTQ==}
@@ -8390,10 +8382,6 @@ snapshots:
   balanced-match@4.0.4: {}
 
   base64-js@1.5.1: {}
-
-  basedpyright@1.39.10:
-    optionalDependencies:
-      fsevents: 2.3.3
 
   baseline-browser-mapping@2.11.13: {}
 
