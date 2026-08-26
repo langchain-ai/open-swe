@@ -68,6 +68,7 @@ from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .pull_request_status import get_pull_request_statuses
 from .team_settings import get_team_default_model, get_team_fable_enabled
+from .thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
 
@@ -930,6 +931,32 @@ async def _sidebar_active_thread_summary(
     return summary, _is_thread_resolved(metadata)
 
 
+async def _pinned_thread_summaries(
+    client: Any,
+    login: str,
+    email: str | None,
+) -> list[dict[str, Any]]:
+    async def load(thread_id: str) -> dict[str, Any] | None:
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
+            return None
+        if not isinstance(thread, Mapping) or not _thread_is_readable(_thread_metadata(thread)):
+            return None
+        return await _summarize_thread(
+            client,
+            thread,
+            owner_login=login,
+            owner_email=email,
+        )
+
+    summaries = await asyncio.gather(
+        *(load(thread_id) for thread_id in await list_thread_pin_ids(login))
+    )
+    return [summary for summary in summaries if summary is not None]
+
+
 async def list_dashboard_threads_sidebar(
     login: str,
     *,
@@ -998,7 +1025,7 @@ async def list_dashboard_threads_sidebar(
     )
     count_record["threads"] = len(active_window) + len(resolved_window)
     with phase(record, "summarize"):
-        active_items, resolved_items, active_thread = await asyncio.gather(
+        active_items, resolved_items, active_thread, pinned_items = await asyncio.gather(
             _summarize_threads(
                 client,
                 active_window,
@@ -1014,6 +1041,7 @@ async def list_dashboard_threads_sidebar(
                 visible_thread_ids=active_ids,
                 include_all=include_all,
             ),
+            _pinned_thread_summaries(client, login, email),
         )
     active_has_more = len(active_candidates) > safe_active_limit
     resolved_has_more = len(resolved_candidates) > safe_resolved_limit
@@ -1052,7 +1080,24 @@ async def list_dashboard_threads_sidebar(
             "limit": safe_resolved_limit,
             "hasMore": resolved_has_more,
         },
+        "pinned": pinned_items,
     }
+
+
+async def pin_dashboard_thread(thread_id: str, login: str) -> None:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    if not isinstance(thread, Mapping):
+        raise HTTPException(404, "thread not found")
+    _assert_thread_readable(_thread_metadata(thread))
+    await pin_thread(login, thread_id)
+
+
+async def unpin_dashboard_thread(thread_id: str, login: str) -> None:
+    await unpin_thread(login, thread_id)
 
 
 async def list_dashboard_threads_page(
