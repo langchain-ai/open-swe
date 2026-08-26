@@ -6,6 +6,8 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.source_context import SourceContext
+
 from .dispatch import dispatch_agent_run
 from .tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
 from .utils.sandbox import create_sandbox
@@ -86,9 +88,7 @@ def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]
         value = metadata.get(key)
         if value is not None:
             configurable["user_email" if key == "triggering_user_email" else key] = value
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        configurable.update(source_context)
+    configurable.update(SourceContext.from_metadata(metadata).dump())
     return configurable
 
 

@@ -4,6 +4,7 @@ from xml.etree import ElementTree
 
 import pytest
 
+from agent.source_context import SourceContext
 from agent.utils import slack as slack_utils
 from agent.utils.run_usage import RunUsageSummary
 from agent.utils.slack import (
@@ -63,7 +64,9 @@ def test_source_context_preserves_existing_slack_permalink_on_lookup_failure(
 
     enriched = asyncio.run(
         webhook_common._source_context_with_slack_permalink(
-            {"slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"}},
+            SourceContext.parse(
+                {"slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"}}
+            ),
             {
                 "source_context": {
                     "slack_thread": {
@@ -76,8 +79,8 @@ def test_source_context_preserves_existing_slack_permalink_on_lookup_failure(
         )
     )
 
-    slack_thread = cast(dict[str, object], enriched["slack_thread"])
-    assert slack_thread["permalink"] == "https://slack.example/existing"
+    assert enriched.slack_thread is not None
+    assert enriched.slack_thread.permalink == "https://slack.example/existing"
 
 
 def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
@@ -90,7 +93,9 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
 
     enriched = asyncio.run(
         webhook_common._source_context_with_slack_permalink(
-            {"slack_thread": {"channel_id": "C999", "thread_ts": "1700000000.000999"}},
+            SourceContext.parse(
+                {"slack_thread": {"channel_id": "C999", "thread_ts": "1700000000.000999"}}
+            ),
             {
                 "source_context": {
                     "slack_thread": {
@@ -103,8 +108,7 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
         )
     )
 
-    slack_thread = cast(dict[str, object], enriched["slack_thread"])
-    assert "permalink" not in slack_thread
+    assert "permalink" not in enriched.dump()["slack_thread"]
 
 
 def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,7 +123,9 @@ def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.Monkey
             github_login=github_login,
             user_email=user_email,
             title=github_login,
-            source_context={"slack_thread": {"triggering_user_id": slack_user_id}},
+            source_context=SourceContext.parse(
+                {"slack_thread": {"triggering_user_id": slack_user_id}}
+            ),
         )
 
     asyncio.run(upsert("owner-gh", "owner@example.com", "UOWNER"))

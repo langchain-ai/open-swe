@@ -6,6 +6,8 @@ from typing import Any
 from fastapi import HTTPException
 from langgraph.config import get_config
 
+from agent.source_context import SourceContext
+
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
@@ -292,10 +294,9 @@ async def slack_start_new_thread(
     metadata: dict[str, Any] = {
         "source": "slack",
         "title": clean_title[:80],
-        "source_context": {
-            "slack_thread": new_slack_thread,
-            "breakout_from": breakout_from,
-        },
+        "source_context": SourceContext.parse(
+            {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
+        ).dump(),
     }
     if repo:
         metadata.update(
