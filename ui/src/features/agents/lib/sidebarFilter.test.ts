@@ -26,7 +26,7 @@ function makeThread(overrides: Partial<AgentThread> = {}): AgentThread {
     source: "dashboard",
     status: "idle",
     viewed: true,
-      createdAt: Date.now(),
+    createdAt: Date.now(),
     updatedAt: Date.now(),
     messages: [],
     ...overrides,

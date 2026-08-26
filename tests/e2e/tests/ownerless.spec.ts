@@ -26,7 +26,9 @@ async function openThreadViaSlack(
   }
   await page
     .locator("#text")
-    .fill(options.message ?? "<@U0BOT> please add a greet() helper and open a PR");
+    .fill(
+      options.message ?? "<@U0BOT> please add a greet() helper and open a PR",
+    );
   await page.locator("#send").click();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
