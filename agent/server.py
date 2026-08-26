@@ -194,6 +194,7 @@ from .utils.authorship import (
 )
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
+from .utils.gateway import gateway_env_default
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_org_membership import is_user_active_org_member
 from .utils.github_proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
@@ -1433,7 +1434,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
         team_defaults = (default_model_pair(), default_model_pair())
         title_defaults = team_defaults[0]
-        use_gateway = False
+        use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
     else:
