@@ -22,6 +22,7 @@ describe("withArtifactShell", () => {
       '<head><meta http-equiv="Content-Security-Policy"'
     )
     expect(shelled).toContain("script-src 'unsafe-inline'")
+    expect(shelled).toContain("<style>:root{color-scheme:dark}</style>")
     expect(shelled).toContain("connect-src 'none'")
   })
 
@@ -31,6 +32,7 @@ describe("withArtifactShell", () => {
     expect(shelled.startsWith('<!doctype html><html data-theme="light"')).toBe(
       true
     )
+    expect(shelled).toContain("<style>:root{color-scheme:light}</style>")
     expect(shelled).toContain("<body><h1>Plan</h1></body>")
   })
 })

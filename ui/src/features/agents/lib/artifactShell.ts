@@ -18,7 +18,11 @@ export function withArtifactShell(
   html: string,
   theme: "light" | "dark"
 ): string {
-  const head = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`
+  // Seeds the UA-rendered parts (scrollbars, form controls) with the viewer's
+  // theme; an artifact's own `color-scheme` declaration still wins.
+  const head =
+    `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">` +
+    `<style>:root{color-scheme:${theme}}</style>`
   const themed = html.replace(
     /<html(?=\s|>)/i,
     `<html data-theme="${theme}" data-viewer-theme="${theme}"`

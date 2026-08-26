@@ -37,6 +37,8 @@ The dashboard stamps `data-theme="light"` or `data-theme="dark"` on `<html>`, so
 :root[data-theme="dark"] { /* redefine them again — this layer wins */ }
 ```
 
+Declare `color-scheme` in each layer too (`light` on `:root`, `dark` in both dark layers) so scrollbars, form controls, and UA defaults follow the artifact instead of staying light under a dark palette. The dashboard seeds it from the viewer's theme; your own declaration wins.
+
 The media-query layer covers surfaces that stamp nothing, such as a downloaded file or a Slack attachment. Paint `body` with an explicit token background and style components only through tokens: a color whose only definition sits inside a media or `[data-theme]` block is the classic unreadable-artifact bug. Give the second theme the same care as the first — don't naively invert; keep contrast legible and the accent working on both grounds. A deliberate single-theme artifact may omit both dark layers only when every background and foreground is explicit.
 
 ## Craft

@@ -4,9 +4,9 @@ import pytest
 
 from agent.utils.html_artifact import (
     DEFAULT_TITLE,
-    FULL_DOCUMENT_GREP,
     artifact_skeleton,
     is_full_document,
+    sandbox_wrap_command,
     wrap_html_artifact,
 )
 
@@ -51,18 +51,37 @@ def test_scripts_and_forms_survive_wrapping() -> None:
         "<h1>fragment</h1>",
         "<htmlish>not a document</htmlish>",
         "<p>mentions &lt;html&gt; in prose</p>",
+        "<h1>caf\u00e9 \u2014 na\u00efve</h1>",
     ],
 )
-def test_grep_pattern_agrees_with_the_python_detector(content: str, tmp_path) -> None:
-    path = tmp_path / "artifact.html"
-    path.write_text(content)
+def test_sandbox_command_matches_in_process_wrapping(content: str, tmp_path) -> None:
+    source = tmp_path / "artifact.html"
+    destination = tmp_path / "snapshot.html"
+    source.write_text(content, encoding="utf-8")
 
-    found = subprocess.run(
-        ["grep", "-qiE", FULL_DOCUMENT_GREP, "--", str(path)],
-        check=False,
+    command = sandbox_wrap_command(
+        str(source), str(destination), limit=1_000_001, title="Quarterly chart"
+    )
+    result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+
+    expected = wrap_html_artifact(content, title="Quarterly chart")
+    assert destination.read_text(encoding="utf-8") == expected
+    assert int(result.stdout.strip()) == len(expected.encode())
+
+
+def test_sandbox_command_truncates_at_the_limit(tmp_path) -> None:
+    source = tmp_path / "artifact.html"
+    destination = tmp_path / "snapshot.html"
+    source.write_text("<h1>" + "x" * 500 + "</h1>", encoding="utf-8")
+
+    subprocess.run(
+        sandbox_wrap_command(str(source), str(destination), limit=32),
+        shell=True,
+        capture_output=True,
+        check=True,
     )
 
-    assert (found.returncode == 0) is is_full_document(content)
+    assert "<h1>" + "x" * 28 in destination.read_text(encoding="utf-8")
 
 
 def test_multiline_html_tag_is_not_double_wrapped() -> None:
