@@ -80,6 +80,9 @@ from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop
 from .input_messages import (
     SystemIdentity,
     build_input_messages,
+    dynamic_context_hash,
+    message_sender_id,
+    system_introduction,
     visible_dynamic_context_hashes,
 )
 from .integrations.corridor_mcp import (
@@ -1236,7 +1239,21 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
         ):
             return []
-        injected = visible_dynamic_context_hashes(state)
+        sender_id = next(
+            (
+                sender_id
+                for candidate in reversed(state.get("messages") or [])
+                if isinstance(candidate, HumanMessage)
+                and (sender_id := message_sender_id(candidate.content, kind="human")) is not None
+            ),
+            None,
+        )
+        if sender_id is None:
+            return []
+        identity: SystemIdentity = {**_SENDER_CONTEXT_SYSTEM, "subject_id": sender_id}
+        introduction_hash = dynamic_context_hash(system_introduction(identity)["content"])
+        if introduction_hash in visible_dynamic_context_hashes(state):
+            return []
         return cast(
             list[Any],
             build_input_messages(
@@ -1246,8 +1263,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     "surface": "automation",
                     "kind": "system",
                 },
-                systems=[_SENDER_CONTEXT_SYSTEM],
-                injected_dynamic_context_hashes=injected,
+                systems=[identity],
             ),
         )
 

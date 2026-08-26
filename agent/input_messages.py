@@ -43,6 +43,7 @@ class SystemIdentity(TypedDict):
     display_name: str
     platform: NotRequired[str]
     sender_type: NotRequired[str]
+    subject_id: NotRequired[str]
 
 
 Identity = PersonIdentity | ChannelIdentity | SystemIdentity
@@ -78,7 +79,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "open_swe_account",
     ),
     "channel": ("platform", "name", "thread_id", "topic", "purpose"),
-    "system": ("display_name", "platform", "sender_type"),
+    "system": ("display_name", "platform", "sender_type", "subject_id"),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 _SYSTEM_ENTITY_ID = "system:open-swe"
@@ -110,7 +111,7 @@ def injected_dynamic_context_hashes_from_metadata(metadata: object) -> set[str]:
     return {value for value in values if isinstance(value, str) and value}
 
 
-def message_sender_id(content: object) -> str | None:
+def message_sender_id(content: object, *, kind: MessageKind | None = None) -> str | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
@@ -123,7 +124,7 @@ def message_sender_id(content: object) -> str | None:
         messages = [root] if root.tag == "input-message" else root.findall(".//input-message")
         for message in messages:
             sender = message.get("sender")
-            if sender:
+            if sender and (kind is None or message.get("kind") == kind):
                 return sender
     return None
 
