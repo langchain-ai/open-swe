@@ -34,6 +34,7 @@ export interface PanelFile {
   originalContent: string
   modifiedContent: string
   status: GitStatus
+  patch?: string | null
   unrenderable?: boolean
 }
 
@@ -72,6 +73,7 @@ export function toPanelFiles(
     originalContent: file.originalContent ?? "",
     modifiedContent: file.modifiedContent ?? "",
     status: prFileStatus(file),
+    patch: file.patch,
     unrenderable: file.unrenderable,
   }))
 }
@@ -331,9 +333,15 @@ const FileDiffSection = memo(
         </button>
         {open &&
           (file.unrenderable ? (
-            <div className="bg-background p-4 text-center text-xs text-muted-foreground/70">
-              Binary or large file — diff not shown.
-            </div>
+            file.patch ? (
+              <pre className="overflow-x-auto bg-background p-4 font-mono text-xs leading-5 text-foreground">
+                <code>{file.patch}</code>
+              </pre>
+            ) : (
+              <div className="bg-background p-4 text-center text-xs text-muted-foreground/70">
+                Binary file — diff not available.
+              </div>
+            )
           ) : (
             <div
               className="overflow-hidden bg-background"

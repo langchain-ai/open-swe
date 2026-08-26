@@ -73,6 +73,7 @@ export interface ThreadPrDiffFile {
   deletions: number
   originalContent: string | null
   modifiedContent: string | null
+  patch?: string | null
   unrenderable: boolean
 }
 
