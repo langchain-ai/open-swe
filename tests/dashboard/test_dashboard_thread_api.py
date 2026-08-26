@@ -2087,6 +2087,24 @@ async def test_pin_dashboard_thread_allows_readable_non_owner(monkeypatch) -> No
     assert pinned == [("octocat", "shared-thread")]
 
 
+async def test_pin_dashboard_thread_returns_not_found_for_lookup_failure(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id):
+            raise RuntimeError("thread missing")
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.pin_dashboard_thread("missing-thread", "octocat")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "thread not found"
+
+
 async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id):

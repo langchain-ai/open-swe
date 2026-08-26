@@ -1152,7 +1152,10 @@ async def list_dashboard_threads_sidebar(
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:
     client = langgraph_client()
-    thread = await client.threads.get(thread_id)
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
     if not isinstance(thread, Mapping):
         raise HTTPException(404, "thread not found")
     _assert_thread_readable(_thread_metadata(thread))

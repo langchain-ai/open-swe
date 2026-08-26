@@ -205,7 +205,8 @@ export function AgentsSidebar({
   }, [activeLocalSessionId, activeThreadId, isDesktop, setDesktopThreadSource])
   const pinnedThreads = sidebar.data.pinned ?? []
   const pinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
-  const activeThreads = sidebar.data.active.items.filter(
+  const allActiveThreads = sidebar.data.active.items
+  const activeThreads = allActiveThreads.filter(
     (thread) => !pinnedIds.has(thread.id)
   )
   const resolvedThreads = sidebar.data.resolved.items.filter(
@@ -265,9 +266,9 @@ export function AgentsSidebar({
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
   const cloudActivity = {
-    running: activeThreads.filter((thread) => thread.status === "running")
+    running: allActiveThreads.filter((thread) => thread.status === "running")
       .length,
-    completed: activeThreads.filter(
+    completed: allActiveThreads.filter(
       (thread) => thread.status === "finished" && !thread.viewed
     ).length,
   }
