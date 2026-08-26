@@ -12,6 +12,7 @@ from ..utils.slack import (
     get_active_slack_thread,
     lookup_slack_thread_run_mapping,
     post_slack_top_level_message_with_ts,
+    slack_thread_mutation_lock,
     store_slack_run_mapping,
 )
 from ..utils.thread_ops import langgraph_client
@@ -134,18 +135,26 @@ async def slack_move_thread(
     new_slack = _new_slack_context(active, target_channel, new_ts)
     destination_bound = False
     try:
-        await bind_slack_thread_id(client, target_channel, new_ts, thread_id)
-        destination_bound = True
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={"source": "slack", "source_context": {"slack_thread": new_slack}},
-        )
-        persisted = await get_active_slack_thread(client, thread_id)
-        if not persisted or (persisted.get("channel_id"), persisted.get("thread_ts")) != (
-            target_channel,
-            new_ts,
-        ):
-            raise RuntimeError("destination metadata did not persist")
+        async with slack_thread_mutation_lock(
+            client, source_channel, source_ts, thread_id=thread_id
+        ) as locked_active:
+            if not locked_active or (
+                locked_active.get("channel_id"),
+                locked_active.get("thread_ts"),
+            ) != (source_channel, source_ts):
+                raise RuntimeError("Slack thread moved concurrently; retry")
+            await bind_slack_thread_id(client, target_channel, new_ts, thread_id)
+            destination_bound = True
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={"source": "slack", "source_context": {"slack_thread": new_slack}},
+            )
+            persisted = await get_active_slack_thread(client, thread_id)
+            if not persisted or (persisted.get("channel_id"), persisted.get("thread_ts")) != (
+                target_channel,
+                new_ts,
+            ):
+                raise RuntimeError("destination metadata did not persist")
     except Exception as exc:  # noqa: BLE001
         if destination_bound:
             try:

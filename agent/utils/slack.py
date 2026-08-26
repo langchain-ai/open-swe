@@ -24,6 +24,7 @@ from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.run_usage import RunUsageSummary
 
 from .http import DEFAULT_HTTP_TIMEOUT
+from .url_safety import request_with_safe_redirects
 from .user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
+SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 
 SlackChannelContext = dict[str, str]
@@ -702,6 +704,104 @@ async def update_slack_message(
             return False, f"http_error: {type(exc).__name__}"
 
 
+async def upload_slack_thread_file(
+    channel_id: str,
+    thread_ts: str,
+    filename: str,
+    content: bytes,
+    *,
+    title: str | None = None,
+    initial_comment: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Upload one file to a Slack thread and return its file ID and any error."""
+    if not SLACK_BOT_TOKEN:
+        return None, "missing_slack_bot_token"
+    if not content:
+        return None, "empty_file"
+    if len(content) > SLACK_FILE_UPLOAD_MAX_BYTES:
+        return None, "file_too_large"
+
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+            ticket_response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/files.getUploadURLExternal",
+                headers=_slack_headers(),
+                json={"filename": filename, "length": len(content)},
+            )
+            ticket_error = _slack_response_error(ticket_response)
+            if ticket_error:
+                return None, ticket_error
+            ticket = ticket_response.json()
+            upload_url = ticket.get("upload_url")
+            file_id = ticket.get("file_id")
+            if not isinstance(upload_url, str) or not isinstance(file_id, str):
+                return None, "invalid_upload_ticket"
+
+            upload_response, blocked = await request_with_safe_redirects(
+                http_client,
+                "POST",
+                upload_url,
+                content=content,
+                headers={"Content-Type": "application/octet-stream"},
+                validate_url=_validate_slack_upload_url,
+            )
+            if blocked:
+                return None, "unsafe_upload_url"
+            if upload_response is None:
+                return None, "upload_failed"
+            upload_response.raise_for_status()
+
+            payload: dict[str, Any] = {
+                "files": [{"id": file_id, "title": title or filename}],
+                "channel_id": channel_id,
+                "thread_ts": thread_ts,
+            }
+            if initial_comment:
+                payload["initial_comment"] = initial_comment
+            complete_response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/files.completeUploadExternal",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            complete_error = _slack_response_error(complete_response)
+            if complete_error:
+                return None, complete_error
+            return file_id, None
+    except httpx.HTTPError as exc:
+        logger.exception("Slack file upload failed")
+        return None, f"http_error: {type(exc).__name__}"
+    except (TypeError, ValueError):
+        logger.exception("Slack file upload returned an invalid response")
+        return None, "invalid_slack_response"
+
+
+def _validate_slack_upload_url(url: str) -> tuple[bool, str]:
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").lower() != "files.slack.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in (None, 443)
+    ):
+        return False, "Slack returned an invalid upload URL"
+    return True, ""
+
+
+def _slack_response_error(response: httpx.Response) -> str | None:
+    if response.status_code == 429:
+        retry_after = response.headers.get("Retry-After")
+        return f"rate_limited: {retry_after}" if retry_after else "rate_limited"
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, Mapping):
+        raise ValueError("Slack API response must be an object")
+    if data.get("ok"):
+        return None
+    error = data.get("error")
+    return "rate_limited" if error == "ratelimited" else str(error or "slack_api_error")
+
+
 async def post_slack_thread_reply(
     channel_id: str,
     thread_ts: str,
@@ -1045,9 +1145,13 @@ def _slack_thread_version_namespace(channel_id: str, thread_ts: str) -> tuple[st
 
 @asynccontextmanager
 async def slack_thread_mutation_lock(
-    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
-) -> AsyncIterator[None]:
-    """Serialize inbound version updates with version-checked Slack posts."""
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    *,
+    thread_id: str | None = None,
+) -> AsyncIterator[dict[str, Any] | None]:
+    """Lock a Slack thread and optionally return its current active location."""
     channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
     lock_id = str(
         uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-thread-lock:{channel}:{timestamp}")
@@ -1066,7 +1170,7 @@ async def slack_thread_mutation_lock(
                 raise TimeoutError("Timed out waiting for the Slack thread mutation lock") from None
             await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
     try:
-        yield
+        yield await get_active_slack_thread(langgraph_client, thread_id) if thread_id else None
     finally:
         try:
             await langgraph_client.threads.delete(lock_id)
