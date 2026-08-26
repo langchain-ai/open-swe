@@ -103,6 +103,7 @@ async def request_with_safe_redirects(
     url: str,
     *,
     headers_for_url: Callable[[str, str], Mapping[str, str] | None] | None = None,
+    validate_url: Callable[[str], tuple[bool, str]] | None = None,
     **kwargs: Any,
 ) -> tuple[httpx.Response | None, dict[str, Any] | None]:
     """Issue a request with DNS pinning and per-hop redirect validation."""
@@ -114,6 +115,10 @@ async def request_with_safe_redirects(
     response: httpx.Response | None = None
 
     for redirect_count in range(_MAX_REDIRECTS + 1):
+        if validate_url:
+            allowed, reason = validate_url(current_url)
+            if not allowed:
+                return None, _blocked_response(current_url, reason)
         is_safe, reason, hostname, addr_infos = resolve_and_validate(current_url)
         if not is_safe or hostname is None or addr_infos is None:
             return None, _blocked_response(current_url, reason)

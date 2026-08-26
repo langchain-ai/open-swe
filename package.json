@@ -4,7 +4,7 @@
   "packageManager": "pnpm@11.18.0",
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
-    "dev:desktop": "pnpm --dir desktop run dev:full",
+    "dev:desktop": "pnpm --dir desktop run dev",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "build": "turbo run build",
     "check": "turbo run check",

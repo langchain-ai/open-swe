@@ -4,12 +4,12 @@ import base64
 import binascii
 import json
 import re
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
-from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, field_validator
+
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 SKILLS_NAMESPACE = "user_skills"
 ORGANIZATION_SKILLS_NAMESPACE = "organization_skills"
@@ -57,10 +57,6 @@ class SkillUpdate(BaseModel):
         return value
 
 
-def _client():
-    return get_client()
-
-
 def _namespace(login: str) -> list[str]:
     return [SKILLS_NAMESPACE, login]
 
@@ -71,10 +67,6 @@ def _organization_namespace() -> list[str]:
 
 def _key(name: str) -> str:
     return f"/{name}/SKILL.md"
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _content(name: str, description: str, instructions: str) -> str:
@@ -90,7 +82,7 @@ def _content(name: str, description: str, instructions: str) -> str:
 def _record(
     name: str, description: str, instructions: str, existing: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    now = _now_iso()
+    now = now_iso()
     return {
         "name": name,
         "description": description,
@@ -102,25 +94,17 @@ def _record(
     }
 
 
-def _value(item: Any) -> dict[str, Any] | None:
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
-
-
 async def _get_skill(namespace: list[str], name: str) -> dict[str, Any] | None:
     SkillCreate(name=name, description="valid")
-    item = await _client().store.get_item(namespace, _key(name))
-    return _value(item) if item else None
+    return await get_value(namespace, _key(name))
 
 
 async def _list_skills(namespace: list[str], *, limit: int, offset: int) -> dict[str, Any]:
-    result = await _client().store.search_items(namespace, limit=limit + 1, offset=offset)
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    skills = [value for item in (items or [])[:limit] if (value := _value(item)) is not None]
-    skills.sort(key=lambda skill: skill.get("name", ""))
+    found = await search_values(namespace, limit=limit + 1, offset=offset)
+    skills = sorted(found[:limit], key=lambda skill: skill.get("name", ""))
     return {
         "items": skills,
-        "next_offset": offset + limit if len(items or []) > limit else None,
+        "next_offset": offset + limit if len(found) > limit else None,
     }
 
 
@@ -128,7 +112,7 @@ async def _create_skill(namespace: list[str], body: SkillCreate) -> dict[str, An
     if await _get_skill(namespace, body.name):
         raise HTTPException(409, "skill already exists")
     value = _record(body.name, body.description, body.instructions)
-    await _client().store.put_item(namespace, _key(body.name), value)
+    await put_value(namespace, _key(body.name), value)
     return value
 
 
@@ -138,7 +122,7 @@ async def _update_skill(namespace: list[str], name: str, body: SkillUpdate) -> d
     if not existing:
         raise HTTPException(404, "skill not found")
     value = _record(name, body.description, body.instructions, existing)
-    await _client().store.put_item(namespace, _key(name), value)
+    await put_value(namespace, _key(name), value)
     return value
 
 
@@ -146,7 +130,7 @@ async def _delete_skill(namespace: list[str], name: str) -> None:
     SkillCreate(name=name, description="valid")
     if not await _get_skill(namespace, name):
         raise HTTPException(404, "skill not found")
-    await _client().store.delete_item(namespace, _key(name))
+    await delete_value(namespace, _key(name))
 
 
 async def get_skill(login: str, name: str) -> dict[str, Any] | None:
@@ -205,18 +189,11 @@ def _decode_cursor(cursor: str | None) -> str:
 
 async def list_organization_skills(*, limit: int, cursor: str | None) -> dict[str, Any]:
     after = _decode_cursor(cursor)
-    result = await _client().store.search_items(
-        _organization_namespace(), limit=MAX_ORGANIZATION_SKILLS + 1
-    )
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    if len(items or []) > MAX_ORGANIZATION_SKILLS:
+    found = await search_values(_organization_namespace(), limit=MAX_ORGANIZATION_SKILLS + 1)
+    if len(found) > MAX_ORGANIZATION_SKILLS:
         raise HTTPException(409, "organization skill limit exceeded; delete a skill to continue")
     skills = sorted(
-        (
-            value
-            for item in items or []
-            if (value := _value(item)) is not None and value.get("name", "") > after
-        ),
+        (value for value in found if value.get("name", "") > after),
         key=lambda skill: skill.get("name", ""),
     )
     page = skills[:limit]
@@ -227,11 +204,8 @@ async def list_organization_skills(*, limit: int, cursor: str | None) -> dict[st
 
 
 async def create_organization_skill(body: SkillCreate) -> dict[str, Any]:
-    existing = await _client().store.search_items(
-        _organization_namespace(), limit=MAX_ORGANIZATION_SKILLS
-    )
-    items = existing.get("items") if isinstance(existing, dict) else getattr(existing, "items", [])
-    if len(items or []) >= MAX_ORGANIZATION_SKILLS:
+    existing = await search_values(_organization_namespace(), limit=MAX_ORGANIZATION_SKILLS)
+    if len(existing) >= MAX_ORGANIZATION_SKILLS:
         raise HTTPException(409, "organization skill limit reached")
     return await _create_skill(_organization_namespace(), body)
 

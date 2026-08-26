@@ -227,6 +227,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
+| `slack_attach_html` | `agent/tools/slack_attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
 
 ### Adding a tool

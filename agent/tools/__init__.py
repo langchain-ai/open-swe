@@ -51,6 +51,7 @@ _TOOL_MODULES = {
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
     "slack_add_reaction": ".slack_add_reaction",
+    "slack_attach_html": ".slack_attach_html",
     "slack_move_thread": ".slack_move_thread",
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
@@ -108,6 +109,7 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
+    "slack_attach_html",
     "slack_move_thread",
     "slack_read_thread_messages",
     "slack_start_new_thread",
@@ -160,6 +162,7 @@ if TYPE_CHECKING:
     from .schedule_thread_wakeup import schedule_thread_wakeup
     from .search_repo_code import search_repo_code
     from .slack_add_reaction import slack_add_reaction
+    from .slack_attach_html import slack_attach_html
     from .slack_move_thread import slack_move_thread
     from .slack_read_thread_messages import slack_read_thread_messages
     from .slack_start_new_thread import slack_start_new_thread

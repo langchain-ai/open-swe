@@ -96,7 +96,7 @@ async def test_github_reaction_added_creates_langsmith_feedback(
         return [
             {
                 "id": "f1",
-                "github_review_comment_id": 123,
+                "github_review_comment_ids": [123],
                 "github_review_run_id": "run-1",
             }
         ]
@@ -145,7 +145,7 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
         return [
             {
                 "id": "f1",
-                "github_review_comment_id": 123,
+                "github_review_comment_ids": [123],
                 "github_review_run_id": "run-1",
             }
         ]

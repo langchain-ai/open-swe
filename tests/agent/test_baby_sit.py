@@ -8,6 +8,7 @@ import pytest
 from langgraph_sdk.errors import ConflictError
 
 from agent import baby_sit, scheduler
+from agent import store as agent_store
 from agent.utils.slack import GitHubPrRef
 
 
@@ -81,10 +82,15 @@ class _Client:
         self.threads = _Threads(active_threads if active_threads is not None else set())
 
 
+def _use_client(monkeypatch: pytest.MonkeyPatch, client: _Client) -> None:
+    monkeypatch.setattr(baby_sit, "get_client", lambda: client)
+    monkeypatch.setattr(agent_store, "store_client", lambda: client)
+
+
 @pytest.fixture
 def watch_client(monkeypatch: pytest.MonkeyPatch) -> _Client:
     client = _Client()
-    monkeypatch.setattr(baby_sit, "_client", lambda: client)
+    _use_client(monkeypatch, client)
     return client
 
 
@@ -200,7 +206,7 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     shared_watch_clients: tuple[_Client, _Client], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     first_client, second_client = shared_watch_clients
-    monkeypatch.setattr(baby_sit, "_client", lambda: first_client)
+    _use_client(monkeypatch, first_client)
     await _start_watch(first_client)
     monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
@@ -231,13 +237,13 @@ async def test_concurrent_failure_evaluations_dispatch_once(
 
     first = asyncio.create_task(baby_sit.evaluate_watch("acme/repo#7"))
     await dispatch_started.wait()
-    monkeypatch.setattr(baby_sit, "_client", lambda: second_client)
+    _use_client(monkeypatch, second_client)
     assert await baby_sit.evaluate_watch("acme/repo#7") == "busy"
     release_dispatch.set()
 
     assert await first == "dispatched"
     dispatch.assert_awaited_once()
-    monkeypatch.setattr(baby_sit, "_client", lambda: first_client)
+    _use_client(monkeypatch, first_client)
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 

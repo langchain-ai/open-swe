@@ -381,6 +381,7 @@ Users can also override the team/project mapping per-comment by including `repo:
                 "channels:history",
                 "channels:read",
                 "chat:write",
+                "files:write",
                 "groups:history",
                 "groups:read",
                 "im:history",
@@ -416,7 +417,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 
 </details>
 
-3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`)
+3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Existing installations must reinstall or re-authorize the app after adding `files:write`.
 
 **Slack URL checklist:**
 
@@ -618,8 +619,7 @@ invalidating already-stored GitHub tokens:
 Make sure ngrok is still running from step 2, then start the backend in a second terminal:
 
 ```bash
-make dev          # uv run langgraph dev
-# or: uv run langgraph dev --no-browser
+make dev          # uv run langgraph dev --no-browser --port 2024
 ```
 
 `langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
@@ -645,10 +645,10 @@ The dashboard is the web app in `ui/`. It's a server-rendered TanStack Start app
 
 ```bash
 pnpm install          # from the repo root: ui/ and desktop/ are one pnpm workspace
-pnpm run dev          # turbo -> vite dev --port 3000 -> http://localhost:3000
+make web             # pnpm run dev -> Vite on http://localhost:3000
 ```
 
-No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `pnpm run dev`. It is read at request time, so the same build can front any backend.
+No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `make web` or `pnpm run dev`. It is read at request time, so the same build can front any backend.
 
 To enable Datadog browser RUM, set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building the dashboard. Optional build-time settings are `VITE_DATADOG_SITE` (default `datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` (default `100`), and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay is enabled by default for sampled RUM sessions with all content masked; telemetry also strips URL query strings and fragments. Values prefixed with `VITE_` are public in the browser bundle; use a Datadog client token, never an API or application key.
 
@@ -665,12 +665,14 @@ For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CL
 > **Experimental:** The desktop wrapper is an early-access convenience surface. The web UI is
 > the recommended way to use Open SWE.
 
-The Electron app in `desktop/` includes the compiled dashboard UI. It only needs the Open SWE
-backend to be running:
+The Electron app in `desktop/` includes the compiled dashboard UI. Run it alongside the Open SWE
+backend (and, optionally, the web UI) in separate terminals:
 
 ```bash
 pnpm install                  # from the repo root
-pnpm run dev:desktop
+make dev                      # terminal 1
+pnpm run dev:desktop          # terminal 2
+make web                      # terminal 3, optional web UI
 ```
 
 Development connects to `http://localhost:2024`. To use a hosted backend instead, run
@@ -790,7 +792,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 ### Dashboard UI can't reach the backend
 
 - Confirm the backend is running via `make dev` on `:2024` (not `make run` on `:8000`).
-- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `pnpm run dev`.
+- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `make web` or `pnpm run dev`.
 
 ### Sandbox creation failures
 
