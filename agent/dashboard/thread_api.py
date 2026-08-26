@@ -971,7 +971,9 @@ async def list_dashboard_threads_sidebar(
     safe_active_limit = min(max(active_limit, 1), _THREADS_PAGE_SCAN_CAP)
     safe_resolved_limit = min(max(resolved_limit, 0), _THREADS_PAGE_SCAN_CAP)
     active_target = safe_active_limit + 1
-    resolved_target = safe_resolved_limit + 1
+    # A zero limit means the caller wants no resolved threads at all, so nothing
+    # should keep scanning for one after the active bucket fills.
+    resolved_target = safe_resolved_limit + 1 if safe_resolved_limit else 0
     active: dict[str, ThreadLike] = {}
     resolved_threads: dict[str, ThreadLike] = {}
 

@@ -1904,6 +1904,43 @@ async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(mo
     assert {call["offset"] for call in searches} == {0, page_size}
 
 
+async def test_list_dashboard_threads_sidebar_stops_scanning_when_resolved_hidden(
+    monkeypatch,
+) -> None:
+    """`resolved_limit=0` must not keep paging in search of a resolved thread."""
+    page_size = thread_api._THREADS_SEARCH_PAGE
+    threads = _make_threads(page_size + 10, resolved_before=0)
+    offsets: list[int] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            offsets.append(offset)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=5, resolved_limit=0
+    )
+
+    assert len(result["active"]["items"]) == 5
+    assert result["resolved"]["items"] == []
+    # The first filter stops after one page: the active bucket is full and no
+    # resolved thread was ever wanted. Waiting on one paged to the scan cap.
+    assert offsets[1] == 0
+
+
 async def test_list_dashboard_threads_sidebar_allows_limits_beyond_100(monkeypatch) -> None:
     threads = _make_threads(120, resolved_before=0)
 
