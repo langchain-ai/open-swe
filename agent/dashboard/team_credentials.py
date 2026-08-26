@@ -8,11 +8,11 @@ Datadog MCP tools and LangSmith read tools — the sandbox never sees these keys
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
-from langgraph_sdk import get_client
 from pydantic import BaseModel, field_validator
+
+from agent.store import delete_value, get_value, now_iso, put_value
 
 from ..encryption import decrypt_token, encrypt_token
 
@@ -35,10 +35,6 @@ SUPPORTED_DD_SITES: frozenset[str] = frozenset(
         "ap2.datadoghq.com",
     }
 )
-
-
-def _client():
-    return get_client()
 
 
 class DatadogCredentialsUpdate(BaseModel):
@@ -124,26 +120,30 @@ def _last4(value: str) -> str:
 
 
 async def _get_provider(key: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(TEAM_CREDENTIALS_NAMESPACE, key)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("team credentials lookup failed for %s: %s", key, e)
-        return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
+    return await get_value(TEAM_CREDENTIALS_NAMESPACE, key)
 
 
 async def _put_provider(key: str, value: dict[str, Any]) -> None:
-    await _client().store.put_item(TEAM_CREDENTIALS_NAMESPACE, key, value)
+    await put_value(TEAM_CREDENTIALS_NAMESPACE, key, value)
 
 
 async def _delete_provider(key: str) -> None:
+    await delete_value(TEAM_CREDENTIALS_NAMESPACE, key)
+
+
+async def _provider_for_tool_loading(key: str) -> dict[str, Any] | None:
+    """Read a provider record on the agent's tool-loading path.
+
+    Fail-soft on purpose: these credentials only decide whether an optional
+    integration's tools get loaded, so an unreachable store must cost a run
+    those tools rather than the run itself. Dashboard reads go through
+    :func:`_get_provider` and surface the failure.
+    """
     try:
-        await _client().store.delete_item(TEAM_CREDENTIALS_NAMESPACE, key)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("team credentials delete failed for %s: %s", key, e)
+        return await _get_provider(key)
+    except Exception:
+        logger.warning("team credentials lookup failed for %s", key, exc_info=True)
+        return None
 
 
 async def get_team_credentials_status() -> dict[str, Any]:
@@ -178,7 +178,7 @@ async def connect_datadog(update: DatadogCredentialsUpdate) -> dict[str, Any]:
             "encrypted_api_key": encrypt_token(update.api_key),
             "encrypted_app_key": encrypt_token(update.app_key),
             "api_key_last4": _last4(update.api_key),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_at": now_iso(),
         },
     )
     return await get_team_credentials_status()
@@ -196,7 +196,7 @@ async def connect_langsmith(update: LangSmithCredentialsUpdate) -> dict[str, Any
             "endpoint": update.endpoint or DEFAULT_LANGSMITH_ENDPOINT,
             "encrypted_api_key": encrypt_token(update.api_key),
             "api_key_last4": _last4(update.api_key),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_at": now_iso(),
         },
     )
     return await get_team_credentials_status()
@@ -209,7 +209,7 @@ async def disconnect_langsmith() -> dict[str, Any]:
 
 async def get_datadog_credentials() -> DatadogCredentials | None:
     """Return decrypted Datadog credentials, or ``None`` when not connected."""
-    datadog = await _get_provider(DATADOG_KEY)
+    datadog = await _provider_for_tool_loading(DATADOG_KEY)
     if not isinstance(datadog, dict):
         return None
     api_key = decrypt_token(datadog.get("encrypted_api_key", ""))
@@ -225,7 +225,7 @@ async def get_datadog_credentials() -> DatadogCredentials | None:
 
 async def get_langsmith_credentials() -> LangSmithCredentials | None:
     """Return decrypted LangSmith credentials, or ``None`` when not connected."""
-    langsmith = await _get_provider(LANGSMITH_KEY)
+    langsmith = await _provider_for_tool_loading(LANGSMITH_KEY)
     if not isinstance(langsmith, dict):
         return None
     api_key = decrypt_token(langsmith.get("encrypted_api_key", ""))

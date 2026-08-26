@@ -17,7 +17,12 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
-from ..review.findings import REVIEWER_THREAD_KIND
+from ..review.findings import (
+    REVIEWER_THREAD_KIND,
+    coerce_finding,
+    comment_ids_for_finding,
+    is_thread_resolved,
+)
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
@@ -115,6 +120,9 @@ def _findings_list(metadata: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[str, Any]:
+    # Records persisted by older revisions carry the legacy GitHub-identity
+    # fields; normalize before reading them through the accessors.
+    coerce_finding(finding)
     last_confirmed = finding.get("last_confirmed_sha")
     outdated = bool(
         head_sha
@@ -123,6 +131,7 @@ def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[st
         and last_confirmed != head_sha
     )
     interactions = finding.get("interactions")
+    comment_ids = comment_ids_for_finding(finding)
     return {
         "id": finding.get("id"),
         "severity": finding.get("severity", "low"),
@@ -140,12 +149,8 @@ def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[st
         "outdated": outdated,
         "resolution_note": finding.get("resolution_note"),
         "diff_hunk": finding.get("diff_hunk"),
-        "github_thread_resolved": bool(finding.get("github_thread_resolved")),
-        "github_review_comment_id": (
-            finding["github_review_comment_id"]
-            if isinstance(finding.get("github_review_comment_id"), int)
-            else None
-        ),
+        "github_thread_resolved": is_thread_resolved(finding),
+        "github_review_comment_id": comment_ids[0] if comment_ids else None,
         "interactions": interactions if isinstance(interactions, list) else [],
     }
 

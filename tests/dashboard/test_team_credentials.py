@@ -4,6 +4,7 @@ import pytest
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
+from agent import store as agent_store
 from agent.dashboard import team_credentials as tc
 from agent.dashboard.team_credentials import (
     DatadogCredentialsUpdate,
@@ -34,7 +35,7 @@ class _FakeClient:
 @pytest.fixture()
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
     store = _FakeStore()
-    monkeypatch.setattr(tc, "_client", lambda: _FakeClient(store))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     return store
 

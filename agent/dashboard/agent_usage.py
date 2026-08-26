@@ -13,6 +13,8 @@ from typing import Any, Literal
 import httpx
 from langgraph_sdk import get_client
 
+from agent.review.findings import coerce_finding, is_surfaced
+
 from ..utils.json_types import as_json_object, thread_metadata
 
 AGENT_RUN_NAMESPACE = ["usage", "v2", "agent_runs"]
@@ -424,13 +426,8 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
 
 
 def _finding_surfaced(finding: Mapping[str, Any]) -> bool:
-    surface = as_json_object(finding.get("surface"))
-    return bool(
-        surface.get("state") in {"surfaced", "resolve_pending", "resolved"}
-        or isinstance(finding.get("github_review_id"), int)
-        or isinstance(finding.get("github_review_comment_id"), int)
-        or finding.get("github_review_comment_ids")
-    )
+    record = coerce_finding(dict(finding))
+    return record is not None and is_surfaced(record)
 
 
 async def record_reviewer_publication(

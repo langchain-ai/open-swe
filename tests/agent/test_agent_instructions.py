@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -36,39 +36,31 @@ async def test_get_repo_agent_instructions_returns_none_when_empty() -> None:
     assert result is None
 
 
+def _fake_store_client(stored: dict[str, object] | None) -> MagicMock:
+    client = MagicMock()
+    client.store.get_item = AsyncMock(return_value={"value": stored} if stored else None)
+    client.store.put_item = AsyncMock()
+    return client
+
+
 @pytest.mark.asyncio
 async def test_create_agent_instructions_puts_new_record() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.agent_instructions._get_value",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch("agent.dashboard.agent_instructions._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = _fake_store_client(None)
+    with patch("agent.store.store_client", return_value=client):
         record = await create_agent_instructions("acme/repo", "octo")
     assert record["full_name"] == "acme/repo"
     assert record["instructions"] == ""
-    mock_put.assert_awaited_once()
+    assert record["created_by"] == "octo"
+    client.store.put_item.assert_awaited_once_with(["agent_instructions"], "acme/repo", record)
 
 
 @pytest.mark.asyncio
 async def test_set_agent_instructions_updates_store() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.agent_instructions.get_agent_instructions",
-            new_callable=AsyncMock,
-            return_value={"full_name": "acme/repo", "instructions": ""},
-        ),
-        patch("agent.dashboard.agent_instructions._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = _fake_store_client({"full_name": "acme/repo", "instructions": ""})
+    with patch("agent.store.store_client", return_value=client):
         record = await set_agent_instructions("acme/repo", "Use direct tone.")
     assert record["instructions"] == "Use direct tone."
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["agent_instructions"], "acme/repo", record)
 
 
 def test_construct_system_prompt_contains_only_repository_instructions() -> None:

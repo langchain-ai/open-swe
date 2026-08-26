@@ -4,12 +4,12 @@ import base64
 import hashlib
 import os
 import secrets
-from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
 import httpx
-from langgraph_sdk import get_client
+
+from agent.store import delete_value, get_value, now_iso, put_value
 
 from ..encryption import decrypt_token, encrypt_token
 
@@ -31,10 +31,6 @@ class NotionOAuthError(Exception):
         self.status_code = status_code
         self.detail = detail
         self.error_code = error_code
-
-
-def _client():
-    return get_client()
 
 
 def _is_notion_https_url(url: str) -> bool:
@@ -192,9 +188,9 @@ async def store_notion_oauth_flow(
         "encrypted_client_secret": encrypt_token(client_secret) if client_secret else None,
         "token_endpoint": str(metadata["token_endpoint"]),
         "redirect_uri": redirect_uri,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": now_iso(),
     }
-    await _client().store.put_item([*NOTION_OAUTH_FLOW_NAMESPACE, login], nonce_hash, value)
+    await put_value([*NOTION_OAUTH_FLOW_NAMESPACE, login], nonce_hash, value)
     return build_notion_authorize_url(
         authorization_endpoint=authorization_endpoint,
         client_id=client_id,
@@ -207,21 +203,9 @@ async def store_notion_oauth_flow(
 async def pop_notion_oauth_flow(login: str, nonce_hash: str) -> dict[str, Any] | None:
     """Read and delete a pending Notion OAuth flow."""
     namespace = [*NOTION_OAUTH_FLOW_NAMESPACE, login]
-    try:
-        item = await _client().store.get_item(namespace, nonce_hash)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            return None
-        raise
-    try:
-        await _client().store.delete_item(namespace, nonce_hash)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 404:
-            raise
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    if not isinstance(value, dict):
+    value = await get_value(namespace, nonce_hash)
+    await delete_value(namespace, nonce_hash)
+    if value is None:
         return None
     encrypted_code_verifier = value.pop("encrypted_code_verifier", "")
     if encrypted_code_verifier:

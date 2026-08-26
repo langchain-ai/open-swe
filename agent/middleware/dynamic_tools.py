@@ -1,6 +1,7 @@
 """Load optional integration tool schemas only when requested."""
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -77,14 +78,22 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
             if not names:
                 continue
             self._groups[group] = entry
-            catalog.append(f"- {group}: {', '.join(sorted(names))}")
+            catalog.extend(f"- {name} (integration: {group})" for name in sorted(names))
+
+        aliases = {
+            alias: name
+            for name, group in self._group_of.items()
+            for alias in (f"{group}:{name}", f"{group}: {name}")
+            if alias not in self._group_of
+        }
 
         async def load_integration_tools(
             tool_names: list[str],
             state: Annotated[DynamicToolState | None, InjectedState] = None,
             tool_call_id: Annotated[str, InjectedToolCallId] = "",
         ) -> Command:
-            unknown = sorted(set(tool_names) - self._group_of.keys())
+            normalized_names = [aliases.get(name, name) for name in tool_names]
+            unknown = sorted(set(normalized_names) - self._group_of.keys())
             if unknown:
                 return Command(
                     update={
@@ -97,7 +106,7 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
                         ]
                     }
                 )
-            missing = await self._build(tool_names)
+            missing = await self._build(normalized_names)
             if missing:
                 return Command(
                     update={
@@ -114,14 +123,15 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
                     }
                 )
             loaded = set(state.get("loaded_integration_tools", [])) if state else set()
-            loaded.update(tool_names)
+            loaded.update(normalized_names)
             return Command(
                 update={
                     "loaded_integration_tools": sorted(loaded),
                     "messages": [
                         ToolMessage(
                             content=(
-                                f"Loaded integration tool schemas: {', '.join(sorted(tool_names))}. "
+                                "Loaded integration tool schemas: "
+                                f"{', '.join(sorted(normalized_names))}. "
                                 "Call these tools normally on your next turn."
                             ),
                             tool_call_id=tool_call_id,
@@ -131,10 +141,15 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
             )
 
         description = (
-            "Load connected integration tool schemas before using them. Pass exact tool names, "
-            "then call the loaded tools normally on your next turn.\nAvailable tools:\n"
-            + "\n".join(catalog)
+            "Load connected integration tool schemas before using them. Pass exact tool names "
+            "listed below, then call the loaded tools normally on your next turn."
         )
+        if self._group_of:
+            example_name = (
+                "analyzePlan" if "analyzePlan" in self._group_of else next(iter(self._group_of))
+            )
+            example = json.dumps({"tool_names": [example_name]}, separators=(",", ":"))
+            description += f"\nExample: {example}\nAvailable tools:\n" + "\n".join(catalog)
         self.tools = [
             StructuredTool.from_function(
                 coroutine=load_integration_tools,

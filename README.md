@@ -63,22 +63,9 @@ This follows the principle all three companies converge on: **isolate first, the
 
 ### 3. Tools — Curated, Not Accumulated
 
-Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE follows this principle with a small, focused toolset:
+Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE follows this principle with a small, focused toolset.
 
-| Tool | Purpose |
-|---|---|
-| `execute` | Shell commands in the sandbox |
-| `fetch_url` | Fetch web pages as markdown |
-| `http_request` | API calls (GET, POST, etc.) |
-| `list_threads` / `get_thread` | Discover and inspect readable Open SWE threads |
-| `manage_thread` | Perform authorization-checked dashboard thread actions |
-| `linear_comment` | Post updates to Linear tickets |
-| `linear_search_issues` | Search Linear issues by free text |
-| `output_iframe` | Render sandboxed HTML visualizations in the dashboard |
-| `slack_add_reaction` | React to Slack messages |
-| `slack_thread_reply` | Reply in Slack threads |
-
-GitHub operations are performed with `gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `execute`, and `task` (subagent spawning). Content search uses `rg` through `execute`. Thread discovery and management tools run only on the parent agent, derive the actor from trusted run configuration plus application-generated follow-up attribution, recheck allowed-organization membership, and preserve the dashboard's owner, participant, and admin authorization checks.
+GitHub operations are performed with `gh` inside the sandbox, backed by the LangSmith proxy. Built-in Deep Agents tools handle sandbox files, shell execution, and subagent spawning. Content search uses `rg` through `execute`. Thread discovery and management tools run only on the parent agent, derive the actor from trusted run configuration plus application-generated follow-up attribution, recheck allowed-organization membership, and preserve the dashboard's owner, participant, and admin authorization checks.
 
 **Optional observability tools (server-side):** Admins can connect Datadog and LangSmith from team settings (Admin → Observability credentials). When connected, the agent gains Datadog tools (via Datadog's hosted MCP server, default `toolsets=core`) and read-only LangSmith tools (`langsmith_get_trace`, `langsmith_list_runs`). These run in the LangGraph server process using credentials encrypted at rest — the sandbox never holds Datadog or LangSmith keys. They are loaded **only for runs triggered by an authorized user** (admins plus any emails in `OBSERVABILITY_AUTHORIZED_EMAILS`; active members of `ALLOWED_GITHUB_ORGS` also receive LangSmith tools), so a prompt-injected run from an untrusted contributor cannot reach team observability data. Use scoped, read-oriented keys regardless: observability data (logs, traces) is attacker-influenced content that can carry prompt injection, and the agent has network egress — the same residual-risk class as `web_search` / `fetch_url`.
 

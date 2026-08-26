@@ -35,7 +35,9 @@ async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> Non
     middleware = DynamicToolMiddleware({"Notion": [notion_search, notion_update]})
     loader = cast(StructuredTool, middleware.tools[0])
 
-    assert "notion-search, notion-update-page" in loader.description
+    assert "- notion-search (integration: Notion)" in loader.description
+    assert "- notion-update-page (integration: Notion)" in loader.description
+    assert 'Example: {"tool_names":["notion-search"]}' in loader.description
     assert "schema details that must stay hidden" not in loader.description
     schema = cast(Any, loader.tool_call_schema).model_json_schema()
     assert set(schema["properties"]) == {"tool_names"}
@@ -109,7 +111,8 @@ async def test_a_lazy_group_is_not_built_until_it_is_loaded() -> None:
     loader = cast(StructuredTool, middleware.tools[0])
 
     # The catalog reaches the model without the group ever being built.
-    assert "- Corridor: analyzePlan" in loader.description
+    assert "- analyzePlan (integration: Corridor)" in loader.description
+    assert 'Example: {"tool_names":["analyzePlan"]}' in loader.description
     assert builds == 0
 
     coroutine = cast(Any, loader.coroutine)
@@ -134,6 +137,68 @@ async def test_a_lazy_group_is_not_built_until_it_is_loaded() -> None:
     assert routed == ["analyzePlan"]
     # Built once and reused, not re-fetched per call.
     assert builds == 1
+
+
+@pytest.mark.parametrize("qualified_name", ["Corridor:analyzePlan", "Corridor: analyzePlan"])
+async def test_catalog_qualified_names_are_normalized(qualified_name: str) -> None:
+    builds = 0
+    calls = 0
+
+    async def analyze_plan(value: str) -> str:
+        nonlocal calls
+        calls += 1
+        return value
+
+    async def load() -> list[BaseTool]:
+        nonlocal builds
+        builds += 1
+        return [
+            StructuredTool.from_function(
+                coroutine=analyze_plan,
+                name="analyzePlan",
+                description="Analyze an implementation plan.",
+            )
+        ]
+
+    middleware = DynamicToolMiddleware(
+        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(tool_names=[qualified_name], state={}, tool_call_id="load-1")
+    assert isinstance(command, Command)
+    assert builds == 1
+    loaded_state = cast(dict[str, Any], command.update)
+    assert loaded_state["loaded_integration_tools"] == ["analyzePlan"]
+
+    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
+        assert request.tool is not None
+        result = await request.tool.ainvoke(request.tool_call["args"])
+        return ToolMessage(content=result, tool_call_id=request.tool_call["id"])
+
+    call = _Request(
+        state=loaded_state,
+        tools=[],
+        tool_call={"name": "analyzePlan", "args": {"value": "plan"}, "id": "call-1"},
+    )
+    result = await middleware.awrap_tool_call(cast(ToolCallRequest, call), tool_handler)
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "plan"
+    assert builds == 1
+    assert calls == 1
+
+
+async def test_unknown_qualified_name_is_rejected() -> None:
+    middleware = DynamicToolMiddleware({"Corridor": [_tool("analyzePlan")]})
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(tool_names=["Other:analyzePlan"], state={}, tool_call_id="load-1")
+
+    assert isinstance(command, Command)
+    message = cast(dict[str, Any], command.update)["messages"][0]
+    assert message.status == "error"
+    assert message.content == "Unknown integration tools: Other:analyzePlan"
 
 
 async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
