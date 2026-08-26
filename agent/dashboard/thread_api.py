@@ -55,7 +55,7 @@ from ..utils.thread_participants import (
 from ..utils.timing import phase
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
-from .environments import get_environment, slugify
+from .environments import ENVIRONMENTS, slugify
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -1269,7 +1269,7 @@ async def _resolve_requested_environment(requested: Any) -> str | None:
         slug = slugify(requested)
     except ValueError:
         return None
-    return slug if await get_environment(slug) is not None else None
+    return slug if await ENVIRONMENTS.get(slug) is not None else None
 
 
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:

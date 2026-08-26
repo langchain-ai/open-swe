@@ -14,7 +14,7 @@ validated instead of as ``dict[str, Any]``.
 """
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
@@ -184,58 +184,3 @@ class TypedStore(Generic[RecordT]):
                     exc_info=True,
                 )
         return records
-
-
-class KeyedRecordStore:
-    """Records keyed by a stable id, each stamped with ``created_at``/``updated_at``.
-
-    ``default_factory(key, created_by)`` seeds a record that does not exist yet,
-    so ``create`` is idempotent and ``update`` can patch a record the dashboard
-    never explicitly created.
-    """
-
-    def __init__(
-        self,
-        namespace: Namespace,
-        *,
-        sort_key: str | None = None,
-        default_factory: Callable[[str, str], dict[str, Any]] | None = None,
-    ) -> None:
-        self.namespace = list(namespace)
-        self._sort_key = sort_key
-        self._default_factory = default_factory
-
-    def _default_record(self, key: str, created_by: str) -> dict[str, Any]:
-        if self._default_factory is None:
-            raise RuntimeError(f"{self.namespace} has no default record factory")
-        return self._default_factory(key, created_by)
-
-    async def get(self, key: str) -> dict[str, Any] | None:
-        return await get_value(self.namespace, key)
-
-    async def list(self) -> list[dict[str, Any]]:
-        records = await search_values(self.namespace, limit=1000)
-        if self._sort_key is not None:
-            sort_key = self._sort_key
-            records.sort(key=lambda record: str(record.get(sort_key, "")))
-        return records
-
-    async def put(self, key: str, record: dict[str, Any]) -> dict[str, Any]:
-        await put_value(self.namespace, key, record)
-        return record
-
-    async def create(self, key: str, created_by: str = "") -> dict[str, Any]:
-        existing = await self.get(key)
-        if existing:
-            return existing
-        return await self.put(key, self._default_record(key, created_by))
-
-    async def update(self, key: str, patch: dict[str, Any]) -> dict[str, Any]:
-        created_by = patch.get("created_by")
-        existing = await self.get(key) or self._default_record(
-            key, created_by if isinstance(created_by, str) else ""
-        )
-        return await self.put(key, {**existing, **patch, "updated_at": now_iso()})
-
-    async def delete(self, key: str) -> None:
-        await delete_value(self.namespace, key)
