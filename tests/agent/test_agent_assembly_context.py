@@ -182,6 +182,25 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
 
 
 @pytest.mark.asyncio
+async def test_agent_adds_repository_skill_sources() -> None:
+    config = _base_config()
+    config["configurable"]["repo"] = {"owner": "acme", "name": "widget"}
+    with patch(
+        "agent.server._resolve_repo_skill_sources",
+        new_callable=AsyncMock,
+        return_value=["/workspace/widget/.agents/skills/"],
+    ):
+        captured = await _capture_create_deep_agent_kwargs(config)
+
+    assert captured["skills"] == [
+        "/skills/",
+        "/organization-skills/",
+        "/bundled-skills/",
+        "/workspace/widget/.agents/skills/",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     config = _base_config()
     config.setdefault("configurable", {}).update(

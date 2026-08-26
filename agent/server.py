@@ -10,6 +10,8 @@ the agent itself is stateless.
 
 import logging
 import os
+import posixpath
+import shlex
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
@@ -31,7 +33,6 @@ import asyncio
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
-from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
@@ -214,6 +215,7 @@ from .utils.sandbox_state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
+from .utils.skill_backend import SkillCompositeBackend
 from .utils.startup_trace import aphase
 from .utils.thread_settings import (
     ThreadSettings,
@@ -286,6 +288,34 @@ async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str
     except Exception:
         logger.debug("Failed to load team default repo for prompt", exc_info=True)
         return None
+
+
+async def _resolve_repo_skill_sources(
+    backend: SandboxBackendProtocol, configurable: dict[str, Any]
+) -> list[str]:
+    """Find repository skill directories without making assembly depend on them."""
+    try:
+        repo = await _resolve_prompt_default_repo(configurable)
+        repo_name = repo.get("name") if repo else None
+        if not isinstance(repo_name, str) or not repo_name:
+            return []
+        work_dir = await aresolve_sandbox_work_dir(backend)
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to resolve repository skill directories", exc_info=True)
+        return []
+
+    repo_dir = posixpath.join(work_dir, repo_name)
+    sources: list[str] = []
+    for skill_dir in (".agents/skills", ".claude/skills"):
+        source = posixpath.join(repo_dir, skill_dir)
+        try:
+            result = await backend.aexecute(f"test -d {shlex.quote(source)}")
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to probe repository skill directory %s", source, exc_info=True)
+            continue
+        if getattr(result, "exit_code", 1) == 0:
+            sources.append(f"{source}/")
+    return sources
 
 
 async def _resolve_repo_custom_instructions(
@@ -1711,7 +1741,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
-    agent_backend = CompositeBackend(default=backend, routes=skill_routes)
+    skill_sources.extend(await _resolve_repo_skill_sources(backend, configurable))
+    agent_backend = SkillCompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = _make_model_or_defer(
         subagent_model_id,
