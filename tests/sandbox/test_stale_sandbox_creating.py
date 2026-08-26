@@ -57,7 +57,7 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
         _thread_id,
         _github_proxy_token=None,
         _github_proxy_repositories=None,
-        _repo=None,
+        _base_proxy_config=None,
     ):
         return sandbox_backend
 
@@ -103,7 +103,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
         _thread_id,
         _github_proxy_token=None,
         _github_proxy_repositories=None,
-        _repo=None,
+        _base_proxy_config=None,
     ):
         return sandbox_backend
 
