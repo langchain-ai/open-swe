@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
@@ -60,7 +61,7 @@ async def manage_code_channel(
     ],
     title: str = "",
     team_id: str = "",
-    is_private: bool | None = None,
+    is_private: bool = False,
     status: SessionStatus = "active",
     items: list[dict[str, Any]] | None = None,
     summary_message_ts: str = "",
@@ -84,8 +85,8 @@ async def manage_code_channel(
 ) -> dict[str, Any]:
     """Manage the complete Slack code-channel surface for this session.
 
-    Use `create` to promote the current Slack thread. Use `status`, `rename`,
-    `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
+    Use `create` to promote the current Slack thread using its generated title. Use
+    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
     upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
     can be passed directly or read from `file_path`, while Block Kit uses `blocks`
     plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
@@ -121,7 +122,7 @@ async def manage_code_channel(
             client,
             thread_id,
             active,
-            title,
+            await _code_channel_title(client, thread_id, title),
             repo if isinstance(repo, dict) else None,
             team_id=team_id,
             is_private=is_private,
@@ -225,6 +226,24 @@ async def manage_code_channel(
     return {"success": False, "error": f"Unknown action {action}"}
 
 
+async def _code_channel_title(client: Any, thread_id: str, fallback: str) -> str:
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:  # noqa: BLE001
+        return fallback
+    # Only trust metadata written by title generation: a missing title_seed key
+    # (e.g. legacy title-only metadata) has no proof of a generated title.
+    metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+    if (
+        not isinstance(metadata, Mapping)
+        or "title_seed" not in metadata
+        or metadata["title_seed"] is not None
+    ):
+        return fallback
+    title = metadata.get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else fallback
+
+
 def _result(
     action: str,
     channel_id: str,
@@ -268,7 +287,7 @@ async def _create(
     repo: dict[str, Any] | None,
     *,
     team_id: str = "",
-    is_private: bool | None = None,
+    is_private: bool = False,
 ) -> dict[str, Any]:
     if not title.strip():
         return {"success": False, "error": "title is required"}
@@ -295,7 +314,6 @@ async def _create(
         "channel_id": channel_id,
         "thread_ts": CODE_CHANNEL_SESSION_TS,
         "triggering_event_ts": origin_message_ts,
-        "thread_version": 0,
     }
     bound = False
     try:
@@ -346,7 +364,9 @@ async def _create(
     _, status_error = await set_session_status_result(channel_id, "processing")
     if status_error:
         warnings.append(f"Could not set processing status: {status_error}")
-    context_items = repo_context_bar_items(repo)
+    context_items = repo_context_bar_items(
+        repo, dashboard_url=dashboard_thread_url(thread_id) or ""
+    )
     if context_items:
         _, context_error = await set_context_bar(channel_id, context_items)
         if context_error:

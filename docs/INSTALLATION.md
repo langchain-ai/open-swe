@@ -336,6 +336,13 @@ Users can also override the team/project mapping per-comment by including `repo:
         "background_color": "#000000"
     },
     "features": {
+        "agent_view": {
+            "agent_description": "A software engineering agent that works in isolated sandboxes and opens pull requests.",
+            "suggested_prompts": [
+                {"title": "Start a coding task", "message": "Please implement this change: "},
+                {"title": "Investigate an issue", "message": "Please investigate this issue: "}
+            ]
+        },
         "app_home": {
             "home_tab_enabled": false,
             "messages_tab_enabled": true,
@@ -354,6 +361,7 @@ Users can also override the team/project mapping per-comment by including `repo:
         "scopes": {
             "bot": [
                 "reactions:write",
+                "assistant:write",
                 "app_mentions:read",
                 "channels:history",
                 "channels:read",
@@ -376,6 +384,9 @@ Users can also override the team/project mapping per-comment by including `repo:
         "event_subscriptions": {
             "request_url": "https://<your-ngrok-url>/webhooks/slack",
             "bot_events": [
+                "agent_session_stopped",
+                "app_context_changed",
+                "app_home_opened",
                 "app_mention",
                 "message.im",
                 "message.mpim"
@@ -394,7 +405,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 
 </details>
 
-3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Existing installations must reinstall or re-authorize the app after adding `files:write`.
+3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Existing installations must reinstall or re-authorize the app after adding `assistant:write` or `files:write`. The Agent view adds the top-bar entry point, threaded processing state, titles, and Slack's native stop button.
 
 **Slack URL checklist:**
 
@@ -451,6 +462,7 @@ LANGSMITH_URL_PROD="https://smith.langchain.com"
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key
+BASETEN_API_KEY=""                     # Baseten models when not using LangSmith Gateway
 OPENAI_API_KEY=""                      # OpenAI models and dashboard voice dictation
 # OPENAI_BASE_URL="https://api.openai.com/v1"  # Optional OpenAI-compatible API base URL
 GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)

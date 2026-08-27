@@ -10,6 +10,35 @@ import pytest
 manage_tool = import_module("agent.tools.manage_code_channel")
 
 
+@pytest.mark.parametrize(
+    ("metadata", "fallback", "expected"),
+    [
+        (
+            {"title": "  Match code channel and thread titles.  ", "title_seed": None},
+            "Different title",
+            "Match code channel and thread titles.",
+        ),
+        (
+            {"title": "Original Slack message", "title_seed": "Original Slack message"},
+            "Fallback title",
+            "Fallback title",
+        ),
+        ({}, "Fallback title", "Fallback title"),
+        # Legacy metadata written before title generation stored a seed: a
+        # title without a title_seed key is not provably generated.
+        ({"title": "Legacy hand-written title"}, "Fallback title", "Fallback title"),
+    ],
+)
+async def test_code_channel_title_prefers_thread_title(
+    metadata: dict[str, Any], fallback: str, expected: str
+) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": metadata}))
+    )
+
+    assert await manage_tool._code_channel_title(client, "thread-1", fallback) == expected
+
+
 async def test_sandbox_content_reader_enforces_source_and_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

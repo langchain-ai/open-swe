@@ -9,8 +9,6 @@ from agent.utils.slack import (
     SlackThreadMappingError,
     bind_slack_thread_id,
     delete_slack_thread_associations,
-    get_slack_thread_version,
-    increment_slack_thread_version,
     lookup_slack_run_message_mapping,
     lookup_slack_thread_id,
     resolve_slack_thread_id,
@@ -90,17 +88,6 @@ def _legacy_thread(
             "source_context": {"slack_thread": {"channel_id": channel_id, "thread_ts": thread_ts}}
         },
     }
-
-
-@pytest.mark.asyncio
-async def test_thread_version_counts_distinct_inbound_messages() -> None:
-    client: Any = _Client()
-
-    assert await increment_slack_thread_version(client, "C1", "1.0", "1.1") == 1
-    assert await increment_slack_thread_version(client, "C1", "1.0", "1.1") == 1
-    assert await increment_slack_thread_version(client, "C1", "1.0", "1.2") == 2
-    assert await get_slack_thread_version(client, "C1", "1.0") == 2
-    assert await get_slack_thread_version(client, "C1", "2.0") == 0
 
 
 @pytest.mark.asyncio

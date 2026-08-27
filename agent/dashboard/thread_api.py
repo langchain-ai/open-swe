@@ -66,6 +66,7 @@ from .options import (
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
+from .pull_request_context import get_pull_request_context
 from .pull_request_status import get_pull_request_statuses
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -1975,27 +1976,62 @@ async def _authorized_thread_metadata(
     return metadata
 
 
+def _tracked_pull_requests(metadata: Mapping[str, Any]) -> list[object]:
+    records = metadata.get("pull_requests")
+    tracked = list(records) if isinstance(records, list) else []
+    if tracked:
+        return tracked
+    pr_url = metadata.get("pr_url")
+    pr_ref = parse_github_pr_url(pr_url) if isinstance(pr_url, str) else None
+    if not pr_ref:
+        return []
+    return [
+        {
+            "repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
+            "number": pr_ref.number,
+        }
+    ]
+
+
 async def get_dashboard_thread_pull_request_status(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return live GitHub health for every pull request tracked by the thread."""
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
-    records = metadata.get("pull_requests")
-    tracked = list(records) if isinstance(records, list) else []
-    if not tracked:
-        pr_url = metadata.get("pr_url")
-        pr_ref = parse_github_pr_url(pr_url) if isinstance(pr_url, str) else None
-        if pr_ref:
-            tracked = [
-                {
-                    "repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
-                    "number": pr_ref.number,
-                }
-            ]
+    tracked = _tracked_pull_requests(metadata)
     if not tracked:
         return {"pullRequests": []}
     token = await _github_token_for_login(login)
     return {"pullRequests": await get_pull_request_statuses(tracked, token)}
+
+
+async def get_dashboard_thread_pull_request_context(
+    thread_id: str,
+    login: str,
+    *,
+    repo_full_name: str,
+    number: int,
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Return fresh model context for one PR already tracked by the thread."""
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    record = next(
+        (
+            candidate
+            for candidate in _tracked_pull_requests(metadata)
+            if isinstance(candidate, Mapping)
+            and candidate.get("repo_full_name") == repo_full_name
+            and candidate.get("number") == number
+        ),
+        None,
+    )
+    if record is None:
+        raise HTTPException(404, "pull request is not tracked by this thread")
+    token = await _github_token_for_login(login)
+    result = await get_pull_request_context(record, token)
+    if result is None:
+        raise HTTPException(502, "could not scan pull request")
+    return result
 
 
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:

@@ -180,9 +180,6 @@ async def test_code_channel_view_action_routes_to_channel_session(
         "get_slack_repo_config",
         AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
     )
-    monkeypatch.setattr(
-        slack_routes.common, "increment_slack_thread_version", AsyncMock(return_value=2)
-    )
     monkeypatch.setattr(slack_routes.service, "process_slack_mention", process)
     background_tasks = BackgroundTasks()
 

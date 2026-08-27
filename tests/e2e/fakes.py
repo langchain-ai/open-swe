@@ -244,6 +244,8 @@ def create_pull(
         "check_runs": [],
         "statuses": [],
         "review_threads": [],
+        "reviews": [],
+        "review_decision": "REVIEW_REQUIRED",
         "author": "open-swe[bot]",
         "created_at": time.strftime(
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 24 * 60 * 60)
@@ -296,26 +298,61 @@ def update_pull_health(number: int, values: dict[str, Any]) -> dict[str, Any] | 
         "check_runs",
         "statuses",
         "review_threads",
+        "reviews",
+        "review_decision",
     }
     pull.update({key: value for key, value in values.items() if key in allowed})
     return pull
 
 
 def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
+    comments = thread.get("comments")
+    if not isinstance(comments, list):
+        comments = [
+            {
+                "author": thread.get("author"),
+                "body": thread.get("body", ""),
+                "url": thread.get("url"),
+            }
+        ]
     return {
         "isResolved": bool(thread.get("is_resolved", False)),
+        "isOutdated": bool(thread.get("is_outdated", False)),
         "path": thread.get("path", ""),
         "line": thread.get("line"),
         "originalLine": thread.get("original_line"),
         "comments": {
             "nodes": [
                 {
-                    "author": {"login": thread.get("author")},
-                    "body": thread.get("body", ""),
-                    "url": thread.get("url"),
+                    "author": {"login": comment.get("author")},
+                    "body": comment.get("body", ""),
+                    "url": comment.get("url"),
                 }
-            ]
+                for comment in comments
+            ],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
         },
+    }
+
+
+def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "__typename": "CheckRun",
+        "name": check.get("name", ""),
+        "status": str(check.get("status", "")).upper(),
+        "conclusion": str(check.get("conclusion", "")).upper() or None,
+        "detailsUrl": check.get("details_url"),
+        "isRequired": check.get("required", False),
+    }
+
+
+def status_graphql(status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "__typename": "StatusContext",
+        "context": status.get("context", ""),
+        "state": str(status.get("state", "")).upper(),
+        "targetUrl": status.get("target_url"),
+        "isRequired": status.get("required", False),
     }
 
 
@@ -333,6 +370,8 @@ def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
             "check_runs",
             "statuses",
             "review_threads",
+            "reviews",
+            "review_decision",
         )
     }
 
