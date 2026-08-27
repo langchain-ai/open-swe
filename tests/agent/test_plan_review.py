@@ -40,6 +40,84 @@ def test_format_comments_empty() -> None:
     assert _format_comments([]) == ""
 
 
+async def test_approve_plan_tool_returns_existing_dashboard_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    from langgraph.types import Command
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "t1", "plan_mode": False}},
+    )
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "_thread_metadata",
+        lambda thread_id: _async_value({"plan_mode": False}),
+    )
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "get_plan_content",
+        lambda thread_id, *, raise_on_error=False: _async_value(
+            {"status": "approved", "html": "<h1>Reviewed plan</h1>"}
+        ),
+    )
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "list_plan_comments",
+        lambda thread_id, *, raise_on_error=False: _async_value(
+            [{"author": "reviewer", "body": "Keep the migration reversible."}]
+        ),
+    )
+
+    result = await approve_plan_tool.approve_plan(state={"plan_mode": False}, tool_call_id="call-1")
+
+    assert isinstance(result, Command)
+    assert result.update["status"] == "approved"
+    assert result.update["already_approved"] is True
+    message = result.update["messages"][0].content
+    assert "<h1>Reviewed plan</h1>" in message
+    assert "Keep the migration reversible." in message
+
+
+async def _async_value(value: Any) -> Any:
+    return value
+
+
+def test_active_plan_mode_ignores_false_state_for_fallbacks() -> None:
+    from agent.tools.approve_plan import _active_plan_mode
+
+    assert _active_plan_mode({"plan_mode": False}, {"plan_mode": False}, {"plan_mode": True})
+
+
+async def test_approve_plan_tool_keeps_inactive_mode_error_without_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "t1", "plan_mode": False}},
+    )
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "_thread_metadata",
+        lambda thread_id: _async_value({"plan_mode": False}),
+    )
+    monkeypatch.setattr(
+        approve_plan_tool, "get_plan_content", lambda *args, **kwargs: _async_value(None)
+    )
+
+    result = await approve_plan_tool.approve_plan(state={"plan_mode": False})
+
+    assert result == {"success": False, "error": "plan mode is not active for this thread"}
+
+
 def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
     from agent.dashboard.plan_api import _plan_approved_slack_blocks, _plan_approved_slack_text
 

@@ -49,6 +49,23 @@ async def approve_plan(
     try:
         metadata = await _thread_metadata(str(thread_id))
         if not _active_plan_mode(state, configurable, metadata):
+            content = await get_plan_content(str(thread_id), raise_on_error=True) or {}
+            if content.get("status") == PLAN_STATUS_APPROVED:
+                plan = str(content.get("html") or content.get("markdown") or "").strip()
+                comments = await list_plan_comments(str(thread_id), raise_on_error=True)
+                return Command(
+                    update={
+                        "plan_mode": False,
+                        "status": PLAN_STATUS_APPROVED,
+                        "already_approved": True,
+                        "messages": [
+                            ToolMessage(
+                                content=_approved_message(plan, _format_comments(comments)),
+                                tool_call_id=tool_call_id,
+                            )
+                        ],
+                    }
+                )
             return {"success": False, "error": "plan mode is not active for this thread"}
         content = await get_plan_content(str(thread_id), raise_on_error=True) or {}
         if content.get("status") == PLAN_STATUS_SHARED:
@@ -90,8 +107,8 @@ async def _thread_metadata(thread_id: str) -> dict[str, Any]:
 def _active_plan_mode(
     state: Mapping[str, Any] | None, configurable: Any, metadata: Mapping[str, Any]
 ) -> bool:
-    if isinstance(state, dict) and "plan_mode" in state:
-        return state.get("plan_mode") is True
+    if isinstance(state, dict) and state.get("plan_mode") is True:
+        return True
     if isinstance(configurable, dict) and configurable.get("plan_mode") is True:
         return True
     return metadata.get("plan_mode") is True
