@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:72635dfb407dc0dd7c1b5625f2eac62efb1ea4076b1dea1e6f3528ebb7ef333c",
+  "claims": [
+    {
+      "id": "claim_0e227b88b5d94fd5924bb5c89a53831e",
+      "statement": "Open SWE's backend is a LangGraph application that serves multiple graphs (agent, reviewer, analyzer, chat, scheduler) together with a FastAPI app (agent.webapp:app), all wired through langgraph.json which also declares the checkpointer TTL policy and .env env file.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L6-L9",
+          "version": "repo-lines-v1:sha256:d547df9020b80765a92f748d3cd522970aaaa085214970afd3445f41236b3cba:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGFkNDg5NmZjYTA2YzM4NmMxZGE2YzJjYjFkODcxMDViMDdjODYzOTE3N2UzNWMyN2YwYjIxZDZmNjk2ZThiMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWFlZjY5ZmIwZDZkOTRlMTBkNzRjMTQ0MTdiMjNkMjBhYTA3YmEyODk0MDZkMmE3ZDllMGIxMzRkYzgwNWRhZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2UzNmY2OGM3NGM4YWRkNGI2MDUxMjA0NjVmOTQ3MTFlZWU5N2M2ZmVmYTYzNmE0OTNkYTdmM2RjMDcwMThjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDRkY2YyZWViNzkzM2UzZTVmMDE3OGIzMzRkNDUwN2E1NDZjYTRlZTY2YzY4NDZkNWIyZGNhMDQyYjE5YjE2OCJ9"
+        },
+        {
+          "resource": "repo://langgraph.json#L5-L25",
+          "version": "repo-lines-v1:sha256:83396167692f0969e047e25302bb8789e4391599d0b1f0c555402e675e702974:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0MzAyNjQ2NDg1Mjc3NmNhZDJkMjc5YzE2MDMwYTNiMmM1N2I4M2MxMTIwNTkyZTZhZjgxYjY5YjY4NGJhYTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjNjE1MGYxZjFmN2M2MjQyZmI4ZmUwZjhmNjNlZDMyZTRlNzc2MWM4NjA5OTc5Zjg4MzdlMWJlMzZjYWQxMDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI3ZWEwY2FjZDU0ZWFlODUyMGI0M2FiNTEyMDViZGQ2YjE0MTdjYzAyNTBiOTJjNjQxMTUxZGM0M2Y5MjkwZTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_865f6195385d4d4ebbe6e5a23dd20014",
+      "statement": "make dev runs `uv run langgraph dev --no-browser --port 2024`, serving all graphs plus the FastAPI app on http://localhost:2024 so that both the /webhooks/* and /dashboard/api/* endpoints are available from one process.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L10-L11",
+          "version": "repo-lines-v1:sha256:566e422023da2336fe5c10f17022564259558bca82a50901b218df77665633e9:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTAxZmFkY2FiMDRkNDgwYmFiMWY0Y2Y0Nzg0NzAyMmViMzNhMjhiM2E2ZmQ2YmJiMTg3ODMyYTY1Y2QxZmRlZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmVlMDVkNzUwYzcwMDA1NmNlYjQ0NWY4NzdiMTJiMDUzODc3YTAzOWRmMGQyYjNiN2NkY2M1NzFmZDhlNzI3MiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzdhOWNkZDZmNGEzNWRiZmU1MzU5ZTEwZGZlMTNmNmZkNWZjZDhiOGUzNGU1MjYyYTc3NTcxNWNmOGY1ZWFmYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWE5N2VhMDQ1MjgwOTkwYjJlNzM4NjQxNDFiYjg2ZjY3ZjZjYWNmZWIwNDUxZDQ1ODQ5MmNlZjM3ODRkZjZiMyJ9"
+        },
+        {
+          "resource": "repo://docs/INSTALLATION.md#L609-L627",
+          "version": "repo-lines-v1:sha256:6c371def1b2d943e253474604e39690352051d0a8db0e6713d085a1c89e4ba06:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkZTJmNTMyOGVlNmU4MDUwZThhYWZkOGRjODY5YTA2OWNkOTU4NGVkYWFmNTRmZTU4OWQ3M2MzYjdkY2Q3OTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM5ZmExOTc3YmMwMzU0YmQzYTYwNzQzZTU0YjIyOTk1M2QxNGRlNjE2OWEyMzY3ZDk4MzI5MTZlOTZkZTkzYTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNlZTI2ZTcwY2JiMzllZTZmMTQwZjFlMmY5NmRhMDMyNjc1NmQ0OTQ4NjM3ZTg2ZmFiOGZkMjM4YTI2NTFiZmYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3620b953bfce4995842beaea367d22f3",
+      "statement": "make run runs `uvicorn agent.webapp:app --reload --port 8000` and serves the FastAPI app without the LangGraph runtime, which is insufficient for the dashboard's Agents chat features that call LangGraph; full local dev therefore requires make dev on :2024.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L16-L17",
+          "version": "repo-lines-v1:sha256:bf1b8b419382bba1cb6f267b08cabe3bffc79b383a660fe71731c85cfddb6657:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDNhOGJhOTMzNzhkMGVlMTg4NTljOTcwMGQ4YzI4ZjdmNTcwYTljMmMxOGFlYjk5ZDBkYjE4OThjOTFlMjUwYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjhhMzJhYjMzZDNkYWM5YTU3Y2I3NTY5YTExNDU4MDg1ZTA0ZjcxYTRmNzYwMTM1N2NjMDgzM2I1NzIxZDc2MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTE1MmE3Y2ZlNDQ5NzExNjYzNDgxZDA2Zjk4Y2RjMTNkYWUxMjdkODkzNWI3ZjUyN2U3ZWJiNWE5NjE2ZjJmZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2Q2ZTQ5ODExNzUxNjhhZTk3NWRiYTdhY2IxMmY2NTg5MzRhOTYwMDg5OWJiZDJmMDRkZjg1ZmFlY2IzMGQ1MyJ9"
+        },
+        {
+          "resource": "repo://docs/INSTALLATION.md#L628-L628",
+          "version": "repo-lines-v1:sha256:2d4b027107c585fb96c3c1930306fdbf49bb112c4cc2b71adf7d1e641409f1af:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMmQ0YjAyNzEwN2M1ODVmYjk2YzNjMTkzMDMwNmZkYmY0OWJiMTEyYzRjYzJiNzFhZGY3ZDFlNjQxNDA5ZjFhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMmQ0YjAyNzEwN2M1ODVmYjk2YzNjMTkzMDMwNmZkYmY0OWJiMTEyYzRjYzJiNzFhZGY3ZDFlNjQxNDA5ZjFhZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODI3ZmFhMDU3MTQyMWZiZjE0ZjlmYjIzZDMxNmE5MmFiNjVhMDJjNDYwYzg2YTZiMTMxYWU5MTM0ZjI4M2JmOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTA2YWM4MWVjY2JkMjllYWI2MzAyZWU0NGVhNjIwOWYwNTI4ZjMyY2ViNGJlMmQ1OTNkZTY1OTNlMjU4OTQxNyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_ac66971e0fe949b1858e5aafe841a8d2",
+      "statement": "make install installs backend dependencies including dev extras via `uv sync --extra dev`, and the Makefile exposes uv-run wrappers for pytest (test/integration_tests), ruff (lint/format/format-check), and basedpyright (typecheck) over agent/ and tests/.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L31-L72",
+          "version": "repo-lines-v1:sha256:12869abe540838a9ac9267bee19dca7b97c0ad1989905d1e4bc3773105f8885e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM2YzU4MDE5Yzk3MGUzYjE3MzJhZTY2YzkwMDg1NjQzODI0Njk1M2YxMmNiYTI5ZDYxOWIwMDU3MmZmZjI0NTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyZmJjZDlhYjc2ZmQyNTMzNWI2MzQ3ZDZkMGI2ZjA4ODlkZmJlMjU4MzdlZDQ3YzAyZTU0Y2VjZTU3YmIxMmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIxZjc3NTYzNjE0NGM1OWE5ZDJjMDkzNmY4Nzc0ZGVhM2NiOTU4MWZhYjM2OTI3YWYxZTEwMmM0Mjg4MGU2NDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYWI5YzQ3MzQ2NGI2ZGQ3YThmMzBlMTNlYzYzMzlkNzk5MWFmNDNkNjc5NTZlM2NiYmQ4NTE4NjA5ZjJhZWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7c0acef30b314001ba9760696f5b0434",
+      "statement": "The local dev server's langgraph-api version is pinned via constraint-dependencies (langgraph-api>=0.12.6,<0.13) in pyproject.toml so that tests and local runs use the same runtime version that langgraph.json declares for production, rather than uv resolving to an end-of-life release.",
+      "evidence": [
+        {
+          "resource": "repo://langgraph.json#L4-L4",
+          "version": "repo-lines-v1:sha256:64149bc0af48e3bda2ef7f8b84778f1698b5af106f2f5db2505715a348e8aa8a:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjQxNDliYzBhZjQ4ZTNiZGEyZWY3ZjhiODQ3NzhmMTY5OGI1YWYxMDZmMmY1ZGIyNTA1NzE1YTM0OGU4YWE4YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjQxNDliYzBhZjQ4ZTNiZGEyZWY3ZjhiODQ3NzhmMTY5OGI1YWYxMDZmMmY1ZGIyNTA1NzE1YTM0OGU4YWE4YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZDlmZGQzNTI2ZDhjOGM5MzFlNDFmNTdhZjZhZDY5ZThlYzAxMGI5MzExMjRkNjFmZmYxOWVkMjg4MDYzYmYyMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTNiMTVlMDgyMTRkMmEwZmI0NjRmMmI3NDJjYzdlY2VjZjgzNGYxZjc4MGFmOTY0MGE1YzIyODU0YmUzMDBhMCJ9"
+        },
+        {
+          "resource": "repo://pyproject.toml#L52-L57",
+          "version": "repo-lines-v1:sha256:056aebaa00c86570279687f69db2e751567c592de095cbfcd8eb1d508fd97cc4:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTM5YzI5MjYxZjY5YjFkMWFlMWRiMmVhNWQyOWI5M2IwMmM3ZjA1MmI3MmNjMWE1MmM3YWQ2MWY1NWRhODM3NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZGQ1ZTU3NmFjNDdlYzY5ZTJjOWYwYzkxYzJmMDZmODgwYTM2MjI2NDRlZDg2MWQxM2IyOTdjYTgxYTljZmY2ZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDMwYzI0MzdjYWUwOTYyY2Y2NmUzN2RkNjc3MTJhYTllNGY1MmMwODhjODA0Yzg1ZjAxYzA3OWYwMTFhNDZhOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjkwNWJkZWQwNjQ0MDE5ODI4NDkwYjFkNTZjOTA2YTQ4YTk4YzIwM2JlMTY5MDNiNGZmNTIwMmI5NTRmYjZhZSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_23f87a37794f43989803b0b0870d1bb3",
+      "statement": "langgraph.desktop.json is a separate trimmed deployment manifest for the desktop build that exposes only the agent graph, disables the built-in UI, and configures a local auth handler (agent.local_auth:auth) with Studio auth disabled.",
+      "evidence": [
+        {
+          "resource": "repo://langgraph.desktop.json#L5-L17",
+          "version": "repo-lines-v1:sha256:f180601d3c0294b9bfe0e6ca0011cbee53e6b46fa905c0e46001f0325b23d5a1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0MzAyNjQ2NDg1Mjc3NmNhZDJkMjc5YzE2MDMwYTNiMmM1N2I4M2MxMTIwNTkyZTZhZjgxYjY5YjY4NGJhYTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI3ZWEwY2FjZDU0ZWFlODUyMGI0M2FiNTEyMDViZGQ2YjE0MTdjYzAyNTBiOTJjNjQxMTUxZGM0M2Y5MjkwZTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_03a80335729849e0b9f03b173c47a3db",
+      "statement": "The dashboard is part of a pnpm workspace whose members are ui, desktop, and tests/e2e, and Turborepo orchestrates the per-package dev, build, typecheck, test, and check tasks.",
+      "evidence": [
+        {
+          "resource": "repo://pnpm-workspace.yaml#L1-L4",
+          "version": "repo-lines-v1:sha256:fb2d7e73b4c2e7a812bd702aaff5341c14436f200e347874e1aec7426c0192c9:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWRiMDc2ZWI4MGFkZTE5ZmVhM2UwYTQzMTk4NmI2NTVmNWZhNTllZDYyNjdlMTA3ZDY4OGI2MWMzZjQyMTc5NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTFlN2JkODFiMDA5ZmViMDQ1MzYzNmVmNmRjZTk1YzA5N2M3YjRjNTM2MjNlNDZmNjI3ODkxNTMzYWIzOGRlMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWQ3YjRmZmVjNGE3ZTUzMmE4YWMwZGVlYTVhYzQ4ZTRkOWZkZjE3YjY1NjVjOWFmMTA0ZjQyZDIyNTJhMDUyYyJ9"
+        },
+        {
+          "resource": "repo://turbo.json#L3-L26",
+          "version": "repo-lines-v1:sha256:038f9eeadb876358a676044be3661cd68af3adf2029420d98e9d98248bf2c723:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2ZTIzYjQ5ZWQ3ODBkMzgwMzk3YWVhNzllM2NkZTgwZmU5NGM4YzU3YmZmODc1MjJjODMxNjM4MDhmN2M3OTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIxOGYyMTg4NDQwNmQ5ZDcxYzcyYzMzZTU5ZDU5YjY5NDkzOTQxNzljYjJhNDg1Yjc4OTkwMzFjYTAzOGMxYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9728ecdcb847471f8a5e2b37825bc6c6",
+      "statement": "make web runs `turbo run dev --filter=open-swe-dashboard`, starting the dashboard Vite dev server on http://localhost:3000, which proxies /dashboard/api/* to DASHBOARD_API_URL (defaulting to http://localhost:2024) so no ui/.env is needed and one build can front any backend.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L13-L14",
+          "version": "repo-lines-v1:sha256:1265a49f032ca9fcc2578037c1b1ad9f6bc265a6f0f98aab87cecc3cb0bd0d53:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTNlMGEzMTA5ZTc0NjEyNjFmNjQxY2EyZjMxNGY2YTRhODY3ODMzMmMzZWEzOWUyNWQ2MDJjMWJmNmVmMTIyZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOGU0ZWZlNTQ5NjliMzZmZTliZTNiNDliZGUzMzNmZjljNjRhZjdmN2E3NGY4OGFjZTYzMjExN2IyNzlmYzljNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzA0ZTc3ZmQ4ZjM3Nzk5YWY0NTU5NjY3ODU3ZDJlN2M2MTRhNjZhMjEyODAxMjY2MDVkMjk0MzM2ZDRhN2QzNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDQ4NjBmMGU2NWU4NTZmMGQ4Yjc1YjM3OWNkZThiOTQ2YzhmMWE3YjdhOWJiMWMwZTBlY2ZjZTQyNmU0ZmFjYiJ9"
+        },
+        {
+          "resource": "repo://docs/INSTALLATION.md#L634-L639",
+          "version": "repo-lines-v1:sha256:69a78e3323439cf58a1ec7061aa0c128aec4adaa4a72ef8453c41cb3a61bfbc6:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNWRlMmY1MzI4ZWU2ZTgwNTBlOGFhZmQ4ZGM4NjlhMDY5Y2Q5NTg0ZWRhYWY1NGZlNTg5ZDczYzNiN2RjZDc5OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzdmMzNhZjA4MWUxOGIwY2I1ZjAxNjZkN2NhMmZlMjgxYjE2NGViZGM3ZTI0MDNlNDMzY2VmODUxYWM4ZDFkNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmQ0ZDIwMDRmMDVkYmU3MGNhZGY2YjU0MjJjYTNhYTEwMzE1YmIxODEyODAxZTA5MmNhMDBlZmU2MTY3NmMwOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTI5MzBiY2M3YWU4NjMzZDcxODJiNDQxMzY3M2FmNTZiYmIwNjU3MDg4MWMzZDFhYjdlMjVmMWJlODEyMmJhNyJ9"
+        },
+        {
+          "resource": "repo://package.json#L6-L6",
+          "version": "repo-lines-v1:sha256:1800685c84cd431d67808f63f0da4909e2a506c742b1774aee5eeacc0f33a22c:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTgwMDY4NWM4NGNkNDMxZDY3ODA4ZjYzZjBkYTQ5MDllMmE1MDZjNzQyYjE3NzRhZWU1ZWVhY2MwZjMzYTIyYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTgwMDY4NWM4NGNkNDMxZDY3ODA4ZjYzZjBkYTQ5MDllMmE1MDZjNzQyYjE3NzRhZWU1ZWVhY2MwZjMzYTIyYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTdhNmVkYzI4ZGE1NzY0MzM4ZTU2ODQ5ZDkxZmIxZDQ0OGM3YTA4NDNmZTVkOGY3ZGVmMmI3NGM3M2I5MzY2ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGRhODk4NzgwZThmNTI4MWNiMzdjYWM5MGEyZjJjNzFiZDE5OTgyMGQ4MWFjY2MzODM1MTIyMGU4ZTVkMmRiMiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_d669b21fba334a49a220d8a1709876ef",
+      "statement": "The dashboard build/typecheck/test scripts fan out across the workspace through Turborepo, while lint (oxlint) and format/format:check (oxfmt) run once from the repo root over all JS/TS files and are not Turborepo tasks.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L649-L649",
+          "version": "repo-lines-v1:sha256:9ba96028dfbd39eb0d22dfda40246f0de0c442b605eebb698cbf47dd748b7240:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWJhOTYwMjhkZmJkMzllYjBkMjJkZmRhNDAyNDZmMGRlMGM0NDJiNjA1ZWViYjY5OGNiZjQ3ZGQ3NDhiNzI0MCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOWJhOTYwMjhkZmJkMzllYjBkMjJkZmRhNDAyNDZmMGRlMGM0NDJiNjA1ZWViYjY5OGNiZjQ3ZGQ3NDhiNzI0MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODQ0NWZlNDk0YTEyMmJkZWNmMDExMzQ3YjNlZDAxYzg5NjFmNGE5MWRmZGU3ODczYjc2MjM0ZDMwODk5YjgyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTY0M2Y4NTI0ZWE4YzIwNDliYTlkN2U5ZTU4NzBjMTlhNTQxMDNkNWJkNmQ2ZmQ3ZGViNmRlZGUxNDQ4YzA4MyJ9"
+        },
+        {
+          "resource": "repo://package.json#L9-L18",
+          "version": "repo-lines-v1:sha256:d0106ec859048a0e737bb83961f72b0b00c250790ad711c77ee3abc5620c6d93:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4MmI3MGU4NzU1NzVmNzRjMGIyYWU3YmZkNjI4NzMyOGM2NTk3OWQ1MTJhOTdmMzg4NTEzYTY5ODQxOWJhYzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2N2I1YzdmOGI2ZTdkYWNhODhjZjMzMjBkNTJiZTQ1MGM4MzQ4MGVlZDJhYzk1OTRhMmYxYThmMGI2NmNiOWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFhZjNkZDEwMWNlMDlmODkwNWZjODY3ZjM5ZTc4ZTgzY2QzNWI3N2IxOGRjYmZkMWNkNWRjYTU2NjNmYjI5ZTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwNzg5MTA1NDRhMmViNDY1ZWUxMTc1ZDU2MTIxYTg1NTY1ZGUzMjYzODAzMmQwODZkZjc1M2UwYzhmMTQzMzUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1bb8f1df29d74178920c52713ccf2681",
+      "statement": "Turborepo's build task caches .output/**, .vercel/output/**, and build/**, and treats DASHBOARD_API_URL, VERCEL, E2E_HARNESS, and any VITE_* variable as cache-affecting build inputs so changing them invalidates cached builds.",
+      "evidence": [
+        {
+          "resource": "repo://turbo.json#L8-L20",
+          "version": "repo-lines-v1:sha256:389c47394d0f5ccda8c668f32ef4dbb30556ec086b5d1999c7bb1a975ea80c90:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjllY2VlOTlmN2ExZTVlMGNkYzllODNiYTZlNWE4MGUwM2FiNDQ3ZWZiNjRkYmQ4ZTk0YWIwYTk0OTg5YTAyYTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMGNkYjk3MmE3YmZiN2VkMjQ2ZjlmZjY3MjM4NWU1NWY0OTY4ZmMxMTA0M2RjNWI2ODRkNTFkZmEzMWRiY2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVjZmE1YThhZmFiMzZiZWFjNGM0ZTlhYzViNGI5OWNkYTkxMTg2M2IwMGE3M2VlY2QyOTA1MGRlMGNlYTUzYWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ5Y2VhNjk5MDhmYTI4OTJlYTlkOWJkOTU4ODZhYzQ5YTlkZjYyM2Q3ZDAxNjJkNWMyNDNjZWM0YjQ3MDNmMWYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c10336cf8d2e42079a8f26648e875c1d",
+      "statement": "The Electron desktop app in desktop/ bundles the compiled dashboard UI, is run in development with make desktop (pnpm run dev:desktop) against a running backend, and is packaged with `pnpm --dir desktop run pack` (unpacked) or `pnpm --dir desktop run dist` (installer); packaged builds prompt for the backend URL on first launch rather than defaulting to any hosted deployment.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L19-L20",
+          "version": "repo-lines-v1:sha256:6aa6f3ff8c7d3f82c2bc4a95eb77083441899f58f21cb7a2aa71871fb9a3b7c1:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDQwMDdkNzE0ZGI5NWM4ODEzZjRkMDQ3M2FkZGM5ZDYyYmM3NDhmNjhkMTZjYjA3YjRkNGI4NTg5NzJiOWFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjg2ODA1N2I5MDc3MDFjZTRhYjM4Yzg2MTQwZDVhNTA4ZDYwMTQ5ZDc4OTA1MzFkY2FlZWFhNWRmNTVkMTEwMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzg3ZTJhNjk3NzMyMjQ2YmViNTQ5ZjM3ZjczN2IyMGE4ZmMyZTEwYWYwYjBiZTllN2I0ZDk4ZWQwM2JiNDQ0ZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzk2NzI2ZWI2NTE0YjBmY2Y5YjY2M2RmYTM1YzI5MGFiOTMwZTg3MjlhMDMxMDAxNGMxODFmMWM5MTA4NDY4MCJ9"
+        },
+        {
+          "resource": "repo://docs/INSTALLATION.md#L656-L671",
+          "version": "repo-lines-v1:sha256:f1ccc51290e6dd38b6be08f0af594069d9deb34b91130f0205f1065c2d09be77:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJmOWVmZmMwYTc3NTNmMzE2MmYzZjZjMmI2ZDE1NTA4YTBlYTljYjRiMWUxZWY1N2Q0OTg4ODAwYWEyZWE4YzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2MGRkMjZlNzgxYzllNjk4N2M3Y2NlMDk4Y2M3NjEzNjE5NmYwYjdlYjBkNzMyOWFhZWY3ZmY3Yzk2NzY3MzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3ZWIzNDIwOTNlOGM5MjViYjMwNmU1NmVlNzgxMGVkNTJjMGVkMjYxNDZhMzdhOTQyYjlhM2U3ZWU1MmVmZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjllODg1OTMwMTc3NmRhYjZjYjEyNGYwYzA1MTJjZTk3ZDRiMjQ2ODM5NDJlYzQ4NTRjZjhiMzY1ZjExNGNmYWMifQ"
+        },
+        {
+          "resource": "repo://package.json#L7-L7",
+          "version": "repo-lines-v1:sha256:b9fca5bbab9129e1a598a8d5c698d5eb49b1dadedd8ec3935e05dee917d841bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjlmY2E1YmJhYjkxMjllMWE1OThhOGQ1YzY5OGQ1ZWI0OWIxZGFkZWRkOGVjMzkzNWUwNWRlZTkxN2Q4NDFiZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjlmY2E1YmJhYjkxMjllMWE1OThhOGQ1YzY5OGQ1ZWI0OWIxZGFkZWRkOGVjMzkzNWUwNWRlZTkxN2Q4NDFiZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTljMDA3MDQ0ZWExMTg0ZGFhZTBmZGQ2YzFlYjNlYjM0M2M4NGQzYjU0N2JiNzhmMmJjMzZhNDQ3ZDJlMDg0YyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjljNDAzOTA4ODRkYjBiZGI5MGQ0NTg0YmE1MDk4ZWI5MjJkZTJlMjYwZGI5MWRmZTZjNzAyMDhmNGZhNGJkMyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_ed7e7589d80846ec84d8774da7cfb62f",
+      "statement": "make install-desktop installs or updates Open SWE Desktop on macOS by refusing to run with a dirty working tree, fast-forwarding to main, then invoking scripts/install_desktop.sh, whereas make install-checkout runs that script against the current checkout without touching git state.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L22-L29",
+          "version": "repo-lines-v1:sha256:fedcdb99295af4ba3ba0187a912cb1259607550416516ea220ebb86bf58f52ae:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzAwMTE5MmViYTUzMzFmZGQyODE5OWQ1MGVmNDA3NTQyZDhjMmFmZTMzYWYwOTdlZjU2YzU5YTA3OWU3OTM3NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzYxMTM2NzhmN2ZjNjI2ZmMxNGQzMmUzODAwNGRkMTgyNDM2YzkyMWY5YjQ1Yzc5MTU1OTRlNTA2NGNhNDdkZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYWI1ZjU2MGZhNzJjZDIzNGFlMDE1NTEwMDEzOGY0NGJhMzE1OThhOWI1ODEyNjZjMWIwNDQyMDcxYzcwNjgxMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjdhYjlkNjEyNzMwYjA1NTU0OTYyZWZkNzQzNDNlNGQ0MzFjZmJhYWRmMDdjNjIyM2VhNzcxODdhYWY1ZjNlMyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_27f2634dceb746c99039ce3570a58ea2",
+      "statement": "scripts/install_desktop.sh is macOS-only, verifies node, ditto, uv, and a pnpm/corepack launcher are present, packs the desktop app, and atomically swaps it into /Applications (or ~/Applications when /Applications is not writable).",
+      "evidence": [
+        {
+          "resource": "repo://scripts/install_desktop.sh#L1-L60",
+          "version": "repo-lines-v1:sha256:9852410a3eede97d8f0b71d7189fb421856c9472dd9ebaeb413ab318013cdf65:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkOTVmYzA0YTgwYzk1MmY0OWNlNDE4ODYyN2M1M2IwZmJlOGM0NDA0MWI5NTJkNTkyYWNkMWRlOTk4NjE0NjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmMGVhOWZlODg0NTg0ZTA1MzFiMzg0ZThhNzZlYzQ2MDIxMzY0ZDg0MDU4MDIyMWViNzBiMmIxYzZkZmNjNTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjNDRhYTdiNjA1NmNkOTZlNzk5YmEyMDdmMjlmZGJlMWU4NDBiNDIzYzViYWIxYzlkMTBmZWUzNzg1MWEzY2UifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_acda640c77b944398f151812f76880e1",
+      "statement": "scripts/create_sandbox_snapshot.py builds a LangSmith sandbox snapshot from a Docker image using SandboxClient and prints the resulting UUID to set as DEFAULT_SANDBOX_SNAPSHOT_ID.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/create_sandbox_snapshot.py#L36-L43",
+          "version": "repo-lines-v1:sha256:2eb9fcf38632eacf0caf5d27d6708cd0cde504cbf83eb5d97c36467d413dae23:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTM4ZWQ0NTczYWZlMDZiZTY3NTk0OTRhZjBiMjJmMzNkNThjYzdiNzQ5YjMxZGIzMjMwYzM3ZjhiNDUzMGY2YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDI1NDUxMGI1M2I5ZTE4Y2QzN2E2OWJmNGNmMWVmNzdiYzczZDEyMjAwMmRlNzRmMzllODgxMzZiYmZlNTYwMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODE4MmNkNzIzOTlkZGFhM2Q3Nzg0ZDJmYjRkNTliY2NlMjA2OTY2ZWYwNDU3YmIyYzY0NjQ4MzE0ZTViMDM2MiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2Q0MTM0MGNjMjM5YTE1OWNlOWI2MDIyZTlmNjMyMjgzMmUyZWFkNzZjYWU5ZTQ3NTRkMjEwZWI4ZmI2ZDVlOCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_14ff348c01614028a95b8353f76f7d72",
+      "statement": "scripts/purge_wakeup_crons.py is a one-time backfill that deletes expired one-shot thread_wakeup crons from a deployment, resolving the deployment URL from --url/LANGGRAPH_URL/LANGGRAPH_URL_PROD and the API key from LANGGRAPH_API_KEY/LANGSMITH_API_KEY/LANGSMITH_API_KEY_PROD.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/purge_wakeup_crons.py#L1-L26",
+          "version": "repo-lines-v1:sha256:2d6a69b2b7a54441bfe2fe0ceaf6e47a585a2d9e50f7a7ae3195ea62309e4315:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE2OWIwMTBiY2U1NDg0YmM2OTcwMTMxNjI0YTBmNGM1ZTExMzhkMjcxOWJmZjY2MmE5Y2VhNzc2ODY4N2ExZTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f34635cfb824a2d943e7c0a72335917",
+      "statement": "examples/github-actions/set-base-snapshot.yml is a copy-ready reference workflow that rolls a new base sandbox snapshot out to a running deployment from CI by PUTting to /dashboard/api/sandbox-settings, authenticating with GitHub Actions OIDC (id-token: write) so no long-lived secret is stored.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L227-L240",
+          "version": "repo-lines-v1:sha256:ce7f8eed480546928f9f547c5f6f202f0ea6831c30ce168822e0c6e6dcbb833c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxMTVjMGQ3YTUyN2UxZThiZjRkNmRlMmI5MWUzMDFiYTM1ZDJhMDA5MDY4MThkNTUwMjRmYmI2MWJlNjQzYTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmZjFlZjZhYWI2M2FjMTg0NGRlN2IwYzJiMWY1M2Q3MGQ3MDEyZTQzMjNjOWVjNDRlMjJmYmY5ZTAzOTgxODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE2MzM3OTRkN2ZkN2U2YTYyZWEyNmIwZTYxYjE2YzMwYzdmOWUyMDI2M2RlNTdlNGJlYTdiNTFiNmMzMTFkYWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5YjEzZGNlYmM1ZGZiNTIxMzJlYmZjY2E2OWI4MzdkZDhjNGQwOTg2NmNkZjE0YWRmOWI5MDk5YzkyMjkwYmMifQ"
+        },
+        {
+          "resource": "repo://examples/github-actions/set-base-snapshot.yml#L27-L74",
+          "version": "repo-lines-v1:sha256:cb214b7904edf69a094a1b09a99114a3b26c6b43416a55a26beb11b477696dad:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyYThhZmUxZGEyZTUwNzYwMGM5YWViZjNkNWM4YzA1NmQ0OTcxYjQzODRiMjI0MmZhOWJhY2U1N2ZjNDFiMjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNiOWZmMjEwZmViZGMwNWU4OGJhMzE1ODJmYjNjZGYzODhhNzExZjk2MzcwM2EzMzhjNGIwNWY3MTRkMTFlNTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4OTY2MmY4YmE0NGFkNmE2OGY4OTA2MzczZjdiMzQzNWQxNjU2NTE4NWEzMmU5MmExZDA1MDljZDIyMDQ1YzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_be01998a7182439bbd0addb574125983",
+      "statement": "Admin-gated sandbox-settings CI access is allowlisted via ADMIN_OIDC_SUBJECTS (matched against the OIDC token's sub/repository claim) with an ADMIN_OIDC_AUDIENCE defaulting to open-swe, or alternatively an admin personal access token whose owner is listed in CONFIGURED_ADMINS; secrets.GITHUB_TOKEN works for neither because installation tokens have no user identity and are not OIDC tokens.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L225-L240",
+          "version": "repo-lines-v1:sha256:81645397ab37ec0192f97951a3892bd645b06538a3ad0def7e152506cdda42bb:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMmNmMWQ1MjNlNDkwMGI5YTFmZGZiMDBmMjE1ZDM3YTU5MGE3ZDgyZGQ0NTJlOTk3MWUzZGNlZDE4Mjc1ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmZjFlZjZhYWI2M2FjMTg0NGRlN2IwYzJiMWY1M2Q3MGQ3MDEyZTQzMjNjOWVjNDRlMjJmYmY5ZTAzOTgxODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4MjBiOWQxZDM4NmRkYmRlMjg2NDYzNjVhMmEyZmYxMDBhYTcyMzY3ZmFhMjQ2OTRhM2NiMTQ2ZDA0OWE0ZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5YjEzZGNlYmM1ZGZiNTIxMzJlYmZjY2E2OWI4MzdkZDhjNGQwOTg2NmNkZjE0YWRmOWI5MDk5YzkyMjkwYmMifQ"
+        },
+        {
+          "resource": "repo://examples/github-actions/set-base-snapshot.yml#L6-L25",
+          "version": "repo-lines-v1:sha256:8c08f525c1f03d21cebe98c6094bb9c150a6d0768186d54d76705cfdda57ef8b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmZTU0MGEwOTZiN2IwMDNjOTEyMjEyZjAzODcxMmU5NDI5ZTAyZTcwMzAxNzE0ZjVhMjFlMGUzZGZmOGM3N2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwMjFiYzRmNDdjNDRkNjBhMThmMWNlMTQwNTMwZjQ4NDdjN2I3ZGI2YjE2MGE1NjZlOTI3MTFiZDUwNmY4MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ2OTM3OTc1NDI5OTdkODE5ZjFmZWViYWZlNDM3MWNlM2M0MDRjNzMzNzIyYjYzNGZjMjI0NWEyZTMzOTZhMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI4NmE1OTUxYTZhM2Y2NDhkOWYxMDAyNzVlMGU0YjVkNmFjOWI3MzNkNjcwZGJlYmFjNTMwZTE4ZDRmZWZkNWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eadc4b3dcf5e4752bf245ed137ea5a67",
+      "statement": "The root Dockerfile builds the production LangGraph API server image (not the sandbox image) from langchain/langgraph-api, installing the repo with uv and baking the same graph list and HTTP app (agent.webapp:app) into LANGSERVE_GRAPHS/LANGGRAPH_HTTP plus the checkpointer TTL, and it exposes port 8000.",
+      "evidence": [
+        {
+          "resource": "repo://Dockerfile#L1-L24",
+          "version": "repo-lines-v1:sha256:12c54724e2bda7afa373cbd98fcae0e2b8db0c1601046cea4ea60a068521c07a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyYzUzMjE4Nzc0NDg3Mjg0N2I4ZWQ3OWExYjJiMDFlMGRiMzhkZjVhMGU5ZDZlOTk4MmJmNjFhOGVkNWRmMTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1YWJjYjgyM2E1ZmU2NWFjZTM3NWNjYTBmMzI5NThjMjIxMGNkYTEzODcxODM2MWEyNTk1ZTM4NWIyOTc0NTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://docs/INSTALLATION.md#L705-L747",
+          "version": "repo-lines-v1:sha256:044749db4e6c95e07578fd2cc3a6944432901c34267ca63b2ec20ab8f6076ee9:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3MThiZjJmOGE1ODcyOTA3MDlmYWUwOTBhYWQwMWE5OTA5MzViYzE2MzgxMTRjZTE1YjBlMjhlZDFkNWIwYWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YzA2YzU2MWQ1YzMyNzM0MzY4NTI2OGE0NmIzMzkxZjM5OThlZWU4OTBkMmJlNTFmMGQyMWNjNGE1M2FlNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY3YTkwMWM0Y2JiMDFkMTE0ZWUyNTUwM2E5MTk3NTE1M2NhNmIxNDJlZDM1ZmExZTQ5ZjQ1MjM5ZmY4NDk0M2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYwNzIwYjI1YTVjY2MyMDA0MWE0NWQ3Yjg1NWFmNWFiZThhYWNjZDE1ZDU1YWIxY2RjYjNhZjJkOWVjNjYzYWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_59d619e4cd6146adbaf81f3f4a267ddb",
+      "statement": "A standalone backend container requires the Agent Server backing services and settings — DATABASE_URI (Postgres), REDIS_URI (Redis), LANGSMITH_API_KEY, and LANGGRAPH_CLOUD_LICENSE_KEY — plus LANGGRAPH_URL set to the public backend URL, and must not use scale-to-zero hosting because background runs rely on Redis/Postgres-backed workers staying available.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L714-L730",
+          "version": "repo-lines-v1:sha256:56a766dbfb2ef2c8832acc846ba43d534cbe0f790bafae1357d580a746990aee:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM1MjBjYzYzYWNlMWY5Y2JiZTE1NGMxMjQwNWJkNWM5NjIyMzJiMTUwOTdiM2NmYmE0NjJlMzI0MWMwOTQzYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhMjczNGUxY2ZiNjA4MDUxNGE0NTY2ODY4ZmRiZTY0OTc4OWFhYzRjMzM0ZmNiN2YwZWFlNjJhOGMxNzI2MjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ0MTk4M2IxZGMxMGE4OTY0MTMxM2U3NTQyNjcxM2IzNjdhNzI1NjNlOTdiMDIwNmRjM2U1OTg0NzU2NDY0ZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYwZTRkZThhM2UxZjY0MGVjNjM3NzAxYzllNjBmZGRhNTUxYzFkMGNlNjkzZmJmMTkyOWYzMWNkOTEzYTg4ZjYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e6d3592359f248b0bcf4650d579e5a8d",
+      "statement": "ui/Dockerfile is a multi-stage Node 24 build (run from the repo root) that installs the workspace with the frozen pnpm lockfile, builds open-swe-dashboard into a Nitro .output server, runs it on port 8080, and reads the backend it fronts from DASHBOARD_API_URL at runtime so one image serves any deployment.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L751-L751",
+          "version": "repo-lines-v1:sha256:2593ec8b19aacf49468a8f6a9e27ddfd1bb22b712bfbd02ee1a0d34d0cdf7550:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjU5M2VjOGIxOWFhY2Y0OTQ2OGE4ZjZhOWUyN2RkZmQxYmIyMmI3MTJiZmJkMDJlZTFhMGQzNGQwY2RmNzU1MCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjU5M2VjOGIxOWFhY2Y0OTQ2OGE4ZjZhOWUyN2RkZmQxYmIyMmI3MTJiZmJkMDJlZTFhMGQzNGQwY2RmNzU1MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjA3MjBiMjVhNWNjYzIwMDQxYTQ1ZDdiODU1YWY1YWJlOGFhY2NkMTVkNTVhYjFjZGNiM2FmMmQ5ZWM2NjNhYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZmIwYWM4NWVkYTFlM2M1MjM4Yzk0MGE5ZmZmNDdlMTNmYWQ0MTBiMWY0NWYxNmNiNDgyMTE1ZDMyYWZmNzgzOCJ9"
+        },
+        {
+          "resource": "repo://ui/Dockerfile#L1-L29",
+          "version": "repo-lines-v1:sha256:403f72b7557df3e1838c1c9bcee65884978e58be74b3e3f9ce1ca678524fe896:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzNDNlNWRhNjNiZjYwY2ZlYmZlMjUyZmUxM2Q5NGQ0ODEwMDYzNmEzZWI0YTllMzZkM2I5OWNkYzA3NmQ0NWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImViMDgwNjMyZmYwYmNjMWYzMmU3ZjRlOGI4MmRlNWFlNmIyNGEwZDAzYTg4YTViMTdlOTJjOGE3MjMzNmU2NzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a79443e5cf37464ba8af3d5c730e254c",
+      "statement": "In production the dashboard (typically hosted on Vercel) proxies browser /dashboard/api/* requests and /webhooks/* deliveries to the backend and forwards the osw_session cookie on server renders, making requests same-origin when DASHBOARD_API_BASE_URL and the GitHub App callback are set to the dashboard origin; a cross-origin alternative points the browser at the backend via VITE_DASHBOARD_API_BASE_URL and requires the dashboard origin in DASHBOARD_ALLOWED_ORIGINS.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L751-L755",
+          "version": "repo-lines-v1:sha256:f33a18e338acd9ff4c5592794440371b3a41337fb8636f7444c5dda876ff90cf:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjU5M2VjOGIxOWFhY2Y0OTQ2OGE4ZjZhOWUyN2RkZmQxYmIyMmI3MTJiZmJkMDJlZTFhMGQzNGQwY2RmNzU1MCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTE2ZDNlZmY2ZDQ0MThlODNiODQyNTU1MDM1OTRiM2M0MDg1MzgxZWMzNzlkMTQyMDJhYTc2MjgzOWRiYjAzMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjA3MjBiMjVhNWNjYzIwMDQxYTQ1ZDdiODU1YWY1YWJlOGFhY2NkMTVkNTVhYjFjZGNiM2FmMmQ5ZWM2NjNhYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzQ5NDZiNDE2ZmUxNGZiM2NmYzAyZGE1NjhjZDg4YWFiMjBiNDk4Y2ZjYzQxZmM1MDgxOGE0Y2JjMzc5NzY5ZSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_be737143dc85456783e2126e54dc4a7a",
+      "statement": "The backend can alternatively be deployed to LangGraph Cloud / Platform by connecting the repository and setting the same environment variables, using the hosted deployment URL for LANGGRAPH_URL and webhook callbacks.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L749-L749",
+          "version": "repo-lines-v1:sha256:387187cebcf5ebf24c309c16bad48aa5b438d5b6659f1011ccc086aab7da4c0c:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzg3MTg3Y2ViY2Y1ZWJmMjRjMzA5YzE2YmFkNDhhYTViNDM4ZDViNjY1OWYxMDExY2NjMDg2YWFiN2RhNGMwYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzg3MTg3Y2ViY2Y1ZWJmMjRjMzA5YzE2YmFkNDhhYTViNDM4ZDViNjY1OWYxMDExY2NjMDg2YWFiN2RhNGMwYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODgwOTE4YWM2NDMwNzA0MDMwMDQzMjc4YWJiMTY3MDAxYzY4MzQzZmM1YTNhZGY3ZjgyYjYxNjk1MjliODRhZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGVhOTU1NzRiNGRhZmVjOGQwODM2ZDQwYzdhZjg4YmFlOWUyYmRjYjcyOGE1ODJlNjhhNmQyN2U2YmNiYjRjNiJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-27T06:27:22.313Z"
+  }
+}

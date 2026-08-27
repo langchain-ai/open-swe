@@ -1,0 +1,382 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:7cfe542deb21c23ac8577136902bda4213714dbe49cab95c098c7065f7b21204",
+  "claims": [
+    {
+      "id": "claim_1465c57529184ca1808e7b2add812f08",
+      "statement": "Every Slack/Linear/GitHub webhook route verifies the platform signature on the raw request body before parsing, and returns HTTP 401 on a missing or invalid signature.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/github_routes.py#L16-L21",
+          "version": "repo-lines-v1:sha256:a90f99a7279366bd996bb6b55bde39a27c784b071a9143fb95b4ae676276cde9:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzg3YTJhYjhlMmE0ZmU4NmRjZTkxMGU5M2U1ZDdiMTRhMWM5ZjFlMjU0ZDJhYzMwMWNlOGRjYWM1NmIyZTgyYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiN2RjMzNmMTc3ZmQxYTcxOGI0YzBjNWU5ZTE1ZWY3NGRjOTllYmZiMzFkZTFiNWU1NjgxYjVjOGViMzkyZDVlNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2ZmYjg3YjRkMWRlZWZkY2Q1ZWQ1MzA4N2QyMWI5ZWIwMmI4ZGVkMGNlMzEzMmE0N2Y2ZWQ4Yjk1MmM4YjAyZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzZlZDRjMTYwNDIyMjE3Y2E5NjhkMDRjM2M2OTg1OTU5ZWM1NTI2NjZjN2RiYWI2ZTgyYWZjZDk2NzBmNjA0ZCJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/linear_routes.py#L20-L25",
+          "version": "repo-lines-v1:sha256:4489820ae08148d2f51e1cdb9b2f7c491d585beb369e7ea6bc91bdccef284cfc:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzg3YTJhYjhlMmE0ZmU4NmRjZTkxMGU5M2U1ZDdiMTRhMWM5ZjFlMjU0ZDJhYzMwMWNlOGRjYWM1NmIyZTgyYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiN2RjMzNmMTc3ZmQxYTcxOGI0YzBjNWU5ZTE1ZWY3NGRjOTllYmZiMzFkZTFiNWU1NjgxYjVjOGViMzkyZDVlNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjY1MjQwNGM2NTIxM2U5MjYwNGEwNjdkNjg5MDExNmM0Y2NiNTkwMWY2MWQ2NjU0YTE4NjA5NGZiZmQ4ODc3NyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2NhNjA0NzVhZDFmODQ3MmM0NTgyZDhmNDgyN2QzYWY1OTdiMjgzMzY2YjA0MjgzZDk5Njk2MTQ2MGQ1MjBmMCJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L171-L182",
+          "version": "repo-lines-v1:sha256:25bdf4e4ab777fa44b704bd6a7df95f5262f2aecf9fdc4e80cd454ac31d5585a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM4N2EyYWI4ZTJhNGZlODZkY2U5MTBlOTNlNWQ3YjE0YTFjOWYxZTI1NGQyYWMzMDFjZThkY2FjNTZiMmU4MmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkYzMzZjE3N2ZkMWE3MThiNGMwYzVlOWUxNWVmNzRkYzk5ZWJmYjMxZGUxYjVlNTY4MWI1YzhlYjM5MmQ1ZTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQxYjJmZDNlNGZmZTdkMTczZGI3MDk5MDc1YjU5YjY0ZTZiYzg4YjNiZmIyZDY4NTJjNzlkMmUzOTYzNGJlMzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdjYTYwNDc1YWQxZjg0NzJjNDU4MmQ4ZjQ4MjdkM2FmNTk3YjI4MzM2NmIwNDI4M2Q5OTY5NjE0NjBkNTIwZjAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bdf2ddfc747a4ab4b149308dfcbaabfe",
+      "statement": "Signature verification is fail-closed on a missing signing secret: verify_slack_signature, verify_github_signature, and verify_linear_signature reject the webhook when their secret is unconfigured rather than accepting unauthenticated traffic.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/github_comments.py#L85-L104",
+          "version": "repo-lines-v1:sha256:b2e824c57d3f7b98d73ae56cf6e803fe2910263f32562900e0f3f8feeaccd7fe:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlZGU2ODBmMTNmNmUyZTVhMWE4ZDViZDkyZDM0OGYzMmMyMzA3MWJhYzljMzgxOTRiNjQ2ZTVhMDNiMWYyNDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5ZDdhNTFkY2E1NzM0YmI1NmM2MjhmZGI1YzUyNGEzNzZjMDY1OTNhNTA4MWQ4NzU1NmRlMWI0OWVkOGIwMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI0ZWVlMjA4MWUwODliNzdkMmY2MmRhMmQzNjQ4MDE4NjViZDgzNDdkNDVhNjUzODU4OGMzZjg5MDM0M2Q1YjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk2OGQ0YmY3OGQ5OTE2OGFmZTk0ZjhhZWJlYTYxMWMwZGU2YTZlNTQ3OWEzMzkwYzAzYWYxOWZiN2MyYmU0ZDQifQ"
+        },
+        {
+          "resource": "repo://agent/utils/slack.py#L153-L178",
+          "version": "repo-lines-v1:sha256:8257bedaca87d8906512e0f4d1a987259e7a999fef8f6e1e3d653dde2e49e8e4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2OTkxNDg5NWI5ODA4MDE5Y2M0OTQ0NmVhNTQ1ZDE1YTM4ZjA4YmUxZGZmYWM0ODk5NTkwOTc1NzYyOWRjMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5ZDdhNTFkY2E1NzM0YmI1NmM2MjhmZGI1YzUyNGEzNzZjMDY1OTNhNTA4MWQ4NzU1NmRlMWI0OWVkOGIwMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3N2M2MTA5NDY4ZTljYmNmMTIwMDRlYWVkYjVmODNkM2FmZjc0YzdkZTFjMjk4NzdkNTk4OTE1NGFjMzczNTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBkYzc5ZDdkYjNjZjdmNTM1MWM5YTA2ZmMyMmMwZTExMzg4NWQxYzI1OTVkNTBkNmMzNjVmZmM3NDNlY2JhZGQifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/common.py#L1015-L1035",
+          "version": "repo-lines-v1:sha256:d7bcea3cc07a03a71c874615b26b864dcf67875b23e696ad4a325ab3efa0ee10:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2YmQxMjg2MDg0NmMzYzAwN2E0ZWY4NWUwYWJjODMzNDA5YzUzNjM2ZWEzMTMzNjE1MDE4MTlhZDc1YmFmMTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5ZDdhNTFkY2E1NzM0YmI1NmM2MjhmZGI1YzUyNGEzNzZjMDY1OTNhNTA4MWQ4NzU1NmRlMWI0OWVkOGIwMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5Y2IwMjY1Mjk2MDQ3ODNlMjcxOTRjNDFmOGI2YWRhODc2ZjcxNjZmNWIxNWEyZTRlMWFkMTliZjQ5OGQzNTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk4YzAwMDA4NzUyMDRkZThhNGMwZTk1OWI1ZmQ1MmZlZTg2NDJkMDk4YjU4NWQxNDk0YjMxNjcxMGQ1NDU2MzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_138de6f809a44fd4903988c8d8bace3a",
+      "statement": "verify_slack_signature additionally rejects requests whose X-Slack-Request-Timestamp is more than five minutes old (max_age_seconds=300), defeating replay of a previously valid signed request.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/slack.py#L153-L178",
+          "version": "repo-lines-v1:sha256:8257bedaca87d8906512e0f4d1a987259e7a999fef8f6e1e3d653dde2e49e8e4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2OTkxNDg5NWI5ODA4MDE5Y2M0OTQ0NmVhNTQ1ZDE1YTM4ZjA4YmUxZGZmYWM0ODk5NTkwOTc1NzYyOWRjMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5ZDdhNTFkY2E1NzM0YmI1NmM2MjhmZGI1YzUyNGEzNzZjMDY1OTNhNTA4MWQ4NzU1NmRlMWI0OWVkOGIwMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3N2M2MTA5NDY4ZTljYmNmMTIwMDRlYWVkYjVmODNkM2FmZjc0YzdkZTFjMjk4NzdkNTk4OTE1NGFjMzczNTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBkYzc5ZDdkYjNjZjdmNTM1MWM5YTA2ZmMyMmMwZTExMzg4NWQxYzI1OTVkNTBkNmMzNjVmZmM3NDNlY2JhZGQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6f560f1ec1ae4053913dd4b8afc6b037",
+      "statement": "Webhook routes do the real work in a FastAPI BackgroundTask and immediately return a fast accepted response, so signature-verify plus filtering happens inline while thread resolution and dispatch happen asynchronously.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/github_routes.py#L169-L179",
+          "version": "repo-lines-v1:sha256:555ffaa6743e6231a7d9b5937c40d90dd2b9c0665b572b1c13f427acfb046cef:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmNTMwMzY1YTNiN2Y1ZWNiN2UzN2M3NzZhNDQ3ZThjNWJkOGNkMDdlZTM4MDU0ZDRkZjRiZmUzMzIzZDM5YjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhYTgwNjg2YjA1NTE5MTBiMGZmOTZmOGM0YTYzODA0MDFhYTA4ZGQ0YjdjMTE3ZWE2OGI4M2E2OTU0MTBjMTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBiNGExZTJkMjk3MzE4YzFmZGM5ZGFmYWU5YmQzNGQ3Njc0OTQ4MzMxNDFiNTAyM2U5NTRiZTI1MTk5ZjU4OTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc2OWU5MmJjYzI1MDA3NWYxZGYyYWY5MGI3NDFkYTBjYmIxOTA2NDYyZDc0YjhjMDM0YWQ2YzBiYTE2MDBmNDYifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/linear_routes.py#L153-L163",
+          "version": "repo-lines-v1:sha256:9af2aad757d2e6a6301299b03be5f6544a850d64823e24757df99ae1cfa59910:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkZmFkMzU2Mjk1MzQwYjc0OTk2MWZjYTBjMmM5YTAxY2E5YzljN2JjNDBjZjhkZWRmMDFjOTM0ZjA2OTE4MGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1OGM2M2Y0NzY3ZTdiYWUzMjdjODFiZDEyN2I0OGE5ZTYwOGIxNTZlYWE4MWNkMmMzNzgxNDA0ZDY5YzY2YjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxMzM1NWE5NzdiMjUwZDkyMjMxNzc4NmEyMDk3NWViNGNkYjQwMzRmNmMxOWRiMzQ0YmViOWRmZmUzYmFiNzUifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L488-L499",
+          "version": "repo-lines-v1:sha256:3b6a7267faecf59b9e83dbbc7275e7ce2ce389d1e92d68b8bd1aa3d8298bdba7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwYTBjMjJhMTRhMTYzNjJhNzE5Y2Q3YjZkNzEwZjMwNjA2ZjYxMjMxMmMyMjU0YmZmODE3ZDMyNTczMDkxZTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkMWYwMDRkMDRlYmJkYmE5OTA4MjEzMWQ3ZTlhNmY5N2Y2N2IzZjIyNDM4OGY5Y2NkNmM3N2FlOTA1NmU0MDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjOGYwYTkzNjhjOGNjMTk1MGE0ZWU2MzkxZDMwZGYzYmRjMzJjNDFlN2U5MGNjNWM2YzcyN2EwM2RkYWUzYTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU4ODQ4MzBjY2E5YTAyYWM1ZTJjOWYzMTY1OWM3YmExZTQyZGE3NzMyNjBlOTgzNGNkNmJhY2FkMzM4M2MxM2UifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1604e523cd3d4209bc09d5b8d0003570",
+      "statement": "Thread ids are deterministically derived from external identifiers so webhooks, the dashboard, and the reviewer re-derive the same id and route a follow-up to the existing thread; the formulas are a persisted routing contract and changing one orphans live threads.",
+      "evidence": [
+        {
+          "resource": "repo://agent/thread_ids.py#L1-L71",
+          "version": "repo-lines-v1:sha256:85493fc358271a0a73e69abecf6819aa52bc4d893433dbeb027c609c6900c940:eyJzZWxlY3RlZExpbmVDb3VudCI6NzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkNTA0YzZiODQzNGQ5MTRjNjM5ZTQ2MGJlMTU2ZGZjY2Y2ODhhZDNmNjg1MTFkY2RlZjlkYzA4NTVlNTQxMGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzYTVhMTcwZTE0ZmRjYjliNDgyZTA2MmQ3MTUzZmNmNmY3YzdjNDJhNzBlYjdhZGU2YjgzYTcyNzE1Njk3NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_304e80aa506444f483e245d3b49c9d12",
+      "statement": "The GitHub PR thread id for a branch Open SWE created is recovered by extracting the embedded UUID from the branch name via thread_id_from_branch, and otherwise falls back to pr_comment_thread_id keyed by owner/repo/PR number.",
+      "evidence": [
+        {
+          "resource": "repo://agent/thread_ids.py#L43-L45",
+          "version": "repo-lines-v1:sha256:40266578be9a81682162f1e8522198b0ef29cab46eece385c45ccc0eeda67f18:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjUwNjJiMDRmMzNjZTFkNmM2NTJiY2NkMGQ1MDllMTQ2NTBlOWNiNDBlM2RmNDg5NGUzZDIwMWZiYTliMGE5YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzdlOWY2ZDI3OTdkMDc2NWI4OGE5NWYxZTQ0NTUwNmViYjlmZjZmNTEzYjJhN2ViMTFkNDdmMzUxZjljZmE0NyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzg4YzA0NGY1YWFiOWYwYWY3NDY2MDc5Y2VlNjQ3NTQ3ZjA3NDMwNmEzNjE4MzM1OWU3OTZmODQ0NTlkOTljOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjQ1Y2E0Y2FhYTFkMzI0NDU0YjkzZDBiMWJhNGQwZDFhM2MxNDdmZTBiOTQ3MjVkNzlhYmYyZTgzMjQzZDVlNyJ9"
+        },
+        {
+          "resource": "repo://agent/thread_ids.py#L68-L71",
+          "version": "repo-lines-v1:sha256:3af672793712f40a8cf201b8d4e56a31bfeb141847c20bcd03b909fe2d9e5cf2:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZmFkMWMzOTRiOWNlNTMxYzE2ZTEyM2YyMzkwZTVhZTY3ZTliMzM2NjBjMDZiODBlNzNlZjFiMGFkODM3NWQwMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDNhNWExNzBlMTRmZGNiOWI0ODJlMDYyZDcxNTNmY2Y2ZjdjN2M0MmE3MGViN2FkZTZiODNhNzI3MTU2OTc2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjY2MjI3N2U3OGE2N2JkNTM5ZTA4NmM2YTczODM2N2VlZjgwNGUwNGE2MjQyNGMxNWRlNDljMzhjYzZkZTk2MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/github.py#L828-L841",
+          "version": "repo-lines-v1:sha256:55c66f35c1b544e3dcdd80396c40f0b2c83b05f7366c6e311106c1223485511b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyODVhMGVjYzgzMDZjMTM4MDAzN2JiMDkyY2UzZTc2ODQ3NWQ3ZmY4MGYzOTRmMTZkNTJiNzhhNmI5ZjZkN2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFlZmUzY2RmOGUyYjdjYTM4ZjhkODg2OGIwYWEzMmZmYTYxM2VlYTQ3ZDQ0Mzc4ZjU2YTI4NjEzMGUxM2Q1ZTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZiM2Q1YWM1ZDVjZThhNjU0ZTYwN2RmODUyOWY1ZmM5OWViYzU3NjRmNDBjNDI3NWFlMzQ0ZTFjYjRlM2ZmNzAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_97f539d5acfe430593b3585afcab3edd",
+      "statement": "resolve_slack_thread_id resolves a Slack location to an agent thread by preferring a stored explicit mapping, else searching thread metadata for the Slack location, else deriving slack_thread_id; more than one matching thread raises SlackThreadMappingError instead of guessing.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/slack.py#L1620-L1656",
+          "version": "repo-lines-v1:sha256:f62d5aafc413d01aeee849d3ad506937f31f9a54915524f9ddd3ce7600c8f450:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3Y2JmNTA3YWQ1YmY1MjRhYzI0NmM5NTRlZDIzMDU5ZTgxMTk3NmM4MzZmMjkxZWY2OGFjOWNmNTQyNzQyODYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5N2UxOTk2MDRjYWIyZTNhYjk2YTczNTA5YzcyNjMzNTE3MmI5MDliYjQ1MWUzMDdjMTBmNWVhMTllNDg3NDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjczM2U4NDg3Yzg1ZGZkY2Y5ZmE3YjkzYzc0NmM5NDYyNWFlNDdlMTIwYzc5N2U3OTFlNzM3ZjllZDdmZmM3M2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwMWVhZWMwOTJlY2UzNzQxZDk1MTJiNWI0MmE0M2MxMzEzYWQ1ZjBhMDZlODdjNmVhY2E2MDhiZmE0OWM1MjIifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L458-L470",
+          "version": "repo-lines-v1:sha256:717b45587774d0aac2be0273db3adf99e14e7f4a9a0a635d008c17cd53773925:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhZDFhNDBhYjE1ZDRkZDQwOTY5MTVkNGNmOTZmMWE0YzUyZDk5NjQ5YzZiOTJiYzM0YzQxMTgzM2IwYTkyNWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmYzhlNDg5Yjk0YzZiMGYzNTYyNmJlNTliYzVjMDQwMzg5YjNhMTUwZGI1NTU2OGFjYWIxNzhmNWY2OGZlNGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1ZTVhOGJlZGZhYTk5NWY0MjBlMWVhMjA4ZDQwOWFmNjA4N2ZkZTNjODBmNjQxMTNhMGY3Yzk5MzQ0NzZmOGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ3ZDI4ZjlkOTRlZDZkNjEzZWI2NDUzOWFiNTQ4ODcyNDVkODBhYzFhZWEzMjE3MjI3OTdlZjE3NjVlMmRmYjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7788b7878a6540c89f7a1d75ae5e0344",
+      "statement": "Open SWE refuses to operate in externally shared Slack (Slack Connect) channels: slack_channel_allows_operations permits only DMs or channels Slack confirms are not externally shared, and an app_mention in an external channel receives a one-time refusal reply and is dropped.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/slack.py#L1034-L1041",
+          "version": "repo-lines-v1:sha256:44e9a7433b3d87c82cf1024560685e11a994ec8829ae3a9ee75cb9a4dd0210a7:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmI4Yjg5ZTg0YWVlNDkwMzgyOWRjMGMxNmQyZWViNzBmY2NjMzk3ZTgyOTc0Mzg3YjU2OGRiYmE1YzViNGZkMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzBjMWYxODhmMTQyZWQ3YTgyNDY4MGIyMDcxNzJjNTUxOWJjNjE0YTQ4ZmRhN2NmMTY3ZWRiOGRkZjc5OTU2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGZiZDAwOTMxNGJjMjcwODQxNjczNGEwMmFlNWZmMzlhMWU0OGEwNTBiZTkxZjQzYjJmYWE5MjAwMmM2MmJmYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDIwYWM1MjE1MDc2OWNhNzY2YTA5M2VjZmJiZDUxYTA3M2I2ZTI5MzhmOWNjNTU4NDA1YmFhNzkwMWRkZjQzZSJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L204-L229",
+          "version": "repo-lines-v1:sha256:11a60a82702664c1713c1870c6f9a9d2389708716ff9b48fd9ee24c361d37cba:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxYjIwNmU0YzY4MzQyMjNjNDg0NmYxYTI1NWM0OTAxMWNiYzI3YTAwZmY5YThhODQxZmUzODJjNjA3MjczZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ5MDA5MWY4NzcyYzQ1M2U0YTZhZjEzYTRiMjYxYzJkODVjYTBjNTU3NWNiMzZkNDNhM2Y2Yjk3NjU2NTg1M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZmYzU0MWYxYzBkYjRjNjEwYTRkNmMzYzVlNTMzODUxNzM4NGI1NjQ3ZDFmYmNhMzk2NmQyMzg5NWFmODMyZGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ0OWMyODA1MzhjNjFhMzYxNmY1MjJjYjI0OTkyNmNhODQ4MGM4NTkyNmE2YWJlN2E2ZGM2ZmZkZmM3YzNjYzMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eac390ed3e464dce8ef342025ccbfb99",
+      "statement": "Outside code channels a Slack message is dispatched only if it is an app_mention, a DM, a reply to a ready plan, or an untagged two-party reply where the sender and Open SWE are the only live participants; bot-authored events, the bot's own messages, and duplicate deliveries are dropped.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L293-L298",
+          "version": "repo-lines-v1:sha256:452d6ef5d674258e244e7dc2ca9603af932449c451a00cc8e3ce1515cb638456:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDliMTNjYTk3ZTFhYjM0MGY2MDcwNjUyMWI1NDQ2NzQ0MTk0ODU0Yzc4NGQyNzhlYTQ3MWE1OTlhYTA0NWVjNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTFhY2FhZTQzMjFhNzQyMjZhNmI4ZDk2ZmMwNzFiNzdlYzFkNTA4Y2QwOTg0M2M3YzE5YWMzYzEzZWI5Yzc3YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzE1ZDUxNjg0MTFiNGI2YzJmYWEzNzE2NGE2ZjE3MzQ4MTcwOTE0NjA4NDA3NzViZjYxZTE0NzE1MjFlZWYxMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODlkZDQyNzgxNjk4NTQ3ZTNkMjcxM2U1Y2JkZjZjNmU0ZmIwOGM3N2UyMDhlZmEwZDNjNDBjZDU2ZjQ4YTE3MyJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L363-L415",
+          "version": "repo-lines-v1:sha256:fbb859917369e0f34934ac8d7535c8417be69cb184cc5bf18ff3531e85758032:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3YmM0ZTZmYTdiYTU0YTI2Y2IyODg2OTVkZWJlZmI0MjI4MDk0MTgxY2ExNzg0ZjJjZDUwMjIwMWY5NjAzNmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNlM2YxNGIyZWJjNDI5ZGMxOWU3OWE3YmYxNmU4MTEwYmNkNjVlNDM4NmJlMWJlOTY4OWQ2NzA4YjQxZGE0ZWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4YTRhOGE1YTJmMGEyMWFjOTczZDJiNmJhODk4NGRjZWUwZDk4YTljZDNkMGY5NjM0YTk0N2Q0NTBlNzllYzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU0N2Q5MmI5MTkxZjE2ZGVjNGEwMmE2N2U0ZDUxYzc1NzM2Zjg0M2Q3ZWNhODRlZDdmNDVmNmNiZmQ3MmFjNzUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9b8a5f3aed8b4579b559884382f098dc",
+      "statement": "Slack event delivery is deduplicated with claim_slack_event, which gates the background dispatch so only the first delivery of an event id creates a run.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L495-L499",
+          "version": "repo-lines-v1:sha256:eb02cefcec97bd0de10c4d2288366e96760557bc926b9537437eead39b6f108a:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzhlNWU4NTQ0M2FmYjI0NmQzZjE4NDg4YTE1NmQ3YzIzN2RkMjYyNzg3OTUwODcyMGY4NzIxZmVhOGU2Njg2OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNWQxZjAwNGQwNGViYmRiYTk5MDgyMTMxZDdlOWE2Zjk3ZjY3YjNmMjI0Mzg4ZjljY2Q2Yzc3YWU5MDU2ZTQwNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYThiZWU4M2Q1ZWY2MmYxMmVmZjVkNWRlYjZlMjdmMWUwMzlkMGYyZTg5ZjkzZjFjYTVlOGFkN2UwODVkNjc0YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTg4NDgzMGNjYTlhMDJhYzVlMmM5ZjMxNjU5YzdiYTFlNDJkYTc3MzI2MGU5ODM0Y2Q2YmFjYWQzMzgzYzEzZSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_85328c94d62d4b39a07bc14c59edfafe",
+      "statement": "GitHub and Linear webhooks acknowledge the human instantly with a 👀 reaction on the triggering comment: react_to_github_comment posts the GitHub eyes reaction (GraphQL EYES for PR-review bodies) and react_to_linear_comment posts 👀 on the Linear comment.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/github_comments.py#L147-L207",
+          "version": "repo-lines-v1:sha256:bce3d30874ca7a4e0460686ff7da587dcb350f2c75aef952653259d1c172d295:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyNGUxOGI0ZDZkMDU5MDc5NThiYmZmYjYwYzNkNjdkODczOTQyZjZlNjYwMTNjMmNmMmUxZjA0ZWNlMTkxM2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzZDJmMDk1NGRkZmJlODIzYjEyNTQ5ZDhlZDA3MDBmNDkwNTU3MTMwNWNiOWFkNmU3OTFmOGY4NjQ4YmY5MDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMyYmFiM2Q4ZjkyZTgyOTAwN2MxNWM1MzIyNjAxMTIyMGRkOWIzNzM1NDc4OWM1ZGI4YWYzMWY5ZDk1ODlhNWQifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/common.py#L402-L436",
+          "version": "repo-lines-v1:sha256:5e677ddc25eaf151b2bbeb5a0cb16d9e9307e1d3eec1cafaf49ff98aadeb4d0b:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYwOWM2NTkwMWIyMTc0ZjkwMjMzYmM5NWI4ZjgwOWZmZGQxYThhY2YzYWEyY2ZiYzY3NWE0NjgyZTU4NGU1YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2E3YWJiNzg3Mzc2NTY1ODQxNzRlNjcyMGIwYjk1MGU3NmU0ZDlkNjJlMjdhODJiYWNkY2I4NGViNTZkYTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDc0NDI3YzdlOWU3ZjkyMDFmZGM5NWRhNGM0NzAxZDFlNzE4NmI0NzlkZTY1ZDc3NTEwNWMwMWVmZjZkOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExYjcyMTRhY2JkM2Y4MmViZWJhYzI1MzNkMjg0NDE0ZjY3ODlkNTQ1ZDlhZDgxZWNiNzdjZjk4ZjM3NGYwODcifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/github.py#L868-L890",
+          "version": "repo-lines-v1:sha256:db237d2d04a85dcbb92e1341f4de405c419700a06981d124b3b9385887b79a0a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxZGE0MzQwN2Q5M2Q4ODc4ODAyNmE3ZGQ4MGZlOWQ2N2FiYWZiMzgwN2YzNGU1MTdiOTAxMjk3MTA0OWVkYjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNkNjkxMjQ5Mjc0NDI3NjEzNmI3YTIzZDU3YzVmYzdjZTM2NGY4NzMzZGExNmNmYzZhNGY5NTFiNjVhMTg4MjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxYjU3M2Q2ZDlhMzY5ZWI1OGQzOTdlZTBmOTM0ZTAwODNlYTJlZjc4NTFhNzA4ZGU3YWMwM2Y4NzI5MTc3ZWMifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/linear.py#L43-L45",
+          "version": "repo-lines-v1:sha256:6d3fb9815bbca759c96ec013f3a41dde44074aface37c49dbc5057d0241b7a03:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzExMjU5NWRkNmVlMjdkNTc2YmQwYmMwOTczYTNmNmQ0NTFlZmNkMTY4NTFkZDAzYjU0NDZhN2RkNTM4ZGJmZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZGFlNzVjNTIzMzk2ZTliMDU1NTNmNmJmYjE3NjU0M2Y2YjA1Njg1ZTE3MmIzMDRlMGI3ZjVjYzNjMWQ2NmFkNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDJlZmFjZjgzMDFlYWEwNWZkYTQ4ZmFiYzdhNjhhZTA3MjFmOGZlMGY3N2JmZDJiZTE3ZjFlY2FmNTI1NjhhOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTk5MjE4Mjg3YjllMmFjYThmNDM1NmRiMzY0ZjczNGJlYTdjMmY4NTk3OTU4NzBhNDk3MzU1NjJhNGViY2U0MSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_5a94e590ae2c4abaaf0066a14bd596db",
+      "statement": "A Slack run is blocked unless the triggering user has a valid GitHub token (except in bot-token-only mode) because Open SWE opens PRs as the triggering user; the user is prompted to link their account instead of a run being dispatched.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/slack.py#L756-L804",
+          "version": "repo-lines-v1:sha256:35364d50efd157113574f72d5e5ffad44ebbf3af106d11a57927f592d16fa7df:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlNDI2Yzk3N2E2ZWZiN2IzNzMxZjBmNTc1Y2ZhMjlkNTJlMWFlNTJlYjRlMTQxZmEwYmRjM2JmNGE2ZWFhOWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNWM4MjYzMmZjODJkNGIyYzM0MGY0MjU1OGJhM2RmYTMxYzc2NTVkZjZmY2MxNjhiNGZkY2U1N2ZhYzYwNDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI1Zjg0MjM1ZjE2NTE3ZGZmNzAyNTMwMzA3ZTAyNzdhYWNhOWMyOGFiMDM0ZGRjNzJkYzY2YTViYmIzNTdiZDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI1Y2QyY2U4YWQyYjBiODliYzQ3NzZhMGUwYzBiMGZjYTE3ZTI5MGJlMGJlNDZkNDM3NjM1NGJjYThkYWZjMTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_108b3218ec8347dd84acf961c5aa6aa1",
+      "statement": "Whether a Slack follow-up interrupts the active run is decided by _interrupts_active_run/_is_explicit_slack_request, and _dispatch_or_queue_slack_run dispatches with multitask_strategy='interrupt' for an explicit tag and 'enqueue' otherwise.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/slack.py#L192-L214",
+          "version": "repo-lines-v1:sha256:78c4f855653648f730ae9b2de84dc2806f2c9ee9fb3ba78f4c66b609008be392:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBhY2Q2Y2E4Y2YzNWIwZGMyZmE3NTMwODQxYzQ2OGE1Y2ZjYjYzYzM4NzVmMzZiNWEyNTE5ZTNkYjgyYWU3ZWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjZDk0NTVmNjgwYzZlMzQ0NzEzYjM1Y2ZlZGEzMWEyZmE0MWQxNDY2YzZiNjkxMmNjOWRiNzRhMDBiYzljNGIifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack.py#L81-L109",
+          "version": "repo-lines-v1:sha256:98eea3d981bb44a16e2ac6d013dbe8d6f415da9ee26974be5870a098f4aa5301:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlMDljNzAyMjU1OTVhYzg3NmE2Yzc4OTIwMTc3OTRlMDA5OTEzYTU4ZDNjZmQzYmMxOGU2YzcwZjQ0MDdlOWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY2ZDQyNjgzNWVjODk2MjMyZDg2MmZmMDRjZDQxYWI1MzY0M2U4YmY2Y2RiYmZlMDI0NzMzODUxZWJlZDdjYjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU0NDM3ZjMzZjFhZTlhY2UzZGQ3MmM5MTNhY2QzNzZhMWFiNTg0ZTIyOTZjM2JmOGJlZWIyYjNkZTMwZDU4NDAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4cba36ce80b649b9b275d82fcd00e7b5",
+      "statement": "The Linear route fires only on Comment create events that mention @open-swe and are not bot- or Open-SWE-authored, and resolves the repository in priority order: explicit owner/repo in the comment, then the commenter's dashboard default_repo, then a team/project mapping, then the team default, rejecting repos outside the allowlist.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/linear_routes.py#L33-L142",
+          "version": "repo-lines-v1:sha256:c4c9b95110793c330cfcf87ddecb94ddcd728a7469933eb7756eabcda7f2d60e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI5MTJmZjU5NDk1MWQwODUzYjQ1MzgyZTQzZmMxYTg4MzUzNzYxOThjZTA1YWUxZjM1ZTY1YjZiOWQ1OWFiNzczIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWMzNTk5Zjg4NDM1MWFlMGY2NmFjZDBiMWI0MThkNTQzYmJlOGUxY2ZjMDBiOWQ0MjkzODVjNzc5M2FmYzgwIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhMGM4M2Q2ODQzZTY2YWNkZjdjZDk5YzJkMDUyODZkMzk0YjU3NjI2NDExNWIxMTQ2ZTk2MjNiYzk5YjFiMmQzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIwYjNiOTYzMTM2ODdiYjI1MjU4NTI2N2IwNDJjYjMxNWJlYzY5OWJmOWJlOWY0ODRhMjA1YzUwYjlhY2EwYWNkIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_cf8cfd5cdc2040e997013afa8284d493",
+      "statement": "process_linear_issue derives the thread id from the issue id via linear_issue_thread_id, resolves the triggering user's email from the comment author/creator/assignee, builds a Linear-issue system introduction plus per-author person introductions and comments, dispatches, and posts a trace comment linking the Open SWE thread.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/linear.py#L26-L70",
+          "version": "repo-lines-v1:sha256:24ef3d5d76a43743939471d2ec510c8d896ea8c929bc17d7946fa0842cd220b6:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhM2U5NTI4MTkzNmJiMTYzZWIwYmQyZWQzMDBlNzExYmNhZTIxNjE4YjVmMDI4YjA5NzcxOTliNDBmZDhmYzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVmMjI4ZGQ2NGE5ZDI4ZmY4ZTIwNjJlYjNhMzcyYmNlMTkxODg0ZjExZjFmYzdkYThkNWIwMTZiNWVmZDM1NTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYxZGFlNGU5YzhiNmYxZWI3ZjZmNzQ1ZjdlZDY4ZTlkMTdhNmM1ODYxZjA0MTJiYjc1NzhiODU3NzZkM2I0MzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA4NTU4NTM4MjlmNWZlZTlhNmJiNTZhZDAyMWVhZDM4ODZhNDExZTAxZjZlMzAzYzY4Mzk4MGY2M2ZjMGY2NTIifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/linear.py#L263-L337",
+          "version": "repo-lines-v1:sha256:a79bafeabfa134fdee27dce6a6aa1aec5f5bdc3e920a86e419387237813280bb:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmNzExMDk2MGUxZjBiOWM0MTAwOWI3NmFmY2RlODJmMDYwZTdlNDZlZDVmMDZiMzk4MjFjYzY2MTcyYzFjNDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk0NTExOWJhNTgxZGI0MDAwNGY4ZjlmOTQyYWRjYmZhYTc3MDgwNzhhOTE5ZWUwNGRmYWZjMTJmYTNmZTBmMDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRiYTg5MmJiMDk0ZmQ4Njc3MWFhMTEyYjhiOWZlZWYwMDMwY2FlNjFkNjI1YWEzYzU1N2IxN2JiZTUzNmM5MzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0030aa220c31479681a4d1f56cd7cadc",
+      "statement": "The GitHub route multiplexes issue, comment, PR, review, push, and CI events; it requires an @open-swe mention on issue/comment events, enforces the repo allowlist and a public-repo org gate, and routes replies to Open SWE review findings to the reviewer graph separately.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/github_routes.py#L23-L182",
+          "version": "repo-lines-v1:sha256:7903904b24f9e13e46dbd17f6611aa0d334476a39ce7c036000551e87c206de5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyNzYyY2FkN2Q2MWQ4YmEyN2MwZDQ4NzMxYTY4OTlkYmQ0MzYzZDc4N2M2MzBkN2E1NDQwNzEwYjVmYWY5NDA1IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1OGIwMDVjOTZjNzRiMTM5ZmQ5YWMwMTFiMTM4NGM5N2UwZjEwYjkwMjE3NGZlMDY2NDVlNzlhOGQ5NWM4ZTBiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkZGQyYTY5NjkwMDliZTI0Y2NlNGZmMTk3NmYxOTI5ZTY0ZjMwNzI2ZTk5ODMwODE1M2MzZDdiYTdmZDJmZjEwIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_e03298355f664cb3b3e0afcee4704102",
+      "statement": "process_github_pr_comment resolves the triggering user's GitHub token via their email mapping (refreshing once on a 401), gathers all comments since the last @open-swe tag, builds per-author person introductions plus one human input-message per comment, and dispatches through _trigger_or_queue_run.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/common.py#L1089-L1123",
+          "version": "repo-lines-v1:sha256:6da01b634589d997c712f5c8e87dc7090ae860f292648e56724d7d92ad0647aa:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1MDg2YTlmOTE4NjIzZGUwNGRjN2Q3MmUxZjkzYjljMzE3YjMzYTk0NWI4MmQ0OTViZjI0YzA3ZjIxNzE2ZGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyM2ZmNWExY2YzZTU5MGMwZjM1ODExYWNlZDhiNzAyMmEwYjJjODJjZTJiYmMyMzdjOGYxMTA5MWZlNWQ2ZWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc3ZTRjYTYxNjFmMTQ1MzNiOGQ1YzgyNWVjZTc4MWU1MWMwNzMwOGI1OGI0MjQ0NDdkMTk4Mjc5ZGNmMTY5Y2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlMGJhN2JhNGUzNDkxMDE5NmY1YjFhOWY5NjJkNjgzODJjOTg0ZGViODk3ZmI4NzZhNDc3ZjNiZTc0NmY1ZDIifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/github.py#L799-L946",
+          "version": "repo-lines-v1:sha256:ddf59f204a63db60d21f54f73557bf1b7402466d8d12e483d0fa12fbea360e96:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxN2ExZDE0NjNjNTg1MzA3ODBiYmIyMWU3ZDdhMjgxN2NjNTFkZjc2YWIwOWMyYzUyYTIzZjBjYmVmMTQxM2VlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzMGMxZjE4OGYxNDJlZDdhODI0NjgwYjIwNzE3MmM1NTE5YmM2MTRhNDhmZGE3Y2YxNjdlZGI4ZGRmNzk5NTZjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI1ZDFkMzU5MTY3ZWM2NjkxN2FhZDA5MzE1OTA2YWU4ODU3NWFmY2NlOWFmMmM2MDNiMDJkNzU4YjA3Y2YyZWU5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJhYTFkZmJiZDdhYjBiODExMDJhZTJjNzNhNzg2YTkwZjY1Y2RiMTI5NzM1NzZiMDk1ZmYzMDZlYjBiMmI0ZTNhIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_4e30c943130e41468b2bbc660fa92dfe",
+      "statement": "Reviewer runs (auto first-review, push re-review, and finding replies) dispatch on the reviewer_thread_id namespace with assistant_id='reviewer', distinct from the agent thread and graph used for coding runs.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/github.py#L1055-L1074",
+          "version": "repo-lines-v1:sha256:89a7bdc64f6f624a795b267d51ac1e266cd03e1e689f1e78d34e3b258814e4d2:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNzM2NjRiZGQ1Y2MxMzY1YjE5YmRmZDM0NDZhYjAyZGQ3YTBjZmZlYTZmNTdhYzQwNzBiODBkYTgyZTcyMGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMxZjRiNGZjODdlYTI3MzlkNjE5NGEwN2U4MTJkNGZhMDEyY2FkZmI5YjE2YWYzODQ5NzJmZDYwOWY5ODA3MjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJlMTNlZTRhODJlZjUyZmI1MGMzOGIxMGFkNmQ3MWNlNzZiMDBkNWYzZjQ1MzVlMDUwNGU5M2E4ZDU1MjNjZmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUwNmIyZDAxODMyMzAzMGNiZTUzYTRmZTc4OGIxNzBiNzlmN2RhZWUxZTdkNjg1ODU4NGExYjY2OTAwZDY2MTMifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/github.py#L341-L352",
+          "version": "repo-lines-v1:sha256:d4bad6123a45001840f6dcb391d461c2d9bd03b6ac51e0850f275267d48d448d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNzM2NjRiZGQ1Y2MxMzY1YjE5YmRmZDM0NDZhYjAyZGQ3YTBjZmZlYTZmNTdhYzQwNzBiODBkYTgyZTcyMGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVmMWNmYjY1ODU3ZTI5MjkwY2QyZTkxY2JhNjcwOWVlMjc1ZGU4MTM4MmI5MzIxMzM2OGU1NmFhNGUyMzhhNmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdkZTg4ODU3ZmFlYTM0YzdjMzQ3ODg4OGRlMGI4YzU2NGRhMTljMTZmNjQyMzc0OGE4M2I4Y2ZmY2YwNTk1YjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYzZmZhNDc3YTM5Y2M0NzllYjM5NzE4NWY0ZGI1M2E5YWRlOWU3YzZiM2ZkMGE5ZWZhMzk2N2RkNGUxNWI2M2UifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/github.py#L466-L477",
+          "version": "repo-lines-v1:sha256:bf1728d7da0aa00aad2be930a5548819b4d82aaa8d31d13a64668a6fe474d7cf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNzM2NjRiZGQ1Y2MxMzY1YjE5YmRmZDM0NDZhYjAyZGQ3YTBjZmZlYTZmNTdhYzQwNzBiODBkYTgyZTcyMGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmMTgwYmIxZWNmMTU0ZjJmYTM3NjBiMGYxNTI4YjJhZjAwZDVhMTYyY2NkNTMzNWUyNTM4NzM4YjBjOGRkMDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNhNzk2ZDc1NjlkZjRkYjYzOTZhMmFhNjFiZmU5NTY4MmExODlhNmZkMzY3OTY0MjQzZDM1NjcxMDFkY2EzNzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIwZDRmMmVmZGY4YTg2NTAxNWJiZjBmYWRlZWFhYjJkMTg4MWJkOGY5NjYwZDhmYjczYTBmZjVmZDgyNGNjMDQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_86364688b54b49a29063148735a8e8bb",
+      "statement": "Content is serialized into a strict input-message envelope: each authored message becomes an <input-message> with sender/surface/kind attributes wrapping an XML-escaped <content> body, and human_input/system_input enforce that kind matches the message role.",
+      "evidence": [
+        {
+          "resource": "repo://agent/input_messages.py#L259-L330",
+          "version": "repo-lines-v1:sha256:d22a6c49d6b31fe34eb23496be2298256cb150c9384dccda66042910611d6a77:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3ZDQ2NjIxNjkyNjJjZGFmMzAxNDhiOTFjZTNmOTViMDgwMzY5NmEzOTNjMGI2NzdiOTYwMzM3NTY1YjdkODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk0ZjAyMzI2NDM4Y2E3OTI1OTc0YmQyNzk0OWU5MWM1ZGIxM2Q5YmI0YjUzZmJmNWUyZGM0ZTA2MTg2ZDMyMDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUyNTdjYTNhZmVjYTBjMjFmNzBlMTNlYTYyNTExZGFmYjU0N2NmNTNjZTRmNGZjZjU2NzhhNTQ1NjljNWNkM2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIyZjFiNjA4OGUyNWM1MDMxNzE1Mzg2YTA0MjI5NzEwZjA3MjQ2OWZlY2RhMzgxNWQyMDFiN2EzNjc4ZmUyMDMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bda084150eb140e48786e219b3f3e9fa",
+      "statement": "Senders, channels, and systems are introduced once as <dynamic-context> blocks stamped with a SHA-256 hash so identities are not re-introduced every turn, and untrusted fields such as a channel topic/purpose are marked trust=\"untrusted\".",
+      "evidence": [
+        {
+          "resource": "repo://agent/input_messages.py#L216-L245",
+          "version": "repo-lines-v1:sha256:ee69d4c5960f6a7c6dfa620c4f93e16c31f7062a7330654ff82fff63c6ad2af2:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMxMWEzZGRmNDVhOWNhZGU4ZTZmYTc5OTRjZDM1ODk0NWQwOGFiNDQ2MjI1YjhiMzdiNGZkMDNlZmRlZjMwMTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI1NzVjOTBkYjViNTRmZjcxMzAyZmJjZGM0NDkwYjdjOWIyYTBmOGFlMjUwOWRiNDE1NjE2ZmY4MzRjYzFhYjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI1M2ExYmEzYWE1MjM5Njc3NmU3M2I3YjMzNjBiZmY5OTZhODJlOGFjNjk0NmRkMDdlYWMyNzM5YjlhYThjNDgifQ"
+        },
+        {
+          "resource": "repo://agent/input_messages.py#L85-L85",
+          "version": "repo-lines-v1:sha256:33fd787175c75ca1883e57a83c368b8e4e8f9b1a558ae8d6ed1aec522a935d0f:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzNmZDc4NzE3NWM3NWNhMTg4M2U1N2E4M2MzNjhiOGU0ZThmOWIxYTU1OGFlOGQ2ZWQxYWVjNTIyYTkzNWQwZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzNmZDc4NzE3NWM3NWNhMTg4M2U1N2E4M2MzNjhiOGU0ZThmOWIxYTU1OGFlOGQ2ZWQxYWVjNTIyYTkzNWQwZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZmUxZDBiNWE4NDMxYzg4YmVmYzkzZTU4YjQ3NTYzOTYyNzIxZjM1YjlhNjQ5MTA1ZDFlMmQ3ZmZhYzAwZWI0OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWQxZTg3OWUyZTVlZDI2OGNmOTExZTZkMDNjZTQzM2NjMGNmYmQyYTc1ZjFmOTY4OTAyZWY3NzI3YjY0N2I4NyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_1076f6a0245a41c280d6db18e1cd5770",
+      "statement": "When a caller passes plain content rather than a prebuilt RunInput, dispatch_agent_run synthesizes sender/channel/system identities from the configurable dict via _dispatch_input, mapping a Slack/GitHub/Linear sender to a namespaced sender_id and falling back to a system: actor when no human sender is present.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L300-L317",
+          "version": "repo-lines-v1:sha256:4de36374bd4c70c33cf88cdbf7e1931638538c776e35cf983d9ca649f4910a04:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNzI5MDQ0NzZhM2E3NDA3NzE0Y2JiZTUyNjFmMjYwMTY3YmJhMTBhOTM2MjdmZDllZDU0NWJhYjQ2YWZkYjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmNjU4Y2EyYzdiMWNhMDIwYzAzYjBkZjc5M2ZmZTAxM2FmNTkzNjY4OGZjM2NiNGVlYzg3MjgwNDI4YzRiZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiZDJiNzVmZTczMDUxN2U4NzkyYjgwY2VjYTM4ZTUwNjVhOTQ0NjJlNTRkYmVmYTcwMTMzZGVlNGIxYjk3NGYifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L71-L152",
+          "version": "repo-lines-v1:sha256:836be903cd664a17dc4ab36f49b24a0bedaec247b309fd74a9700888572af020:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxNjZjZjA4ZWVmZWU2ODIyZGRkMjU0YTFlNWRiYThiM2E2OGY1MTdkYjBlZDczODNjYmZjNjUyM2JmYjkyMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczY2JjNjc0M2Q3OTk3ODJiOGEzYmRjZWRhNjlmMDQ1M2MwOGY0YjYyYzE0MjA2NDRkYThjMDhjNDEzNTA2YmMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_295ed48126cd4cd5b166fbb89294bded",
+      "statement": "dispatch_agent_run routes every trigger through create_durable_run, which defaults to multitask_strategy='interrupt' so a follow-up halts the active run and resumes the agent with full history plus the new message, while background follow-ups can opt into 'enqueue'.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L1-L26",
+          "version": "repo-lines-v1:sha256:e71c74fc5048f1e615b592f848c5845a1f9a22d9d5c85c85ce993cebbca90080:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhZjlhYmFlNTkxYTcyMzFiM2YyZjkwNTAzMjllOTg0ZTJhYzQyY2I1Yzc0MTg3MjUwNTg0Njg4YTZkZTQ0ZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5YmVjNGExOTk5YWIyNzhmYzkyNjVmODNkNmYxMWRmZmU3MTA0NmRjMzYzNjJhZjA0N2FjNTA3ZjY0NGE2MjkifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L233-L327",
+          "version": "repo-lines-v1:sha256:8d59c4e70727609e91409a126d5f89741d4b850c5a130461f9b06fbf3c586534:eyJzZWxlY3RlZExpbmVDb3VudCI6OTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1Y2FiY2JkOGFkOTJhYTM0MGYyNjcyM2I2Yjk2YjlhNzEzOWIzYTMzNWU3MDM4ZTdhMDAwYTE0OTJkMmRjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0Y2Q4ZjY1MWJkZGMyNDJkMzhjYWQyZjc2YjJjZTlmNmI2OWQ1ZTU0NWMyNzEyZWIwOWNkNWFiMWNlYTY5M2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d3860070816447a28165c65d16c49926",
+      "statement": "Durable runs use durability='sync', checkpointing before each step so a crash or container recycle resumes from the last checkpoint instead of losing all work.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L10-L13",
+          "version": "repo-lines-v1:sha256:1c15e667c4a3365d9bf4f3add2a46c6b554cbc73c9c7d20a92f9639aca5f45b4:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTg5MTI1NDRkOTBlZGE3MTllMjMxMmUxOWE5Yjk2MTM1YjkyOTNkODk4NjYxYTAzNDhjNGI0NTdlMTgxODkxNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTljN2M0NDZmZGRjMTUzYmExM2E5ZjgwZjBiMmJkMTYxMTE1OTllYmEzMjFjZWRiMmU4YTVhNTkyYjg0MTE3NCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiN2YwNmRlYzExYWFiMzZjZGFhODk1OTlkYjI4YTA2Mzg1MjMzYTQzZjc4MTMzNDQyOWExZTlkYmY3YmUyMjkzMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTBhYzIxNTgxMmYwZTQ0ZDRjZDgzNjI3MjlmYmNhYjRhMWRmYzhhYWI2ODMwYTliMTNmMmI5MjgxZjUwYTZkMSJ9"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L233-L261",
+          "version": "repo-lines-v1:sha256:937cf8782537f446e143b523e37c12ce0fc793a908786a9000ac528852505ed4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1Y2FiY2JkOGFkOTJhYTM0MGYyNjcyM2I2Yjk2YjlhNzEzOWIzYTMzNWU3MDM4ZTdhMDAwYTE0OTJkMmRjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0Y2Q4ZjY1MWJkZGMyNDJkMzhjYWQyZjc2YjJjZTlmNmI2OWQ1ZTU0NWMyNzEyZWIwOWNkNWFiMWNlYTY5M2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyM2RhNzdiMmFhMzc3Yzc2NThiNmI1Y2M5MjIxMTRjNjUyZTRhNDQwMjM0NjE4NTY3OWYwNDcwYjA4MDI1MDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8f4bab9d13a14984adb4ee5cc688bf97",
+      "statement": "A run-completion webhook is attached only when RUN_COMPLETE_WEBHOOK_SECRET is set and the URL is absolute (not relative/loopback), degrading to no webhook otherwise to avoid the platform rejecting every runs.create; the secret is appended as ?token= and the receiving /webhooks/run-complete route is fail-closed on that token.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/health.py#L17-L27",
+          "version": "repo-lines-v1:sha256:381ab0e40be2b580bea83e44511f8f5a86f01b1c1f61433ccccbcd38de769ae9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwZjZiZmY1ZTEwOWE5MjNlNzY5NTc5MGU0NjMwZjkzNTFhZjk0MmJkYzI2YTU0MDMzZDU2ZGM0ZTQ0NjljNzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5ZTU0NzZkZmIyNGE3MjkwNmI4MDQxNDM2ZDIzYjFmMjc3MzlmNTYyYTRhMTNmZjZhMDU1Njk5ZTgyMDg4ZmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE0NTEwNTUyNzdjN2ZhN2EzMjdhNGQxZDZkMjgwNTI3N2U4OTI0YjE4ZGI1ZDc3YjhjMGEyMDkzNDJiYmU4ZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L155-L201",
+          "version": "repo-lines-v1:sha256:5ffac90cd2407f344544e30de2fb3eebea2e47f7419c3ba2cfa47d73dc5d4c14:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiZmFhNGI1OGZhYjdlZDE5ZDNjNDllMGYxZTVkNWZmZWU1YmYyZDBjNDJhYWZmM2FiYzk0YzI3ZjQyNDA2NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0ZmFkMDk4NTI0ZTNlOWE2MjNlMzE3ZjA1ZWE2OWE1NDc4MWZhODAzNTU3MjAyMTkyZjQ0OTYzYzYxNGJjNjkifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L262-L263",
+          "version": "repo-lines-v1:sha256:0596274643862ffad96f66cfde65e037fc331e4920690f87008164764c245fc8:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjNhYzIwYmFiMjJiNjAxMmI2YWRhNTNlMmFlNWYzNTA0M2E3ZDdlZWNmYjBkZjNiYzdlNTIyODU4OTNiMmVlOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDhjMWJmMDQwYzVmYTE2NjRjZDhlYjFmNDhhNjYwNGM0YjA4OWY0OWI0N2FkZjU2ZjA4MWI0ZjU5NjA1YjdkMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjM0OGRjMzdjMDljNjU4MjQwNGVjMzIyMWQwMmU5YmNmZmE4NWFlZDdkOTY4OGQ2OTY5MTRhOWE3ODE4ZjEzOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzAxNDZkMTllMDYxYTBkNWVhNDY2NmQxNzAwZjhkYTg4MzE3YzE0YTA4YTU4MDIxNzE1ZmYzZDhkODVkMjhkNiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_8c67081c4334409297c83e9027168ab7",
+      "statement": "Runs are created with stream_resumable=True so a client attaching later can replay the event stream; without it the v2 protocol cannot synthesize the lifecycle running event that drives the web UI loading state for a run the UI did not start.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L16-L19",
+          "version": "repo-lines-v1:sha256:1075111c0d8882a89572d703add5547b2df59858e040b44a18d09530d6bafc3e:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjNkNjU3MWIxNmY2Y2FiOWUxMDM5ZjA2NTcyNjRhYTFmOTUxY2FlZjcxYjY1YWYzNDU3MmM2ZjhiMjkyZTZhNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjMzM2U4MDY3OTkwMDkxM2FmNGFlNjI1NmM3MjI2NTBlOThjODg0ZmM3YWYyMWNhMTRlYTkzZGZmZWI2OGZiZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmJiYTU2ODUzMjA5ZTMxNWI2MTliYTJiYjkxMGNkY2Q3YTViMjc2NzU2N2I0NTM4MTJmNjQ2MzYzOGE3YjA4ZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjhlZWNiMjQ0YTk2NDRmZjFlYjIyNjUwY2JmZjAwMzhjMzA2MmRkMTYyOTEwZWVmMWI5MmI2OTgyM2RmNWRlMyJ9"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L245-L261",
+          "version": "repo-lines-v1:sha256:5df75a2ac60d74f6226327ef617c334e61457088ae10b9b04b3dfdb001d5035c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBmYWZiYjEwNWZiYmU4M2NjMmFhYTY1MGMyNmQxZjJkZTY4N2U3MmY3MDQxMWU4MDRjMjRhNDMwOTNhZmIwN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEwMTNiN2FiNDZkZTE4MDk0N2U5Y2I1MTdlNjA3Y2VkM2I3MjllMDYzN2QwNmE5NDMyZjU0Nzg3Y2FkYjY3NTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyM2RhNzdiMmFhMzc3Yzc2NThiNmI1Y2M5MjIxMTRjNjUyZTRhNDQwMjM0NjE4NTY3OWYwNDcwYjA4MDI1MDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ea9deba113304ee59f2ea0822048f00d",
+      "statement": "Dispatched runs are given the Protocol v2 stream shape — the V2_RUN_STREAM_MODES set, stream_subgraphs=True, and the EVENT_STREAMING_V2_CONFIG_KEY marker injected by prepare_run_config — so the dashboard receives tools/lifecycle channels and nested subagent namespaces for webhook-triggered runs; without the marker a run streams values only.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L20-L25",
+          "version": "repo-lines-v1:sha256:cbab23abcc5ffcd310e81a1cd9d5c10bb5a8b337afdfc8d40dd0e0e45e2066af:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTc4MDJiM2YzM2FhNDc5YzliODU3MzI3YjQxODk3NzdjYTA5M2YzZDc4Y2Y2ZTk1MDRlNzBkOTg5ZGI2YWRmNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzQwNzcxYjlhZmY1NmJmODk5ZTU5M2I2MzdmMDJiNjkxZDczMTNhYmM1NzdjY2MzNTNjYjA2YWFiYTM2NWRlMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTZmMDI3N2ExNzIyZjYwOWVkNjZkOTE5ZDlmNGJhNTViYjY0NTE0Y2U3M2ZlMDI3OWYyMmExMDlhYTU1OTM5OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjJlZDcxNmFmZjQ2YmI2ZGUyNjlkYjEwMmJkYjQ0MmRjZGM5NzZmYTgxZjA4ODhhMDVmYTFjNDc0ZDhmMDU0YyJ9"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L214-L230",
+          "version": "repo-lines-v1:sha256:b821ae0ae2983e639f6db570e095e8d65fa29db55a20e26155cc2364689a37a2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0YzM1YTAzZjY4MzhmMzllYzU5Yjc0MTc4NjlhNjkzZDk2YTQwM2UyZTZiMDNmNjIxYmMzMDJkODkxZjJlY2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjYWIxN2JkODQ4NjM0YzRiOTllZWYwZDk4MWExMzIxODFhNjNhYjRmMjY1OTZiZjA2ZTgwMGU3YzUzZjIwMjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4ZTUxYzBiMDczZmUxZTVlYTIyNzYxNTI4ODdhZWRjZTMyZTA2MTg4OGVhNmYzMmM5MWI2ODMzNDVmY2IwNWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjMzkxMDIwZmM3ZWZhMDdkMDY5ODVjMmNiODNmNWIyY2JjNWVmZDg0YjBhZWQzZTM3YWQ0YmFjMTA2YmExNmQifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L53-L68",
+          "version": "repo-lines-v1:sha256:415cbf3235835cafa92efca1dd783b1fc7fcae59eec7d5303ea2c3fbf63b144e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwZmQyZGYzODUzYjg2ZGZmNzFhOTNjM2UzNTgzZGFlYzUyMjRkMjFlNmY2NTgwMjgyYjljYzI4NjExYjBmYTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVlYWEwNzRmN2RkYTA2ODA0NDgyY2E5MzVhZGIzNWNmZmI5Zjk0Yzk3MjRmODdhYjYyMWQ4YWFjM2Q5YmFjYmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU3MTA5YmRiZjkxZDBlMTlkNjBkZGQwMDkyZjcwNzg5NTAyNTVhNTc3NDcwNTRkMzk5YTFmNzBiYjMwZTYzN2MifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-27T06:27:22.313Z"
+  }
+}

@@ -1,67 +1,146 @@
 ---
-type: Project Guide
-title: Open SWE quickstart
-description: Entry point to Open SWE, an internal coding-agent framework built on LangGraph and Deep Agents with Slack, Linear, GitHub, and dashboard workflows.
-resource: /README.md
-tags: [open-swe, architecture, agent-platform, quickstart]
+type: quickstart-hub
+title: Open SWE Quickstart & Wiki Map
+description: Entry point that orients a coding agent to Open SWE — a LangGraph + Deep Agents framework for internal coding agents — with the dev loop and a task-routing map to every wiki section.
+tags: [open-swe, langgraph, deepagents, coding-agent, quickstart, wiki-map, architecture-overview]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-08-27T06:27:22.313Z
+sources:
+  - id: openwiki-source-328bde9e94017848bb09ba23
+    resource: repo://agent/api/app.py
+  - id: openwiki-source-f8665996049065d2172f68e2
+    resource: repo://agent/graphs/agent.py
+  - id: openwiki-source-368e3a3da2c40119aead4316
+    resource: repo://agent/graphs/chat.py
+  - id: openwiki-source-1116ea2d477f08cf0f5b2ef0
+    resource: repo://agent/graphs/scheduler.py
+  - id: openwiki-source-3e15117ace082a39e1f130d8
+    resource: repo://agent/scheduler.py
+  - id: openwiki-source-3096620cfd0eb1bae6d9e78c
+    resource: repo://agent/webapp.py
+  - id: openwiki-source-8037e2358a2c4f9b2c722a11
+    resource: repo://AGENTS.md
+  - id: openwiki-source-5bbba7b2a8ea8360ff233d63
+    resource: repo://langgraph.json
+  - id: openwiki-source-012f2c78e3b1446dfc35803f
+    resource: repo://Makefile
+  - id: openwiki-source-5b54a58d1b51cd490b0e7162
+    resource: repo://package.json
+  - id: openwiki-source-05ccef8d4cf1698187f20464
+    resource: repo://pyproject.toml
+  - id: openwiki-source-23775c3de52f3ab95a13cb8b
+    resource: repo://README.md
+generated: { by: "openwiki/0.4.2", at: "2026-08-27T06:27:22.313Z" }
 ---
-# Open SWE quickstart
 
-Open SWE is a framework for an organization-specific coding agent. It combines a LangGraph runtime, Deep Agents-based coding and review graphs, isolated sandboxes, and collaboration surfaces in Slack, Linear, GitHub, and a web dashboard. The intended outcome is an agent that can receive engineering context, work in a repository, and report or publish its result without giving its credentials directly to the execution environment.
+# Open SWE Quickstart & Wiki Map
 
-Start here when orienting to the repository:
+This is the navigational hub for the Open SWE wiki. It orients you to what the
+system is, how to run it locally, and which section to open for a given task.
+Deep content lives in the linked pages; treat source code and tests as
+authoritative over any prose here.
 
-- [Runtime architecture](runtime-architecture.md) explains the graphs, FastAPI composition, durable dispatch contract, and per-thread execution state.
-- [Workflows](workflows.md) explains how coding, review, planning, approvals, and review-style learning fit together.
-- [Integrations and security](integrations-security.md) explains sandbox isolation, identities, webhook gates, and optional server-side tools.
-- [Dashboard](dashboard.md) explains the authenticated UI, its FastAPI API boundary, and admin/user management surfaces.
-- [Operations and quality](operations-quality.md) explains development commands, CI, E2E verification, reviewer evaluation, and deployment assets.
+## What Open SWE is
 
-## Product model
+Open SWE is an open-source framework for building an org's internal coding
+agent. It is **composed on** the Deep Agents framework
+(`deepagents.create_deep_agent`) and runs as a **LangGraph app**: each thread
+spawns its own isolated cloud sandbox, and the agent is invoked from Slack,
+Linear, or GitHub (PR comments, plus auto-review on `opened` /
+`ready_for_review`).
 
-The primary coding graph is assembled with `deepagents.create_deep_agent` in `agent/server.py`. It receives source context from a Slack thread, Linear issue, GitHub interaction, or dashboard chat; works against a sandbox associated with the thread; and uses a deliberately curated set of collaboration and research tools. The [runtime architecture](runtime-architecture.md) describes the graph factory and durable thread behavior.
+The runtime is served by `langgraph dev` from `langgraph.json`, which declares
+**five graph entrypoints plus a FastAPI app**, all served together:
 
-Open SWE also separates code review from code modification. The read-only reviewer graph prepares a PR-specific checkout and changed-line context before publishing findings, while the analyzer graph learns a repository-specific review style. These user-facing flows are documented in [workflows](workflows.md), and their evaluator is documented in [operations and quality](operations-quality.md).
+| Graph | `langgraph.json` entrypoint | Underlying factory | Purpose |
+|---|---|---|---|
+| `agent` | `agent.graphs.agent:traced_agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
+| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer; findings model + `publish_review`. |
+| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo review style from historical PRs. |
+| `chat` | `agent.graphs.chat:traced_chat_agent` | `agent.chat:get_chat_agent` | Dashboard Agents chat graph. |
+| `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent.scheduler:get_scheduler` | Deterministic cron fan-out, reconciliation, `/baby-sit` CI checks. |
 
-The web dashboard is not a separate backend: it is a Vite/TanStack client over FastAPI endpoints mounted in the same application as the webhooks. It surfaces agent threads, plans, schedules, review administration, profiles, and workspace settings; see [dashboard](dashboard.md).
+The FastAPI app is `agent.webapp:app` (a compatibility shim re-exporting
+`agent.api.app:app`). At startup it mounts the dashboard router and the plan,
+workflow-approval, Linear, Slack, health, and GitHub webhook routers.
 
-## Repository map
+The agent itself is **stateless** — all per-thread state lives in the sandbox
+plus thread metadata — and is rebuilt per thread by the graph factory.
 
-| Area | Source anchors | Why it matters |
-|---|---|---|
-| Agent runtime | `agent/server.py`, `agent/graphs/`, `langgraph.json` | Assembles the coding graph and registers deployed assistants. |
-| Ingress and dispatch | `agent/api/app.py`, `agent/webhooks/`, `agent/dispatch.py` | Verifies incoming events and creates durable LangGraph runs. |
-| Review system | `agent/reviewer.py`, `agent/review/`, `agent/analyzer.py` | Implements diff-scoped review and per-repository review style. |
-| Dashboard | `agent/dashboard/`, `ui/src/` | Owns OAuth/session-backed management APIs and their client UI. |
-| Execution boundary | `agent/utils/sandbox.py`, `agent/integrations/`, `Dockerfile` | Selects isolated execution providers and configures the sandbox image. |
-| Verification | `tests/`, `tests/e2e/`, `evals/reviewer/`, `.github/workflows/ci.yml` | Covers Python behavior, end-to-end flow, and reviewer quality. |
-
-## First changes: where to start
-
-- **Change core agent behavior:** begin in `agent/server.py`, then read [runtime architecture](runtime-architecture.md) and [integrations and security](integrations-security.md). Middleware order and the tool list are operational policy, not incidental wiring.
-- **Add or alter a source workflow:** begin in `agent/webhooks/` and `agent/dispatch.py`, then follow [workflows](workflows.md). Preserve signature validation, source/context construction, deterministic thread identity, and durable dispatch.
-- **Change review behavior:** begin in `agent/reviewer.py` and `agent/review/`; follow [workflows](workflows.md) and run the targeted checks in [operations and quality](operations-quality.md).
-- **Change UI or dashboard APIs:** use [dashboard](dashboard.md) to locate the route, typed UI client, and secured FastAPI endpoint as a unit.
-
-## Local developer baseline
-
-Python dependencies use `uv`; the Python test suite uses pytest; linting/formatting uses Ruff. The central commands are:
-
-```bash
-make install
-make dev                 # LangGraph development server: graphs + FastAPI app
-make lint
-make format-check
-make test
+```mermaid
+flowchart TD
+  subgraph Triggers
+    SL["Slack mention"]
+    LI["Linear comment"]
+    GH["GitHub PR comment / PR event"]
+  end
+  SL --> WA["FastAPI webapp (agent.webapp:app)"]
+  LI --> WA
+  GH --> WA
+  WA --> AG["agent graph (get_agent)"]
+  WA --> RV["reviewer graph"]
+  WA --> DASH["dashboard router + ui/ dashboard"]
+  SCH["scheduler graph"] --> AG
+  AN["analyzer graph"] --> RV
+  AG --> SB["per-thread cloud sandbox"]
+  RV --> SB
 ```
 
-`make run` starts only `uvicorn agent.webapp:app` and is useful for HTTP-only work, but the agent/dashboard runtime normally needs `make dev`. The UI has its own `pnpm` scripts in `ui/package.json`. See [operations and quality](operations-quality.md) for practical test selection and E2E setup.
+Inbound triggers land on the FastAPI webapp, which dispatches LangGraph runs; every agent/reviewer thread owns an isolated sandbox.
 
-## Documentation notes
+## Developer loop
 
-The source of truth is current code plus the maintained installation/customization guides. `AGENTS.md`, `CLAUDE.md`, and parts of `docs/CUSTOMIZATION.md` contain useful orientation but currently disagree with source on some graph registration, middleware, and sandbox details; this wiki follows `langgraph.json` and current implementation paths when they differ.
+Python dependencies are managed with **uv**; the JS dashboard/desktop use
+**pnpm**. `langgraph dev` serves all graphs and the FastAPI app together.
 
-## Backlog
+```bash
+make install            # uv sync --extra dev (pytest, ruff, basedpyright, …)
+make dev                # uv run langgraph dev — serves all graphs + FastAPI app
+make run                # uvicorn agent.webapp:app --reload --port 8000 (FastAPI only)
+make test               # uv run pytest -vvv tests/
+make lint               # ruff check + ruff format --diff
+make format             # ruff format + ruff check --fix
+make typecheck          # basedpyright agent tests
+make web                # pnpm run dev — the ui/ dashboard
+```
 
-- **Full configuration reference** — `docs/INSTALLATION.md`; deferred because it is a large provider-specific setup guide with credential-sensitive material, better maintained in the existing installation documentation.
-- **Per-tool API reference** — `agent/tools/`; deferred because tool behavior is intentionally curated and changes frequently. Start from the registered tool lists in `agent/server.py` or `agent/reviewer.py` for a particular change.
+Conventions that matter: `requires-python = ">=3.11"` while `langgraph.json`
+pins the runtime to 3.12; ruff uses line-length 100; tests default to unit-only
+under `tests/` with `asyncio_mode = "auto"`; the app is **async-only** (do not
+add sync/async dual implementations).
+
+## Task-routing map
+
+Pick the section that matches what you are trying to do.
+
+### Architecture
+- [System Architecture Overview](/openwiki/architecture/overview.md) — the five graphs, the FastAPI webapp, dashboard router, sandbox layer, and web/desktop UI, and how they connect.
+- [Agent Graph & get_agent Factory](/openwiki/architecture/agent-graph.md) — how a deep agent is assembled per-thread with resolved model, curated tools, backend, subagents, and middleware.
+- [Middleware Stack](/openwiki/architecture/middleware-stack.md) — the ordered middleware chain around every model call for the agent and reviewer.
+- [Sandbox Lifecycle & Providers](/openwiki/architecture/sandbox-lifecycle.md) — per-thread get-or-create-then-reconnect lifecycle, provider selection, the GitHub proxy, and failure handling.
+- [Reviewer & Review-Style Analyzer Graphs](/openwiki/architecture/reviewer-and-analyzer.md) — read-only reviewer graph and the analyzer that learns per-repo review style.
+
+### Concepts
+- [Agent Tools (Curated Toolset)](/openwiki/concepts/tools.md) — what tools the agent/reviewer/analyzer expose and the agent/UI parity principle.
+- [Models, Profiles, Team Defaults & Instructions](/openwiki/concepts/models-profiles-instructions.md) — model + reasoning-effort resolution precedence and layered instructions.
+- [Threads, Thread IDs & Persistence](/openwiki/concepts/threads-and-state.md) — deterministic thread-id derivation, thread metadata/state, and Slack code-channel keying.
+- [Authentication, Authorization & Security Boundaries](/openwiki/concepts/auth-and-security.md) — GitHub dual-mode auth, webhook signature verification, dashboard OAuth, and encryption at rest.
+
+### Workflows
+- [Invocation: Slack, Linear & GitHub Webhooks](/openwiki/workflows/invocation.md) — how an inbound mention/comment/event becomes a dispatched run.
+- [PR Creation & GitHub Delivery](/openwiki/workflows/pr-creation.md) — commit, push, and draft-PR flow plus guards and CI feedback.
+- [PR Review Workflow](/openwiki/workflows/pr-review.md) — auto-review and comment-triggered reviews from webhook to published findings.
+- [Scheduling, Cron & Baby-Sit CI Monitoring](/openwiki/workflows/scheduling-and-baby-sit.md) — scheduler graph and the opt-in `/baby-sit` CI monitoring flow.
+- [Context Engineering: AGENTS.md, Source Context & Skills](/openwiki/workflows/context-engineering.md) — how the agent gathers context and uses skills.
+- [Mid-Run Follow-Up Messages](/openwiki/workflows/follow-up-messages.md) — how messages sent while the agent is working are queued and injected.
+
+### Integrations
+- [Dashboard API & Web/Desktop UI](/openwiki/integrations/dashboard-ui.md) — the dashboard router and the `ui/` React dashboard + `desktop/` Electron wrapper.
+- [Observability & MCP Integrations](/openwiki/integrations/observability-and-mcp.md) — Datadog/LangSmith tools, Corridor/Notion MCP, Currents, and Stagehand browser.
+- [Sandbox Provider Integrations](/openwiki/integrations/sandbox-providers.md) — pluggable sandbox providers and how to add a new one.
+
+### Operations & Testing
+- [Configuration & Environment Variables](/openwiki/operations/configuration.md) — environment variables across sandbox, models, auth, webhooks, and integrations.
+- [Local Dev, Build & Deployment](/openwiki/operations/deployment.md) — running locally, building, and deploying the backend and dashboard.
+- [Testing Guide](/openwiki/testing/overview.md) — test layout, conventions, and how to run unit and e2e tests.
