@@ -1,0 +1,122 @@
+AGENTS.md
+  h_f78d33d4280f3f 139-142
+CLAUDE.md
+  h_f78d33d4280f3f 124
+openwiki/.claims/architecture/agent-graph.json
+  h_f78d33d4280f3f 1-384
+openwiki/.claims/architecture/middleware-stack.json
+  h_f78d33d4280f3f 1-338
+openwiki/.claims/architecture/overview.json
+  h_f78d33d4280f3f 1-286
+openwiki/.claims/architecture/reviewer-and-analyzer.json
+  h_f78d33d4280f3f 1-474
+openwiki/.claims/architecture/sandbox-lifecycle.json
+  h_f78d33d4280f3f 1-330
+openwiki/.claims/concepts/auth-and-security.json
+  h_f78d33d4280f3f 1-382
+openwiki/.claims/concepts/models-profiles-instructions.json
+  h_f78d33d4280f3f 1-346
+openwiki/.claims/concepts/threads-and-state.json
+  h_f78d33d4280f3f 1-364
+openwiki/.claims/concepts/tools.json
+  h_f78d33d4280f3f 1-314
+openwiki/.claims/integrations/dashboard-ui.json
+  h_f78d33d4280f3f 1-274
+openwiki/.claims/integrations/observability-and-mcp.json
+  h_f78d33d4280f3f 1-308
+openwiki/.claims/integrations/sandbox-providers.json
+  h_f78d33d4280f3f 1-328
+openwiki/.claims/operations/configuration.json
+  h_f78d33d4280f3f 1-390
+openwiki/.claims/operations/deployment.json
+  h_f78d33d4280f3f 1-286
+openwiki/.claims/quickstart.json
+  h_f78d33d4280f3f 1-170
+openwiki/.claims/testing/overview.json
+  h_f78d33d4280f3f 1-252
+openwiki/.claims/workflows/context-engineering.json
+  h_f78d33d4280f3f 1-354
+openwiki/.claims/workflows/follow-up-messages.json
+  h_f78d33d4280f3f 1-300
+openwiki/.claims/workflows/invocation.json
+  h_f78d33d4280f3f 1-382
+openwiki/.claims/workflows/pr-creation.json
+  h_f78d33d4280f3f 1-268
+openwiki/.claims/workflows/pr-review.json
+  h_f78d33d4280f3f 1-366
+openwiki/.claims/workflows/scheduling-and-baby-sit.json
+  h_f78d33d4280f3f 1-370
+openwiki/.last-update.json
+  h_f78d33d4280f3f 2,4-7
+openwiki/INSTRUCTIONS.md
+  h_f78d33d4280f3f 1
+openwiki/architecture/agent-graph.md
+  h_f78d33d4280f3f 1-242
+openwiki/architecture/index.md
+  h_f78d33d4280f3f 1-7
+openwiki/architecture/middleware-stack.md
+  h_f78d33d4280f3f 1-299
+openwiki/architecture/overview.md
+  h_f78d33d4280f3f 1-155
+openwiki/architecture/reviewer-and-analyzer.md
+  h_f78d33d4280f3f 1-327
+openwiki/architecture/sandbox-lifecycle.md
+  h_f78d33d4280f3f 1-256
+openwiki/concepts/auth-and-security.md
+  h_f78d33d4280f3f 1-304
+openwiki/concepts/index.md
+  h_f78d33d4280f3f 1-6
+openwiki/concepts/models-profiles-instructions.md
+  h_f78d33d4280f3f 1-271
+openwiki/concepts/threads-and-state.md
+  h_f78d33d4280f3f 1-311
+openwiki/concepts/tools.md
+  h_f78d33d4280f3f 1-229
+openwiki/index.md
+  h_f78d33d4280f3f 2,7-16
+openwiki/integrations/dashboard-ui.md
+  h_f78d33d4280f3f 1-207
+openwiki/integrations/index.md
+  h_f78d33d4280f3f 1-5
+openwiki/integrations/observability-and-mcp.md
+  h_f78d33d4280f3f 1-241
+openwiki/integrations/sandbox-providers.md
+  h_f78d33d4280f3f 1-269
+openwiki/operations/configuration.md
+  h_f78d33d4280f3f 1-245
+openwiki/operations/deployment.md
+  h_f78d33d4280f3f 1-250
+openwiki/operations/index.md
+  h_f78d33d4280f3f 1-4
+openwiki/quickstart.md
+  h_f78d33d4280f3f 2-34,37-88,90,92,94-95,98-105,108-146
+openwiki/testing/index.md
+  h_f78d33d4280f3f 1-3
+openwiki/testing/overview.md
+  h_f78d33d4280f3f 1-221
+openwiki/workflows/context-engineering.md
+  h_f78d33d4280f3f 1-242
+openwiki/workflows/follow-up-messages.md
+  h_f78d33d4280f3f 1-237
+openwiki/workflows/index.md
+  h_f78d33d4280f3f 1-8
+openwiki/workflows/invocation.md
+  h_f78d33d4280f3f 1-290
+openwiki/workflows/pr-creation.md
+  h_f78d33d4280f3f 1-207
+openwiki/workflows/pr-review.md
+  h_f78d33d4280f3f 1-317
+openwiki/workflows/scheduling-and-baby-sit.md
+  h_f78d33d4280f3f 1-300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "acd52ed0c96f0d633455b8dab5e7a88f7253d36d",
+  "prompts": {},
+  "humans": {
+    "h_f78d33d4280f3f": {
+      "author": "Colin Francis <colin.francis@langchain.dev>"
+    }
+  }
+}
