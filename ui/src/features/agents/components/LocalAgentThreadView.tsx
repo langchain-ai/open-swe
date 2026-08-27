@@ -458,6 +458,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               <AgentPromptBar
                 activeRun={{ threadId: thread.id, running: isRunning }}
                 busy={isRunning}
+                disabled={transferring}
                 compact
                 models={models}
                 selection={activeSelection}
