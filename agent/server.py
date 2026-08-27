@@ -139,7 +139,6 @@ from .tools import (
     background_task,
     capture_environment_snapshot,
     create_sandbox_file_download_url,
-    create_sandbox_service_url,
     delete_environment,
     delete_organization_skill,
     delete_user_skill,
@@ -786,7 +785,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
-        "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
         "manage_thread",
@@ -1656,11 +1654,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_baby_sit,
         notify_automation_channel,
         open_pull_request,
-        *(
-            (output_iframe, create_sandbox_file_download_url, create_sandbox_service_url)
-            if sandbox_file_downloads
-            else ()
-        ),
+        *((output_iframe, create_sandbox_file_download_url) if sandbox_file_downloads else ()),
         read_user_settings,
         request_pr_review,
         recreate_sandbox,

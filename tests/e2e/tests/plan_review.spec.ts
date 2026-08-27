@@ -230,33 +230,7 @@ test.describe("Plan review", () => {
     await expect(owner.getByTestId("reject-plan")).toBeEnabled();
     await expect(owner.getByTestId("edit-plan")).toHaveCount(0);
     await expect(owner.getByTestId("plan-editor")).toHaveCount(0);
-    await expect(owner.getByTestId("plan-comments")).toBeVisible();
-
-    // Highlight text in the sandboxed HTML preview and attach a comment.
-    const verificationHeading = ownerArtifact
-      .contentFrame()
-      .getByText("Verification");
-    await verificationHeading.evaluate((element) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    });
-    await expect(owner.getByTestId("comment-composer")).toContainText(
-      "Verification",
-    );
-    await owner
-      .getByTestId("comment-input")
-      .fill("Clarify the expected output.");
-    await owner.getByTestId("comment-submit").click();
-    await expect(owner.getByTestId("plan-comment")).toContainText(
-      "Clarify the expected output.",
-    );
-    await expect(
-      ownerArtifact.contentFrame().locator(".plan-annotation-marker"),
-    ).toBeVisible();
+    await expect(owner.getByTestId("plan-comments")).toHaveCount(0);
 
     // Copy the whole plan as HTML.
     await owner.getByTestId("copy-plan").click();
@@ -281,7 +255,7 @@ test.describe("Plan review", () => {
         .contentFrame()
         .getByText("Add greet() helper"),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(collab.getByTestId("plan-comments")).toBeVisible();
+    await expect(collab.getByTestId("plan-comments")).toHaveCount(0);
     await expect(collab.getByTestId("approve-plan")).toBeVisible();
     await expect(collab.getByTestId("reject-plan")).toBeEnabled();
 
@@ -337,7 +311,7 @@ test.describe("Plan review", () => {
       timeout: 30_000,
     });
     await expect(owner.getByTestId("reject-plan")).toBeEnabled();
-    await expect(owner.getByTestId("plan-comments")).toBeVisible();
+    await expect(owner.getByTestId("plan-comments")).toHaveCount(0);
 
     const hydrated = owner.waitForResponse((response) => {
       const path = new URL(response.url()).pathname;

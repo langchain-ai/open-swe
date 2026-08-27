@@ -9,7 +9,6 @@ Reviewers leave whole-document comments, stored one item per comment under
 store operations (no CRDT/WebSocket).
 """
 
-import html
 import logging
 import re
 import uuid
@@ -179,33 +178,6 @@ def _comments_namespace(thread_id: str) -> list[str]:
     return [*PLAN_COMMENTS_NAMESPACE, thread_id]
 
 
-def format_plan_comments(comments: list[dict[str, Any]]) -> str:
-    entries: list[str] = []
-    for comment in comments:
-        body = str(comment.get("body", "")).strip()
-        if not body:
-            continue
-        author = html.escape(str(comment.get("author") or "reviewer").strip(), quote=True)
-        anchor = comment.get("anchor")
-        anchor = anchor if isinstance(anchor, dict) else {}
-        exact = str(anchor.get("exact") or "").strip()
-        prefix = str(anchor.get("context_before") or anchor.get("prefix") or "").strip()
-        suffix = str(anchor.get("context_after") or anchor.get("suffix") or "").strip()
-        context = "\n".join(part for part in (prefix, exact, suffix) if part)
-        fields = []
-        if context:
-            fields.append(f"<surrounding-context>{html.escape(context)}</surrounding-context>")
-        if exact:
-            fields.append(f"<highlighted-text>{html.escape(exact)}</highlighted-text>")
-        fields.append(f"<reviewer-feedback>{html.escape(body)}</reviewer-feedback>")
-        entries.append(
-            f'{len(entries) + 1}. <plan-review-comment author="{author}">\n'
-            + "\n".join(fields)
-            + "\n</plan-review-comment>"
-        )
-    return "\n".join(entries)
-
-
 async def list_plan_comments(
     thread_id: str, *, raise_on_error: bool = False
 ) -> list[dict[str, Any]]:
@@ -235,20 +207,14 @@ async def clear_plan_comments(thread_id: str) -> None:
 
 
 async def add_plan_comment(
-    thread_id: str,
-    *,
-    author: str,
-    author_login: str,
-    body: str,
-    anchor: dict[str, Any] | None,
+    thread_id: str, *, author: str, author_login: str, body: str
 ) -> dict[str, Any]:
-    """Append an anchored comment; returns the stored comment."""
+    """Append a whole-document comment; returns the stored comment."""
     comment = {
         "id": uuid.uuid4().hex,
         "author": author,
         "author_login": author_login,
         "body": body,
-        "anchor": anchor,
         "created_at": now_iso(),
     }
     await put_value(_comments_namespace(thread_id), comment["id"], comment)

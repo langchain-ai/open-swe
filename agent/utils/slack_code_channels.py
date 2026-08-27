@@ -139,7 +139,7 @@ async def create_code_channel(
     origin_channel_id: str,
     origin_message_ts: str,
     team_id: str = "",
-    is_private: bool = False,
+    is_private: bool | None = None,
 ) -> tuple[str | None, str | None]:
     """Create a code channel for a task and return its channel id."""
     if not 1 <= len(name.strip()) <= 200:
@@ -154,7 +154,8 @@ async def create_code_channel(
     }
     if team_id:
         payload["team_id"] = team_id
-    payload["is_private"] = is_private
+    if is_private is not None:
+        payload["is_private"] = is_private
     data, error = await _call("agents.conversations.create", payload)
     if error or data is None:
         return None, error

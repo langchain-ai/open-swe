@@ -265,28 +265,20 @@ async def test_upload_slack_thread_file_completes_external_upload(
         )
 
     assert result == ("F1", None)
-    ticket_call = client_cm.post.call_args_list[0]
-    assert ticket_call.args[0].endswith("/files.getUploadURLExternal")
-    assert ticket_call.kwargs["data"] == {
+    assert client_cm.post.call_args_list[0].args[0].endswith("/files.getUploadURLExternal")
+    assert client_cm.post.call_args_list[0].kwargs["json"] == {
         "filename": "plan.html",
-        "length": "8",
-    }
-    assert ticket_call.kwargs["headers"] == {
-        "Authorization": "Bearer xoxb-test",
+        "length": 8,
     }
     safe_request.assert_awaited_once()
     assert safe_request.call_args.kwargs["content"] == b"<html />"
     assert safe_request.call_args.kwargs["validate_url"] is slack_utils._validate_slack_upload_url
-    complete_call = client_cm.post.call_args_list[1]
-    assert complete_call.args[0].endswith("/files.completeUploadExternal")
-    assert complete_call.kwargs["data"] == {
-        "files": '[{"id": "F1", "title": "Plan"}]',
+    assert client_cm.post.call_args_list[1].args[0].endswith("/files.completeUploadExternal")
+    assert client_cm.post.call_args_list[1].kwargs["json"] == {
+        "files": [{"id": "F1", "title": "Plan"}],
         "channel_id": "C1",
         "thread_ts": "1.0",
         "initial_comment": "Preview",
-    }
-    assert complete_call.kwargs["headers"] == {
-        "Authorization": "Bearer xoxb-test",
     }
 
 

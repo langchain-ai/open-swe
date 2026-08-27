@@ -61,7 +61,7 @@ async def manage_code_channel(
     ],
     title: str = "",
     team_id: str = "",
-    is_private: bool = False,
+    is_private: bool | None = None,
     status: SessionStatus = "active",
     items: list[dict[str, Any]] | None = None,
     summary_message_ts: str = "",
@@ -287,7 +287,7 @@ async def _create(
     repo: dict[str, Any] | None,
     *,
     team_id: str = "",
-    is_private: bool = False,
+    is_private: bool | None = None,
 ) -> dict[str, Any]:
     if not title.strip():
         return {"success": False, "error": "title is required"}

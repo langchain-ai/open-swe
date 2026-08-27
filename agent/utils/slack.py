@@ -4,7 +4,6 @@ import asyncio
 import copy
 import hashlib
 import hmac
-import json
 import logging
 import os
 import re
@@ -72,12 +71,6 @@ def _slack_headers() -> dict[str, str]:
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json; charset=utf-8",
     }
-
-
-def _slack_auth_headers() -> dict[str, str]:
-    if not SLACK_BOT_TOKEN:
-        return {}
-    return {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
 
 
 def _parse_ts(ts: str | None) -> float:
@@ -740,8 +733,8 @@ async def upload_slack_thread_file(
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
             ticket_response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/files.getUploadURLExternal",
-                headers=_slack_auth_headers(),
-                data={"filename": filename, "length": str(len(content))},
+                headers=_slack_headers(),
+                json={"filename": filename, "length": len(content)},
             )
             ticket_error = _slack_response_error(ticket_response)
             if ticket_error:
@@ -766,17 +759,17 @@ async def upload_slack_thread_file(
                 return None, "upload_failed"
             upload_response.raise_for_status()
 
-            data: dict[str, str] = {
-                "files": json.dumps([{"id": file_id, "title": title or filename}]),
+            payload: dict[str, Any] = {
+                "files": [{"id": file_id, "title": title or filename}],
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
             }
             if initial_comment:
-                data["initial_comment"] = initial_comment
+                payload["initial_comment"] = initial_comment
             complete_response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/files.completeUploadExternal",
-                headers=_slack_auth_headers(),
-                data=data,
+                headers=_slack_headers(),
+                json=payload,
             )
             complete_error = _slack_response_error(complete_response)
             if complete_error:

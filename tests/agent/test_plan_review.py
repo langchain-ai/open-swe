@@ -20,69 +20,24 @@ def test_dashboard_plan_url_none_without_thread() -> None:
 
 
 def test_format_comments_numbers_and_skips_blank() -> None:
-    from agent.dashboard.plan_store import format_plan_comments
+    from agent.dashboard.plan_api import _format_comments
 
-    text = format_plan_comments(
+    text = _format_comments(
         [
             {"author": "alice", "body": "add a docstring"},
             {"author": "bob", "body": "looks good"},
             {"author": "carol", "body": "   "},  # blank → skipped
         ]
     )
-    assert '<plan-review-comment author="alice">' in text
-    assert "<reviewer-feedback>add a docstring</reviewer-feedback>" in text
-    assert '<plan-review-comment author="bob">' in text
-    assert "<reviewer-feedback>looks good</reviewer-feedback>" in text
+    assert "1. alice: add a docstring" in text
+    assert "2. bob: looks good" in text
     assert "carol" not in text
 
 
-def test_format_comments_includes_highlight_and_surrounding_context() -> None:
-    from agent.dashboard.plan_store import format_plan_comments
-
-    text = format_plan_comments(
-        [
-            {
-                "author": "alice",
-                "body": "make <this> concrete",
-                "anchor": {
-                    "exact": "Persist the result",
-                    "context_before": "Write the output\nCheck permissions",
-                    "context_after": "Return the identifier\nLog completion",
-                },
-            }
-        ]
-    )
-
-    assert text == (
-        '1. <plan-review-comment author="alice">\n'
-        "<surrounding-context>Write the output\nCheck permissions\nPersist the result\n"
-        "Return the identifier\nLog completion</surrounding-context>\n"
-        "<highlighted-text>Persist the result</highlighted-text>\n"
-        "<reviewer-feedback>make &lt;this&gt; concrete</reviewer-feedback>\n"
-        "</plan-review-comment>"
-    )
-
-
 def test_format_comments_empty() -> None:
-    from agent.dashboard.plan_api import CommentBody, TextAnchor
-    from agent.dashboard.plan_store import format_plan_comments
+    from agent.dashboard.plan_api import _format_comments
 
-    assert format_plan_comments([]) == ""
-    anchor = TextAnchor(
-        exact="text",
-        prefix="",
-        suffix="",
-        context_before="one\ntwo\nthree",
-        context_after="four\nfive\nsix",
-        start=0,
-        end=4,
-    )
-    assert anchor.context_before == "one\ntwo\nthree"
-    with pytest.raises(ValueError, match="anchor range"):
-        CommentBody(
-            body="comment",
-            anchor=TextAnchor(exact="text", prefix="", suffix="", start=0, end=3),
-        )
+    assert _format_comments([]) == ""
 
 
 def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
@@ -492,11 +447,10 @@ def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
     assert path.endswith("-thread-abc-123.html")
 
 
-def test_external_mutations_excluded_in_plan_mode() -> None:
+def test_http_request_excluded_in_plan_mode() -> None:
     from agent.server import PLAN_MODE_EXCLUDED_TOOLS
 
     assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
-    assert "create_sandbox_service_url" in PLAN_MODE_EXCLUDED_TOOLS
 
 
 def test_file_edit_tools_available_in_plan_mode_for_plan_file() -> None:

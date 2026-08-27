@@ -15,7 +15,6 @@ from typing_extensions import TypedDict
 from ..dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_SHARED,
-    format_plan_comments,
     get_plan_content,
     list_plan_comments,
     make_plan_approver,
@@ -56,7 +55,7 @@ async def approve_plan(
             return {"success": False, "error": "shared content is not an implementation plan"}
         plan = str(content.get("html") or content.get("markdown") or "").strip()
         comments = await list_plan_comments(str(thread_id), raise_on_error=True)
-        feedback = format_plan_comments(comments)
+        feedback = _format_comments(comments)
         await set_plan_status(
             str(thread_id),
             PLAN_STATUS_APPROVED,
@@ -113,6 +112,19 @@ def _current_approver(configurable: Any) -> dict[str, str]:
         slack_thread.get("triggering_user_name") or configurable.get("github_login") or actor_id
     )
     return make_plan_approver(actor_id=actor_id, name=name, source=source)
+
+
+def _format_comments(comments: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    index = 1
+    for comment in comments:
+        body = str(comment.get("body", "")).strip()
+        if not body:
+            continue
+        author = str(comment.get("author") or "reviewer").strip()
+        lines.append(f"{index}. {author}: {body}")
+        index += 1
+    return "\n".join(lines)
 
 
 def _approved_message(plan: str, feedback: str) -> str:

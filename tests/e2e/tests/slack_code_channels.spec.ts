@@ -66,22 +66,5 @@ test.describe("Slack Code Channels", () => {
       path: "screenshots/slack-code-channel.png",
       fullPage: true,
     });
-
-    await page.request.post("/control/login", {
-      data: { login: "alice", email: "alice@example.com" },
-    });
-    await page.goto(`/agents/${initialResult.thread_id}`);
-    const codeChannelLink = page.getByRole("link", {
-      name: "Open code channel",
-    });
-    await expect(codeChannelLink).toBeVisible();
-    await expect(codeChannelLink).toHaveAttribute(
-      "href",
-      /https:\/\/slack\.com\/app_redirect\?channel=C_CODE_\d+&team=T_TEST/,
-    );
-    await page.screenshot({
-      path: "screenshots/web-code-channel-link.png",
-      fullPage: true,
-    });
   });
 });

@@ -11,7 +11,6 @@ import uuid
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
-from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException
@@ -41,7 +40,6 @@ from ..utils.slack import (
     parse_github_pr_url,
     update_slack_trace_reply_for_web_handoff,
 )
-from ..utils.slack_code_channels import CODE_CHANNEL_SESSION_TS
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -70,7 +68,6 @@ from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .pull_request_context import get_pull_request_context
 from .pull_request_status import get_pull_request_statuses
-from .slack_oauth import SLACK_TEAM_ID
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
@@ -377,17 +374,6 @@ def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     return slack_thread.permalink.strip() or None
 
 
-def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
-        return None
-    channel_id = slack_thread.channel_id.strip()
-    team_id = SLACK_TEAM_ID.strip()
-    if not channel_id or not team_id:
-        return None
-    return f"https://slack.com/app_redirect?{urlencode({'channel': channel_id, 'team': team_id})}"
-
-
 def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
     value = metadata.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else None
@@ -549,7 +535,6 @@ async def _thread_summary(
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
         "sourceUrl": _thread_source_url(metadata),
-        "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
     }
     raw_pull_requests = metadata.get("pull_requests")
