@@ -131,6 +131,7 @@ Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task 
 - New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+- Do not use parent-relative Python imports that start with `..`; use absolute imports instead. Same-package imports with a single dot, such as `.foo`, are allowed.
 
 <!-- OPENWIKI:START -->
 
