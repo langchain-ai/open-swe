@@ -11,7 +11,7 @@ from typing import Any, cast
 import httpx
 from langchain_core.messages.content import create_text_block
 
-from agent.dashboard.environments import get_environment, parse_environment_tag
+from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -51,6 +51,14 @@ _UNTAGGED_REPLY_PREAMBLE = (
     "addressed to you, handle it exactly as you would a direct mention.\n\n"
 )
 
+_CODE_CHANNEL_CONTEXT = (
+    "## Slack Code Channel\n"
+    "The whole channel is one session. Treat messages as addressed to you unless clearly aimed "
+    "at someone else; replies post top-level unless the user started a Slack thread. Use "
+    "`manage_code_channel` for session "
+    "status, title, context, runtime commands, HTML/diff/Block Kit/canvas views, and archival."
+)
+
 _MESSAGE_UPDATE_PREAMBLE = (
     "A Slack message previously delivered to this thread was edited. Treat the updated text "
     "below as the current version and as an explicit correction to the earlier message. Do not "
@@ -81,6 +89,23 @@ def _is_explicit_slack_request(
         treat_all_messages_as_mentions
         or (bot_user_id and f"<@{bot_user_id}>" in text)
         or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+    )
+
+
+def _interrupts_active_run(
+    text: str,
+    bot_user_id: str,
+    *,
+    treat_all_messages_as_mentions: bool,
+    code_channel: bool,
+    message_update: bool,
+    explicit_request: bool,
+) -> bool:
+    return explicit_request or _is_explicit_slack_request(
+        text,
+        bot_user_id,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions and not code_channel,
+        message_update=message_update,
     )
 
 
@@ -481,7 +506,7 @@ async def _notify_slack_processing_error(
             common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
             or "Slack request"
         )
-        await common.upsert_agent_thread_owner_metadata(
+        await common.upsert_agent_thread_metadata(
             thread_id,
             source="slack",
             repo_config=repo_config,
@@ -539,6 +564,9 @@ async def _process_slack_mention_impl(
     attachments = event_data.get("attachments", [])
     bot_user_id = event_data.get("bot_user_id", "")
     message_update = bool(event_data.get("message_update"))
+    reply_thread_ts = event_data.get("reply_thread_ts")
+    if not isinstance(reply_thread_ts, str):
+        reply_thread_ts = ""
     original_message_ts = event_data.get("original_message_ts")
     if not isinstance(original_message_ts, str) or not original_message_ts:
         original_message_ts = event_ts
@@ -597,8 +625,11 @@ async def _process_slack_mention_impl(
             if isinstance(timezone_value, str):
                 user_timezone = timezone_value.strip()
 
+    context_thread_ts = reply_thread_ts or thread_ts
     thread_messages = (
-        [] if message_update else await common.fetch_slack_thread_messages(channel_id, thread_ts)
+        []
+        if message_update
+        else await common.fetch_slack_thread_messages(channel_id, context_thread_ts)
     )
     current_message = next(
         (message for message in thread_messages if str(message.get("ts")) == original_message_ts),
@@ -618,6 +649,7 @@ async def _process_slack_mention_impl(
 
     treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
     untagged_reply = bool(event_data.get("untagged_reply"))
+    code_channel = bool(event_data.get("code_channel"))
     context_messages, context_mode = common.select_slack_context_messages(
         thread_messages,
         event_ts,
@@ -659,7 +691,7 @@ async def _process_slack_mention_impl(
     environment_slug: str | None = None
     if is_first_mention:
         tagged_slug, text_without_tag = parse_environment_tag(clean_text)
-        if tagged_slug and await get_environment(tagged_slug) is not None:
+        if tagged_slug and await ENVIRONMENTS.get(tagged_slug) is not None:
             environment_slug = tagged_slug
             clean_text = text_without_tag or "(no text in mention)"
         elif tagged_slug:
@@ -690,6 +722,7 @@ async def _process_slack_mention_impl(
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
+        + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
@@ -793,6 +826,8 @@ async def _process_slack_mention_impl(
     }
     if user_timezone:
         slack_thread_context["triggering_user_timezone"] = user_timezone
+    if code_channel and reply_thread_ts:
+        slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     configurable: dict[str, Any] = {
         "repo": repo_config,
@@ -823,7 +858,7 @@ async def _process_slack_mention_impl(
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    await common.upsert_agent_thread_owner_metadata(
+    await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
         repo_config=repo_config,
@@ -834,13 +869,13 @@ async def _process_slack_mention_impl(
         environment=environment_slug,
     )
 
-    # A DM (treat_all_messages_as_mentions) is inherently directed at the bot, so
-    # it interrupts immediately like an explicit @-mention rather than debouncing.
-    explicitly_tagged = _is_explicit_slack_request(
+    explicitly_tagged = _interrupts_active_run(
         text,
         bot_user_id,
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        code_channel=code_channel,
         message_update=message_update,
+        explicit_request=bool(event_data.get("explicit_request")),
     )
     run_input = _slack_context_input(
         context_messages,
@@ -853,13 +888,30 @@ async def _process_slack_mention_impl(
         request_blocks=content_blocks,
         operational_context=operational_context,
     )
-    run = await _dispatch_or_queue_slack_run(
-        langgraph_client,
-        thread_id,
-        run_input,
-        configurable,
-        explicitly_tagged=explicitly_tagged,
-    )
+    if code_channel:
+        await common.set_session_status(channel_id, "processing")
+        if is_first_mention:
+            await common.set_context_bar(
+                channel_id,
+                common.repo_context_bar_items(
+                    repo_config, dashboard_url=common.dashboard_thread_url(thread_id) or ""
+                ),
+            )
+            await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    try:
+        run = await _dispatch_or_queue_slack_run(
+            langgraph_client,
+            thread_id,
+            run_input,
+            configurable,
+            explicitly_tagged=explicitly_tagged,
+        )
+    except Exception:
+        # No run means no completion webhook, so nothing else would ever clear
+        # the loading UI this turn switched on.
+        if code_channel:
+            await common.set_session_status(channel_id, "active")
+        raise
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
         common._run_id_for_logging(run),

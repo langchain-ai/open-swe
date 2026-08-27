@@ -25,7 +25,9 @@ from e2e_env import (
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
+CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
+_code_channel_seq = [0]
 
 
 def next_slack_ts() -> str:
@@ -74,6 +76,10 @@ def slack_messages(channel: str) -> list[dict[str, Any]]:
     return sorted(messages, key=lambda message: message["ts"])
 
 
+def slack_channels() -> list[str]:
+    return list(dict.fromkeys(channel for channel, _thread_ts in SLACK_MESSAGES))
+
+
 def slack_message(channel: str, thread_ts: str, message_ts: str) -> dict[str, Any] | None:
     return next(
         (message for message in slack_thread(channel, thread_ts) if message["ts"] == message_ts),
@@ -95,6 +101,32 @@ def update_slack_message(
                 message["blocks"] = blocks
             return message
     return None
+
+
+def create_code_channel(payload: dict[str, Any]) -> dict[str, Any]:
+    _code_channel_seq[0] += 1
+    channel_id = f"C_CODE_{_code_channel_seq[0]}"
+    channel = {
+        "id": channel_id,
+        "name": str(payload.get("name") or "Open SWE task"),
+        "session_id": str(payload.get("session_id") or ""),
+        "origin_channel_id": str(payload.get("origin_channel_id") or ""),
+        "origin_message_ts": str(payload.get("origin_message_ts") or ""),
+        "status": "active",
+        "context_bar_items": [],
+        "commands": [],
+        "views": [],
+        "archived": False,
+    }
+    CODE_CHANNELS[channel_id] = channel
+    return channel
+
+
+def update_code_channel(channel_id: str, **values: Any) -> dict[str, Any] | None:
+    channel = CODE_CHANNELS.get(channel_id)
+    if channel is not None:
+        channel.update(values)
+    return channel
 
 
 # --- GitHub ----------------------------------------------------------------
@@ -250,6 +282,8 @@ def create_pull(
         "check_runs": [],
         "statuses": [],
         "review_threads": [],
+        "reviews": [],
+        "review_decision": "REVIEW_REQUIRED",
         "author": "open-swe[bot]",
         "created_at": time.strftime(
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 24 * 60 * 60)
@@ -302,26 +336,40 @@ def update_pull_health(number: int, values: dict[str, Any]) -> dict[str, Any] | 
         "check_runs",
         "statuses",
         "review_threads",
+        "reviews",
+        "review_decision",
     }
     pull.update({key: value for key, value in values.items() if key in allowed})
     return pull
 
 
 def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
+    comments = thread.get("comments")
+    if not isinstance(comments, list):
+        comments = [
+            {
+                "author": thread.get("author"),
+                "body": thread.get("body", ""),
+                "url": thread.get("url"),
+            }
+        ]
     return {
         "id": thread.get("node_id", "PRRT_fixture"),
         "isResolved": bool(thread.get("is_resolved", False)),
+        "isOutdated": bool(thread.get("is_outdated", False)),
         "path": thread.get("path", ""),
         "line": thread.get("line"),
         "originalLine": thread.get("original_line"),
         "comments": {
             "nodes": [
                 {
-                    "author": {"login": thread.get("author")},
-                    "body": thread.get("body", ""),
-                    "url": thread.get("url"),
+                    "author": {"login": comment.get("author")},
+                    "body": comment.get("body", ""),
+                    "url": comment.get("url"),
                 }
-            ]
+                for comment in comments
+            ],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
         },
     }
 
@@ -355,6 +403,27 @@ def published_threads_graphql(owner: str, repo: str, number: int) -> list[dict[s
     return list(threads.values())
 
 
+def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "__typename": "CheckRun",
+        "name": check.get("name", ""),
+        "status": str(check.get("status", "")).upper(),
+        "conclusion": str(check.get("conclusion", "")).upper() or None,
+        "detailsUrl": check.get("details_url"),
+        "isRequired": check.get("required", False),
+    }
+
+
+def status_graphql(status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "__typename": "StatusContext",
+        "context": status.get("context", ""),
+        "state": str(status.get("state", "")).upper(),
+        "targetUrl": status.get("target_url"),
+        "isRequired": status.get("required", False),
+    }
+
+
 def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
     return {
         key: pull[key]
@@ -369,6 +438,8 @@ def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
             "check_runs",
             "statuses",
             "review_threads",
+            "reviews",
+            "review_decision",
         )
     }
 
@@ -587,6 +658,7 @@ def review_state(owner: str, repo: str, number: int) -> dict[str, Any]:
 
 def reset() -> None:
     SLACK_MESSAGES.clear()
+    CODE_CHANNELS.clear()
     PULLS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()

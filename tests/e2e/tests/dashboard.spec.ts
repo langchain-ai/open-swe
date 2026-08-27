@@ -152,23 +152,25 @@ async function waitForThreadNotBusy(page: Page, threadId: string) {
     .not.toBe("busy");
 }
 
+async function threadState(page: Page, threadId: string): Promise<string> {
+  const res = await page.request.get(
+    `/dashboard/api/threads/${threadId}/state`,
+  );
+  if (!res.ok()) return "";
+  return JSON.stringify(await res.json());
+}
+
 async function waitForStateToContain(
   page: Page,
   threadId: string,
   text: string,
 ) {
   await expect
-    .poll(
-      async () => {
-        const res = await page.request.get(
-          `/dashboard/api/threads/${threadId}/state`,
-        );
-        if (!res.ok()) return false;
-        return JSON.stringify(await res.json()).includes(text);
-      },
-      { timeout: 60_000, intervals: [500] },
-    )
-    .toBe(true);
+    .poll(() => threadState(page, threadId), {
+      timeout: 60_000,
+      intervals: [500],
+    })
+    .toContain(text);
 }
 
 async function latestPrBody(page: Page): Promise<string> {
@@ -331,12 +333,14 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
           status: "completed",
           conclusion: "failure",
           details_url: "https://checks.example/unit-tests",
+          required: true,
         },
         {
           name: "browser-e2e",
           status: "completed",
           conclusion: "timed_out",
           details_url: "https://checks.example/browser-e2e",
+          required: false,
         },
         {
           name: "preview-deploy",
@@ -351,13 +355,31 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
           target_url: "https://checks.example/security",
         },
       ],
+      reviews: [
+        {
+          author: "lead-reviewer",
+          state: "CHANGES_REQUESTED",
+          body: "The fallback must preserve the original exception.",
+          url: "https://github.example/review/1",
+        },
+      ],
+      review_decision: "CHANGES_REQUESTED",
       review_threads: [
         {
-          author: "reviewer-one",
-          body: "Handle the null response before reading the payload.",
           path: "agent/dashboard/routes.py",
           line: 42,
-          url: "https://github.example/discussion/1",
+          comments: [
+            {
+              author: "reviewer-one",
+              body: "Handle the null response before reading the payload.",
+              url: "https://github.example/discussion/1",
+            },
+            {
+              author: "author-one",
+              body: "I handled null but still need to retain the retry reason.",
+              url: "https://github.example/discussion/1-reply",
+            },
+          ],
         },
         {
           author: "reviewer-two",
@@ -404,8 +426,24 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     await page.keyboard.press("Escape");
     await fixButton.click();
-    const fixPrompt = "Fix the actionable issues on";
+    const fixPrompt = "Fresh GitHub scan:";
     await waitForStateToContain(page, threadId, fixPrompt);
+    const state = await page.request.get(`/threads/${threadId}/state`);
+    const stateText = JSON.stringify(await state.json());
+    expect(stateText).toContain("[required] unit-tests: FAILURE");
+    expect(stateText).toContain("[optional] browser-e2e: TIMED_OUT");
+    expect(stateText).toContain(
+      "The fallback must preserve the original exception.",
+    );
+    expect(stateText).toContain(
+      "Handle the null response before reading the payload.",
+    );
+    expect(stateText).toContain(
+      "I handled null but still need to retain the retry reason.",
+    );
+    expect(stateText).not.toContain(
+      "This resolved comment must not be counted.",
+    );
     await expect(page.getByText(new RegExp(fixPrompt)).first()).toBeVisible();
   });
 
@@ -715,6 +753,93 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await page.reload();
     await expect(userMessage).toContainText(prompt);
     await expect(userMessage).not.toContainText("sender_context");
+  });
+
+  test("injects sender context only when one web user's context changes", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/agents");
+    const dismissOnboarding = page.getByRole("button", {
+      name: "Maybe later",
+    });
+    if (await dismissOnboarding.isVisible()) await dismissOnboarding.click();
+    await page.keyboard.press("Escape");
+
+    const clearInstructions = await page.request.delete(
+      "/dashboard/api/me/instructions",
+      { headers: { origin: new URL(page.url()).origin } },
+    );
+    expect(clearInstructions.ok()).toBeTruthy();
+
+    const editor = page.getByTestId("composer-editor");
+    await editor.focus();
+    await editor.pressSequentially("first sender payload message");
+    await editor.press("Enter");
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await waitForStateToContain(
+      page,
+      threadId,
+      "This metadata was generated by Open SWE for the sender of this message.",
+    );
+    await waitForThreadIdle(page, threadId);
+    await expect(page.getByTestId("composer-editor")).toHaveAttribute(
+      "contenteditable",
+      "true",
+    );
+
+    await editor.focus();
+    await editor.pressSequentially("second sender payload message");
+    await editor.press("Enter");
+    await waitForStateToContain(
+      page,
+      threadId,
+      "second sender payload message",
+    );
+    await waitForThreadIdle(page, threadId);
+    await page.waitForTimeout(2_000);
+
+    let state = await threadState(page, threadId);
+    const payloadMarker =
+      /This metadata was generated by Open SWE for the sender of this message\./g;
+    expect(state.match(payloadMarker) ?? []).toHaveLength(1);
+
+    const instructions = "Always use the sender preference update marker.";
+    const origin = new URL(page.url()).origin;
+    const instructionsResponse = await page.request.put(
+      "/dashboard/api/me/instructions",
+      {
+        headers: { origin, referer: `${origin}/` },
+        data: { instructions },
+      },
+    );
+    expect(
+      instructionsResponse.ok(),
+      await instructionsResponse.text(),
+    ).toBeTruthy();
+
+    await editor.focus();
+    await editor.pressSequentially("sender preference changed message");
+    await editor.press("Enter");
+    await waitForStateToContain(
+      page,
+      threadId,
+      "sender preference changed message",
+    );
+    await waitForStateToContain(page, threadId, instructions);
+    await expect
+      .poll(
+        async () =>
+          (await threadState(page, threadId)).match(payloadMarker)?.length ?? 0,
+        { timeout: 60_000, intervals: [500] },
+      )
+      .toBe(2);
+    await waitForThreadIdle(page, threadId);
+
+    state = await threadState(page, threadId);
+    expect(state.match(payloadMarker) ?? []).toHaveLength(2);
   });
 
   test("keeps the submitted message and thread view visible while a new chat starts", async ({

@@ -14,7 +14,6 @@ from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 import httpx
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Query,
@@ -42,15 +41,12 @@ from .enabled_repos import (
 )
 from .environments import (
     DEFAULT_ENVIRONMENT_SLUG,
+    ENVIRONMENTS,
+    Environment,
     EnvironmentCreate,
     EnvironmentUpdate,
-    create_environment,
-    delete_environment,
-    get_environment,
     list_environment_options,
-    list_environments,
     slugify,
-    update_environment,
 )
 from .eval_jobs import (
     get_reviewer_eval_status,
@@ -107,20 +103,6 @@ from .repo_cache import (
     read_cached_repos,
     schedule_repo_cache_refresh,
     write_cached_repos,
-)
-from .repo_snapshots import (
-    RepoSnapshotConfigError,
-    RepoSnapshotCreate,
-    RepoSnapshotUpdate,
-    create_repo_snapshot,
-    delete_repo_snapshot,
-    generate_dockerfile_template,
-    get_repo_snapshot,
-    is_repo_snapshot_build_stale,
-    list_repo_snapshots,
-    mark_repo_snapshot_building,
-    run_snapshot_build,
-    update_repo_snapshot,
 )
 from .review_api import (
     create_review_comment,
@@ -218,6 +200,7 @@ from .thread_api import (
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
+    get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
@@ -225,6 +208,7 @@ from .thread_api import (
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
+    pin_dashboard_thread,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
@@ -232,6 +216,7 @@ from .thread_api import (
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
+    unpin_dashboard_thread,
 )
 from .user_credentials import (
     CurrentsCredentialsUpdate,
@@ -969,87 +954,6 @@ async def api_set_sandbox_settings(
     return await upsert_sandbox_settings(body, updated_by=_admin.get("sub"))
 
 
-@router.get("/repo-snapshots")
-async def api_list_repo_snapshots(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> list[dict[str, Any]]:
-    return await list_repo_snapshots()
-
-
-@router.get("/repo-snapshots/template")
-async def api_repo_snapshot_template(
-    full_name: str,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, str]:
-    try:
-        return {"dockerfile": generate_dockerfile_template(normalize_repo_full_name(full_name))}
-    except RepoSnapshotConfigError as e:
-        raise HTTPException(500, str(e)) from e
-
-
-@router.post("/repo-snapshots")
-async def api_create_repo_snapshot(
-    body: RepoSnapshotCreate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    try:
-        return await create_repo_snapshot(body.full_name, _admin["sub"])
-    except RepoSnapshotConfigError as e:
-        raise HTTPException(500, str(e)) from e
-
-
-@router.get("/repo-snapshots/{full_name:path}")
-async def api_get_repo_snapshot(
-    full_name: str,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    record = await get_repo_snapshot(normalize_repo_full_name(full_name))
-    if not record:
-        raise HTTPException(404, "repo snapshot not found")
-    return record
-
-
-@router.put("/repo-snapshots/{full_name:path}")
-async def api_update_repo_snapshot(
-    full_name: str,
-    body: RepoSnapshotUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await update_repo_snapshot(normalize_repo_full_name(full_name), body)
-
-
-@router.post("/repo-snapshots/{full_name:path}/build")
-async def api_build_repo_snapshot(
-    full_name: str,
-    background_tasks: BackgroundTasks,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    full_name = normalize_repo_full_name(full_name)
-    record = await get_repo_snapshot(full_name)
-    if not record:
-        raise HTTPException(404, "repo snapshot not found")
-    if not (record.get("dockerfile") or "").strip():
-        raise HTTPException(400, "dockerfile is empty")
-    if record.get("status") == "building" and not is_repo_snapshot_build_stale(record):
-        raise HTTPException(409, "a build is already in progress")
-    record = await mark_repo_snapshot_building(full_name)
-    background_tasks.add_task(run_snapshot_build, full_name)
-    return record
-
-
-@router.delete("/repo-snapshots/{full_name:path}")
-async def api_delete_repo_snapshot(
-    full_name: str,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> Response:
-    full_name = normalize_repo_full_name(full_name)
-    record = await get_repo_snapshot(full_name)
-    if not record:
-        raise HTTPException(404, "repo snapshot not found")
-    await delete_repo_snapshot(full_name)
-    return Response(status_code=204)
-
-
 def _normalized_slug(raw: str) -> str:
     try:
         return slugify(raw)
@@ -1062,7 +966,7 @@ async def api_list_environments(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return {
-        "environments": await list_environments(),
+        "environments": await ENVIRONMENTS.list_all(),
         "default_slug": DEFAULT_ENVIRONMENT_SLUG,
     }
 
@@ -1071,9 +975,9 @@ async def api_list_environments(
 async def api_create_environment(
     body: EnvironmentCreate,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
+) -> Environment:
     try:
-        return await create_environment(body, _admin["sub"])
+        return await ENVIRONMENTS.create(body, _admin["sub"])
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
 
@@ -1093,8 +997,8 @@ async def api_environment_options(
 async def api_get_environment(
     slug: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    record = await get_environment(_normalized_slug(slug))
+) -> Environment:
+    record = await ENVIRONMENTS.get(_normalized_slug(slug))
     if not record:
         raise HTTPException(404, "environment not found")
     return record
@@ -1105,9 +1009,9 @@ async def api_update_environment(
     slug: str,
     body: EnvironmentUpdate,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
+) -> Environment:
     try:
-        return await update_environment(_normalized_slug(slug), body)
+        return await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -1117,7 +1021,7 @@ async def api_delete_environment(
     slug: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Response:
-    if not await delete_environment(_normalized_slug(slug)):
+    if not await ENVIRONMENTS.remove(_normalized_slug(slug)):
         raise HTTPException(404, "environment not found")
     return Response(status_code=204)
 
@@ -1970,6 +1874,24 @@ async def api_list_threads_sidebar(
     return JSONResponse(payload, headers={"Server-Timing": header})
 
 
+@router.post("/threads/{thread_id}/pin", status_code=204)
+async def api_pin_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await pin_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
+
+
+@router.delete("/threads/{thread_id}/pin", status_code=204)
+async def api_unpin_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await unpin_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
+
+
 @router.get("/threads/page")
 async def api_list_threads_page(
     limit: int = 25,
@@ -2012,6 +1934,22 @@ async def api_get_thread_pull_request_status(
     return await get_dashboard_thread_pull_request_status(
         thread_id,
         session["sub"],
+        email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/pull-request-context")
+async def api_get_thread_pull_request_context(
+    thread_id: str,
+    repo_full_name: str,
+    number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pull_request_context(
+        thread_id,
+        session["sub"],
+        repo_full_name=repo_full_name,
+        number=number,
         email=session.get("email"),
     )
 

@@ -44,12 +44,17 @@ async def _capture_create_deep_agent_kwargs(
     thread_settings: dict[str, object] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
+    make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = "thread-ctx"
 
     def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
         captured.update(kwargs)
         return _DummyAgent()
+
+    def fake_make_model(model_id: str, **kwargs: object) -> MagicMock:
+        make_model_calls.append((model_id, kwargs))
+        return MagicMock()
 
     clear_sandbox_backend(thread_id)
     with (
@@ -81,13 +86,14 @@ async def _capture_create_deep_agent_kwargs(
             return_value=thread_settings or {},
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[MagicMock(), MagicMock()]),
+        patch("agent.server.make_model", side_effect=fake_make_model),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
     clear_sandbox_backend(thread_id)
+    captured["make_model_calls"] = make_model_calls
     return captured
 
 
@@ -175,6 +181,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
             backend.write(f"{route}poison/SKILL.md", "malicious")
     skill = await backend.aread("/bundled-skills/baby-sit/SKILL.md")
     assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
+    artifacts = await backend.aread("/bundled-skills/html-artifacts/SKILL.md")
+    assert artifacts.file_data and "name: html-artifacts" in artifacts.file_data["content"]
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
@@ -195,6 +203,24 @@ async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     assert isinstance(backend, CompositeBackend)
     assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
     assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
+
+
+@pytest.mark.asyncio
+async def test_desktop_agent_honors_gateway_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
+    config = _base_config()
+    config.setdefault("configurable", {}).update(
+        {"source": "desktop", "local_project_path": "/tmp"}
+    )
+    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+        captured = await _capture_create_deep_agent_kwargs(config)
+
+    calls = captured["make_model_calls"]
+    assert isinstance(calls, list)
+    assert calls
+    assert all(kwargs["use_gateway"] is True for _, kwargs in calls)
 
 
 @pytest.mark.asyncio
@@ -475,6 +501,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     parent_names = {_registered_tool_name(tool) for tool in parent_tools}
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
+        "manage_code_channel",
         "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",

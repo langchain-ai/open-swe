@@ -21,6 +21,7 @@ const THREAD_IDS = {
   running: "71000000-0000-4000-8000-000000000003",
   ready: "71000000-0000-4000-8000-000000000004",
   done: "71000000-0000-4000-8000-000000000005",
+  shared: "71000000-0000-4000-8000-000000000007",
   dailyScheduled: "73000000-0000-4000-8000-000000000001",
   dailyTest: "73000000-0000-4000-8000-000000000002",
   weeklyRunning: "73000000-0000-4000-8000-000000000003",
@@ -33,6 +34,7 @@ const TITLES = {
   running: "E2E Workspace Running refactor",
   ready: "E2E Workspace Ready docs",
   done: "E2E Workspace Resolved cleanup",
+  shared: "E2E Workspace Teammate incident",
   dailyScheduled: "E2E Workspace Daily health scheduled run",
   dailyTest: "E2E Workspace Daily health test run",
   weeklyRunning: "E2E Workspace Weekly cleanup running",
@@ -71,8 +73,7 @@ function baseMetadata(
   overrides: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
-    github_login: USER.login,
-    triggering_user_email: USER.email,
+    participant_logins: { [USER.login]: true },
     title,
     source: "dashboard",
     origin: "dashboard",
@@ -264,11 +265,8 @@ function paginationThreads(): Array<ThreadSeed> {
 
 // Earlier specs leave their own threads behind for this user, and the sidebar
 // counts every one of them — so start from an empty workspace.
-async function purgeOwnedThreads(request: APIRequestContext) {
-  for (const owner of [
-    { github_login: USER.login },
-    { triggering_user_email: USER.email },
-  ]) {
+async function purgeParticipantThreads(request: APIRequestContext) {
+  for (const owner of [{ participant_logins: { [USER.login]: true } }]) {
     for (let page = 0; page < 20; page += 1) {
       const searchResponse = await request.post("/threads/search", {
         data: { metadata: owner, limit: 100, offset: 0 },
@@ -290,7 +288,7 @@ async function seedThreads(
   request: APIRequestContext,
   threads: Array<ThreadSeed>,
 ) {
-  await purgeOwnedThreads(request);
+  await purgeParticipantThreads(request);
   for (const thread of threads) {
     const resetResponse = await request.delete(`/threads/${thread.id}`);
     expect([200, 204, 404]).toContain(resetResponse.status());
@@ -380,6 +378,10 @@ async function deleteScheduleThreads(
 
 async function cleanupFixtures(request: APIRequestContext) {
   for (const threadId of createdThreadIds) {
+    const pinResponse = await request.delete("/store/items", {
+      data: { namespace: ["thread_pins", USER.login], key: threadId },
+    });
+    expect([200, 204, 404]).toContain(pinResponse.status());
     const response = await request.delete(`/threads/${threadId}`);
     expect([200, 204, 404]).toContain(response.status());
   }
@@ -437,6 +439,48 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("threads workspace", () => {
+  test("pins and unpins a non-owned thread across sidebar views", async ({
+    page,
+    request,
+  }) => {
+    const thread = {
+      id: THREAD_IDS.shared,
+      metadata: {
+        ...baseMetadata(Date.now(), TITLES.shared, 1_000, {
+          github_login: "teammate",
+          triggering_user_email: "teammate@example.com",
+          source: "slack",
+          origin: "slack",
+          latest_run_id: "e2e-run-shared",
+          latest_run_status: "success",
+        }),
+      },
+    };
+    await seedThreads(request, [thread]);
+    await loginAs(page);
+    await page.goto(`/agents/${THREAD_IDS.shared}`);
+
+    const row = page.getByRole("link", { name: TITLES.shared }).first();
+    await expect(row).toBeVisible();
+    await row.click({ button: "right" });
+    await page.getByText("Pin thread", { exact: true }).click();
+
+    const pinned = sidebarGroup(page.locator("aside"), "Pinned");
+    await expect(
+      pinned.getByRole("link", { name: TITLES.shared }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Kanban" }).click();
+    await expect(
+      pinned.getByRole("link", { name: TITLES.shared }),
+    ).toBeVisible();
+
+    await pinned
+      .getByRole("link", { name: TITLES.shared })
+      .click({ button: "right" });
+    await page.getByText("Unpin thread", { exact: true }).click();
+    await expect(pinned).toHaveCount(0);
+  });
+
   test("does not flash new-thread onboarding while a thread route loads", async ({
     page,
     request,

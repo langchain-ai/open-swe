@@ -1,4 +1,5 @@
 import type {
+  AgentPullRequestContextResponse,
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
@@ -74,6 +75,7 @@ export interface ThreadPrDiffFile {
   deletions: number
   originalContent: string | null
   modifiedContent: string | null
+  patch?: string | null
   unrenderable: boolean
 }
 
@@ -144,6 +146,7 @@ export interface SidebarThreadsGroup {
 export interface SidebarThreads {
   active: SidebarThreadsGroup
   resolved: SidebarThreadsGroup
+  pinned?: Array<AgentThread>
 }
 
 const API_BASE = dashboardApiBase()
@@ -276,6 +279,10 @@ export const agentsApi = {
         body: JSON.stringify({ resolved }),
       }
     ),
+  pinThread: (threadId: string, pinned: boolean) =>
+    agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}/pin`, {
+      method: pinned ? "POST" : "DELETE",
+    }),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
   createSchedule: (body: ScheduleCreateRequest) =>
     agentsRequest<AgentSchedule>("/schedules", {
@@ -313,6 +320,19 @@ export const agentsApi = {
     agentsRequest<SelfReviewResponse>(
       `/inline-review/${encodeURIComponent(threadId)}`
     ),
+  getThreadPullRequestContext: (
+    threadId: string,
+    repoFullName: string,
+    number: number
+  ) => {
+    const query = new URLSearchParams({
+      repo_full_name: repoFullName,
+      number: String(number),
+    })
+    return agentsRequest<AgentPullRequestContextResponse>(
+      `/threads/${encodeURIComponent(threadId)}/pull-request-context?${query}`
+    )
+  },
   listWorkflowApprovals: (threadId: string) =>
     agentsRequest<WorkflowPushApprovalsResponse>(
       `/workflow-approval/${encodeURIComponent(threadId)}`

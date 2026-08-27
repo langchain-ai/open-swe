@@ -1,6 +1,7 @@
 import logging
 import os
 import shlex
+from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
@@ -161,6 +162,7 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - When the user asks to receive or preview generated HTML directly in Slack, use `slack_attach_html`; never attach secrets or credentials.
 - When asked to move or continue the current thread in another Slack thread, use `slack_move_thread` with a concise, non-sensitive message to preserve history and detach the original thread.
 - When asked to break out work, use `slack_start_new_thread` with a headline-only title and self-contained instructions.
+- When a task warrants its own dedicated Slack channel, use `manage_code_channel` to move this session into a code channel. Inside one, use that tool for status, title, context and resources, runtime commands, HTML/diff/Block Kit/canvas views, canvas comments and revisions, and archival with a closing summary. Keep stable `view_key` values so view updates replace existing tabs.
 - When a plan is ready, send its review link with `slack_thread_reply`, pass `options=["Approve & implement", "Request changes"]`, and invite manual feedback too; use these options rather than constructing custom Block Kit."""
 
 LINEAR_SOURCE_GUIDANCE = """This run was triggered from Linear.
@@ -238,14 +240,7 @@ Until `approve_plan` succeeds, **you MUST NOT** edit/create/delete files inside 
 
 **Workflow:** explore the relevant code enough to choose a sound approach, clarify ambiguity, choose a dated, descriptive path like `/workspace/plans/YYYY-MM-DD-short-task-slug.html`, create it with ONE recommended plan, refine it with normal file-editing tools if needed, then publish it with `save_plan` by passing that exact `plan_file_path`. Keep the implementation plan high level: focus on desired behavior, architecture boundaries, product decisions, tradeoffs, rollout/migration concerns, and verification. Avoid exhaustive file lists unless a detail is unusually tricky, risky, or controversial. Aim for about one page of content unless the task truly requires more.
 
-Before writing HTML, sketch a compact design plan and follow it:
-- **Color:** choose 4–6 named hex values grounded in the subject, including deliberately tinted neutrals.
-- **Type:** assign at least a display and body role, plus a utility/data face when useful. Google Fonts may be linked directly; every face needs a real fallback stack.
-- **Layout:** state the layout concept in one or two sentences. A plan or memo should be polished and utilitarian, not given an oversized landing-page hero.
-
-Build one complete HTML document with a specific 2–4 word `<title>`, semantic structure, real content, inline CSS, responsive layout, visible keyboard focus, horizontal overflow containment for wide content, and `prefers-reduced-motion` support. Inline or data-URI every asset; Google Fonts stylesheets are the only permitted external resource. Do not use scripts, forms, iframes, objects, embeds, host-page CSS, or runtime dependencies. Design complete light/system/dark token sets: put the full light palette in `:root`; redefine tokens for system dark in `@media (prefers-color-scheme: dark) {{ :root:not([data-theme=\"light\"]) {{ ... }} }}`; redefine them again in `:root[data-theme=\"dark\"]`. Paint `body` with an explicit token background and style components only through tokens. A deliberate single-theme artifact may omit theme switching only when every background and foreground is explicit.
-
-Ground visual choices in the task's subject and audience. Avoid generic AI defaults such as cream/terracotta serif pages, black with one neon accent, purple-blue gradient heroes, centered-everything layouts, ubiquitous rounded cards, decorative numbering, emoji section markers, and defaulting to Inter or Space Grotesk. Structure and labels must encode real information. Write active, specific copy from the reader's perspective. For editorial requests, review the design plan for generic choices, revise at least one weak choice, spend boldness in one place, and keep the rest quiet.
+Read the `html-artifacts` skill before writing the artifact and follow it — it covers structure, the design plan, the available runtime, theming, and craft.
 
 If the user approves the current plan, asks to exit plan mode, or asks to implement the plan, call `approve_plan` before implementation. After `approve_plan` succeeds, plan mode is inactive and you should implement the approved plan. After saving, follow the Source Context section to share the plan-review link and invite the user to review, approve, or request changes, then stop. Do not implement — you will be re-invoked with the approval and any feedback."""
 
@@ -355,20 +350,9 @@ Steps, in order:
    - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the triggering user.
    - **Update an existing PR** (edit body, mark ready, etc.) with `gh pr edit`. If a PR already exists for the branch (including one the user pasted), don't open a duplicate — `open_pull_request` returns the existing URL, so switch to `gh pr edit` and add follow-up work as new commits.
 
-   **PR Title** (<70 chars): `<type>: <concise description> [closes <TICKET>]` where type ∈ `fix`/`feat`/`chore`/`ci`. Append the resolvable ticket in brackets (e.g. `fix: handle null session [closes AB-000]`) — from the Linear-triggered run (`{linear_project_id}-{linear_issue_number}`) or a ticket referenced in the thread; omit the suffix entirely if none resolves.
+    Follow the repository's PR title and description conventions. Inspect `AGENTS.md`, PR templates, `.changelog/README.md`, and nearby docs before choosing the format. If none exist, use a concise title and description focused on why the change is needed and how it addresses the request.
 
-   **PR Body** (<10 lines):
-   ```
-   ## Description
-   <1-3 sentences on WHY and the approach. No "Changes:" section.>
-
-   ## Release Note
-   <One-line changelog for self-hosted customers, or "none" for internal/CI/test/refactor.>
-
-   ## Test Plan
-   - [ ] <new/novel verification steps only — not "run existing tests">
-   ```
-   `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Commit messages: concise, focused on the "why"; default to the PR title.
+   `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Keep commit messages concise and focused on the "why".
 
 3. **Self-review the PR.** Delegate exactly one `pr-self-review` task. The reviewer that comments on pull requests stands down for the ones you open, and these findings are never posted to the PR — this pass is the only review the code gets before a human reads it. When it returns, call `list_inline_findings` and give every finding a disposition with `set_inline_finding_disposition`:
    - **`fixed`** — an obvious defect in code this PR introduced: wrong identifier or key, inverted condition, dropped await, a changed contract its callsite no longer satisfies. Fix it, re-run lint/format, commit, push, and say in the note what you changed.
@@ -393,7 +377,7 @@ COLLABORATION_TEMPLATE = """---
 
 ### Collaborative Attribution
 
-This run was triggered by **{display_name}**. You author the work **as them** — their git identity is configured in Repository Setup, so every commit and the PR are attributed to them. Credit open-swe as the collaborator:
+This message was sent by **{display_name}**. Before each commit, set the git identity to the participant who inspired that commit — use your best judgment — and open the PR as the sender of the message that asked for it. Credit open-swe as the collaborator:
 
 - **Commits**: append this trailer verbatim (on its own line, a blank line after the body) to every commit you author, including follow-ups:
 
@@ -488,6 +472,25 @@ def _render_user_instructions_section(instructions: str | None) -> str:
     )
 
 
+def _git_identity_command(identity: CollaboratorIdentity) -> str:
+    return (
+        f"git config user.name {shlex.quote(identity.commit_name)} "
+        f"&& git config user.email {shlex.quote(identity.commit_email)}"
+    )
+
+
+def _render_participant_identities(
+    identities: Sequence[CollaboratorIdentity],
+) -> str:
+    if not identities:
+        return ""
+    lines = "\n".join(
+        f"- **{identity.display_name}**: `{_git_identity_command(identity)}`"
+        for identity in identities
+    )
+    return f"Git identities you may author commits as:\n\n{lines}"
+
+
 def construct_sender_context(
     identity: CollaboratorIdentity | None,
     *,
@@ -495,18 +498,24 @@ def construct_sender_context(
     draft_prs: bool = True,
     thread_url: str | None = None,
     workspace_admin: bool = False,
+    participant_identities: Sequence[CollaboratorIdentity] = (),
 ) -> str:
     resolved_identity = identity or CollaboratorIdentity(
         display_name=OPEN_SWE_BOT_NAME,
         commit_name=OPEN_SWE_BOT_NAME,
         commit_email=OPEN_SWE_BOT_EMAIL,
     )
+    known = {other.commit_email for other in participant_identities}
+    identities = [
+        *([resolved_identity] if resolved_identity.commit_email not in known else []),
+        *participant_identities,
+    ]
     sections = [
         "This metadata was generated by Open SWE for the sender of this message. It applies "
         "only to this turn and must not be attributed to other thread participants.",
         f"Workspace admin: {'yes' if workspace_admin else 'no'}.",
-        f"Git identity command: `git config user.name {shlex.quote(resolved_identity.commit_name)} "
-        f"&& git config user.email {shlex.quote(resolved_identity.commit_email)}`",
+        f"Sender's git identity command: `{_git_identity_command(resolved_identity)}`",
+        _render_participant_identities(identities),
         _render_collaboration_section(resolved_identity, thread_url),
         f"New PRs are created {'as drafts' if draft_prs else 'ready for review'} for this sender.",
         _render_user_instructions_section(user_custom_instructions),

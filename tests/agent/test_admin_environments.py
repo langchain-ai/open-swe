@@ -5,11 +5,12 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
+from agent.dashboard.environments import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.tools import admin_gate
 from agent.tools import environments as env_tools
 
-_READY = {"slug": "base", "name": "Base", "snapshot_status": "ready", "snapshot_id": "env-snap"}
+_READY = Environment(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
 
 def _config(**configurable: object) -> RunnableConfig:
@@ -20,47 +21,40 @@ def _config(**configurable: object) -> RunnableConfig:
 
 
 @pytest.mark.asyncio
-async def test_default_environment_snapshot_wins_over_repo_and_base() -> None:
+async def test_default_environment_snapshot_wins_over_base() -> None:
     with (
         patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
         patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
-        patch.object(
             server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "env-snap"
+        assert await server._resolve_snapshot_id() == "env-snap"
 
 
 @pytest.mark.asyncio
-async def test_environment_without_ready_snapshot_falls_back_to_repo() -> None:
-    capturing = {**_READY, "snapshot_status": "capturing"}
+async def test_environment_without_ready_snapshot_falls_back_to_base() -> None:
+    capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
     with (
         patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=capturing),
-        patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
         patch.object(
             server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
+        assert await server._resolve_snapshot_id() == "admin-snap"
 
 
 @pytest.mark.asyncio
 async def test_snapshot_resolution_passes_the_threads_environment() -> None:
-    resolve = AsyncMock(return_value={**_READY, "slug": "staging", "snapshot_id": "staging-snap"})
+    resolve = AsyncMock(
+        return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
+    )
     with (
         patch.object(server, "resolve_environment", resolve),
-        patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
         patch.object(
             server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        snapshot_id = await server._resolve_snapshot_id(None, "staging")
+        snapshot_id = await server._resolve_snapshot_id("staging")
 
     assert snapshot_id == "staging-snap"
     resolve.assert_awaited_once_with("staging")
@@ -68,19 +62,18 @@ async def test_snapshot_resolution_passes_the_threads_environment() -> None:
 
 @pytest.mark.asyncio
 async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
-    environment = {
-        **_READY,
-        "mem_bytes": 32 * 1024**3,
-        "vcpus": 16,
-        "fs_capacity_bytes": 512 * 1024**3,
-        "create_params": {"_internal_runtime": "v2"},
-    }
+    environment = _READY.model_copy(
+        update={
+            "mem_bytes": 32 * 1024**3,
+            "vcpus": 16,
+            "fs_capacity_bytes": 512 * 1024**3,
+            "create_params": {"_internal_runtime": "v2"},
+        }
+    )
     with patch.object(
         server, "resolve_environment", new_callable=AsyncMock, return_value=environment
     ):
-        snapshot_id, resources, create_params = await server._resolve_sandbox_create_config(
-            None, "base"
-        )
+        snapshot_id, resources, create_params = await server._resolve_sandbox_create_config("base")
 
     assert snapshot_id == "env-snap"
     assert resources == {
@@ -155,21 +148,22 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     create = AsyncMock(
-        return_value={
-            "name": "base",
-            "slug": "base",
-            "prompt": "prompt",
-            "repos": [],
-            "mem_bytes": 16 * 1024**3,
-            "vcpus": 8,
-            "fs_capacity_bytes": 256 * 1024**3,
-            "create_params": {"_internal_runtime": "v2"},
-        }
+        return_value=Environment(
+            slug="base",
+            name="base",
+            prompt="prompt",
+            mem_bytes=16 * 1024**3,
+            vcpus=8,
+            fs_capacity_bytes=256 * 1024**3,
+            create_params={"_internal_runtime": "v2"},
+        )
     )
     with (
         patch.object(admin_gate, "get_config", return_value=_config(github_login="ramonn")),
-        patch.object(env_tools.store, "get_environment", new_callable=AsyncMock, return_value=None),
-        patch.object(env_tools.store, "create_environment", create),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
+        ),
+        patch.object(env_tools.store.ENVIRONMENTS, "create", create),
     ):
         result = await env_tools.save_environment(
             "base",
@@ -193,27 +187,16 @@ async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.Monk
 @pytest.mark.asyncio
 async def test_save_environment_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    update = AsyncMock(
-        return_value={
-            "name": "base",
-            "slug": "base",
-            "prompt": "prompt",
-            "repos": [],
-            "mem_bytes": None,
-            "vcpus": None,
-            "fs_capacity_bytes": None,
-            "create_params": {},
-        }
-    )
+    update = AsyncMock(return_value=Environment(slug="base", name="base", prompt="prompt"))
     with (
         patch.object(admin_gate, "get_config", return_value=_config(github_login="ramonn")),
         patch.object(
-            env_tools.store,
-            "get_environment",
+            env_tools.store.ENVIRONMENTS,
+            "get",
             new_callable=AsyncMock,
-            return_value={"slug": "base"},
+            return_value=Environment(slug="base"),
         ),
-        patch.object(env_tools.store, "update_environment", update),
+        patch.object(env_tools.store.ENVIRONMENTS, "apply_update", update),
     ):
         result = await env_tools.save_environment(
             "base",
@@ -256,7 +239,9 @@ async def test_capture_tool_requires_a_saved_environment(monkeypatch: pytest.Mon
             "get_config",
             return_value=_config(github_login="ramonn", thread_id="t-1"),
         ),
-        patch.object(env_tools.store, "get_environment", new_callable=AsyncMock, return_value=None),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
+        ),
     ):
         result = await env_tools.capture_environment_snapshot("base")
 

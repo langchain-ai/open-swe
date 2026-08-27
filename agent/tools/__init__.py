@@ -30,6 +30,7 @@ _TOOL_MODULES = {
     "list_review_findings": ".list_review_findings",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "manage_code_channel": ".manage_code_channel",
     "manage_thread": ".threads",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
@@ -92,6 +93,7 @@ __all__ = [
     "list_review_findings",
     "list_threads",
     "manage_baby_sit",
+    "manage_code_channel",
     "manage_thread",
     "notify_automation_channel",
     "open_pull_request",
@@ -158,6 +160,7 @@ if TYPE_CHECKING:
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings
     from .manage_baby_sit import manage_baby_sit
+    from .manage_code_channel import manage_code_channel
     from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
     from .organization_skills import delete_organization_skill, save_organization_skill

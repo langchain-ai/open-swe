@@ -1219,7 +1219,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         },
     }
 
-    await common.upsert_agent_thread_owner_metadata(
+    await common.upsert_agent_thread_metadata(
         thread_id,
         source="github",
         repo_config=repo_config,

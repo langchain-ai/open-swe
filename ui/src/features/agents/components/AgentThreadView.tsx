@@ -3,6 +3,7 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
 import type {
+  AgentPullRequest,
   AgentThread,
   ImageChunk,
   Message,
@@ -32,6 +33,7 @@ import {
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -118,8 +120,15 @@ export function AgentThreadView({
     ]
   )
   const fixPullRequest = useCallback(
-    (prompt: string) => submitMessage(prompt, []),
-    [submitMessage]
+    async (pullRequest: AgentPullRequest) => {
+      const result = await agentsApi.getThreadPullRequestContext(
+        thread.id,
+        pullRequest.repoFullName,
+        pullRequest.number
+      )
+      await submitMessage(result.prompt, [])
+    },
+    [submitMessage, thread.id]
   )
   const usedTokens = useMemo(
     () => latestContextTokens(stream.messages),

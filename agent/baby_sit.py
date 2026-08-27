@@ -196,7 +196,6 @@ async def _create_watch_cron(key: str) -> str:
 
 async def _ensure_watch_cron(key: str) -> str:
     crons = await get_client().crons.search(
-        assistant_id="scheduler",
         metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
         limit=10,
     )

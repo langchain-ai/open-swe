@@ -85,51 +85,10 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert "conversation has moved to Web" in (handoff_message.findtext("content") or "")
     assert user_entity.attrib["id"] == "github:octocat"
     assert user_message.findtext("content") == "continue in web"
-    assert result["plan_approval_blocked"] is True
     # The handoff is carried by the injected message alone. Rewriting the system
     # prompt would say the same thing while invalidating the whole cached prefix.
     assert "rendered_system_prompt" not in result
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
-
-
-@pytest.mark.asyncio
-async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
-    store = _FakeStore(
-        {
-            (("queue", "thread-1"), "pending_messages"): {
-                "messages": [
-                    {
-                        "content": {
-                            "text": "go ahead",
-                            "source": "dashboard",
-                            "from_owner": True,
-                            "sender": {
-                                "id": "github:owner",
-                                "platform": "github",
-                                "github_login": "owner",
-                            },
-                        }
-                    },
-                ]
-            }
-        }
-    )
-
-    with (
-        patch(
-            "agent.middleware.check_message_queue.get_config",
-            return_value={"configurable": {"thread_id": "thread-1"}},
-        ),
-        patch("agent.middleware.check_message_queue.get_store", return_value=store),
-    ):
-        result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
-        )
-
-    assert result is not None
-    assert result["plan_approval_blocked"] is False
-    user_message = ElementTree.fromstring(_envelope(result["messages"][-1]))
-    assert user_message.findtext("content") == "go ahead"
 
 
 @pytest.mark.asyncio

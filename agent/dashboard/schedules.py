@@ -20,7 +20,7 @@ from ..utils.slack import (
     store_slack_run_mapping,
 )
 from ..utils.thread_ops import langgraph_client
-from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 from .admin import is_admin
 from .options import gate_fable_model, normalize_model_choice
 from .profiles import get_profile, get_valid_access_token
@@ -478,7 +478,7 @@ def _agent_run_metadata(
         "schedule_name": record.get("name"),
         "schedule_test": test_run,
         "github_login": record.get("created_by"),
-        PARTICIPANT_LOGINS_KEY: [record["created_by"]] if record.get("created_by") else [],
+        PARTICIPANT_LOGINS_KEY: merge_participants(None, record.get("created_by")),
         "triggering_user_email": record.get("user_email"),
         "title": f"{title_prefix}: {record.get('name') or 'Agent'}",
         "base_branch": record.get("base_branch") or "main",

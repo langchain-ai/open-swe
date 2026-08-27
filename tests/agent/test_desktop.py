@@ -29,6 +29,8 @@ def test_desktop_backend_allows_registered_project_without_provider_secrets(
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
+    marker = project / "marker.txt"
+    marker.write_text("marker")
     allowlist = tmp_path / "projects.json"
     allowlist.write_text(json.dumps([{"cwd": str(project)}]))
     monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
@@ -39,6 +41,7 @@ def test_desktop_backend_allows_registered_project_without_provider_secrets(
     backend = create_desktop_backend({"local_project_path": str(project)})
     assert backend._env.get("PATH") == "/bin"
     assert "OPENAI_API_KEY" not in backend._env
+    assert backend.read(str(marker)).file_data == {"content": "marker", "encoding": "utf-8"}
 
 
 def test_desktop_backend_rejects_unregistered_project(

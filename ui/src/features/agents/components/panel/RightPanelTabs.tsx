@@ -549,50 +549,47 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 </div>
               )
             })}
-            {props.surfaces.length > 0 ? (
-              <Menu
-                open={addSurfaceMenuOpen}
-                onOpenChange={setAddSurfaceMenuOpen}
-              >
-                <MenuTrigger
-                  render={
-                    <Button
-                      aria-label="Add panel surface"
-                      className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                      size="icon-xs"
-                      variant="ghost"
-                    />
-                  }
-                >
-                  <Plus className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup
-                  align="start"
-                  side="bottom"
-                  sideOffset={6}
-                  className="min-w-44"
-                  onKeyDownCapture={handleAddSurfaceMenuKeyDown}
-                >
-                  {addSurfaceActions.map((action) => {
-                    const Icon = action.icon
-                    return (
-                      <SurfaceMenuItem
-                        key={action.label}
-                        available={action.available}
-                        disabledReason={action.disabledReason}
-                        shortcut={action.shortcut}
-                        onClick={action.onClick}
-                      >
-                        <Icon />
-                        {action.label}
-                      </SurfaceMenuItem>
-                    )
-                  })}
-                </MenuPopup>
-              </Menu>
-            ) : null}
           </div>
         </ScrollArea>
+        {props.surfaces.length > 0 ? (
+          <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
+            <MenuTrigger
+              render={
+                <Button
+                  aria-label="Add panel surface"
+                  className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+                  size="icon-xs"
+                  variant="ghost"
+                />
+              }
+            >
+              <Plus className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup
+              align="start"
+              side="bottom"
+              sideOffset={6}
+              className="min-w-44"
+              onKeyDownCapture={handleAddSurfaceMenuKeyDown}
+            >
+              {addSurfaceActions.map((action) => {
+                const Icon = action.icon
+                return (
+                  <SurfaceMenuItem
+                    key={action.label}
+                    available={action.available}
+                    disabledReason={action.disabledReason}
+                    shortcut={action.shortcut}
+                    onClick={action.onClick}
+                  >
+                    <Icon />
+                    {action.label}
+                  </SurfaceMenuItem>
+                )
+              })}
+            </MenuPopup>
+          </Menu>
+        ) : null}
         {props.layoutControls}
       </div>
       {tabMenu ? (

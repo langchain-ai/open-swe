@@ -11,7 +11,6 @@ import type {
 import type { SidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   GROUP_MODE_OPTIONS,
-  OWNERSHIP_OPTIONS,
   PR_FILTER_OPTIONS,
   SOURCE_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
@@ -177,31 +176,6 @@ export function SidebarFilterMenu({
                   className="z-50 outline-none"
                 >
                   <Menu.Popup className={POPUP_CLASS}>
-                    <Menu.RadioGroup
-                      value={filters.ownership}
-                      onValueChange={(value) =>
-                        patch({
-                          ownership: value as SidebarFilters["ownership"],
-                        })
-                      }
-                    >
-                      {OWNERSHIP_OPTIONS.map((option) => (
-                        <Menu.RadioItem
-                          key={option.value}
-                          value={option.value}
-                          closeOnClick={false}
-                          className={ITEM_CLASS}
-                        >
-                          <span className="truncate">{option.label}</span>
-                          <Menu.RadioItemIndicator className="ml-auto flex">
-                            <Indicator />
-                          </Menu.RadioItemIndicator>
-                        </Menu.RadioItem>
-                      ))}
-                    </Menu.RadioGroup>
-
-                    <Menu.Separator className={SEPARATOR_CLASS} />
-
                     <CheckboxSubmenu
                       label="Status"
                       options={STATUS_FILTER_OPTIONS}

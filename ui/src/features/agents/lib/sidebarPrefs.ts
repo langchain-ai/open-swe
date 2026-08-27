@@ -39,12 +39,7 @@ function asStringArray(value: unknown): Array<string> {
 function sanitizeFilters(value: unknown): SidebarFilters {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
-  const ownership = raw.ownership
   return {
-    ownership:
-      ownership === "mine" || ownership === "shared" || ownership === "all"
-        ? ownership
-        : DEFAULT_SIDEBAR_FILTERS.ownership,
     statuses: asStringArray(raw.statuses) as SidebarFilters["statuses"],
     sources: asStringArray(raw.sources) as SidebarFilters["sources"],
     pr: asStringArray(raw.pr) as SidebarFilters["pr"],

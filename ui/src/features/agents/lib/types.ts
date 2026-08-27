@@ -254,7 +254,6 @@ export interface WorkflowPushApproval {
 
 export interface WorkflowPushApprovalsResponse {
   threadId: string
-  isOwner: boolean
   approvals: Array<WorkflowPushApproval>
 }
 
@@ -349,6 +348,44 @@ export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
 
+export interface AgentPullRequestContextResponse {
+  context: {
+    repoFullName: string
+    number: number
+    url: string
+    headSha: string | null
+    mergeState: string | null
+    reviewDecision: string | null
+    checksAvailable: boolean
+    checks: Array<{
+      name: string
+      status: string
+      conclusion: string | null
+      required: boolean | null
+      url: string | null
+    }>
+    reviewsAvailable: boolean
+    changesRequestedReviews: Array<{
+      author: string
+      body: string
+      url: string | null
+    }>
+    unresolvedReviewThreads: Array<{
+      path: string
+      line: number | null
+      isOutdated: boolean
+      commentsTruncated: boolean
+      comments: Array<{
+        author: string
+        body: string
+        url: string | null
+      }>
+    }>
+    truncated: boolean
+  }
+  prompt: string
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -372,7 +409,6 @@ export interface AgentThread {
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
-  isOwner?: boolean
   createdAt: number
   updatedAt: number
   traceUrl?: string | null

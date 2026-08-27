@@ -29,7 +29,7 @@ def apply() -> None:
     import importlib
 
     from agent import server
-    from agent.utils import auth, authorship
+    from agent.utils import auth, authorship, slack_code_channels
     from agent.utils import slack as slack_utils
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
@@ -84,6 +84,7 @@ def apply() -> None:
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
+    slack_code_channels.SLACK_API_BASE_URL = FAKE_SLACK_API
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.
@@ -92,7 +93,7 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import profiles, pull_request_status, thread_api
+    from agent.dashboard import profiles, pull_request_context, pull_request_status, thread_api
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
@@ -101,6 +102,7 @@ def apply() -> None:
     thread_api.get_valid_access_token = _dummy_user_token
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
+    pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
     # provider, so there is nothing to capture from — record the request in the

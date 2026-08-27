@@ -159,28 +159,9 @@ To set up per-user OAuth:
 
 LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-(Optional) Build and Push a custom Docker Image to Docker hub
-First build and push the sandbox Docker image to a registry LangSmith can pull from. The sandbox image is `Dockerfile.sandbox` — pass `-f Dockerfile.sandbox`, because the root `Dockerfile` builds the API server image instead and produces snapshots without `git`, `gh`, `sfw`, the Docker CLI, or the language runtimes agent runs need. On Apple Silicon, force `linux/amd64`
+The image must carry the toolchain agent runs expect — `git`, `gh`, `sfw`, the Docker CLI, and the language runtimes — and must be in a registry LangSmith can pull from. Run `sfw --version` while building the image to populate its binary cache, and set `SFW_SKIP_UPDATE_CHECK=1` at runtime so the sandbox proxy does not block its update request.
 
-```bash
-docker buildx build \
-  -f Dockerfile.sandbox \
-  --platform linux/amd64 \
-  -t <your-docker-hub>/<name-of-your-image> \
-  --push .
-```
-
-For a multi-arch tag that also runs locally on Apple Silicon:
-
-```bash
-docker buildx build \
-  -f Dockerfile.sandbox \
-  --platform linux/amd64,linux/arm64 \
-  -t <your-docker-hub>/<name-of-your-image> \
-  --push .
-```
-
-Then build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
+Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
 ```python
 from langsmith.sandbox import SandboxClient
@@ -188,7 +169,7 @@ from langsmith.sandbox import SandboxClient
 client = SandboxClient(api_key="<your key>")
 snapshot = client.create_snapshot(
     name="open-swe",
-    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",  # built from ./Dockerfile.sandbox
+    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",
     fs_capacity_bytes=128 * 1024**3,
 )
 print(snapshot.id)
@@ -216,11 +197,9 @@ DEFAULT_SANDBOX_MEM_BYTES="17179869184"
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
 # Optional; delete a stopped sandbox after this many seconds. Default is 2592000 (30 days). 0 disables.
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"
-# Optional; required only for the admin Repository Snapshots page/template generator.
-REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
 
-A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot should include the GitHub CLI from `Dockerfile.sandbox`; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot must include the GitHub CLI; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
 
 ### Environments
 
@@ -228,11 +207,11 @@ An **environment** pairs a prompt with a snapshot every run boots from, and can 
 
 With more than one environment configured, a picker appears in the dashboard composer (any signed-in user, names only), and a Slack thread can pick one with an `env:<name>` tag on the message that opens it — `@Open SWE env:staging fix the flaky test`. Only the opening message can: the sandbox is created once, so a later tag would change the prompt but not the image. A run with no selection uses `default`.
 
-Captures are named `openswe-environment-<name>` (the platform appends its own `:latest` tag, and rejects a name that carries one); set `ENVIRONMENT_SNAPSHOT_PREFIX` to replace the `openswe` prefix when several deployments share one LangSmith workspace. Snapshot resolution for a new sandbox is: the run's environment, then the repo's snapshot, then the base snapshot below.
+Captures are named `openswe-environment-<name>` (the platform appends its own `:latest` tag, and rejects a name that carries one); set `ENVIRONMENT_SNAPSHOT_PREFIX` to replace the `openswe` prefix when several deployments share one LangSmith workspace. Snapshot resolution for a new sandbox is: the run's environment, then the base snapshot below.
 
 ### Changing the base snapshot without a redeploy
 
-Admins can override `DEFAULT_SANDBOX_SNAPSHOT_ID` at runtime from the **Repository Snapshots** page (**Base snapshot** field). The stored value wins; clearing it falls back to the env var. Per-repo snapshots still take precedence for runs targeting a repo with a ready snapshot.
+Admins can override `DEFAULT_SANDBOX_SNAPSHOT_ID` at runtime from the **Sandbox** page (**Base snapshot** field). The stored value wins; clearing it falls back to the env var. An environment with a ready snapshot still takes precedence.
 
 The same setting is available over the API, which is how the repo that builds your sandbox image can roll a new snapshot out on its own:
 
@@ -259,8 +238,6 @@ ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this
 **Admin personal access token.** The token only needs to identify its owner (`GET /user`), and that login (or email) must appear in `CONFIGURED_ADMINS`. Matching by login needs no token permissions; matching by email needs a token that can read email addresses (classic `user:email`, or the fine-grained "Email addresses" read permission) when the account's email isn't public. Prefer a machine user over a human's token.
 
 `secrets.GITHUB_TOKEN` works for neither: installation tokens have no user identity, and they are not OIDC tokens. `examples/github-actions/set-base-snapshot.yml` is a copy-ready workflow using the OIDC path.
-
-`REPO_SNAPSHOT_BASE_IMAGE` should point at the same published Open SWE sandbox image you used to create the default snapshot (for example, the image built from `./Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the `FROM` line when generating per-repo Dockerfile templates. If it is not set, template generation is intentionally disabled so admins do not accidentally build repo-scoped snapshots from a bare image that lacks Open SWE's required tools (`git`, `gh`, `sfw`, language runtimes, and proxy assumptions).
 
 ## 5. Set up triggers
 
@@ -428,6 +405,14 @@ Both Slack URLs must point at the Open SWE backend that serves `agent.webapp:app
 
 Slack Block Kit option buttons only work when Interactivity is enabled and pointed at `/webhooks/slack/interactivity`.
 
+**Code channels (early access):**
+
+The default manifest above uses the legacy Slack integration. To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the existing Slack app, and reinstall or re-authorize it. The admin selection is browser-local and only controls which manifest is copied.
+
+In a code channel the whole channel is one Open SWE session, so Open SWE answers messages without requiring an `@`-mention, replies at the channel level by default (or in a thread the user started), reports its session status, and keeps the context bar current. The `manage_code_channel` tool covers channel creation and archival, status and title, context actions and external resources, runtime slash commands, HTML/diff/Block Kit/canvas views, view reconciliation, and canvas content/comments.
+
+This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`. The feature's `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint above, while Block Kit view actions use the normal interactivity endpoint. Code channel messages arrive over the `message.channels` / `message.groups` subscriptions an app already uses; `message.session` is an alternative for apps that want *only* session messages, and subscribing to both does not duplicate deliveries. Code channels are in early access: if your workspace is not enrolled, leave the Admin toggle off — everything else keeps working unchanged.
+
 **Credentials you'll need:**
 
 - `SLACK_BOT_TOKEN`: the Bot User OAuth Token (`xoxb-...`)
@@ -438,6 +423,8 @@ Slack Block Kit option buttons only work when Interactivity is enabled and point
 **Default repo:**
 
 Slack messages are routed to the Slack default repo (`SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
+
+Open SWE refuses Slack Connect channels when `conversations.info` reports `is_ext_shared`, before starting an agent run. If Slack cannot verify a channel, it fails closed and does not operate there.
 
 **"Sign in with Slack" account linking (optional):**
 
@@ -718,7 +705,7 @@ GitHub App must allow `<backend-url>/dashboard/api/auth/callback` for desktop lo
 
 Production runs the backend and dashboard separately.
 
-**Backend — standalone Docker:** the root `Dockerfile` builds a production LangGraph API server image for Open SWE. It is not the sandbox image; build sandbox snapshots from `Dockerfile.sandbox`.
+**Backend — standalone Docker:** the root `Dockerfile` builds a production LangGraph API server image for Open SWE. It is not the sandbox image.
 
 ```bash
 docker build -t open-swe .
@@ -798,7 +785,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If sandbox creation fails with `No base snapshot configured`, build a snapshot (see step 4c) and either export its UUID as `DEFAULT_SANDBOX_SNAPSHOT_ID` or set it as the base snapshot on the admin **Repository Snapshots** page
+- If sandbox creation fails with `No base snapshot configured`, build a snapshot (see step 4c) and either export its UUID as `DEFAULT_SANDBOX_SNAPSHOT_ID` or set it as the base snapshot on the admin **Sandbox** page
 - If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
 - If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 
