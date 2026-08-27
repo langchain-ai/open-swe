@@ -342,6 +342,54 @@ class BackendSupervisor {
     }
   }
 
+  async exportThreadState(threadId) {
+    const activity = await this.threadActivity();
+    if (activity === null)
+      throw new Error("Could not read local agent activity");
+    if (activity[threadId] === "running") {
+      throw new Error(
+        "Wait for the local agent to finish before continuing in cloud",
+      );
+    }
+    const response = await this.request(
+      `/threads/${encodeURIComponent(threadId)}/state`,
+    );
+    if (!response.ok) {
+      throw new Error(`Could not read local agent state (${response.status})`);
+    }
+    const state = await response.json();
+    if (
+      !state ||
+      typeof state !== "object" ||
+      (Array.isArray(state.next) && state.next.length) ||
+      (Array.isArray(state.tasks) && state.tasks.length) ||
+      (Array.isArray(state.interrupts) && state.interrupts.length)
+    ) {
+      throw new Error(
+        "The local agent has unfinished work and cannot be transferred",
+      );
+    }
+    const values = state.values;
+    if (
+      !values ||
+      typeof values !== "object" ||
+      !Array.isArray(values.messages)
+    ) {
+      throw new Error("The local agent has no transferable conversation state");
+    }
+    const payload = {
+      format_version: 1,
+      state: {
+        messages: values.messages,
+        ...(Array.isArray(values.todos) ? { todos: values.todos } : {}),
+      },
+    };
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 2 * 1024 * 1024) {
+      throw new Error("The local conversation is too large to transfer");
+    }
+    return payload;
+  }
+
   async deleteThread(threadId) {
     const response = await this.request(
       `/threads/${encodeURIComponent(threadId)}`,

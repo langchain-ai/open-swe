@@ -340,6 +340,18 @@ function configureDesktopIpc() {
     lastActivity = activity;
     return activity;
   });
+  ipcMain.handle("desktop:export-local-thread", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = localThreadStore.get(threadId);
+    if (!thread) throw new Error("Local agent not found");
+    return {
+      ...(await backendSupervisor.exportThreadState(thread.id)),
+      local_thread_id: thread.id,
+      title: thread.title,
+      model_id: thread.modelId,
+      effort: thread.effort,
+    };
+  });
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     const updated = localThreadStore.update(input?.threadId, {

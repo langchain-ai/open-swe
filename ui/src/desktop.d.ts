@@ -29,6 +29,15 @@ export interface DesktopLocalThreadSummary {
 
 export type DesktopLocalActivity = Record<string, "running" | "error">
 
+export interface DesktopLocalThreadExport {
+  format_version: 1
+  local_thread_id: string
+  title: string
+  model_id: string | null
+  effort: string | null
+  state: { messages: Array<unknown>; todos?: Array<unknown> }
+}
+
 export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
@@ -182,6 +191,7 @@ declare global {
       ) => Promise<DesktopLocalThreadSummary | null>
       listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
       localActivity: () => Promise<DesktopLocalActivity>
+      exportLocalThread: (threadId: string) => Promise<DesktopLocalThreadExport>
       updateLocalThread: (input: {
         threadId: string
         viewed?: boolean

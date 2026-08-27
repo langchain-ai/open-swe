@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
-import { CircleAlert, FolderOpen, X } from "lucide-react"
-import { Link } from "@tanstack/react-router"
+import { CircleAlert, CloudUpload, FolderOpen, X } from "lucide-react"
+import { Link, useNavigate } from "@tanstack/react-router"
 
 import type {
   DesktopLocalPromptInput,
@@ -12,6 +12,7 @@ import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import { Button } from "@/components/ui/button"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
@@ -41,6 +42,7 @@ import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
+import { agentsApi } from "@/features/agents/lib/api"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -76,6 +78,7 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
+  const navigate = useNavigate()
   const stream = useAgentThreadStream()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
@@ -86,6 +89,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     defaultSelection,
     isLoading: modelsLoading,
   } = useModelOptions()
+  const [transferring, setTransferring] = useState(false)
   const [sessionSelection, setSessionSelection] = useState<{
     sessionId: string
     selection: ModelSelection | null
@@ -174,6 +178,33 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  const transferToCloud = useCallback(async () => {
+    if (!thread || !window.openSweDesktop) return
+    if (
+      !window.confirm(
+        "Continue this conversation in cloud? Local files, uncommitted changes, and terminal history will not be transferred."
+      )
+    )
+      return
+    setTransferring(true)
+    setError(null)
+    try {
+      const exported = await window.openSweDesktop.exportLocalThread(sessionId)
+      const cloudThread = await agentsApi.importLocalThread({
+        ...exported,
+        repo: pr?.repoFullName ?? null,
+      })
+      await navigate({
+        to: "/agents/$threadId",
+        params: { threadId: cloudThread.id },
+      })
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setTransferring(false)
+    }
+  }, [navigate, pr, sessionId, thread])
+
   const messages = useMemo(() => {
     const live = streamMessagesToUi(
       stream.messages,
@@ -359,7 +390,18 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 {thread.cwd}
               </span>
             </span>
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+            {session.data && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isRunning || transferring}
+                onClick={() => void transferToCloud()}
+              >
+                <CloudUpload />
+                {transferring ? "Transferring…" : "Continue in cloud"}
+              </Button>
+            )}
+            <span className="shrink-0 text-xs text-muted-foreground">
               This Mac
             </span>
           </div>

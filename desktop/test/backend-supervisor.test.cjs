@@ -128,6 +128,33 @@ test("creates the local LangGraph thread before stream hydration", async () => {
   });
 });
 
+test("exports completed local thread state for cloud transfer", async () => {
+  const supervisor = new BackendSupervisor({});
+  supervisor.threadActivity = async () => ({});
+  supervisor.request = async () =>
+    Response.json({
+      values: { messages: [{ type: "human", content: "fix it" }], todos: [] },
+      next: [],
+      tasks: [],
+      interrupts: [],
+    });
+
+  assert.deepEqual(await supervisor.exportThreadState("thread-1"), {
+    format_version: 1,
+    state: { messages: [{ type: "human", content: "fix it" }], todos: [] },
+  });
+});
+
+test("rejects transfer while the local thread is running", async () => {
+  const supervisor = new BackendSupervisor({});
+  supervisor.threadActivity = async () => ({ "thread-1": "running" });
+
+  await assert.rejects(
+    supervisor.exportThreadState("thread-1"),
+    /Wait for the local agent to finish/,
+  );
+});
+
 test("rejects a failed local LangGraph thread creation", async () => {
   const supervisor = new BackendSupervisor({});
   supervisor.request = async () => new Response(null, { status: 503 });

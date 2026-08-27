@@ -103,6 +103,9 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+_LOCAL_IMPORT_MAX_BYTES = 2 * 1024 * 1024
+_LOCAL_IMPORT_MAX_MESSAGES = 500
+_LOCAL_IMPORT_MESSAGE_TYPES = frozenset({"human", "user", "ai", "assistant", "tool"})
 _SANDBOX_CREATING_SENTINEL = "__creating__"
 
 
@@ -174,6 +177,18 @@ class ThreadMessageBody(BaseModel):
 
 class ThreadResolveBody(BaseModel):
     resolved: bool = True
+
+
+class LocalThreadImportBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    format_version: Literal[1]
+    local_thread_id: str = Field(min_length=1, max_length=100, alias="localThreadId")
+    title: str = Field(min_length=1, max_length=80)
+    repo: str | None = Field(default=None, max_length=200)
+    model_id: str | None = Field(default=None, alias="modelId")
+    effort: str | None = None
+    state: dict[str, Any]
 
 
 async def _resolve_agent_model_choice(
@@ -1348,6 +1363,122 @@ async def _create_dashboard_thread_record(
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
+
+
+def _sanitize_local_import_state(state: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        encoded = json.dumps(state, separators=(",", ":"), ensure_ascii=False).encode()
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "local agent state must be JSON") from exc
+    if len(encoded) > _LOCAL_IMPORT_MAX_BYTES:
+        raise HTTPException(413, "local agent state exceeds 2MB limit")
+    messages = state.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise HTTPException(422, "local agent state has no messages")
+    if len(messages) > _LOCAL_IMPORT_MAX_MESSAGES:
+        raise HTTPException(422, "local agent state has too many messages")
+    sanitized_messages: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, Mapping):
+            raise HTTPException(422, "invalid local agent message")
+        message_type = message.get("type")
+        if message_type not in _LOCAL_IMPORT_MESSAGE_TYPES:
+            raise HTTPException(422, "unsupported local agent message type")
+        content = message.get("content")
+        if not isinstance(content, (str, list)):
+            raise HTTPException(422, "invalid local agent message content")
+        sanitized_messages.append(
+            {
+                key: value
+                for key, value in dict(message).items()
+                if key
+                in {
+                    "type",
+                    "content",
+                    "id",
+                    "name",
+                    "tool_call_id",
+                    "tool_calls",
+                    "invalid_tool_calls",
+                    "additional_kwargs",
+                    "response_metadata",
+                    "status",
+                }
+            }
+        )
+    result: dict[str, Any] = {"messages": sanitized_messages}
+    todos = state.get("todos")
+    if todos is not None:
+        if not isinstance(todos, list) or len(todos) > 100:
+            raise HTTPException(422, "invalid local agent todos")
+        for todo in todos:
+            if not isinstance(todo, Mapping) or any(
+                not isinstance(todo.get(key), str) for key in ("content", "status")
+            ):
+                raise HTTPException(422, "invalid local agent todo")
+        result["todos"] = [dict(todo) for todo in todos]
+    return result
+
+
+async def import_local_thread(
+    body: LocalThreadImportBody,
+    login: str,
+    *,
+    email: str | None = None,
+) -> dict[str, Any]:
+    await _ensure_dashboard_github_token(login)
+    repo_config = _parse_repo(body.repo)
+    if body.repo is not None and repo_config is None:
+        raise HTTPException(422, "invalid repository")
+    state = _sanitize_local_import_state(body.state)
+    profile = await get_profile(login) or {}
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(
+        profile, body.model_id, body.effort
+    )
+    chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
+    now_ms = _now_ms()
+    metadata: dict[str, Any] = {
+        "source": _DASHBOARD_SOURCE,
+        "origin": "desktop",
+        "thread_category": "interactive",
+        "trigger_kind": "user",
+        PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
+        PARTICIPANT_EMAILS_KEY: merge_participants(None, email),
+        "title": body.title.strip(),
+        "base_branch": profile.get("base_branch") or "main",
+        "branch_prefix": profile.get("branch_prefix"),
+        "model": chosen_model or profile.get("default_model") or "Default",
+        "effort": chosen_effort or profile.get("reasoning_effort"),
+        "resolved_model": resolved_model,
+        "resolved_effort": resolved_effort,
+        "plan_mode": False,
+        "imported_from_local_thread_id": body.local_thread_id,
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
+    if repo_config:
+        metadata["repo_owner"] = repo_config["owner"]
+        metadata["repo_name"] = repo_config["name"]
+    else:
+        metadata["repo_explicitly_none"] = True
+    client = langgraph_client()
+    thread_id = str(uuid.uuid4())
+    try:
+        await client.threads.create(
+            thread_id=thread_id,
+            graph_id="agent",
+            metadata=metadata,
+            if_exists="raise",
+            supersteps=[{"updates": [{"as_node": "model", "values": state}]}],
+        )
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:
+        try:
+            await client.threads.delete(thread_id)
+        except Exception:
+            logger.debug("Could not clean up failed local import %s", thread_id, exc_info=True)
+        raise HTTPException(502, "could not import local agent") from exc
+    return await _thread_summary(as_thread_dict(thread))
 
 
 def _repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:

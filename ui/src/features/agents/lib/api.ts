@@ -26,6 +26,16 @@ export class AgentsApiError extends Error {
   }
 }
 
+export interface LocalThreadImportRequest {
+  format_version: 1
+  local_thread_id: string
+  title: string
+  repo?: string | null
+  model_id?: string | null
+  effort?: string | null
+  state: { messages: Array<unknown>; todos?: Array<unknown> }
+}
+
 export interface ThreadMessageRequest {
   content: string
   images?: Array<ImageChunk>
@@ -304,6 +314,11 @@ export const agentsApi = {
   deleteSchedule: (scheduleId: string) =>
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
+    }),
+  importLocalThread: (body: LocalThreadImportRequest) =>
+    agentsRequest<AgentThread>("/threads/import-local", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
   getThread: (threadId: string, options?: { markViewed?: boolean }) =>
     agentsRequest<AgentThread>(

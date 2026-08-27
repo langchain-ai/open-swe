@@ -192,6 +192,7 @@ from .team_settings import (
     upsert_team_settings,
 )
 from .thread_api import (
+    LocalThreadImportBody,
     ThreadMessageBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
@@ -205,6 +206,7 @@ from .thread_api import (
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     get_dashboard_thread_working_tree_diff,
+    import_local_thread,
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
@@ -2173,6 +2175,18 @@ async def create_voice_transcription(
     request: Request, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, str]:
     return {"text": await transcribe_audio(request)}
+
+
+@router.post("/threads/import-local")
+async def api_import_local_thread(
+    body: LocalThreadImportBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    if body.repo:
+        accessible = await accessible_repo_full_names(session["sub"])
+        if body.repo.lower() not in accessible:
+            raise HTTPException(403, "repository is not accessible")
+    return await import_local_thread(body, session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/messages")
