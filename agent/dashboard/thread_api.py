@@ -70,6 +70,7 @@ from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .pull_request_context import get_pull_request_context
 from .pull_request_status import get_pull_request_statuses
+from .slack_oauth import SLACK_TEAM_ID
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
@@ -381,9 +382,10 @@ def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
     if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
         return None
     channel_id = slack_thread.channel_id.strip()
-    if not channel_id:
+    team_id = SLACK_TEAM_ID.strip()
+    if not channel_id or not team_id:
         return None
-    return f"https://slack.com/app_redirect?{urlencode({'channel': channel_id})}"
+    return f"https://slack.com/app_redirect?{urlencode({'channel': channel_id, 'team': team_id})}"
 
 
 def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:

@@ -77,7 +77,7 @@ test.describe("Slack Code Channels", () => {
     await expect(codeChannelLink).toBeVisible();
     await expect(codeChannelLink).toHaveAttribute(
       "href",
-      /https:\/\/slack\.com\/app_redirect\?channel=C_CODE_/,
+      /https:\/\/slack\.com\/app_redirect\?channel=C_CODE_\d+&team=T_TEST/,
     );
     await page.screenshot({
       path: "screenshots/web-code-channel-link.png",

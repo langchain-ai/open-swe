@@ -497,7 +497,8 @@ async def test_thread_summary_omits_slack_source_url_for_public_repo() -> None:
     assert summary["sourceUrl"] is None
 
 
-async def test_thread_summary_includes_code_channel_url() -> None:
+async def test_thread_summary_includes_code_channel_url(monkeypatch) -> None:
+    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T team&workspace")
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
@@ -509,7 +510,22 @@ async def test_thread_summary_includes_code_channel_url() -> None:
         )
     )
 
-    assert summary["codeChannelUrl"] == ("https://slack.com/app_redirect?channel=C+code%26channel")
+    assert summary["codeChannelUrl"] == (
+        "https://slack.com/app_redirect?channel=C+code%26channel&team=T+team%26workspace"
+    )
+
+
+async def test_thread_summary_omits_code_channel_url_without_team() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "0"}},
+            }
+        )
+    )
+
+    assert summary["codeChannelUrl"] is None
 
 
 async def test_thread_summary_omits_code_channel_url_for_slack_thread() -> None:
