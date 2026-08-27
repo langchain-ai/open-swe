@@ -203,6 +203,7 @@ export interface AgentSchedule {
   name: string
   prompt: string
   schedule: string
+  scope: "workspace"
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode

@@ -159,6 +159,7 @@ def _schedule_summary(
         "name": record.get("name"),
         "prompt": record.get("prompt"),
         "schedule": record.get("schedule"),
+        "scope": "workspace",
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
@@ -172,9 +173,21 @@ def _schedule_summary(
         "lastTriggeredAt": state.get("last_triggered_at"),
         "lastError": state.get("last_error"),
         "lastErrorAt": state.get("last_error_at"),
+        "createdBy": record.get("created_by"),
+        "updatedBy": record.get("updated_by") or record.get("created_by"),
         "createdAt": record.get("created_at"),
         "updatedAt": record.get("updated_at"),
     }
+
+
+async def _migrate_workspace_record(
+    namespace: list[str], key: str, record: dict[str, Any]
+) -> dict[str, Any]:
+    if record.get("scope") == "workspace":
+        return record
+    migrated = {**record, "scope": "workspace"}
+    await put_value(namespace, key, migrated)
+    return migrated
 
 
 async def _put_schedule(record: dict[str, Any]) -> dict[str, Any]:
@@ -202,6 +215,7 @@ async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
         **(existing or {}),
         **patch,
         "schedule_id": schedule_id,
+        "scope": "workspace",
         "created_by": record.get("created_by"),
         "user_email": record.get("user_email"),
     }
@@ -209,40 +223,32 @@ async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
 
 
 async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:
-    return await get_value(SCHEDULES_NAMESPACE, schedule_id)
+    record = await get_value(SCHEDULES_NAMESPACE, schedule_id)
+    if not record:
+        return None
+    return await _migrate_workspace_record(SCHEDULES_NAMESPACE, schedule_id, record)
 
 
-def _user_owns_schedule(record: dict[str, Any], login: str, email: str | None = None) -> bool:
-    if record.get("created_by") == login:
-        return True
-    record_email = record.get("user_email")
-    return bool(email and isinstance(record_email, str) and record_email == email.strip().lower())
-
-
-def _assert_schedule_owner(
-    record: dict[str, Any] | None, login: str, email: str | None = None
-) -> None:
-    if not record or not _user_owns_schedule(record, login, email):
+def _assert_schedule_exists(record: dict[str, Any] | None) -> None:
+    if not record:
         raise HTTPException(404, "schedule not found")
 
 
-async def list_agent_schedules(login: str, *, email: str | None = None) -> list[dict[str, Any]]:
-    searches: list[dict[str, Any]] = [{"created_by": login}]
-    if email and email.strip():
-        searches.append({"user_email": email.strip().lower()})
-
-    seen: dict[str, dict[str, Any]] = {}
+async def list_agent_schedules() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for record in await search_all_values(SCHEDULES_NAMESPACE):
+        schedule_id = record.get("id")
+        if isinstance(schedule_id, str):
+            records.append(
+                await _migrate_workspace_record(SCHEDULES_NAMESPACE, schedule_id, record)
+            )
     run_states: dict[str, dict[str, Any]] = {}
-    for filter in searches:
-        for record in await search_all_values(SCHEDULES_NAMESPACE, filter=filter):
-            schedule_id = record.get("id")
-            if isinstance(schedule_id, str) and _user_owns_schedule(record, login, email):
-                seen[schedule_id] = record
-        for state in await search_all_values(SCHEDULE_RUN_STATE_NAMESPACE, filter=filter):
-            schedule_id = state.get("schedule_id")
-            if isinstance(schedule_id, str):
-                run_states[schedule_id] = state
-    records = list(seen.values())
+    for state in await search_all_values(SCHEDULE_RUN_STATE_NAMESPACE):
+        schedule_id = state.get("schedule_id")
+        if isinstance(schedule_id, str):
+            run_states[schedule_id] = await _migrate_workspace_record(
+                SCHEDULE_RUN_STATE_NAMESPACE, schedule_id, state
+            )
     records.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
     return [_schedule_summary(record, run_states.get(record["id"])) for record in records]
 
@@ -324,7 +330,9 @@ async def create_agent_schedule(
         "last_triggered_at": None,
         "last_error": None,
         "last_error_at": None,
+        "scope": "workspace",
         "created_by": login,
+        "updated_by": login,
         "user_email": (await _resolve_run_email(login, profile) or email or "").strip().lower(),
         "created_at": now,
         "updated_at": now,
@@ -349,7 +357,7 @@ async def update_agent_schedule(
     allow_admin_thread: bool = False,
 ) -> dict[str, Any]:
     existing = await get_agent_schedule(schedule_id)
-    _assert_schedule_owner(existing, login, email)
+    _assert_schedule_exists(existing)
     assert existing is not None
     if (
         body.admin_thread is True
@@ -358,7 +366,7 @@ async def update_agent_schedule(
     ):
         raise HTTPException(403, "admin only")
 
-    patch: dict[str, Any] = {}
+    patch: dict[str, Any] = {"scope": "workspace", "updated_by": login}
     if body.prompt is not None:
         patch["prompt"] = body.prompt.strip()
     if body.schedule is not None:
@@ -404,9 +412,9 @@ async def update_agent_schedule(
     return _schedule_summary(updated, await _get_run_state(schedule_id))
 
 
-async def delete_agent_schedule(schedule_id: str, login: str, *, email: str | None = None) -> None:
+async def delete_agent_schedule(schedule_id: str) -> None:
     existing = await get_agent_schedule(schedule_id)
-    _assert_schedule_owner(existing, login, email)
+    _assert_schedule_exists(existing)
     assert existing is not None
     await _delete_cron(existing.get("cron_id"))
     await delete_value(SCHEDULES_NAMESPACE, schedule_id)
@@ -475,6 +483,7 @@ def _agent_run_metadata(
         "thread_category": "automation",
         "trigger_kind": "schedule_test" if test_run else "schedule",
         "schedule_id": record["id"],
+        "automation_scope": "workspace",
         "schedule_name": record.get("name"),
         "schedule_test": test_run,
         "github_login": record.get("created_by"),
@@ -709,11 +718,9 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
     return await _launch_agent_schedule_record(record)
 
 
-async def trigger_agent_schedule(
-    schedule_id: str, login: str, *, email: str | None = None
-) -> dict[str, Any]:
+async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
     record = await get_agent_schedule(schedule_id)
-    _assert_schedule_owner(record, login, email)
+    _assert_schedule_exists(record)
     assert record is not None
 
     result = await _launch_agent_schedule_record(record, test_run=True)

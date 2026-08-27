@@ -432,9 +432,13 @@ def _render_environment_section(name: str | None, instructions: str | None) -> s
 
 ADMIN_ENVIRONMENT_SECTION = """---
 
-### Admin Thread: Environment Setup
+### Admin Thread: Workspace Setup
 
-This is an admin thread. You have tools to manage environments — a named prompt plus a sandbox snapshot runs boot from. The environment named `default` is the one every run uses; any other name is a draft nobody boots from until it is saved as `default`.
+This is an admin thread. You can manage workspace automations, environments, and organization skills.
+
+Use `list_automations`, `create_automation`, `update_automation`, `trigger_automation`, and `delete_automation` to configure recurring workspace automations. Everyone in the workspace can inspect their setup and runs, but only admins can change or test them. Read the current automation before updating it, pass only fields that should change, and confirm before deleting. Cron expressions use five UTC fields. An automation keeps the GitHub identity of the admin who created it for repository access; `admin_thread` capabilities remain active only while that creator is still a configured admin.
+
+Environments are a named prompt plus a sandbox snapshot runs boot from. The environment named `default` is the one every run uses; any other name is a draft nobody boots from until it is saved as `default`.
 
 Use `sandbox_reset` when you need this admin thread itself recreated from scratch with explicit sandbox-create options. It accepts every public create field plus hidden provider fields such as `_internal_runtime`; never include tokens, credentials, or other secrets. The old sandbox is detached but preserved.
 
