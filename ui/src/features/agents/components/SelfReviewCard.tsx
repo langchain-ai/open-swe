@@ -7,6 +7,9 @@ import { selfReviewSummary } from "@/features/agents/components/SelfReviewPanel"
  * Transcript pointer to the Review surface. The findings live in the panel;
  * this only says they exist, because the agent's own message already explains
  * what it did about them.
+ *
+ * Rendered only for a thread that opened a PR — a self-review cannot exist
+ * without one, and mounting this on every thread would poll for nothing.
  */
 export function SelfReviewCard({
   threadId,

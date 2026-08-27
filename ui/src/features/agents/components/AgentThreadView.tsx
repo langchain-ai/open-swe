@@ -284,7 +284,7 @@ export function AgentThreadView({
               showPlanArtifact={
                 thread.planStatus === "ready" || thread.planStatus === "shared"
               }
-              showSelfReview
+              showSelfReview={Boolean(thread.pr)}
               onOpenSelfReview={handleOpenSelfReview}
               onOpenFile={handleOpenFile}
               queuedMessages={queuedMessages}
