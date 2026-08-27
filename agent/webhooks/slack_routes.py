@@ -50,6 +50,7 @@ async def _queue_code_channel_turn(
     event_id: str,
     event_ts: str,
     explicit_request: bool,
+    team_id: str = "",
 ) -> dict[str, str]:
     if not channel_id or not user_id or not text or not event_id or not event_ts:
         return {"status": "ignored", "reason": "Missing code channel interaction fields"}
@@ -89,6 +90,7 @@ async def _queue_code_channel_turn(
             "treat_all_messages_as_mentions": True,
             "code_channel": True,
             "explicit_request": explicit_request,
+            "team_id": team_id,
         },
         repo_config,
     )
@@ -199,6 +201,7 @@ async def slack_webhook(
         return {"status": "ignored", "reason": "Invalid Slack event"}
 
     event_id = str(payload.get("event_id") or "")
+    team_id = str(payload.get("team_id") or event.get("team") or "")
     channel_id = _event_channel_id(event)
     channel_context: dict[str, Any] | None = None
     if channel_id:
@@ -259,6 +262,7 @@ async def slack_webhook(
             event_id=event_id or f"code-channel-action:{action_channel_id}:{event_ts}",
             event_ts=event_ts,
             explicit_request=True,
+            team_id=team_id,
         )
 
     if event.get("type") == "reaction_added":
@@ -484,6 +488,8 @@ async def slack_webhook(
             "message_update": is_message_update,
             "code_channel": in_code_channel,
             "reply_thread_ts": reply_thread_ts if in_code_channel else "",
+            "team_id": team_id,
+            "app_context": updated_message.get("app_context") or event.get("app_context"),
         }
         repo_config = await common.get_slack_repo_config(
             channel_id,
@@ -524,6 +530,7 @@ async def slack_code_channel_command(
     command = value("command").removeprefix("/")
     command_text = value("text")
     trigger_id = value("trigger_id")
+    team_id = value("team_id")
     if not (channel_id and user_id and 1 <= len(command) <= 31 and len(command_text) <= 4000):
         return {"response_type": "ephemeral", "text": "That code-channel command was invalid."}
 
@@ -538,6 +545,7 @@ async def slack_code_channel_command(
         event_id=event_id,
         event_ts=event_ts,
         explicit_request=True,
+        team_id=team_id,
     )
     if result["status"] != "accepted":
         return {
