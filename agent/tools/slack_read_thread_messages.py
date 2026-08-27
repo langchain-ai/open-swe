@@ -1,38 +1,10 @@
 from typing import Any
 
 from ..utils.slack import (
-    SLACK_THREAD_MAX_MESSAGES,
-    fetch_slack_thread_messages,
-    format_slack_messages_for_prompt,
+    fetch_and_format_slack_thread,
     get_slack_thread_version,
-    get_slack_user_names,
 )
 from ..utils.thread_ops import langgraph_client
-
-
-async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
-    """Fetch thread messages and resolve author names."""
-    messages = await fetch_slack_thread_messages(channel_id, message_ts)
-    if not messages:
-        return {"success": False, "messages": []}
-
-    user_ids = [
-        user_id for msg in messages if isinstance(user_id := msg.get("user"), str) and user_id
-    ]
-    user_names = await get_slack_user_names(user_ids) if user_ids else {}
-
-    truncated = len(messages) >= SLACK_THREAD_MAX_MESSAGES
-    formatted = format_slack_messages_for_prompt(messages, user_names)
-    if truncated:
-        formatted = (
-            f"[thread truncated — showing most recent {len(messages)} messages]\n{formatted}"
-        )
-    return {
-        "success": True,
-        "formatted": formatted,
-        "count": len(messages),
-        "truncated": truncated,
-    }
 
 
 async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
@@ -59,13 +31,18 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
     thread_version = await get_slack_thread_version(
         langgraph_client(), clean_channel_id, clean_message_ts
     )
-    result = await _fetch_and_format(clean_channel_id, clean_message_ts)
-    if not result.get("success"):
+    transcript = await fetch_and_format_slack_thread(clean_channel_id, clean_message_ts)
+    if transcript is None:
         return {
             "success": False,
             "error": "Could not fetch thread messages. The bot may not have access to "
             "that channel, or the message may have been deleted.",
         }
 
-    result["thread_version"] = thread_version
-    return result
+    return {
+        "success": True,
+        "formatted": transcript.formatted,
+        "count": transcript.count,
+        "truncated": transcript.truncated,
+        "thread_version": thread_version,
+    }

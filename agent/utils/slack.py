@@ -1179,6 +1179,35 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
+@dataclass(frozen=True)
+class SlackThreadTranscript:
+    formatted: str
+    count: int
+    truncated: bool
+
+
+async def fetch_and_format_slack_thread(
+    channel_id: str, thread_ts: str
+) -> SlackThreadTranscript | None:
+    """Fetch thread messages and resolve author names; None when nothing is readable."""
+    messages = await fetch_slack_thread_messages(channel_id, thread_ts)
+    if not messages:
+        return None
+
+    user_ids = [
+        user_id for msg in messages if isinstance(user_id := msg.get("user"), str) and user_id
+    ]
+    user_names = await get_slack_user_names(user_ids) if user_ids else {}
+
+    truncated = len(messages) >= SLACK_THREAD_MAX_MESSAGES
+    formatted = format_slack_messages_for_prompt(messages, user_names)
+    if truncated:
+        formatted = (
+            f"[thread truncated — showing most recent {len(messages)} messages]\n{formatted}"
+        )
+    return SlackThreadTranscript(formatted=formatted, count=len(messages), truncated=truncated)
+
+
 def _slack_thread_version_namespace(channel_id: str, thread_ts: str) -> tuple[str, str, str]:
     channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
     return (_SLACK_THREAD_VERSION_NAMESPACE, channel, timestamp.replace(".", "_"))

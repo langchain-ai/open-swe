@@ -8,6 +8,7 @@ from langgraph.prebuilt import InjectedState
 from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.slack import (
     convert_mentions_to_slack_format,
+    fetch_and_format_slack_thread,
     get_active_slack_thread,
     get_slack_thread_version,
     post_slack_thread_reply_with_ts,
@@ -28,8 +29,10 @@ async def slack_thread_reply(
 
     Use this for clarifying questions, essential progress updates, and the final
     answer or outcome. Pass the current `thread_version` from Slack context or
-    `slack_read_thread_messages`; if a newer message arrived, the post fails and
-    you must re-read the thread before retrying. For Slack-triggered information-only
+    `slack_read_thread_messages`; if a newer message arrived the post is rejected and
+    nobody sees it, and the result carries the new messages plus the `thread_version`
+    to use — call this tool again immediately with that value rather than ending the
+    run. For Slack-triggered information-only
     requests, put the complete answer in `message`, not merely a summary, and do not
     repeat it in the final assistant response. Make `message` as concise as possible: default
     to one sentence with only the outcome/status and link, or one blocking
@@ -93,33 +96,34 @@ async def slack_thread_reply(
         else str(thread_ts)
     )
 
+    message_ts: str | None = None
+    slack_error: str | None = None
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         current_version = await get_slack_thread_version(client, channel_id, thread_ts)
-        if thread_version != current_version:
-            return {
-                "success": False,
-                "error": "Slack thread version mismatch",
-                "expected_thread_version": current_version,
-                "provided_thread_version": thread_version,
-                "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
-            }
-
-        message = convert_mentions_to_slack_format(message)
-        slack_blocks = blocks or _build_option_blocks(message, options)
-        usage = summarize_run_usage(state)
-        message_ts, slack_error = await _post_and_store_mapping(
-            channel_id,
-            thread_ts,
-            message,
-            blocks=slack_blocks,
-            usage=usage,
-            post_thread_ts=post_thread_ts,
-            agent_thread_id=(
-                None if is_code_channel_session(str(thread_ts)) else str(thread_id or "") or None
-            ),
-            langgraph_client=client,
-            run_id=run_id,
-            triggering_user_id=_triggering_user_id(configurable),
+        stale = thread_version != current_version
+        if not stale:
+            message = convert_mentions_to_slack_format(message)
+            slack_blocks = blocks or _build_option_blocks(message, options)
+            usage = summarize_run_usage(state)
+            message_ts, slack_error = await _post_and_store_mapping(
+                channel_id,
+                thread_ts,
+                message,
+                blocks=slack_blocks,
+                usage=usage,
+                post_thread_ts=post_thread_ts,
+                agent_thread_id=(
+                    None
+                    if is_code_channel_session(str(thread_ts))
+                    else str(thread_id or "") or None
+                ),
+                langgraph_client=client,
+                run_id=run_id,
+                triggering_user_id=_triggering_user_id(configurable),
+            )
+    if stale:
+        return await _stale_version_result(
+            channel_id, str(thread_ts), thread_version, current_version
         )
     if message_ts is None:
         return {
@@ -130,6 +134,39 @@ async def slack_thread_reply(
             "hint": _slack_reply_failure_hint(slack_error),
         }
     return {"success": True, "thread_version": current_version}
+
+
+async def _stale_version_result(
+    channel_id: str,
+    thread_ts: str,
+    provided_version: int,
+    current_version: int,
+) -> dict[str, Any]:
+    transcript = await fetch_and_format_slack_thread(channel_id, thread_ts)
+    hint = (
+        "Your message was NOT posted and nobody has seen it. New Slack messages arrived "
+        "while you were working. "
+        + (
+            "They are included in `thread_messages` below, so you do not need to call "
+            "slack_read_thread_messages. "
+            if transcript
+            else "Call slack_read_thread_messages to see them. "
+        )
+        + f"Call slack_thread_reply again right now with thread_version={current_version}, "
+        "revising the message only if the new messages change the answer. Never end the run "
+        "with an unposted reply."
+    )
+    result: dict[str, Any] = {
+        "success": False,
+        "posted": False,
+        "error": "Slack thread version mismatch",
+        "thread_version": current_version,
+        "provided_thread_version": provided_version,
+        "hint": hint,
+    }
+    if transcript:
+        result["thread_messages"] = transcript.formatted
+    return result
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:

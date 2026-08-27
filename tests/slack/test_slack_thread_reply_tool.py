@@ -7,6 +7,8 @@ from uuid import UUID
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.utils.slack import SlackThreadTranscript
+
 slack_reply_tool = importlib.import_module("agent.tools.slack_thread_reply")
 
 
@@ -40,18 +42,46 @@ async def test_slack_thread_reply_rejects_stale_thread_version(
     async def fail_if_posted(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
         pytest.fail("stale reply must not be posted")
 
+    async def fetch_thread(*_args: Any) -> SlackThreadTranscript:
+        return SlackThreadTranscript(
+            formatted="Alice: wait, one more thing", count=1, truncated=False
+        )
+
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fail_if_posted)
+    monkeypatch.setattr(slack_reply_tool, "fetch_and_format_slack_thread", fetch_thread)
 
     result = await slack_reply_tool.slack_thread_reply("hello", 0)
 
-    assert result == {
-        "success": False,
-        "error": "Slack thread version mismatch",
-        "expected_thread_version": 1,
-        "provided_thread_version": 0,
-        "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
-    }
+    assert result["success"] is False
+    assert result["posted"] is False
+    assert result["error"] == "Slack thread version mismatch"
+    assert result["thread_version"] == 1
+    assert result["provided_thread_version"] == 0
+    assert result["thread_messages"] == "Alice: wait, one more thing"
+    assert "NOT posted" in result["hint"]
+    assert "thread_version=1" in result["hint"]
+    assert "slack_read_thread_messages" in result["hint"]
+
+
+async def test_slack_thread_reply_stale_version_without_fetchable_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_if_posted(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
+        pytest.fail("stale reply must not be posted")
+
+    async def fetch_thread(*_args: Any) -> None:
+        return None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fail_if_posted)
+    monkeypatch.setattr(slack_reply_tool, "fetch_and_format_slack_thread", fetch_thread)
+
+    result = await slack_reply_tool.slack_thread_reply("hello", 0)
+
+    assert "thread_messages" not in result
+    assert result["thread_version"] == 1
+    assert "Call slack_read_thread_messages to see them." in result["hint"]
 
 
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(
