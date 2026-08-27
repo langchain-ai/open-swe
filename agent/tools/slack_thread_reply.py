@@ -5,7 +5,6 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..pr_completion import defer_message
 from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.slack import (
     convert_mentions_to_slack_format,
@@ -80,9 +79,6 @@ async def slack_thread_reply(
 
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-
-    if isinstance(thread_id, str) and await defer_message(thread_id, message) is not None:
-        return {"success": True, "deferred_until_pr_green": True}
 
     from ..utils.slack_code_channels import is_code_channel_session
 

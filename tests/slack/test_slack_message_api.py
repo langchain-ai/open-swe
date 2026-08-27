@@ -206,24 +206,6 @@ async def test_post_slack_thread_reply_preserves_bool_return_on_error(
     assert ok is False
 
 
-async def test_post_slack_thread_reply_defers_when_pr_watch_is_active(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    defer = AsyncMock(return_value=object())
-    module = MagicMock(defer_message=defer)
-    monkeypatch.setattr(slack_utils.importlib, "import_module", MagicMock(return_value=module))
-    post_with_ts = AsyncMock()
-    monkeypatch.setattr(slack_utils, "post_slack_thread_reply_with_ts", post_with_ts)
-
-    ok = await slack_utils.post_slack_thread_reply(
-        "C1", "1.0", "Status", agent_thread_id="thread-1"
-    )
-
-    assert ok is True
-    defer.assert_awaited_once_with("thread-1", "Status")
-    post_with_ts.assert_not_awaited()
-
-
 async def test_post_slack_thread_reply_forwards_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     post_with_ts = AsyncMock(return_value=("1.1", None))
     monkeypatch.setattr(slack_utils, "post_slack_thread_reply_with_ts", post_with_ts)
