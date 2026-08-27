@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -88,6 +89,30 @@ async def test_generate_and_store_thread_title_only_replaces_explicit_seed(
     )
 
     assert threads.metadata == expected
+
+
+@pytest.mark.asyncio
+async def test_title_generation_renames_code_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    threads = _Threads(
+        {
+            "source": "slack",
+            "title": "please review title generation",
+            "title_seed": "please review title generation",
+            "source_context": {"slack_thread": {"channel_id": "C-code", "thread_ts": "0"}},
+        }
+    )
+    client = type("Client", (), {"threads": threads})()
+    rename = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr("agent.thread_title.rename_session", rename)
+
+    await generate_and_store_thread_title(
+        thread_id="thread-123",
+        conversation="please review title generation",
+        model=cast(BaseChatModel, _Model()),
+        client=client,
+    )
+
+    rename.assert_awaited_once_with("C-code", "Review thread title generation")
 
 
 @pytest.mark.asyncio
