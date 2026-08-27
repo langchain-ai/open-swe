@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
+MAX_IDLE_TICKS = 5
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 
@@ -54,16 +55,21 @@ async def ensure_background_task_cron(thread_id: str) -> str:
     return cron_id
 
 
-async def _delete_crons(thread_id: str) -> None:
+async def _delete_crons(thread_id: str) -> int:
     client = _client()
     crons = await client.crons.search(
         metadata={"kind": CRON_KIND, "thread_id": thread_id},
         limit=10,
     )
+    deleted = 0
     for cron in crons or []:
         cron_id = cron.get("cron_id") if isinstance(cron, dict) else None
         if isinstance(cron_id, str):
             await client.crons.delete(cron_id)
+            deleted += 1
+    if not deleted:
+        logger.warning("No background-task crons found for thread %s", thread_id)
+    return deleted
 
 
 def _notification(task: dict[str, Any]) -> str:
@@ -127,11 +133,35 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     thread = await client.threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    idle_ticks = metadata.get("background_task_idle_ticks")
+    idle_ticks = idle_ticks if isinstance(idle_ticks, int) and idle_ticks >= 0 else 0
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or not sandbox_id:
-        await _delete_crons(thread_id)
+        await client.threads.update(
+            thread_id=thread_id, metadata={"background_task_idle_ticks": idle_ticks + 1}
+        )
+        try:
+            await _delete_crons(thread_id)
+        except Exception:
+            logger.warning(
+                "Failed to delete background-task crons for thread %s", thread_id, exc_info=True
+            )
         return {"status": "missing_sandbox"}
-    backend = await create_sandbox(sandbox_id)
+    try:
+        backend = await create_sandbox(sandbox_id)
+    except Exception:
+        idle_ticks += 1
+        await client.threads.update(
+            thread_id=thread_id, metadata={"background_task_idle_ticks": idle_ticks}
+        )
+        if idle_ticks > MAX_IDLE_TICKS:
+            try:
+                await _delete_crons(thread_id)
+            except Exception:
+                logger.warning(
+                    "Failed to delete background-task crons for thread %s", thread_id, exc_info=True
+                )
+        return {"status": "sandbox_unreachable", "delivered": 0}
     tasks = await _list_tasks(backend)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
@@ -160,23 +190,41 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             await _unclaim(backend, task_id)
             logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
     pending = any(task.get("notification") != "done" for task in terminal)
+    idle_ticks = 0 if running or pending or delivered else idle_ticks + 1
+    await client.threads.update(
+        thread_id=thread_id, metadata={"background_task_idle_ticks": idle_ticks}
+    )
+    if idle_ticks > MAX_IDLE_TICKS:
+        try:
+            await _delete_crons(thread_id)
+        except Exception:
+            logger.warning(
+                "Failed to delete background-task crons for thread %s", thread_id, exc_info=True
+            )
+        return {"status": "idle", "delivered": delivered}
     if not running and not pending:
         lock = await backend.aexecute(
             f"mkdir -p {shlex.quote(TASK_ROOT)} && mkdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null",
             timeout=10,
         )
-        if getattr(lock, "exit_code", None) == 0:
-            try:
-                fresh = await _list_tasks(backend)
-                if not any(
-                    task.get("status") == "running"
-                    or (
-                        task.get("status") in TERMINAL_STATES and task.get("notification") != "done"
-                    )
-                    for task in fresh
-                ):
+        lock_acquired = getattr(lock, "exit_code", None) == 0
+        try:
+            fresh = await _list_tasks(backend)
+            if not any(
+                task.get("status") == "running"
+                or (task.get("status") in TERMINAL_STATES and task.get("notification") != "done")
+                for task in fresh
+            ):
+                try:
                     await _delete_crons(thread_id)
-            finally:
+                except Exception:
+                    logger.warning(
+                        "Failed to delete background-task crons for thread %s",
+                        thread_id,
+                        exc_info=True,
+                    )
+        finally:
+            if lock_acquired:
                 await backend.aexecute(
                     f"rmdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null || true", timeout=10
                 )
