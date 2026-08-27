@@ -2696,8 +2696,8 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
             calls.append(("cancel_many", kwargs))
 
     class FakeStore:
-        async def get_item(self, namespace: tuple[str, str], key: str) -> None:
-            return None
+        async def delete_item(self, namespace: tuple[str, str], key: str) -> None:
+            calls.append(("delete_item", {"namespace": namespace, "key": key}))
 
     class FakeClient:
         threads = FakeThreads()
@@ -2715,6 +2715,10 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
             "run_ids": ["pending-run", "running-run"],
             "action": "interrupt",
         },
+    )
+    assert calls[3] == (
+        "delete_item",
+        {"namespace": ("queue", "thread-1"), "key": "pending_messages"},
     )
     # Reported as interrupted even though the platform still says busy.
     assert result["status"] == "interrupted"
@@ -2782,9 +2786,14 @@ async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypa
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))
 
+    class FakeStore:
+        async def delete_item(self, namespace: tuple[str, str], key: str) -> None:
+            calls.append(("delete_item", {"namespace": namespace, "key": key}))
+
     class FakeClient:
         threads = FakeThreads()
         runs = FakeRuns()
+        store = FakeStore()
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
@@ -2798,7 +2807,11 @@ async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypa
             "action": "interrupt",
         },
     )
-    assert calls[3][0] == "update"
+    assert calls[3] == (
+        "delete_item",
+        {"namespace": ("queue", "thread-1"), "key": "pending_messages"},
+    )
+    assert calls[4][0] == "update"
     assert thread["metadata"]["latest_run_status"] == "interrupted"
     assert result["id"] == "thread-1"
 
