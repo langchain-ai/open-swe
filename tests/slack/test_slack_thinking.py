@@ -30,9 +30,9 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     client = AsyncMock()
     client.runs.join_stream = join_stream
     client.runs.get.return_value = {"status": "success"}
-    start = AsyncMock(return_value=("2.0", None))
-    append = AsyncMock(return_value=(True, None))
-    stop = AsyncMock(return_value=(True, None))
+    start = AsyncMock(return_value="2.0")
+    append = AsyncMock()
+    stop = AsyncMock()
     monkeypatch.setattr(slack_thinking, "start_slack_stream", start)
     monkeypatch.setattr(slack_thinking, "append_slack_stream", append)
     monkeypatch.setattr(slack_thinking, "stop_slack_stream", stop)
@@ -63,7 +63,7 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
 
 
 async def test_stop_sends_pending_updates_despite_append_backoff(monkeypatch) -> None:
-    stop = AsyncMock(return_value=(True, None))
+    stop = AsyncMock()
     monkeypatch.setattr(slack_thinking, "stop_slack_stream", stop)
     stream = slack_thinking.SlackThinkingStream(
         client=AsyncMock(),
@@ -103,7 +103,9 @@ async def test_stop_sends_pending_updates_despite_append_backoff(monkeypatch) ->
 async def test_rate_limit_defers_append_until_retry_after(monkeypatch) -> None:
     clock = 10.0
     monkeypatch.setattr(slack_thinking, "monotonic", lambda: clock)
-    append = AsyncMock(side_effect=[(False, "rate_limited: 30"), (True, None)])
+    append = AsyncMock(
+        side_effect=[slack_thinking.SlackStreamError("rate_limited", retry_after=30), None]
+    )
     monkeypatch.setattr(slack_thinking, "append_slack_stream", append)
     stream = slack_thinking.SlackThinkingStream(
         client=AsyncMock(),

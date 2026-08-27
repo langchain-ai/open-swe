@@ -11,6 +11,7 @@ from typing import Any, Literal
 from langgraph_sdk.client import LangGraphClient
 
 from .utils.slack import (
+    SlackStreamError,
     append_slack_stream,
     start_slack_stream,
     stop_slack_stream,
@@ -144,15 +145,16 @@ class SlackThinkingStream:
         initial = Step(
             _step_id(self.run_id, (), "startup"), "Preparing the agent workspace", "in_progress"
         )
-        self.message_ts, error = await start_slack_stream(
-            self.channel_id,
-            self.thread_ts,
-            [initial.chunk()],
-            recipient_user_id=self.recipient_user_id,
-            recipient_team_id=self.recipient_team_id,
-        )
-        if not self.message_ts:
-            logger.info("Slack Thinking Steps unavailable for run %s: %s", self.run_id, error)
+        try:
+            self.message_ts = await start_slack_stream(
+                self.channel_id,
+                self.thread_ts,
+                [initial.chunk()],
+                recipient_user_id=self.recipient_user_id,
+                recipient_team_id=self.recipient_team_id,
+            )
+        except SlackStreamError as exc:
+            logger.info("Slack Thinking Steps unavailable for run %s: %s", self.run_id, exc.code)
             return False
         self.steps[((), "startup")] = initial
         await store_slack_run_mapping(
@@ -210,21 +212,21 @@ class SlackThinkingStream:
         if now < self.retry_at or (not force and now - self.last_flush < _FLUSH_INTERVAL_SECONDS):
             return
         chunks = [step.chunk() for step in self.pending.values()]
-        ok, error = await append_slack_stream(self.channel_id, self.message_ts, chunks)
-        if ok:
-            self.pending.clear()
-            self.last_flush = monotonic()
-            self.retry_at = 0.0
-        elif (error or "").startswith("rate_limited"):
-            _, _, raw_delay = (error or "").partition(":")
-            try:
-                delay = float(raw_delay.strip()) if raw_delay else _DEFAULT_RETRY_SECONDS
-            except ValueError:
-                delay = _DEFAULT_RETRY_SECONDS
-            self.retry_at = monotonic() + min(max(delay, 1.0), _MAX_RETRY_SECONDS)
-        else:
-            logger.warning("Disabling Slack Thinking Steps for run %s: %s", self.run_id, error)
-            self.disabled = True
+        try:
+            await append_slack_stream(self.channel_id, self.message_ts, chunks)
+        except SlackStreamError as exc:
+            if exc.code == "rate_limited":
+                delay = exc.retry_after if exc.retry_after is not None else _DEFAULT_RETRY_SECONDS
+                self.retry_at = monotonic() + min(max(delay, 1.0), _MAX_RETRY_SECONDS)
+            else:
+                logger.warning(
+                    "Disabling Slack Thinking Steps for run %s: %s", self.run_id, exc.code
+                )
+                self.disabled = True
+            return
+        self.pending.clear()
+        self.last_flush = monotonic()
+        self.retry_at = 0.0
 
     async def stop(self, status: str) -> None:
         for step in self.steps.values():
@@ -234,13 +236,14 @@ class SlackThinkingStream:
                 self.pending[step.task_id] = step
         if self.message_ts:
             chunks = [step.chunk() for step in self.pending.values()]
-            ok, error = await stop_slack_stream(self.channel_id, self.message_ts, chunks)
-            if ok:
-                self.pending.clear()
-            else:
+            try:
+                await stop_slack_stream(self.channel_id, self.message_ts, chunks)
+            except SlackStreamError as exc:
                 logger.warning(
-                    "Could not stop Slack Thinking Steps for run %s: %s", self.run_id, error
+                    "Could not stop Slack Thinking Steps for run %s: %s", self.run_id, exc.code
                 )
+            else:
+                self.pending.clear()
 
 
 async def stream_slack_thinking_steps(

@@ -49,9 +49,9 @@ async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatc
         appended = await slack_utils.append_slack_stream("C1", "1.0", chunks)
         stopped = await slack_utils.stop_slack_stream("C1", "1.0", chunks)
 
-    assert started == ("1.0", None)
-    assert appended == (True, None)
-    assert stopped == (True, None)
+    assert started == "1.0"
+    assert appended is None
+    assert stopped is None
     calls = client_cm.post.await_args_list
     assert calls[0].args[0].endswith("/chat.startStream")
     assert calls[0].kwargs["json"] == {
@@ -80,6 +80,23 @@ async def test_code_channel_stream_is_top_level(monkeypatch: pytest.MonkeyPatch)
         await slack_utils.start_slack_stream("C1", "0", [])
 
     assert "thread_ts" not in client_cm.post.await_args.kwargs["json"]
+
+
+@pytest.mark.asyncio
+async def test_slack_stream_rate_limit_preserves_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_rate_limited_response(retry_after="30"))
+
+    with (
+        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        pytest.raises(slack_utils.SlackStreamError) as raised,
+    ):
+        await slack_utils.append_slack_stream("C1", "1.0", [])
+
+    assert raised.value.code == "rate_limited"
+    assert raised.value.retry_after == 30
 
 
 @pytest.mark.asyncio

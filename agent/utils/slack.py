@@ -669,30 +669,41 @@ async def post_slack_top_level_message_with_ts(
     )
 
 
-async def _slack_stream_call(
-    method: str, payload: dict[str, Any]
-) -> tuple[dict[str, Any] | None, str | None]:
+class SlackStreamError(Exception):
+    def __init__(self, code: str, *, retry_after: float | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retry_after = retry_after
+
+
+async def _slack_stream_call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not SLACK_BOT_TOKEN:
-        return None, "missing_slack_bot_token"
+        raise SlackStreamError("missing_slack_bot_token")
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/{method}", headers=_slack_headers(), json=payload
             )
             if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                return None, f"rate_limited: {retry_after}" if retry_after else "rate_limited"
+                raw_retry_after = response.headers.get("Retry-After")
+                try:
+                    retry_after = float(raw_retry_after) if raw_retry_after else None
+                except ValueError:
+                    retry_after = None
+                raise SlackStreamError("rate_limited", retry_after=retry_after)
             response.raise_for_status()
             data = response.json()
+        except SlackStreamError:
+            raise
         except (httpx.HTTPError, ValueError) as exc:
             logger.exception("Slack %s request failed", method)
-            return None, f"http_error: {type(exc).__name__}"
+            raise SlackStreamError(f"http_error:{type(exc).__name__}") from exc
         if not isinstance(data, dict):
-            return None, "invalid_response"
+            raise SlackStreamError("invalid_response")
         if not data.get("ok"):
             error = str(data.get("error") or "unknown_error")
-            return None, "rate_limited" if error == "ratelimited" else error
-        return data, None
+            raise SlackStreamError("rate_limited" if error == "ratelimited" else error)
+        return data
 
 
 async def start_slack_stream(
@@ -702,7 +713,7 @@ async def start_slack_stream(
     *,
     recipient_user_id: str = "",
     recipient_team_id: str = "",
-) -> tuple[str | None, str | None]:
+) -> str:
     """Start a Slack Thinking Steps stream and return its message timestamp."""
     from .slack_code_channels import is_code_channel_session
 
@@ -717,19 +728,20 @@ async def start_slack_stream(
         payload["recipient_user_id"] = recipient_user_id
     if recipient_team_id:
         payload["recipient_team_id"] = recipient_team_id
-    data, error = await _slack_stream_call("chat.startStream", payload)
-    message_ts = data.get("ts") if data else None
-    return (message_ts if isinstance(message_ts, str) and message_ts else None), error
+    data = await _slack_stream_call("chat.startStream", payload)
+    message_ts = data.get("ts")
+    if not isinstance(message_ts, str) or not message_ts:
+        raise SlackStreamError("missing_message_ts")
+    return message_ts
 
 
 async def append_slack_stream(
     channel_id: str, message_ts: str, chunks: list[dict[str, Any]]
-) -> tuple[bool, str | None]:
+) -> None:
     """Append structured chunks to a Slack stream."""
-    _, error = await _slack_stream_call(
+    await _slack_stream_call(
         "chat.appendStream", {"channel": channel_id, "ts": message_ts, "chunks": chunks}
     )
-    return error is None, error
 
 
 async def stop_slack_stream(
@@ -738,7 +750,7 @@ async def stop_slack_stream(
     chunks: list[dict[str, Any]] | None = None,
     *,
     session_status: str = "active",
-) -> tuple[bool, str | None]:
+) -> None:
     """Finalize a Slack stream."""
     payload: dict[str, Any] = {
         "channel": channel_id,
@@ -747,10 +759,11 @@ async def stop_slack_stream(
     }
     if chunks:
         payload["chunks"] = chunks
-    _, error = await _slack_stream_call("chat.stopStream", payload)
-    if error in {"message_not_in_streaming_state", "stopped_by_user"}:
-        return True, None
-    return error is None, error
+    try:
+        await _slack_stream_call("chat.stopStream", payload)
+    except SlackStreamError as exc:
+        if exc.code not in {"message_not_in_streaming_state", "stopped_by_user"}:
+            raise
 
 
 async def update_slack_message(
