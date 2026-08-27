@@ -24,7 +24,6 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.slack_thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
@@ -36,6 +35,7 @@ from . import common
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
+
 _MENTION_PREAMBLE = "You were mentioned in Slack.\n\n"
 
 _UNTAGGED_REPLY_PREAMBLE = (
@@ -914,19 +914,6 @@ async def _process_slack_mention_impl(
         thread_id,
     )
     run_id = run.get("run_id")
-    if code_channel and isinstance(run_id, str) and run_id:
-        stream_thread_ts = reply_thread_ts or thread_ts
-        await stream_slack_thinking_steps(
-            client=langgraph_client,
-            thread_id=thread_id,
-            run_id=run_id,
-            channel_id=channel_id,
-            thread_ts=stream_thread_ts,
-            mapping_thread_ts=thread_ts,
-            original_message_ts=original_message_ts,
-            recipient_user_id=user_id,
-            recipient_team_id=str(event_data.get("team_id") or ""),
-        )
     if is_first_mention:
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
