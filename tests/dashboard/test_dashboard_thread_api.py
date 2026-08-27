@@ -497,6 +497,36 @@ async def test_thread_summary_omits_slack_source_url_for_public_repo() -> None:
     assert summary["sourceUrl"] is None
 
 
+async def test_thread_summary_includes_code_channel_url() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {
+                    "slack_thread": {"channel_id": "C code&channel", "thread_ts": "0"}
+                },
+            }
+        )
+    )
+
+    assert summary["codeChannelUrl"] == ("https://slack.com/app_redirect?channel=C+code%26channel")
+
+
+async def test_thread_summary_omits_code_channel_url_for_slack_thread() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {
+                    "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"}
+                },
+            }
+        )
+    )
+
+    assert summary["codeChannelUrl"] is None
+
+
 async def test_recovery_patch_reaches_any_authenticated_user(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
