@@ -130,29 +130,44 @@ async def resolve_run_metadata(config: dict[str, Any], thread_id: str) -> dict[s
     return metadata
 
 
+ARTIFACT_ROUTE_NAMES = ("large_tool_results", "conversation_history")
+
+
 def _artifacts_root() -> Path:
+    """Where the agent's scratch files go.
+
+    ``tempfile.gettempdir()`` probes the filesystem — ``os.getcwd()`` among
+    other calls — the first time it runs, so this belongs off the event loop.
+    Its caller does that; do not call it directly from async code.
+    """
     configured = os.environ.get("OPEN_SWE_LOCAL_ARTIFACTS_DIR")
     if configured:
         return Path(configured)
     return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
 
 
+def _build_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
+    # The thread id becomes a path segment, so it may only be a plain name.
+    safe_id = re.sub(r"[^A-Za-z0-9._-]", "-", thread_id or "thread").lstrip(".") or "thread"
+    root = _artifacts_root() / safe_id
+    routes: dict[str, FilesystemBackend] = {}
+    for name in ARTIFACT_ROUTE_NAMES:
+        directory = root / name
+        directory.mkdir(parents=True, exist_ok=True)
+        routes[f"/{name}/"] = FilesystemBackend(root_dir=directory, virtual_mode=True)
+    return routes
+
+
 async def local_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
     """Backends for the agent's own scratch files on a local run.
 
     Offloaded tool results and evicted history default to the artifacts root,
-    which for a local run is the user's project: the dumps would show up as
-    changes and be swept into the next `git add -A`. Route them out of the
-    repository while leaving the virtual paths the model sees unchanged.
+    which for a local run is the user's project: the dumps would be relayed to
+    their machine, show up as changes, and be swept into the next `git add -A`.
+    Route them out of the repository while leaving the virtual paths the model
+    sees unchanged.
+
+    Every filesystem touch happens in one worker thread: this runs inside the
+    graph factory, on the event loop the whole deployment shares.
     """
-    # The thread id becomes a path segment, so it may only be a plain name.
-    safe_id = re.sub(r"[^A-Za-z0-9._-]", "-", thread_id or "thread").lstrip(".") or "thread"
-    root = _artifacts_root() / safe_id
-    routes = {}
-    for name in ("large_tool_results", "conversation_history"):
-        directory = root / name
-        await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
-        routes[f"/{name}/"] = await asyncio.to_thread(
-            FilesystemBackend, root_dir=directory, virtual_mode=True
-        )
-    return routes
+    return await asyncio.to_thread(_build_artifact_routes, thread_id)

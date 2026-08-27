@@ -104,6 +104,26 @@ async def test_artifact_routes_stay_out_of_the_project(
         assert root == (artifacts / "thread-1" / prefix.strip("/")).resolve()
 
 
+async def test_artifact_routes_do_not_block_the_event_loop_without_a_configured_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unconfigured path is the one that runs in production.
+
+    With no ``OPEN_SWE_LOCAL_ARTIFACTS_DIR`` the root comes from
+    ``tempfile.gettempdir()``, which probes the filesystem on first use. This
+    runs inside the graph factory, on the loop the whole deployment shares, so
+    a blocking call here fails the run outright under `langgraph dev`.
+    """
+    monkeypatch.delenv("OPEN_SWE_LOCAL_ARTIFACTS_DIR", raising=False)
+
+    with detect_blocking_calls():
+        routes = await local_artifact_routes("thread-blocking")
+
+    assert set(routes) == {"/large_tool_results/", "/conversation_history/"}
+    for backend in routes.values():
+        assert Path(str(backend.cwd)).is_dir()
+
+
 async def test_artifact_routes_reject_a_traversing_thread_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
