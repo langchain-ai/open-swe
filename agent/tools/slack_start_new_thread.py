@@ -153,7 +153,6 @@ def _new_slack_thread_context(
     return {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
-        "thread_version": 0,
         "triggering_user_id": original.get("triggering_user_id", ""),
         "triggering_user_name": original.get("triggering_user_name", ""),
         "triggering_user_email": original.get("triggering_user_email", ""),
