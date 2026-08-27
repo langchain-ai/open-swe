@@ -62,6 +62,7 @@ async def test_slack_thread_reply_rejects_stale_thread_version(
     assert "NOT posted" in result["hint"]
     assert "thread_version=1" in result["hint"]
     assert "slack_read_thread_messages" in result["hint"]
+    assert "new input to the run" in result["hint"]
 
 
 async def test_slack_thread_reply_stale_version_without_fetchable_thread(

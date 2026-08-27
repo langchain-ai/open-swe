@@ -31,8 +31,8 @@ async def slack_thread_reply(
     answer or outcome. Pass the current `thread_version` from Slack context or
     `slack_read_thread_messages`; if a newer message arrived the post is rejected and
     nobody sees it, and the result carries the new messages plus the `thread_version`
-    to use — call this tool again immediately with that value rather than ending the
-    run. For Slack-triggered information-only
+    to use — treat those messages as new input to the run, act on them, then post
+    again rather than ending the run. For Slack-triggered information-only
     requests, put the complete answer in `message`, not merely a summary, and do not
     repeat it in the final assistant response. Make `message` as concise as possible: default
     to one sentence with only the outcome/status and link, or one blocking
@@ -152,9 +152,10 @@ async def _stale_version_result(
             if transcript
             else "Call slack_read_thread_messages to see them. "
         )
-        + f"Call slack_thread_reply again right now with thread_version={current_version}, "
-        "revising the message only if the new messages change the answer. Never end the run "
-        "with an unposted reply."
+        + "Read them and treat them as new input to the run: they may change the answer, ask "
+        "for something else entirely, or require more work before you can reply. Once you "
+        f"have acted on them, post with thread_version={current_version}. Never end the run "
+        "without replying."
     )
     result: dict[str, Any] = {
         "success": False,
