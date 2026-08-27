@@ -112,6 +112,25 @@ async def test_context_bar_action_routes_to_code_channel_session(
     assert "create-pr" in code_channel_route.await_args.args[0]["text"]
 
 
+@pytest.mark.parametrize("is_private", [False, True])
+async def test_create_code_channel_sets_visibility(
+    monkeypatch: pytest.MonkeyPatch, is_private: bool
+) -> None:
+    call = AsyncMock(return_value=({"channel": {"id": "C-code"}}, None))
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    channel_id, error = await slack_code_channels.create_code_channel(
+        name="Fix flaky tests",
+        session_id="thread-1",
+        origin_channel_id="C-origin",
+        origin_message_ts="1.000",
+        is_private=is_private,
+    )
+
+    assert (channel_id, error) == ("C-code", None)
+    assert call.await_args_list[0].args[1]["is_private"] is is_private
+
+
 async def test_set_view_rejects_content_over_one_megabyte(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
