@@ -252,8 +252,9 @@ async def test_import_local_thread_seeds_idle_cloud_state(monkeypatch) -> None:
             ]
         }
     ]
-    assert created["metadata"]["source"] == "dashboard"
-    assert "slack_thread" not in created["metadata"]
+    metadata = cast(dict[str, object], created["metadata"])
+    assert metadata["source"] == "dashboard"
+    assert "slack_thread" not in metadata
 
 
 def test_sanitize_local_import_rejects_system_messages() -> None:
