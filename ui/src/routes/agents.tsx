@@ -69,6 +69,7 @@ function AgentsLayout() {
       localOnly={localOnly}
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
+      hideSidebar={nestedRoute === "plan"}
     >
       <AgentThreadStreamProvider
         threadId={activeThreadId ?? null}
