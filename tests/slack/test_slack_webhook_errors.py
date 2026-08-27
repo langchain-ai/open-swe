@@ -486,7 +486,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
             "bot_user_id": "BOT",
             "thread_id": "t1",
             "message_update": True,
-            "thread_version": 1,
         },
         {"owner": "langchain-ai", "name": "open-swe"},
     )

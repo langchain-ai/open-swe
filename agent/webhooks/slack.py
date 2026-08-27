@@ -241,7 +241,6 @@ async def _slack_user_can_reply_to_ready_plan(
 def _format_slack_thread_section(
     channel_id: str,
     thread_ts: str,
-    thread_version: int,
     context_source: str,
     channel_context: dict[str, Any] | None,
 ) -> str:
@@ -256,7 +255,6 @@ def _format_slack_thread_section(
     if channel_name:
         lines.append(f"- Channel name: #{channel_name}")
     lines.append(f"- Thread TS: {thread_ts}")
-    lines.append(f"- Thread version: {thread_version}")
     lines.append(f"- Context starts at: {context_source}")
     channel_description = common.get_slack_channel_context_description(channel_context)
     if channel_description:
@@ -590,15 +588,6 @@ async def _process_slack_mention_impl(
     thread_id = event_data.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
-    supplied_thread_version = event_data.get("thread_version")
-    thread_version = (
-        supplied_thread_version
-        if isinstance(supplied_thread_version, int)
-        else await common.increment_slack_thread_version(
-            langgraph_client, channel_id, thread_ts, original_message_ts
-        )
-    )
-
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
         await common.refresh_user_mapping_cache()
@@ -711,7 +700,7 @@ async def _process_slack_mention_impl(
     )
 
     slack_thread_section = _format_slack_thread_section(
-        channel_id, thread_ts, thread_version, context_source, channel_context
+        channel_id, thread_ts, context_source, channel_context
     )
     operational_context = (
         _slack_prompt_preamble(untagged_reply, message_update) + "## Default Repository Hint\n"
@@ -818,7 +807,6 @@ async def _process_slack_mention_impl(
         "channel_id": channel_id,
         "channel_context": channel_context,
         "thread_ts": thread_ts,
-        "thread_version": thread_version,
         "triggering_user_id": user_id,
         "triggering_user_name": user_name,
         "triggering_user_email": user_email,

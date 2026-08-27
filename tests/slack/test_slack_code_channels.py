@@ -49,7 +49,6 @@ def code_channel_route(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         "get_slack_repo_config",
         AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
     )
-    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", AsyncMock(return_value=4))
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(slack_routes.service, "process_slack_mention", process)
     monkeypatch.setattr(slack_routes, "_synthetic_slack_ts", lambda: "1786574000.000001")
@@ -79,7 +78,6 @@ async def test_runtime_slash_command_routes_to_code_channel_session(
     assert code_channel_route.await_args is not None
     event_data = code_channel_route.await_args.args[0]
     assert event_data["thread_ts"] == "0"
-    assert event_data["thread_version"] == 4
     assert event_data["explicit_request"] is True
     assert "/run-tests tests/slack" in event_data["text"]
 
@@ -112,6 +110,25 @@ async def test_context_bar_action_routes_to_code_channel_session(
     assert response["status"] == "accepted"
     assert code_channel_route.await_args is not None
     assert "create-pr" in code_channel_route.await_args.args[0]["text"]
+
+
+@pytest.mark.parametrize("is_private", [False, True])
+async def test_create_code_channel_sets_visibility(
+    monkeypatch: pytest.MonkeyPatch, is_private: bool
+) -> None:
+    call = AsyncMock(return_value=({"channel": {"id": "C-code"}}, None))
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    channel_id, error = await slack_code_channels.create_code_channel(
+        name="Fix flaky tests",
+        session_id="thread-1",
+        origin_channel_id="C-origin",
+        origin_message_ts="1.000",
+        is_private=is_private,
+    )
+
+    assert (channel_id, error) == ("C-code", None)
+    assert call.await_args_list[0].args[1]["is_private"] is is_private
 
 
 async def test_set_view_rejects_content_over_one_megabyte(
@@ -194,7 +211,6 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
         "get_slack_repo_config",
         AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
     )
-    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", AsyncMock(return_value=1))
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
 
     background_tasks = BackgroundTasks()
