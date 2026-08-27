@@ -10,6 +10,7 @@ _TOOL_MODULES = {
     "capture_environment_snapshot": ".environments",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
+    "create_sandbox_service_url": ".create_sandbox_service_url",
     "delete_automation": ".automations",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
@@ -74,6 +75,7 @@ __all__ = [
     "capture_environment_snapshot",
     "create_automation",
     "create_sandbox_file_download_url",
+    "create_sandbox_service_url",
     "delete_automation",
     "delete_environment",
     "enter_plan_mode",
@@ -142,6 +144,7 @@ if TYPE_CHECKING:
     )
     from .background_execute import background_execute, background_task
     from .create_sandbox_file_download_url import create_sandbox_file_download_url
+    from .create_sandbox_service_url import create_sandbox_service_url
     from .enter_plan_mode import enter_plan_mode
     from .environments import (
         capture_environment_snapshot,

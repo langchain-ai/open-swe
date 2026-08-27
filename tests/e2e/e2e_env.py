@@ -56,6 +56,7 @@ _DEFAULTS = {
     "SLACK_BOT_TOKEN": "xoxb-test-token",
     "SLACK_BOT_USER_ID": BOT_USER_ID,
     "SLACK_BOT_USERNAME": BOT_USERNAME,
+    "SLACK_TEAM_ID": "T_TEST",
     # Slack runs resolve the repo from this when the channel/thread carry none.
     "DEFAULT_REPO_OWNER": OWNER,
     "DEFAULT_REPO_NAME": REPO,

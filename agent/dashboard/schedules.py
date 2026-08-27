@@ -374,7 +374,7 @@ async def update_agent_schedule(
     if body.name is not None:
         patch["name"] = body.name.strip() or _derive_name(patch.get("prompt", existing["prompt"]))
     if body.repo is not None:
-        patch["repo"] = await repo_config_for_user(login, body.repo)
+        patch["repo"] = await repo_config_for_user(existing["created_by"], body.repo)
     if body.model_id is not None or body.effort is not None:
         model, effort = normalize_model_choice(body.model_id, body.effort)
         if model and effort:

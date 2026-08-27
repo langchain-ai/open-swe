@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -71,6 +72,12 @@ def _slack_headers() -> dict[str, str]:
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json; charset=utf-8",
     }
+
+
+def _slack_auth_headers() -> dict[str, str]:
+    if not SLACK_BOT_TOKEN:
+        return {}
+    return {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
 
 
 def _parse_ts(ts: str | None) -> float:
@@ -662,6 +669,90 @@ async def post_slack_top_level_message_with_ts(
     )
 
 
+async def _slack_stream_call(
+    method: str, payload: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str | None]:
+    if not SLACK_BOT_TOKEN:
+        return None, "missing_slack_bot_token"
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/{method}", headers=_slack_headers(), json=payload
+            )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                return None, f"rate_limited: {retry_after}" if retry_after else "rate_limited"
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.exception("Slack %s request failed", method)
+            return None, f"http_error: {type(exc).__name__}"
+        if not isinstance(data, dict):
+            return None, "invalid_response"
+        if not data.get("ok"):
+            error = str(data.get("error") or "unknown_error")
+            return None, "rate_limited" if error == "ratelimited" else error
+        return data, None
+
+
+async def start_slack_stream(
+    channel_id: str,
+    thread_ts: str,
+    chunks: list[dict[str, Any]],
+    *,
+    recipient_user_id: str = "",
+    recipient_team_id: str = "",
+) -> tuple[str | None, str | None]:
+    """Start a Slack Thinking Steps stream and return its message timestamp."""
+    from .slack_code_channels import is_code_channel_session
+
+    payload: dict[str, Any] = {
+        "channel": channel_id,
+        "chunks": chunks,
+        "task_display_mode": "timeline",
+    }
+    if not is_code_channel_session(thread_ts):
+        payload["thread_ts"] = thread_ts
+    if recipient_user_id:
+        payload["recipient_user_id"] = recipient_user_id
+    if recipient_team_id:
+        payload["recipient_team_id"] = recipient_team_id
+    data, error = await _slack_stream_call("chat.startStream", payload)
+    message_ts = data.get("ts") if data else None
+    return (message_ts if isinstance(message_ts, str) and message_ts else None), error
+
+
+async def append_slack_stream(
+    channel_id: str, message_ts: str, chunks: list[dict[str, Any]]
+) -> tuple[bool, str | None]:
+    """Append structured chunks to a Slack stream."""
+    _, error = await _slack_stream_call(
+        "chat.appendStream", {"channel": channel_id, "ts": message_ts, "chunks": chunks}
+    )
+    return error is None, error
+
+
+async def stop_slack_stream(
+    channel_id: str,
+    message_ts: str,
+    chunks: list[dict[str, Any]] | None = None,
+    *,
+    session_status: str = "active",
+) -> tuple[bool, str | None]:
+    """Finalize a Slack stream."""
+    payload: dict[str, Any] = {
+        "channel": channel_id,
+        "ts": message_ts,
+        "session_status": session_status,
+    }
+    if chunks:
+        payload["chunks"] = chunks
+    _, error = await _slack_stream_call("chat.stopStream", payload)
+    if error in {"message_not_in_streaming_state", "stopped_by_user"}:
+        return True, None
+    return error is None, error
+
+
 async def update_slack_message(
     channel_id: str,
     message_ts: str,
@@ -733,8 +824,8 @@ async def upload_slack_thread_file(
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
             ticket_response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/files.getUploadURLExternal",
-                headers=_slack_headers(),
-                json={"filename": filename, "length": len(content)},
+                headers=_slack_auth_headers(),
+                data={"filename": filename, "length": str(len(content))},
             )
             ticket_error = _slack_response_error(ticket_response)
             if ticket_error:
@@ -759,17 +850,17 @@ async def upload_slack_thread_file(
                 return None, "upload_failed"
             upload_response.raise_for_status()
 
-            payload: dict[str, Any] = {
-                "files": [{"id": file_id, "title": title or filename}],
+            data: dict[str, str] = {
+                "files": json.dumps([{"id": file_id, "title": title or filename}]),
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
             }
             if initial_comment:
-                payload["initial_comment"] = initial_comment
+                data["initial_comment"] = initial_comment
             complete_response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/files.completeUploadExternal",
-                headers=_slack_headers(),
-                json=payload,
+                headers=_slack_auth_headers(),
+                data=data,
             )
             complete_error = _slack_response_error(complete_response)
             if complete_error:
@@ -1749,6 +1840,7 @@ async def store_slack_run_mapping(
     triggering_user_id: str | None = None,
     trace_message_ts: str | None = None,
     agent_thread_id: str | None = None,
+    thinking_message_ts: str | None = None,
 ) -> None:
     """Persist Slack thread/message to LangGraph run mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -1765,6 +1857,8 @@ async def store_slack_run_mapping(
         value["trace_message_ts"] = trace_message_ts
     if agent_thread_id:
         value["agent_thread_id"] = agent_thread_id
+    if thinking_message_ts:
+        value["thinking_message_ts"] = thinking_message_ts
     try:
         await langgraph_client.store.put_item(
             namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}", value

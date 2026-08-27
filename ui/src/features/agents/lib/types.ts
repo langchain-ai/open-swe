@@ -375,6 +375,7 @@ export interface AgentThread {
   updatedAt: number
   traceUrl?: string | null
   sourceUrl?: string | null
+  codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>

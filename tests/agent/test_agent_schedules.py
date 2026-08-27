@@ -350,6 +350,7 @@ async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, mon
     await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
 
     async def repo_config(login: str, full_name: str | None) -> dict[str, str] | None:
+        assert login == "alice"
         assert full_name == "langchain-ai/open-swe"
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -357,9 +358,9 @@ async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, mon
 
     result = await schedules.update_agent_schedule(
         "sched_1",
-        "alice",
+        "bob",
         ScheduleUpdateBody(repo="langchain-ai/open-swe"),
-        email="alice@example.com",
+        email="bob@example.com",
     )
 
     assert result["repo"] == "langchain-ai/open-swe"
