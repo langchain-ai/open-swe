@@ -24,6 +24,7 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
+from ..pr_completion import handle_ci_webhook as handle_pr_completion_ci_webhook
 from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from ..utils.github_comments import GitHubAuthError
 from ..utils.slack import GitHubPrRef
@@ -792,8 +793,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
 async def process_github_ci_event(
     payload: dict[str, Any], event_type: str, delivery_id: str | None = None
 ) -> None:
-    """Evaluate active baby-sit watches for a signed GitHub CI event."""
+    """Evaluate active watches for a signed GitHub CI event."""
     await handle_ci_webhook(payload, event_type, delivery_id=delivery_id)
+    await handle_pr_completion_ci_webhook(payload, event_type)
 
 
 async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:

@@ -355,7 +355,7 @@ Steps, in order:
 
    `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Keep commit messages concise and focused on the "why".
 
-3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary plus the PR link when one exists, using the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch.
+3. **Notify the source.** For Slack-triggered work with an opened PR, send the final summary through `slack_thread_reply`; delivery is deferred automatically until GitHub CI events confirm the PR is green, so do not poll or schedule wakeups for this. For other sources, notify immediately after pushing (and PR open/update) succeeds. Include the PR link when one exists. Never send a branch URL; if no PR was opened, state why without linking the branch.
 
 **Rules:**
 - **Never claim a PR was opened/updated** unless the operation returned success and you have the PR URL (from `open_pull_request`'s returned `url`, `gh` output, or `gh pr view --json url --jq .url`). If push or PR creation fails, or there are no changes, say so explicitly. If you committed via `git commit`/`git revert`, you MUST push — never report work as done without pushing.

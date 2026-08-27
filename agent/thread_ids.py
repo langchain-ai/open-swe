@@ -13,6 +13,7 @@ import uuid
 __all__ = [
     "baby_sit_lock_thread_id",
     "github_issue_thread_id",
+    "pr_completion_lock_thread_id",
     "linear_issue_thread_id",
     "pr_comment_thread_id",
     "review_style_thread_id",
@@ -55,6 +56,10 @@ def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> s
 
 def baby_sit_lock_thread_id(key: str) -> str:
     return _url_uuid(f"open-swe:baby-sit-lock:{key}")
+
+
+def pr_completion_lock_thread_id(key: str) -> str:
+    return _url_uuid(f"open-swe:pr-completion-lock:{key}")
 
 
 def linear_issue_thread_id(issue_id: str) -> str:

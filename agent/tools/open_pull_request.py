@@ -10,8 +10,13 @@ from langgraph_sdk import get_client
 
 from ..dashboard.agent_usage import record_agent_pr_usage
 from ..dashboard.plan_store import get_plan_content
+from ..pr_completion import arm_watch
+from ..source_context import SourceContext
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.github_app import get_github_app_installation_token
+from ..utils.github_app import (
+    get_github_app_installation_id_for_repo,
+    get_github_app_installation_token,
+)
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
 from ..utils.slack_code_channels import (
@@ -637,11 +642,50 @@ async def _record_pr_telemetry(
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
             slack_thread = configurable.get("slack_thread")
+            configured_slack_thread = slack_thread if isinstance(slack_thread, dict) else None
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,
-                slack_thread if isinstance(slack_thread, dict) else None,
+                configured_slack_thread,
             )
+            raw_head = details.get("head")
+            if not isinstance(raw_head, dict):
+                raw_head = pr.get("head")
+            pr_head = raw_head if isinstance(raw_head, dict) else {}
+            raw_head_sha = pr_head.get("sha")
+            head_sha = raw_head_sha if isinstance(raw_head_sha, str) else ""
+            source_slack_thread = dict(active) if active else None
+            if (
+                source_slack_thread
+                and configured_slack_thread
+                and configured_slack_thread.get("channel_id")
+                == source_slack_thread.get("channel_id")
+                and configured_slack_thread.get("thread_ts") == source_slack_thread.get("thread_ts")
+                and isinstance(configured_slack_thread.get("reply_thread_ts"), str)
+            ):
+                source_slack_thread["reply_thread_ts"] = configured_slack_thread["reply_thread_ts"]
+            source_context = SourceContext.parse(
+                {"slack_thread": source_slack_thread} if source_slack_thread else {}
+            )
+            if configured_slack_thread is not None and not source_context.slack_location:
+                raise RuntimeError("Slack delivery context is unavailable for PR completion")
+            if source_context.slack_location:
+                if not head_sha:
+                    raise RuntimeError("GitHub did not return a PR head SHA")
+                installation_id = await get_github_app_installation_id_for_repo(owner, repo)
+                if installation_id is None:
+                    raise RuntimeError("GitHub App installation is unavailable for PR completion")
+                await arm_watch(
+                    thread_id=thread_id,
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    pr_url=pr_url if isinstance(pr_url, str) else "",
+                    head_sha=head_sha,
+                    head_ref=head,
+                    installation_id=installation_id,
+                    source_context=source_context,
+                )
             if active and is_code_channel_session(str(active.get("thread_ts") or "")):
                 channel_id = str(active.get("channel_id") or "")
                 await set_context_bar(

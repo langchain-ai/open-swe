@@ -59,6 +59,7 @@ query PullRequestFixChecks(
           commit {
             oid
             statusCheckRollup {
+              state
               contexts(first: 100, after: $cursor) {
                 pageInfo { hasNextPage endCursor }
                 nodes {
@@ -271,6 +272,7 @@ async def _fetch_checks(
     seen_cursors: set[str] = set()
     checks: list[dict[str, Any]] = []
     head_sha: str | None = None
+    rollup_state: str | None = None
     while True:
         pull = await _graphql(
             client,
@@ -288,13 +290,30 @@ async def _fetch_checks(
         )
         commit = commit_wrapper.get("commit") if isinstance(commit_wrapper, dict) else None
         if not isinstance(commit, dict):
-            return {"headSha": None, "checks": [], "truncated": False}
+            return {
+                "headSha": None,
+                "rollupState": None,
+                "checks": [],
+                "truncated": False,
+            }
         oid = commit.get("oid")
         head_sha = oid if isinstance(oid, str) else head_sha
         rollup = commit.get("statusCheckRollup")
         if rollup is None:
-            return {"headSha": head_sha, "checks": [], "truncated": False}
-        contexts = rollup.get("contexts") if isinstance(rollup, dict) else None
+            return {
+                "headSha": head_sha,
+                "rollupState": None,
+                "checks": [],
+                "truncated": False,
+            }
+        if not isinstance(rollup, dict):
+            return None
+        state = rollup.get("state")
+        if cursor is None:
+            rollup_state = state if isinstance(state, str) else None
+        elif state != rollup_state:
+            return None
+        contexts = rollup.get("contexts")
         nodes = contexts.get("nodes") if isinstance(contexts, dict) else None
         if not isinstance(nodes, list):
             return None
@@ -304,10 +323,20 @@ async def _fetch_checks(
             if isinstance(node, dict) and (check := _actionable_check(node)) is not None
         )
         if len(checks) > _CONTEXT_LIMIT:
-            return {"headSha": head_sha, "checks": checks[:_CONTEXT_LIMIT], "truncated": True}
+            return {
+                "headSha": head_sha,
+                "rollupState": rollup_state,
+                "checks": checks[:_CONTEXT_LIMIT],
+                "truncated": True,
+            }
         page_info = contexts.get("pageInfo") if isinstance(contexts, dict) else None
         if not isinstance(page_info, dict) or page_info.get("hasNextPage") is not True:
-            return {"headSha": head_sha, "checks": checks, "truncated": False}
+            return {
+                "headSha": head_sha,
+                "rollupState": rollup_state,
+                "checks": checks,
+                "truncated": False,
+            }
         next_cursor = page_info.get("endCursor")
         if (
             not isinstance(next_cursor, str)
@@ -315,7 +344,12 @@ async def _fetch_checks(
             or next_cursor in seen_cursors
             or len(checks) >= _CONTEXT_LIMIT
         ):
-            return {"headSha": head_sha, "checks": checks[:_CONTEXT_LIMIT], "truncated": True}
+            return {
+                "headSha": head_sha,
+                "rollupState": rollup_state,
+                "checks": checks[:_CONTEXT_LIMIT],
+                "truncated": True,
+            }
         seen_cursors.add(next_cursor)
         cursor = next_cursor
 

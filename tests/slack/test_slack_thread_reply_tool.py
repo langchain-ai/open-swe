@@ -2,6 +2,7 @@ import importlib
 import json
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -17,6 +18,7 @@ def _patch_mutation_lock(monkeypatch: pytest.MonkeyPatch) -> None:
         yield
 
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
+    monkeypatch.setattr(slack_reply_tool, "defer_message", AsyncMock(return_value=None))
 
 
 def _config() -> dict[str, Any]:
@@ -50,6 +52,7 @@ async def test_slack_thread_reply_holds_mutation_lock_while_posting(
 
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
+    monkeypatch.setattr(slack_reply_tool, "defer_message", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
     assert await slack_reply_tool.slack_thread_reply("hello") == {"success": True}
@@ -87,6 +90,22 @@ async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
     assert await slack_reply_tool.slack_thread_reply("threaded") == {"success": True}
+
+
+async def test_slack_thread_reply_defers_after_pr_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _config()
+    config["configurable"]["thread_id"] = "thread-1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    defer = AsyncMock(return_value=object())
+    monkeypatch.setattr(slack_reply_tool, "defer_message", defer)
+    post = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_thread_reply("Done")
+
+    assert result == {"success": True, "deferred_until_pr_green": True}
+    defer.assert_awaited_once_with("thread-1", "Done")
+    post.assert_not_awaited()
 
 
 async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(

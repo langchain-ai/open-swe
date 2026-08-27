@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import hmac
+import importlib
 import logging
 import os
 import re
@@ -817,8 +818,13 @@ async def post_slack_thread_reply(
     *,
     blocks: list[dict[str, Any]] | None = None,
     agent_thread_id: str | None = None,
+    bypass_pr_completion_gate: bool = False,
 ) -> bool:
     """Post a reply in a Slack thread."""
+    if agent_thread_id is not None and not bypass_pr_completion_gate:
+        defer_message = importlib.import_module("agent.pr_completion").defer_message
+        if await defer_message(agent_thread_id, text) is not None:
+            return True
     kwargs: dict[str, Any] = {"blocks": blocks}
     if agent_thread_id is not None:
         kwargs["agent_thread_id"] = agent_thread_id
