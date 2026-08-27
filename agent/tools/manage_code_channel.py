@@ -232,7 +232,9 @@ async def _code_channel_title(client: Any, thread_id: str, fallback: str) -> str
     except Exception:  # noqa: BLE001
         return fallback
     metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
-    title = metadata.get("title") if isinstance(metadata, Mapping) else None
+    if not isinstance(metadata, Mapping) or metadata.get("title_seed") is not None:
+        return fallback
+    title = metadata.get("title")
     return title.strip() if isinstance(title, str) and title.strip() else fallback
 
 

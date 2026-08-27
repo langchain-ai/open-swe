@@ -14,9 +14,14 @@ manage_tool = import_module("agent.tools.manage_code_channel")
     ("metadata", "fallback", "expected"),
     [
         (
-            {"title": "  Match code channel and thread titles.  "},
+            {"title": "  Match code channel and thread titles.  ", "title_seed": None},
             "Different title",
             "Match code channel and thread titles.",
+        ),
+        (
+            {"title": "Original Slack message", "title_seed": "Original Slack message"},
+            "Fallback title",
+            "Fallback title",
         ),
         ({}, "Fallback title", "Fallback title"),
     ],
