@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from contextlib import suppress
-from typing import Any, Literal
+from typing import Any, Literal, Required, TypedDict
 
 from langgraph.config import get_config
 
@@ -43,6 +43,14 @@ from ..utils.thread_ops import langgraph_client
 from .create_sandbox_file_download_url import _resolve_sandbox_file
 
 
+class ContextBarItem(TypedDict, total=False):
+    key: Required[str]
+    label: Required[str]
+    icon: str
+    url: str
+    item_type: Literal["info", "action"]
+
+
 async def manage_code_channel(
     action: Literal[
         "create",
@@ -63,7 +71,7 @@ async def manage_code_channel(
     team_id: str = "",
     is_private: bool = False,
     status: SessionStatus = "active",
-    items: list[dict[str, Any]] | None = None,
+    items: list[ContextBarItem] | None = None,
     summary_message_ts: str = "",
     summary_thread_ts: str = "",
     resource: dict[str, Any] | None = None,
@@ -86,7 +94,11 @@ async def manage_code_channel(
     """Manage the complete Slack code-channel surface for this session.
 
     Use `create` to promote the current Slack thread using its generated title. Use
-    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
+    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. For
+    `context`, each item requires a unique `key` (1-64 chars) and human-readable `label` (1-128
+    chars); optional fields are a supported `icon`, a `url` up to 2048 chars, and `item_type` of
+    `info` or `action` (action items must not carry a `url`). Pass at most 5 items, for example
+    `items=[{"key": "repo", "label": "langchain-ai/open-swe", "item_type": "info"}]`. `view`
     upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
     can be passed directly or read from `file_path`, while Block Kit uses `blocks`
     plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
@@ -141,6 +153,17 @@ async def manage_code_channel(
         if items is None:
             return {"success": False, "error": "items is required"}
         ok, error = await set_context_bar(channel_id, items)
+        if error and error.startswith("invalid_context_bar_item_"):
+            return {
+                "success": False,
+                "error": error,
+                "hint": (
+                    "Each context item requires key and label; optional fields are icon, url, "
+                    'and item_type ("info" or "action"). Example: '
+                    'items=[{"key": "repo", "label": "langchain-ai/open-swe", '
+                    '"item_type": "info"}]'
+                ),
+            }
         return _result(action, channel_id, None, error if not ok else None)
     if action == "summary":
         data, error = await set_summary_message(

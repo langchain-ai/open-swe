@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.utils.slack_code_channels import _context_items_error
+
 manage_tool = import_module("agent.tools.manage_code_channel")
 
 
@@ -104,3 +106,38 @@ async def test_promotion_initializes_status_context_and_runtime_commands(
     status.assert_awaited_once_with("C-code", "processing")
     context.assert_awaited_once()
     commands.assert_awaited_once_with("C-code", manage_tool.DEFAULT_CODE_CHANNEL_COMMANDS)
+
+
+async def test_context_rejection_includes_item_shape_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        manage_tool, "get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+    )
+    monkeypatch.setattr(manage_tool, "langgraph_client", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        manage_tool,
+        "get_active_slack_thread",
+        AsyncMock(
+            return_value={"channel_id": "C-code", "thread_ts": manage_tool.CODE_CHANNEL_SESSION_TS}
+        ),
+    )
+    monkeypatch.setattr(
+        manage_tool,
+        "set_context_bar",
+        AsyncMock(return_value=(False, "invalid_context_bar_item_key")),
+    )
+
+    result = await manage_tool.manage_code_channel(
+        action="context", items=[{"text": "Question", "type": "text"}]
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "invalid_context_bar_item_key"
+    assert "key and label" in result["hint"]
+    assert '"key": "repo"' in result["hint"]
+
+
+def test_context_item_shapes_match_server_validation() -> None:
+    assert _context_items_error([{"text": "Question", "type": "text"}]) == (
+        "invalid_context_bar_item_key"
+    )
+    assert _context_items_error([{"key": "repo", "label": "langchain-ai/open-swe"}]) is None
