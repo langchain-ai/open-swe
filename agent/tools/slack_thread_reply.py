@@ -102,6 +102,7 @@ async def slack_thread_reply(
             run_id=run_id,
             triggering_user_id=_triggering_user_id(configurable),
         )
+        next_version = await get_slack_thread_version(client, channel_id, thread_ts)
     if message_ts is None:
         return {
             "success": False,
@@ -110,7 +111,7 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    return {"success": True, "thread_version": current_version}
+    return {"success": True, "thread_version": next_version}
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:

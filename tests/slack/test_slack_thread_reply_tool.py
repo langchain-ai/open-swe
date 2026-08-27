@@ -72,13 +72,19 @@ async def test_slack_thread_reply_holds_mutation_lock_while_posting(
         assert lock_held is True
         return "2.0", None
 
+    versions = iter([1, 2])
+
+    async def current_version(*_args: Any) -> int:
+        return next(versions)
+
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
+    monkeypatch.setattr(slack_reply_tool, "get_slack_thread_version", current_version)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
     assert await slack_reply_tool.slack_thread_reply("hello", 1) == {
         "success": True,
-        "thread_version": 1,
+        "thread_version": 2,
     }
     assert lock_held is False
 
