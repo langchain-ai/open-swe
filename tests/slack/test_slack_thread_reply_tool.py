@@ -54,6 +54,73 @@ async def test_slack_thread_reply_rejects_stale_thread_version(
     }
 
 
+async def test_slack_thread_reply_returns_post_state_thread_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    versions = iter([1, 3])
+
+    async def current_version(*_args: Any) -> int:
+        return next(versions)
+
+    async def post(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "get_slack_thread_version", current_version)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_thread_reply("hello", 1) == {
+        "success": True,
+        "thread_version": 3,
+    }
+
+
+async def test_slack_thread_reply_refreshes_benign_version_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    versions = iter([2, 3, 4])
+    posted = False
+
+    async def current_version(*_args: Any) -> int:
+        return next(versions)
+
+    async def post(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
+        nonlocal posted
+        posted = True
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "get_slack_thread_version", current_version)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_thread_reply("hello", 1) == {
+        "success": True,
+        "thread_version": 4,
+        "refreshed": True,
+    }
+    assert posted is True
+
+
+async def test_slack_thread_reply_retries_genuine_version_mismatch_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    versions = iter([2, 2])
+
+    async def current_version(*_args: Any) -> int:
+        return next(versions)
+
+    async def fail_if_posted(*_args: Any, **_kwargs: Any) -> tuple[str | None, str | None]:
+        pytest.fail("genuine stale reply must not be posted")
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "get_slack_thread_version", current_version)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fail_if_posted)
+
+    assert (await slack_reply_tool.slack_thread_reply("hello", 1))["error"] == (
+        "Slack thread version mismatch"
+    )
+
+
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -27,9 +27,10 @@ async def slack_thread_reply(
     """Post a message to the current Slack thread and the Web UI.
 
     Use this for clarifying questions, essential progress updates, and the final
-    answer or outcome. Pass the current `thread_version` from Slack context or
-    `slack_read_thread_messages`; if a newer message arrived, the post fails and
-    you must re-read the thread before retrying. For Slack-triggered information-only
+    answer or outcome. Pass the `thread_version` returned by your previous
+    successful `slack_thread_reply` call, or from `slack_read_thread_messages`.
+    The tool automatically refreshes benign version drift; a newer inbound message
+    may still require re-reading the thread. For Slack-triggered information-only
     requests, put the complete answer in `message`, not merely a summary, and do not
     repeat it in the final assistant response. Make `message` as concise as possible: default
     to one sentence with only the outcome/status and link, or one blocking
@@ -95,14 +96,19 @@ async def slack_thread_reply(
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         current_version = await get_slack_thread_version(client, channel_id, thread_ts)
+        refreshed = False
         if thread_version != current_version:
-            return {
-                "success": False,
-                "error": "Slack thread version mismatch",
-                "expected_thread_version": current_version,
-                "provided_thread_version": thread_version,
-                "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
-            }
+            refreshed_version = await get_slack_thread_version(client, channel_id, thread_ts)
+            if thread_version < refreshed_version == current_version:
+                return {
+                    "success": False,
+                    "error": "Slack thread version mismatch",
+                    "expected_thread_version": current_version,
+                    "provided_thread_version": thread_version,
+                    "hint": "New messages have been posted. Re-read the Slack thread to get the updated thread_version before posting.",
+                }
+            current_version = refreshed_version
+            refreshed = True
 
         message = convert_mentions_to_slack_format(message)
         slack_blocks = blocks or _build_option_blocks(message, options)
@@ -129,7 +135,11 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    return {"success": True, "thread_version": current_version}
+    post_state_version = await get_slack_thread_version(client, channel_id, thread_ts)
+    result = {"success": True, "thread_version": post_state_version}
+    if refreshed:
+        result["refreshed"] = True
+    return result
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
