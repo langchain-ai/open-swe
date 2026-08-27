@@ -27,7 +27,11 @@ from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
-from .utils.slack import post_slack_thread_reply
+from .utils.slack import (
+    lookup_slack_run_message_mapping,
+    post_slack_thread_reply,
+    stop_slack_stream,
+)
 from .utils.slack_code_channels import is_code_channel_session, set_session_status
 from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
@@ -288,6 +292,25 @@ async def _schedule_success_cost_refresh(
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
+async def _settle_thinking_stream(
+    client: LangGraphClient, thread_id: str, run_id: str | None
+) -> None:
+    if run_id is None:
+        return
+    try:
+        thread = await client.threads.get(thread_id)
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        slack_thread = SourceContext.from_metadata(metadata).slack_thread
+        if slack_thread is None:
+            return
+        mapping = await lookup_slack_run_message_mapping(client, slack_thread.channel_id, run_id)
+        message_ts = mapping.get("thinking_message_ts") if mapping else None
+        if isinstance(message_ts, str) and message_ts:
+            await stop_slack_stream(slack_thread.channel_id, message_ts)
+    except Exception:  # noqa: BLE001
+        logger.debug("run-complete: could not settle Thinking Steps for %s", run_id, exc_info=True)
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -299,6 +322,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    client = langgraph_client()
+    await _settle_thinking_stream(client, thread_id, run_id)
     if status == "success":
         return await _schedule_success_cost_refresh(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
@@ -311,7 +336,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if status not in _TERMINAL_FAILURE_STATUSES:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
 
-    client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
     except Exception:  # noqa: BLE001
