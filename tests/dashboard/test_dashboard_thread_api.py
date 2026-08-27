@@ -222,21 +222,22 @@ async def test_import_local_thread_seeds_idle_cloud_state(monkeypatch) -> None:
         threads = FakeThreads()
 
     _patch_new_thread_deps(monkeypatch, profile={})
+    assert_branch = AsyncMock()
+    monkeypatch.setattr(thread_api, "_assert_imported_branch", assert_branch)
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.import_local_thread(
-        thread_api.LocalThreadImportBody(
-            format_version=1,
-            localThreadId="local-1",
-            title="Fix CI",
-            repo="octo/repo",
-            modelId=_VISION_MODEL,
-            effort="medium",
-            state={"messages": [{"type": "human", "content": "Fix it"}]},
-        ),
-        "octocat",
-        email="octocat@example.com",
+    body = thread_api.LocalThreadImportBody(
+        format_version=1,
+        localThreadId="local-1",
+        title="Fix CI",
+        repo="octo/repo",
+        branch="open-swe/fix-ci",
+        head_sha="a" * 40,
+        modelId=_VISION_MODEL,
+        effort="medium",
+        state={"messages": [{"type": "human", "content": "Fix it"}]},
     )
+    result = await thread_api.import_local_thread(body, "octocat", email="octocat@example.com")
 
     assert result["origin"] == "desktop"
     assert result["repoFullName"] == "octo/repo"
@@ -253,7 +254,10 @@ async def test_import_local_thread_seeds_idle_cloud_state(monkeypatch) -> None:
         }
     ]
     metadata = cast(dict[str, object], created["metadata"])
+    assert_branch.assert_awaited_once_with("octocat", body)
     assert metadata["source"] == "dashboard"
+    assert metadata["branch_name"] == "open-swe/fix-ci"
+    assert metadata["imported_head_sha"] == "a" * 40
     assert "slack_thread" not in metadata
 
 
@@ -286,6 +290,39 @@ async def test_build_configurable_carries_import_artifacts_once(monkeypatch) -> 
     )
 
     assert configurable["local_import_artifacts"] == {"/conversation_history/context.md": "history"}
+
+
+async def test_import_local_thread_rejects_changed_remote_branch(monkeypatch) -> None:
+    class Client:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *args):
+            return None
+
+    body = thread_api.LocalThreadImportBody(
+        format_version=1,
+        localThreadId="local-1",
+        title="Fix CI",
+        repo="octo/repo",
+        branch="fix-ci",
+        head_sha="a" * 40,
+        state={},
+    )
+    monkeypatch.setattr(thread_api, "get_valid_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(thread_api, "github_client", lambda **_kwargs: Client())
+    monkeypatch.setattr(
+        thread_api,
+        "github_request",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status_code=200, json=lambda: {"commit": {"sha": "b" * 40}}
+            )
+        ),
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api._assert_imported_branch("octocat", body)
+    assert exc_info.value.status_code == 409
 
 
 def test_sanitize_local_import_rejects_artifact_traversal() -> None:

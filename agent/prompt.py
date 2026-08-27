@@ -558,6 +558,7 @@ def construct_system_prompt(
     source: str = "dashboard",
     slack_context: bool = False,
     sandbox_file_downloads: bool = False,
+    source_branch: str | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -582,7 +583,13 @@ def construct_system_prompt(
             if plan_mode
             else ""
         ),
-        default_prompt_section=default_prompt_section,
+        default_prompt_section=default_prompt_section
+        + (
+            f"\n\nThe transferred code state is the pushed git branch `{source_branch}`. "
+            f"Fetch and continue from `origin/{source_branch}`; do not require an existing pull request."
+            if source_branch
+            else ""
+        ),
         repository_scope_section=(
             _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
         ),

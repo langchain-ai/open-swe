@@ -22,6 +22,7 @@ const {
   currentBranch,
   localBranches,
   deleteRefs,
+  pushedBranch,
   readBranchDiff,
   readDiff,
   repoRoot,
@@ -334,8 +335,10 @@ function configureDesktopIpc() {
     const activity = await backendSupervisor.threadActivity();
     if (!activity) throw new Error("Could not read local agent activity");
     for (const [threadId, status] of Object.entries(lastActivity)) {
-      if (status === "running" && activity[threadId] !== "running")
-        localThreadStore.update(threadId, { viewed: false });
+      if (status === "running" && activity[threadId] !== "running") {
+        const thread = localThreadStore.update(threadId, { viewed: false });
+        await syncThreadBranch(thread);
+      }
     }
     lastActivity = activity;
     return activity;
@@ -343,9 +346,19 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:export-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
     const thread = localThreadStore.get(threadId);
-    if (!thread) throw new Error("Local agent not found");
+    if (!thread?.checkpoint.repo || !thread.checkpoint.branch)
+      throw new Error("The local agent has no git branch to transfer");
+    const source = await pushedBranch(
+      thread.checkpoint.repo,
+      thread.checkpoint.branch,
+    );
+    if (!source)
+      throw new Error("Push the local agent branch before continuing in cloud");
     return {
       ...(await backendSupervisor.exportThreadState(thread.id)),
+      repo: source.repoFullName,
+      branch: source.branch,
+      head_sha: source.headSha,
       local_thread_id: thread.id,
       title: thread.title,
       model_id: thread.modelId,

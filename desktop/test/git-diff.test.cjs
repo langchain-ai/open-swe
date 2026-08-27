@@ -12,6 +12,7 @@ const {
   currentBranch,
   localBranches,
   parsePullRequest,
+  pushedBranch,
   readBranchDiff,
   readDiff,
   repoRoot,
@@ -130,6 +131,39 @@ test("diffs the worktree against a session checkpoint", async (t) => {
   const huge = diff.files.find((file) => file.path === "huge.txt");
   assert.equal(huge.unrenderable, true);
   assert.equal(huge.modifiedContent, null);
+});
+
+test("resolves pushed branch without a pull request", async (t) => {
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-remote-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"));
+  t.after(() => {
+    fs.rmSync(remote, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  git(remote, ["init", "-q", "--bare"]);
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(dir, "file.txt"), "one\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "init"]);
+  git(dir, ["remote", "add", "origin", "git@github.com:example/repo.git"]);
+  git(dir, [
+    "config",
+    "url." + remote + ".insteadOf",
+    "git@github.com:example/repo.git",
+  ]);
+  git(dir, ["push", "-q", "-u", "origin", "main"]);
+
+  const source = await pushedBranch(dir, "main");
+  assert.equal(source.repoFullName, "example/repo");
+  assert.equal(source.branch, "main");
+  assert.match(source.headSha, /^[0-9a-f]{40}$/);
+
+  fs.writeFileSync(path.join(dir, "file.txt"), "two\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "unpushed"]);
+  assert.equal(await pushedBranch(dir, "main"), null);
 });
 
 test("branch diff reports only what the branch committed", async (t) => {

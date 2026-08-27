@@ -30,7 +30,9 @@ export interface LocalThreadImportRequest {
   format_version: 1
   local_thread_id: string
   title: string
-  repo?: string | null
+  repo: string
+  branch: string
+  head_sha: string
   model_id?: string | null
   effort?: string | null
   state: { messages: Array<unknown>; todos?: Array<unknown> }

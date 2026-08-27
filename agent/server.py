@@ -1386,6 +1386,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
+                source_branch=configurable.get("branch_name")
+                if isinstance(configurable.get("branch_name"), str)
+                else None,
             ),
         }
 

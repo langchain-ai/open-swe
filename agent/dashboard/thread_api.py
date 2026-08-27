@@ -11,6 +11,7 @@ import uuid
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException
@@ -27,6 +28,7 @@ from ..input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from ..utils.github_http import GITHUB_API_BASE, github_client, github_request
 from ..utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -186,7 +188,9 @@ class LocalThreadImportBody(BaseModel):
     format_version: Literal[1]
     local_thread_id: str = Field(min_length=1, max_length=100, alias="localThreadId")
     title: str = Field(min_length=1, max_length=80)
-    repo: str | None = Field(default=None, max_length=200)
+    repo: str = Field(min_length=3, max_length=200)
+    branch: str = Field(min_length=1, max_length=255)
+    head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     model_id: str | None = Field(default=None, alias="modelId")
     effort: str | None = None
     state: dict[str, Any]
@@ -1436,16 +1440,49 @@ def _sanitize_local_import_state(state: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+async def _assert_imported_branch(login: str, body: LocalThreadImportBody) -> None:
+    token = await get_valid_access_token(login)
+    if not token:
+        raise HTTPException(401, "github token unavailable, re-login required")
+    owner, repo = body.repo.split("/", 1)
+    async with github_client(token=token) as client:
+        response = await github_request(
+            client,
+            "GET",
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{quote(body.branch, safe='')}",
+        )
+        if response.status_code == 401:
+            token = await get_valid_access_token(login, force_refresh=True)
+            if not token:
+                raise HTTPException(401, "github token expired, re-login required")
+            response = await github_request(
+                client,
+                "GET",
+                f"{GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{quote(body.branch, safe='')}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    if response.status_code == 404:
+        raise HTTPException(422, "pushed branch not found")
+    if response.status_code != 200:
+        raise HTTPException(502, f"github API error ({response.status_code})")
+    payload = response.json()
+    commit = payload.get("commit") if isinstance(payload, dict) else None
+    if not isinstance(commit, dict) or commit.get("sha") != body.head_sha:
+        raise HTTPException(409, "pushed branch changed; retry the transfer")
+
+
 async def import_local_thread(
     body: LocalThreadImportBody,
     login: str,
     *,
     email: str | None = None,
 ) -> dict[str, Any]:
-    await _ensure_dashboard_github_token(login)
     repo_config = _parse_repo(body.repo)
-    if body.repo is not None and repo_config is None:
+    if repo_config is None:
         raise HTTPException(422, "invalid repository")
+    if _safe_git_ref(body.branch) != body.branch:
+        raise HTTPException(422, "invalid branch")
+    await _assert_imported_branch(login, body)
     state = _sanitize_local_import_state(body.state)
     artifacts = _sanitize_local_import_artifacts(body.artifacts)
     if len(json.dumps({"state": state, "artifacts": artifacts}).encode()) > _LOCAL_IMPORT_MAX_BYTES:
@@ -1472,16 +1509,15 @@ async def import_local_thread(
         "resolved_effort": resolved_effort,
         "plan_mode": False,
         "imported_from_local_thread_id": body.local_thread_id,
+        "branch_name": body.branch,
+        "imported_head_sha": body.head_sha,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
     if artifacts:
         metadata["local_import_artifacts"] = artifacts
-    if repo_config:
-        metadata["repo_owner"] = repo_config["owner"]
-        metadata["repo_name"] = repo_config["name"]
-    else:
-        metadata["repo_explicitly_none"] = True
+    metadata["repo_owner"] = repo_config["owner"]
+    metadata["repo_name"] = repo_config["name"]
     client = langgraph_client()
     thread_id = str(uuid.uuid4())
     try:
@@ -1544,6 +1580,10 @@ async def _build_dashboard_configurable(
     artifacts = metadata.get("local_import_artifacts")
     if isinstance(artifacts, dict):
         configurable["local_import_artifacts"] = artifacts
+    for key in ("branch_name", "imported_head_sha"):
+        value = metadata.get(key)
+        if isinstance(value, str):
+            configurable[key] = value
     if overrides:
         for key, value in overrides.items():
             if value is not None:

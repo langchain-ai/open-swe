@@ -182,7 +182,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     if (!thread || !window.openSweDesktop) return
     if (
       !window.confirm(
-        "Continue this conversation in cloud? Local files, uncommitted changes, and terminal history will not be transferred."
+        "Continue this conversation in cloud from its pushed git branch? Unpushed changes and terminal history will not be transferred."
       )
     )
       return
@@ -190,10 +190,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     setError(null)
     try {
       const exported = await window.openSweDesktop.exportLocalThread(sessionId)
-      const cloudThread = await agentsApi.importLocalThread({
-        ...exported,
-        repo: pr?.repoFullName ?? null,
-      })
+      const cloudThread = await agentsApi.importLocalThread(exported)
       await navigate({
         to: "/agents/$threadId",
         params: { threadId: cloudThread.id },
@@ -203,7 +200,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     } finally {
       setTransferring(false)
     }
-  }, [navigate, pr, sessionId, thread])
+  }, [navigate, sessionId, thread])
 
   const messages = useMemo(() => {
     const live = streamMessagesToUi(

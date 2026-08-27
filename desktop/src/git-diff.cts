@@ -99,8 +99,50 @@ function count(value) {
 
 /** `owner/repo` from an already-validated pull request URL. */
 function repoFullNameFromUrl(url: URL) {
-  const [owner, repo] = url.pathname.split("/").filter(Boolean);
-  return owner && repo ? `${owner}/${repo}` : null;
+  const [owner, rawRepo] = url.pathname.split("/").filter(Boolean);
+  const repo = rawRepo?.replace(/\.git$/, "");
+  return url.hostname === "github.com" && owner && repo
+    ? `${owner}/${repo}`
+    : null;
+}
+
+function parseGitHubRemote(raw) {
+  const value = raw.trim();
+  try {
+    return repoFullNameFromUrl(new URL(value));
+  } catch {
+    const match = value.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/);
+    return match ? `${match[1]}/${match[2]}` : null;
+  }
+}
+
+async function pushedBranch(repo, branch) {
+  const name = await validBranchName(repo, branch);
+  if (!name) return null;
+  try {
+    const [repoFullName, headSha, remoteSha] = await Promise.all([
+      git(repo, ["config", "--get", "remote.origin.url"], null, 5_000).then(
+        (value) => parseGitHubRemote(text(value)),
+      ),
+      git(
+        repo,
+        ["rev-parse", "--verify", `${name}^{commit}`],
+        null,
+        5_000,
+      ).then(text),
+      git(
+        repo,
+        ["ls-remote", "--exit-code", "origin", `refs/heads/${name}`],
+        null,
+        15_000,
+      ).then((value) => text(value).split(/\s+/, 1)[0]),
+    ]);
+    return repoFullName && headSha === remoteSha
+      ? { repoFullName, branch: name, headSha }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function parsePullRequest(raw) {
@@ -526,6 +568,7 @@ module.exports = {
   localBranches,
   deleteRefs,
   parsePullRequest,
+  pushedBranch,
   readDiff,
   repoRoot,
   repositoryMetadata,

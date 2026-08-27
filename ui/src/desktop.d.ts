@@ -35,6 +35,9 @@ export interface DesktopLocalThreadExport {
   title: string
   model_id: string | null
   effort: string | null
+  repo: string
+  branch: string
+  head_sha: string
   state: { messages: Array<unknown>; todos?: Array<unknown> }
   artifacts: Record<string, string>
 }
