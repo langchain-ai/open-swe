@@ -52,6 +52,7 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
 
     start.assert_awaited_once()
     stop.assert_awaited_once()
+    assert stop.await_args is not None
     final_chunks = stop.await_args.args[2]
     serialized = str(final_chunks)
     assert "Running a development command" in serialized
