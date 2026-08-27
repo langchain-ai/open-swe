@@ -12,8 +12,7 @@ async def create_sandbox_service_url(
 ) -> dict[str, Any]:
     """Create a browser URL for a service listening in the active LangSmith sandbox.
 
-    The service must listen on `0.0.0.0` at the specified port. Anyone with the returned URL can
-    access the service until it expires, so do not expose services containing secrets or credentials.
+    The service must listen on `0.0.0.0` at the specified port. Anyone with the URL can access it.
     """
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("port must be an integer between 1 and 65535")
