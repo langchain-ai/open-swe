@@ -1,4 +1,8 @@
 import asyncio
+import os
+import posixpath
+import shlex
+import subprocess
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import cast
@@ -26,11 +30,91 @@ from agent.utils.sandbox_state import (
 class _FakeSandboxBackend:
     id = "sandbox-1"
 
+    def get_work_dir(self) -> str:
+        return "/workspace"
+
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        if command.startswith("test -d "):
+            return ExecuteResponse(output="", exit_code=0)
+        if command.startswith("realpath -- "):
+            return ExecuteResponse(output=f"{command.removeprefix('realpath -- ')}\n", exit_code=0)
+        if command.startswith("rm -rf -- "):
+            return ExecuteResponse(output="", exit_code=0)
         return ExecuteResponse(output=f"{self.id}: {command}: {timeout}", exit_code=0)
 
     async def adelete(self, file_path: str) -> DeleteResult:
         return DeleteResult(path=file_path)
+
+
+class _DeletingSandboxBackend:
+    id = "sandbox-delete"
+
+    def __init__(self, work_dir: str) -> None:
+        self.work_dir = work_dir
+        self.commands: list[str] = []
+
+    def get_work_dir(self) -> str:
+        return self.work_dir
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        self.commands.append(command)
+        args = shlex.split(command)
+        if args[:1] == ["test"]:
+            return ExecuteResponse(
+                output="",
+                exit_code=0 if os.path.isdir(self.work_dir) else 1,
+            )
+        if args[:2] == ["realpath", "--"]:
+            path = posixpath.realpath(args[2])
+            if not os.path.exists(path):
+                return ExecuteResponse(output="", exit_code=1)
+            return ExecuteResponse(output=f"{path}\n", exit_code=0)
+        subprocess.run(args, check=True)
+        return ExecuteResponse(output="", exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_deletes_file_inside_work_dir(tmp_path) -> None:  # noqa: ANN001
+    file_path = tmp_path / "artifact.txt"
+    file_path.write_text("artifact")
+    backend = _DeletingSandboxBackend(str(tmp_path))
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+
+    result = await proxy.adelete("artifact.txt")
+
+    assert result == DeleteResult(path=str(file_path))
+    assert not file_path.exists()
+    assert backend.commands[-1] == f"rm -rf -- {shlex.quote(str(file_path))}"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_deletes_non_empty_directory_recursively(tmp_path) -> None:  # noqa: ANN001
+    directory = tmp_path / "artifact"
+    directory.mkdir()
+    (directory / "nested.txt").write_text("artifact")
+    backend = _DeletingSandboxBackend(str(tmp_path))
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+
+    result = await proxy.adelete("artifact")
+
+    assert result == DeleteResult(path=str(directory))
+    assert not directory.exists()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_refuses_path_outside_work_dir(tmp_path) -> None:  # noqa: ANN001
+    work_dir = tmp_path / "workspace"
+    work_dir.mkdir()
+    backend = _DeletingSandboxBackend(str(work_dir))
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+
+    result = await proxy.adelete("../outside.txt")
+
+    assert result.error is not None
+    assert "within the sandbox work directory" in result.error
+    assert backend.commands == [
+        f"test -d {shlex.quote(str(work_dir))} && test -w {shlex.quote(str(work_dir))}"
+    ]
 
 
 class _OffloadCapableBackend(BaseSandbox):

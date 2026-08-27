@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import posixpath
+import shlex
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -25,6 +27,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from .sandbox import create_sandbox
+from .sandbox_paths import aresolve_sandbox_work_dir
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +256,37 @@ class SandboxBackendProxy(BaseSandbox):
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def adelete(self, file_path: str) -> DeleteResult:
-        return await (await self._aget_backend()).adelete(file_path)
+        backend = await self._aget_backend()
+        if not isinstance(file_path, str) or not file_path.strip() or "\x00" in file_path:
+            return DeleteResult(error="Error: file_path must be a non-empty sandbox path")
+
+        work_dir = posixpath.normpath(await aresolve_sandbox_work_dir(backend))
+        requested_path = file_path.strip()
+        path = posixpath.normpath(
+            requested_path
+            if requested_path.startswith("/")
+            else posixpath.join(work_dir, requested_path)
+        )
+        if posixpath.commonpath((work_dir, path)) != work_dir or path == work_dir:
+            return DeleteResult(
+                error=f"Error: file_path must resolve within the sandbox work directory ({work_dir})"
+            )
+
+        resolved = await backend.aexecute(f"realpath -- {shlex.quote(path)}")
+        if resolved.exit_code != 0:
+            return DeleteResult(error=f"Error: '{file_path}' not found")
+        resolved_path = posixpath.normpath(resolved.output.strip())
+        if posixpath.commonpath((work_dir, resolved_path)) != work_dir or resolved_path == work_dir:
+            return DeleteResult(
+                error=f"Error: file_path must resolve within the sandbox work directory ({work_dir})"
+            )
+
+        result = await backend.aexecute(f"rm -rf -- {shlex.quote(path)}")
+        if result.exit_code == 0:
+            return DeleteResult(path=path)
+        return DeleteResult(
+            error=f"Error deleting file '{file_path}': {result.output.strip() or 'unknown error'}"
+        )
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
