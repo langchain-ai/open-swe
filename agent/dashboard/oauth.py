@@ -32,6 +32,10 @@ STATE_TTL_SECONDS = 600
 HANDOFF_TTL_SECONDS = 120
 TERMINAL_TICKET_TTL_SECONDS = 60
 TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
+RUNNER_TICKET_TTL_SECONDS = 60
+# A distinct audience so a terminal ticket can never be replayed as a runner
+# ticket: one attaches to a sandbox, the other executes on a workstation.
+RUNNER_TICKET_AUDIENCE = "open-swe-local-runner"
 JWT_ALG = "HS256"
 
 
@@ -65,6 +69,40 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
         raise HTTPException(401, "invalid terminal ticket")
     if not hmac.compare_digest(ticket_thread_id, thread_id):
         raise HTTPException(401, "invalid terminal ticket")
+    email = payload.get("email")
+    return {"sub": login, "email": email if isinstance(email, str) else None}
+
+
+def issue_runner_ticket(*, login: str, email: str | None, device_id: str) -> str:
+    now = int(time.time())
+    payload = {
+        "aud": RUNNER_TICKET_AUDIENCE,
+        "sub": login,
+        "email": email,
+        "device_id": device_id,
+        "iat": now,
+        "exp": now + RUNNER_TICKET_TTL_SECONDS,
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def decode_runner_ticket(token: str, *, device_id: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(
+            token,
+            _secret(),
+            algorithms=[JWT_ALG],
+            audience=RUNNER_TICKET_AUDIENCE,
+            options={"require": ["aud", "sub", "device_id", "iat", "exp"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(401, "invalid runner ticket") from exc
+    login = payload.get("sub")
+    ticket_device_id = payload.get("device_id")
+    if not isinstance(login, str) or not login or not isinstance(ticket_device_id, str):
+        raise HTTPException(401, "invalid runner ticket")
+    if not hmac.compare_digest(ticket_device_id, device_id):
+        raise HTTPException(401, "invalid runner ticket")
     email = payload.get("email")
     return {"sub": login, "email": email if isinstance(email, str) else None}
 

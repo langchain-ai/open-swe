@@ -1,47 +1,133 @@
+"""Where a thread's commands run.
+
+Cloud threads execute in a per-thread sandbox; local threads execute on the
+workstation that created them, reached through the local runner relay. The
+location lives in thread metadata rather than in the thread's identity, so a
+thread can later be handed from one to the other without being recreated.
+
+``run_location`` is deliberately not ``environment``: that name already belongs
+to the named sandbox snapshots in ``agent.dashboard.environments``.
+"""
+
 import asyncio
-import json
+import logging
 import os
 import re
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
+from langgraph_sdk import get_client
 
-SHELL_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
+from .local_runner import LocalMachineBackend
+from .run_location import (
+    CLOUD_RUN_LOCATION,
+    LOCAL_RUN_LOCATION,
+    is_local_run,
+    run_location,
+)
+from .utils.json_types import as_json_object
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "CLOUD_RUN_LOCATION",
+    "LOCAL_RUN_LOCATION",
+    "LocalRunTarget",
+    "create_local_backend",
+    "is_local_run",
+    "load_thread_metadata",
+    "local_artifact_routes",
+    "resolve_local_run_target",
+    "resolve_run_metadata",
+    "run_location",
+]
 
 
-def is_desktop_run(configurable: dict[str, Any]) -> bool:
-    return configurable.get("source") == "desktop"
+@dataclass(frozen=True)
+class LocalRunTarget:
+    """The device and project a local thread is bound to."""
+
+    login: str
+    device_id: str
+    device_name: str
+    project_path: str
 
 
-def resolve_desktop_project(configurable: dict[str, Any]) -> str:
-    requested = configurable.get("local_project_path")
-    allowlist_path = os.environ.get("OPEN_SWE_LOCAL_PROJECTS_FILE")
-    if not isinstance(requested, str) or not requested or not allowlist_path:
-        raise ValueError("Desktop runs require an allowlisted local_project_path")
-    with open(allowlist_path, encoding="utf-8") as file:
-        entries = json.load(file)
-    if not isinstance(entries, list):
-        raise ValueError("OPEN_SWE_LOCAL_PROJECTS_FILE must contain a JSON array")
-    allowed = {
-        os.path.realpath(entry["cwd"] if isinstance(entry, dict) else entry)
-        for entry in entries
-        if isinstance(entry, str) or (isinstance(entry, dict) and isinstance(entry.get("cwd"), str))
-    }
-    project = os.path.realpath(requested)
-    if project not in allowed or not Path(project).is_dir():
-        raise ValueError("local_project_path is not an allowed project directory")
-    return project
+def resolve_local_run_target(metadata: dict[str, Any]) -> LocalRunTarget:
+    """Read a local thread's binding, or say what the thread is missing.
 
+    Every field comes from thread metadata, which the dashboard stamps from the
+    session at creation — never from a run's ``configurable``, which a client
+    can set and which would otherwise let one account aim commands at another
+    account's machine.
 
-def create_desktop_backend(configurable: dict[str, Any]) -> LocalShellBackend:
-    return LocalShellBackend(
-        root_dir=resolve_desktop_project(configurable),
-        virtual_mode=False,
-        env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},
+    Nothing here authorizes the project path. The cloud server cannot see the
+    user's approved-project list, so the desktop re-checks the path against its
+    own allowlist before running anything; this only carries the request.
+    """
+    login = metadata.get("run_location_login")
+    device_id = metadata.get("device_id")
+    project_path = metadata.get("local_project_path")
+    missing = [
+        name
+        for name, value in (
+            ("run_location_login", login),
+            ("device_id", device_id),
+            ("local_project_path", project_path),
+        )
+        if not isinstance(value, str) or not value
+    ]
+    if missing:
+        raise ValueError(f"Local thread metadata is missing {', '.join(missing)}")
+    device_name = metadata.get("device_name")
+    return LocalRunTarget(
+        login=str(login),
+        device_id=str(device_id),
+        device_name=str(device_name)
+        if isinstance(device_name, str) and device_name
+        else str(device_id),
+        project_path=str(project_path),
     )
+
+
+def create_local_backend(metadata: dict[str, Any], thread_id: str) -> LocalMachineBackend:
+    target = resolve_local_run_target(metadata)
+    return LocalMachineBackend(
+        login=target.login,
+        device_id=target.device_id,
+        thread_id=thread_id,
+        project_path=target.project_path,
+    )
+
+
+async def load_thread_metadata(thread_id: str) -> dict[str, Any]:
+    try:
+        thread = await get_client().threads.get(thread_id)
+    except Exception:
+        logger.exception("Failed to read metadata for thread %s", thread_id)
+        return {}
+    return as_json_object(thread.get("metadata") if isinstance(thread, dict) else None)
+
+
+async def resolve_run_metadata(config: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    """Thread metadata for the run, without an extra round trip when avoidable.
+
+    The run config usually carries the thread's metadata inline, but that copy
+    is best-effort. A run whose ``configurable`` claims to be local is refetched
+    so the device binding comes from what the dashboard stamped rather than from
+    the run request: the inline copy is only trusted to say *cloud*, which is
+    also what a thread predating ``run_location`` correctly reports.
+    """
+    metadata = as_json_object((config or {}).get("metadata"))
+    if is_local_run(metadata):
+        return metadata
+    configurable = as_json_object((config or {}).get("configurable"))
+    if configurable.get("run_location") == LOCAL_RUN_LOCATION:
+        return await load_thread_metadata(thread_id)
+    return metadata
 
 
 def _artifacts_root() -> Path:
@@ -51,11 +137,11 @@ def _artifacts_root() -> Path:
     return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
 
 
-async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
-    """Backends for the agent's own scratch files on a desktop run.
+async def local_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
+    """Backends for the agent's own scratch files on a local run.
 
     Offloaded tool results and evicted history default to the artifacts root,
-    which for a desktop run is the user's project: the dumps would show up as
+    which for a local run is the user's project: the dumps would show up as
     changes and be swept into the next `git add -A`. Route them out of the
     repository while leaving the virtual paths the model sees unchanged.
     """

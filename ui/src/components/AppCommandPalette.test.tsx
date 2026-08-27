@@ -4,7 +4,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppCommandPalette } from "./AppCommandPalette"
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
 
@@ -15,14 +14,9 @@ const mocks = vi.hoisted(() => ({
   localThread: {
     id: "local-1",
     title: "Local result",
-    cwd: "/tmp/repo",
-    status: "idle",
-    viewed: true,
-    createdAt: 1,
-    updatedAt: 2,
-    modelId: null,
-    effort: null,
-  } as DesktopLocalThreadSummary,
+    runLocation: "local",
+    deviceName: "Work laptop",
+  } as AgentThread,
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -30,16 +24,13 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
   useInfiniteThreadsPages: () => ({
-    data: { pages: [{ items: [mocks.cloudThread] }] },
+    data: { pages: [{ items: [mocks.cloudThread, mocks.localThread] }] },
     isFetching: false,
     isError: false,
     hasNextPage: true,
     isFetchingNextPage: false,
     fetchNextPage: mocks.fetchNextPage,
   }),
-}))
-vi.mock("@/features/agents/lib/desktopLocal", () => ({
-  useDesktopLocalThreads: () => ({ data: [mocks.localThread] }),
 }))
 
 afterEach(() => {
@@ -73,7 +64,7 @@ describe("AppCommandPalette", () => {
     })
   })
 
-  it("filters thread titles as text and routes local results", () => {
+  it("lists local threads alongside cloud ones, on the same route", () => {
     render(
       <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
     )
@@ -84,8 +75,8 @@ describe("AppCommandPalette", () => {
     fireEvent.click(screen.getByRole("option", { name: /Local result/ }))
 
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/agents/local/$sessionId",
-      params: { sessionId: "local-1" },
+      to: "/agents/$threadId",
+      params: { threadId: "local-1" },
     })
   })
 

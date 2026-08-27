@@ -72,7 +72,13 @@ from .dashboard.team_settings import (
     get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
-from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
+from .desktop import (
+    create_local_backend,
+    is_local_run,
+    local_artifact_routes,
+    resolve_run_metadata,
+    run_location,
+)
 from .input_messages import (
     SystemIdentity,
     build_input_messages,
@@ -193,7 +199,6 @@ from .utils.authorship import (
 )
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
-from .utils.gateway import gateway_env_default
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_org_membership import is_user_active_org_member
 from .utils.github_proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
@@ -912,8 +917,11 @@ def _get_cached_sandbox_backend(
     thread_id: str,
     *,
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
+    run_location: str | None = None,
 ) -> SandboxBackendProxy:
-    return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
+    return get_or_create_sandbox_backend_proxy(
+        thread_id, reconnect=reconnect, run_location=run_location
+    )
 
 
 get_cached_sandbox_backend = _get_cached_sandbox_backend
@@ -1136,13 +1144,15 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) -> bool:
+def _sandbox_file_downloads_enabled(
+    configurable: dict[str, Any] | None = None, *, local_run: bool = False
+) -> bool:
     """Return whether signed sandbox file downloads are available for this run."""
     resolved = configurable or {}
     return (
         os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
         and resolved.get("stop_summary") is not True
-        and not is_desktop_run(resolved)
+        and not local_run
     )
 
 
@@ -1191,6 +1201,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         plan_mode: bool,
         corridor_enabled: bool,
         admin_environments: bool,
+        local_run: bool,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
@@ -1207,6 +1218,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
         self._admin_environments = admin_environments
+        self._local_run = local_run
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = (self._config or {}).get("configurable") or {}
@@ -1276,7 +1288,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
-        if is_desktop_run(configurable):
+        if self._local_run:
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             async with aphase(self._thread_id, "prepare.work_dir"):
@@ -1378,7 +1390,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),
-                sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
+                sandbox_file_downloads=_sandbox_file_downloads_enabled(
+                    configurable, local_run=self._local_run
+                ),
             ),
         }
 
@@ -1397,55 +1411,53 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
+    async with aphase(thread_id, "factory.run_metadata"):
+        thread_run_metadata = await resolve_run_metadata(as_json_object(config), thread_id)
+    local_run = is_local_run(thread_run_metadata)
+
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _configurable: dict[str, Any] = configurable,
+        _metadata: dict[str, Any] = thread_run_metadata,
+        _local_run: bool = local_run,
     ) -> SandboxBackendProtocol:
-        if is_desktop_run(_configurable):
-            return create_desktop_backend(_configurable)
+        if _local_run:
+            return create_local_backend(_metadata, _thread_id)
         return await ensure_sandbox_for_thread(
             _thread_id,
             environment_slug=_environment_slug(_configurable),
         )
 
-    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = _get_cached_sandbox_backend(
+        thread_id, reconnect=reconnect_backend, run_location=run_location(thread_run_metadata)
+    )
     backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization and credentialed integrations, which stay personal to them.
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
-    local_run = is_desktop_run(configurable)
     profile_login = resolve_github_login(as_json_object(config))
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
-            {} if local_run else await load_thread_settings(client, thread_id)
+            await load_thread_settings(client, thread_id)
         )
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    if local_run:
-        from .dashboard.options import default_model_pair
-
-        team_defaults = (default_model_pair(), default_model_pair())
-        title_defaults = team_defaults[0]
-        use_gateway = gateway_env_default()
-        profile = None
-        fable_enabled = False
-    else:
-        async with aphase(thread_id, "factory.settings_defaults"):
-            (
-                team_defaults,
-                title_defaults,
-                use_gateway,
-                profile,
-                fable_enabled,
-            ) = await asyncio.gather(
-                _cached_team_default_model_pair("agent"),
-                _cached_thread_title_model(),
-                _cached_gateway_enabled(),
-                _cached_profile(None if thread_settings.get("model_id") else profile_login),
-                _cached_fable_enabled(),
-            )
+    async with aphase(thread_id, "factory.settings_defaults"):
+        (
+            team_defaults,
+            title_defaults,
+            use_gateway,
+            profile,
+            fable_enabled,
+        ) = await asyncio.gather(
+            _cached_team_default_model_pair("agent"),
+            _cached_thread_title_model(),
+            _cached_gateway_enabled(),
+            _cached_profile(None if thread_settings.get("model_id") else profile_login),
+            _cached_fable_enabled(),
+        )
 
     linear_issue = as_json_object(configurable.get("linear_issue"))
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -1532,9 +1544,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "subagent_effort": subagent_effort,
         "repo_instructions": repo_instructions,
     }
-    if not local_run and (
-        settings_changed or {**thread_settings, **resolved_settings} != thread_settings
-    ):
+    if settings_changed or {**thread_settings, **resolved_settings} != thread_settings:
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
@@ -1601,7 +1611,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = configurable.get("stop_summary") is True
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable, local_run=local_run)
     observability_tools: list[Any] = []
     browser_tools: list[Any] = []
     currents_tools: list[Any] = []
@@ -1710,12 +1720,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
         ),
     }
-    if is_desktop_run(configurable):
+    if local_run:
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
         skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         # The default backend is the user's project, so offloads would land in
         # their repository. Keep the agent's scratch files out of it.
-        skill_routes.update(await desktop_artifact_routes(thread_id))
+        skill_routes.update(await local_artifact_routes(thread_id))
     else:
         skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
             StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
@@ -1780,6 +1790,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     plan_mode=plan_mode,
                     corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
+                    local_run=local_run,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),

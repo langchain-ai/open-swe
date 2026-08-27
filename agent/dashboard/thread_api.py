@@ -27,6 +27,7 @@ from ..input_messages import (
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
+from ..run_location import LOCAL_RUN_LOCATION
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.json_types import (
     JsonObject,
@@ -317,6 +318,11 @@ def _assert_thread_postable(
         raise HTTPException(403, "only admins can send messages in admin threads")
 
 
+def _thread_run_location(metadata: Mapping[str, Any]) -> str:
+    """Where this thread's commands run: a sandbox, or the user's own machine."""
+    return LOCAL_RUN_LOCATION if metadata.get("run_location") == LOCAL_RUN_LOCATION else "cloud"
+
+
 def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     owner = metadata.get("repo_owner")
     name = metadata.get("repo_name")
@@ -521,6 +527,10 @@ async def _thread_summary(
         "planMode": metadata.get("plan_mode") is True,
         "adminThread": metadata.get("admin_thread") is True,
         "environment": metadata.get("environment"),
+        "runLocation": _thread_run_location(metadata),
+        "deviceId": _metadata_string(metadata, "device_id"),
+        "deviceName": _metadata_string(metadata, "device_name"),
+        "localProjectPath": _metadata_string(metadata, "local_project_path"),
         "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
         "origin": origin,
@@ -1293,6 +1303,50 @@ def _resolve_repo_config(repo: str | None) -> dict[str, str]:
     return _parse_repo(repo) or {}
 
 
+_MAX_DEVICE_ID_LENGTH = 64
+_MAX_DEVICE_NAME_LENGTH = 128
+_MAX_PROJECT_PATH_LENGTH = 4096
+
+
+def _resolve_requested_run_location(
+    client_configurable: Mapping[str, Any], login: str
+) -> dict[str, Any]:
+    """Metadata binding a new thread to the workstation that asked for it.
+
+    The device fields come from the client because only it knows its own
+    machine, but ``run_location_login`` is taken from the session: it is what
+    the relay uses to decide whose device may be reached, so a client that
+    could set it could aim commands at someone else's machine.
+    """
+    if client_configurable.get("run_location") != LOCAL_RUN_LOCATION:
+        return {}
+    device_id = client_configurable.get("device_id")
+    project_path = client_configurable.get("local_project_path")
+    if (
+        not isinstance(device_id, str)
+        or not device_id.isalnum()
+        or len(device_id) > _MAX_DEVICE_ID_LENGTH
+    ):
+        raise HTTPException(400, "a local thread needs a valid device_id")
+    if (
+        not isinstance(project_path, str)
+        or not project_path.startswith(("/", "\\"))
+        or len(project_path) > _MAX_PROJECT_PATH_LENGTH
+        or any(character in project_path for character in "\x00\n\r")
+    ):
+        raise HTTPException(400, "a local thread needs an absolute local_project_path")
+    device_name = client_configurable.get("device_name")
+    return {
+        "run_location": LOCAL_RUN_LOCATION,
+        "run_location_login": login,
+        "device_id": device_id,
+        "device_name": (
+            device_name[:_MAX_DEVICE_NAME_LENGTH] if isinstance(device_name, str) else device_id
+        ),
+        "local_project_path": project_path,
+    }
+
+
 async def _create_dashboard_thread_record(
     thread_id: str,
     *,
@@ -1308,6 +1362,7 @@ async def _create_dashboard_thread_record(
     plan_mode: bool = False,
     admin_thread: bool = False,
     environment: str | None = None,
+    run_location: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create or update dashboard thread metadata without starting a run."""
     profile = await get_profile(login) or {}
@@ -1350,6 +1405,8 @@ async def _create_dashboard_thread_record(
         metadata["admin_thread"] = True
     if environment:
         metadata["environment"] = environment
+    if run_location:
+        metadata.update(run_location)
     if not title:
         metadata["title_seed"] = initial_title
     if has_repo:
@@ -1600,6 +1657,7 @@ async def _enrich_run_start_command(
             environment=await _resolve_requested_environment(
                 client_configurable.get("environment")
             ),
+            run_location=_resolve_requested_run_location(client_configurable, login),
         )
         metadata = thread_metadata(thread)
         run_model = _metadata_model_id(metadata)

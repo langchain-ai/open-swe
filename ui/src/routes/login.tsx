@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
 
 import { buttonVariants } from "@/components/ui/button"
@@ -19,7 +19,6 @@ import {
 } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
-import { enableDesktopLocalMode } from "@/lib/desktop-local-mode"
 
 type LoginSearch = { redirect?: string }
 
@@ -45,8 +44,6 @@ function Login() {
     () => (session.data ? consumeAuthRedirect(redirectParam) : null),
     [redirectParam, session.data]
   )
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   if (session.isLoading) {
     return (
@@ -78,18 +75,6 @@ function Login() {
           >
             Continue with GitHub
           </a>
-          {isDesktop && (
-            <Link
-              to="/agents"
-              onClick={enableDesktopLocalMode}
-              className={cn(
-                buttonVariants({ size: "lg", variant: "outline" }),
-                "w-full"
-              )}
-            >
-              Continue in local mode
-            </Link>
-          )}
         </CardContent>
       </Card>
     </main>

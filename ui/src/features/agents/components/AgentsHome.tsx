@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
-import { useNavigate, useRouterState } from "@tanstack/react-router"
+import { useRouterState } from "@tanstack/react-router"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -25,11 +24,8 @@ import {
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import {
-  ensureDesktopModelCredential,
-  localThreadKeys,
-} from "@/features/agents/lib/desktopLocal"
-import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { useRefreshLocalThreads } from "@/features/agents/lib/desktopLocal"
+import { useDeviceIdentity } from "@/features/agents/lib/runLocation"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -57,7 +53,6 @@ export function AgentsHome() {
   // — and keeps streaming after we navigate to the minted thread below.
   const stream = useAgentThreadStream()
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
   const session = useSession()
   const routePending = useRouterState({
     select: (state) => state.status === "pending",
@@ -89,12 +84,12 @@ export function AgentsHome() {
     useState<CreateAgentThreadVariables | null>(null)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
-  const runTarget: RunTarget = isDesktop
-    ? cloudEnabled
-      ? desktopThreadSource
-      : "local"
-    : "cloud"
+  const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
+    null
+  )
+  const deviceIdentity = useDeviceIdentity()
+  const refreshLocalThreads = useRefreshLocalThreads()
+  const runTarget: RunTarget = isDesktop ? (runTargetOverride ?? "cloud") : "cloud"
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
   const localProjectPathRef = useRef(localProjectPath)
   useEffect(() => {
@@ -169,14 +164,14 @@ export function AgentsHome() {
   }, [refreshLocalProjectBranch])
 
   const handleRunTargetChange = (next: RunTarget) => {
-    setDesktopThreadSource(next)
+    setRunTargetOverride(next)
     setLocalError(null)
   }
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
-    setDesktopThreadSource("local")
+    setRunTargetOverride("local")
     setLocalError(null)
   }
 
@@ -211,6 +206,11 @@ export function AgentsHome() {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
+    // A local thread is an ordinary cloud thread whose commands are relayed
+    // back to this machine, so both targets take the same submit path. The id
+    // is minted here rather than lazily so the git checkpoint can be captured
+    // before the agent is allowed to touch the working tree.
+    let localThreadId: string | null = null
     if (runTarget === "local") {
       const desktop = window.openSweDesktop
       if (!desktop || !localProjectPath) {
@@ -222,56 +222,21 @@ export function AgentsHome() {
       window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
       await refreshLocalProjectBranch()
       try {
-        const credentialError = await ensureDesktopModelCredential(
-          activeSelection?.modelId
-        )
-        if (credentialError) {
-          setSubmitting(false)
-          setLocalError(credentialError)
-          return
-        }
-        const managedSkills = cloudEnabled
-          ? await skills.refetch()
-          : { personal: [], organization: [] }
-        const localSession = await desktop.startLocalThread({
+        localThreadId = crypto.randomUUID()
+        await desktop.registerLocalThread({
+          threadId: localThreadId,
           cwd: localProjectPath,
-          prompt,
-          images,
-          skills: [
-            ...new Map(
-              [...managedSkills.personal, ...managedSkills.organization].map(
-                (skill) => [skill.name, skill]
-              )
-            ).values(),
-          ],
-          modelId: activeSelection?.modelId,
-          effort: activeSelection?.effort,
         })
-        queryClient.setQueryData(
-          localThreadKeys.detail(localSession.id),
-          localSession
-        )
-        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-          localThreadKeys.all,
-          (current = []) => [
-            localSession,
-            ...current.filter((thread) => thread.id !== localSession.id),
-          ]
-        )
-        await navigate({
-          to: "/agents/local/$sessionId",
-          params: { sessionId: localSession.id },
-        })
+        refreshLocalThreads()
       } catch (error) {
         setSubmitting(false)
         setLocalError(
           error instanceof Error
             ? error.message
-            : "Could not start the local Open SWE agent"
+            : "Could not prepare the project for a local agent"
         )
-        throw error
+        return
       }
-      return
     }
     const draft = {
       prompt,
@@ -295,13 +260,22 @@ export function AgentsHome() {
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
+    if (localThreadId && localProjectPath) {
+      configurable.run_location = "local"
+      configurable.device_id = deviceIdentity.data?.deviceId
+      configurable.device_name = deviceIdentity.data?.deviceName
+      configurable.local_project_path = localProjectPath
+    }
 
     await stream
       .submit(
         {
           messages: [{ type: "human", content: promptContent(prompt, images) }],
         },
-        { config: { configurable } }
+        {
+          config: { configurable },
+          ...(localThreadId ? { threadId: localThreadId } : {}),
+        }
       )
       .catch((error) => {
         // Submit failed before the SDK minted a thread id — re-enable the

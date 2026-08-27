@@ -66,10 +66,12 @@ class SandboxBackendProxy(BaseSandbox):
         *,
         thread_id: str | None = None,
         reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
+        run_location: str | None = None,
     ) -> None:
         self._backend = backend
         self._thread_id = thread_id
         self._reconnect = reconnect
+        self.run_location = run_location
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
 
@@ -348,16 +350,34 @@ def get_or_create_sandbox_backend_proxy(
     thread_id: str,
     *,
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
+    run_location: str | None = None,
 ) -> SandboxBackendProxy:
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    if sandbox_backend:
+    moved = (
+        sandbox_backend is not None
+        and run_location is not None
+        and sandbox_backend.run_location is not None
+        and sandbox_backend.run_location != run_location
+    )
+    if sandbox_backend is not None and not moved:
         # Callers that only want the handle pass no callback; keep the one the
         # run registered rather than dropping it to the metadata fallback.
         if reconnect is not None:
             sandbox_backend.set_reconnect(reconnect)
+        # A handle cached by a caller that did not know the location adopts the
+        # first one that does, rather than being discarded as a mismatch.
+        if run_location is not None:
+            sandbox_backend.run_location = run_location
         return sandbox_backend
+    if sandbox_backend is not None:
+        # The thread moved between a sandbox and a workstation. The cached
+        # backend points at the place it used to run, and reusing it would send
+        # this run's commands to the wrong machine.
+        sandbox_backend.cancel_startup()
 
-    sandbox_backend = SandboxBackendProxy(thread_id=thread_id, reconnect=reconnect)
+    sandbox_backend = SandboxBackendProxy(
+        thread_id=thread_id, reconnect=reconnect, run_location=run_location
+    )
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
     return sandbox_backend
 

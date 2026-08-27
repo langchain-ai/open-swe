@@ -19,6 +19,15 @@ import {
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import {
+  useLocalThreadDiff,
+  useLocalThreadPrDiff,
+} from "@/features/agents/lib/desktopLocal"
+import {
+  canRunThread,
+  isLocalThread,
+  useDeviceIdentity,
+} from "@/features/agents/lib/runLocation"
 
 interface AgentGitPanelProps {
   thread: AgentThread
@@ -35,14 +44,28 @@ export function AgentGitPanel({
   collapsed,
   onCollapsedChange,
 }: AgentGitPanelProps) {
+  // A local thread's diff and terminals come from this machine over IPC, not
+  // from the sandbox endpoints; everything else about the panel is the same.
+  const deviceIdentity = useDeviceIdentity()
+  // Only the owning machine can read this thread's working tree or open a
+  // shell in it, so elsewhere the local surfaces are simply absent.
+  const local = isLocalThread(thread) && canRunThread(thread, deviceIdentity.data?.deviceId)
+  const cwd = local ? (thread.localProjectPath ?? "") : ""
   const threadRef = useMemo(
-    () => ({ scope: "cloud" as const, threadId: thread.id }),
-    [thread.id]
+    () => ({
+      scope: local ? ("local" as const) : ("cloud" as const),
+      threadId: thread.id,
+    }),
+    [local, thread.id]
   )
-  const terminals = useTerminalGroups(
-    { kind: "cloud", threadId: thread.id },
-    ""
+  const terminalTarget = useMemo(
+    () =>
+      local
+        ? ({ kind: "local" as const, sessionId: thread.id })
+        : ({ kind: "cloud" as const, threadId: thread.id }),
+    [local, thread.id]
   )
+  const terminals = useTerminalGroups(terminalTarget, cwd)
   const openSurface = useRightPanelStore((state) => state.open)
   const activeSurfaceId = useRightPanelStore(
     (state) =>
@@ -52,33 +75,58 @@ export function AgentGitPanel({
     if (revealChangesKey > 0) openSurface(threadRef, "diff")
   }, [openSurface, revealChangesKey, threadRef])
 
-  const terminalAvailable = Boolean(thread.sandboxId)
-
-  // Served from GitHub, so it needs a repository — with or without a PR.
-  const branchScopeAvailable =
-    Boolean(thread.repoFullName) && Boolean(thread.branch)
+  const isRunning = thread.status === "running"
+  const diffVisible = !collapsed && activeSurfaceId === "diff"
   const selectScope = useDiffPanelStore((state) => state.selectScope)
+
+  // Also the source of the branch/PR metadata for a local thread, so it stays
+  // enabled in either scope: it is what tells us the branch has a PR at all.
+  const localCheckpointDiff = useLocalThreadDiff(
+    thread.id,
+    local && diffVisible,
+    isRunning
+  )
+  const localRepository = localCheckpointDiff.data?.repository
+  const branchScopeAvailable = local
+    ? Boolean(localRepository?.pr)
+    : // Served from GitHub, so it needs a repository — with or without a PR.
+      Boolean(thread.repoFullName) && Boolean(thread.branch)
   const scope = useDiffPanelStore((state) =>
     selectThreadDiffScope(
       state.byThreadKey,
       threadRef,
       branchScopeAvailable,
-      Boolean(thread.pr)
+      local ? undefined : Boolean(thread.pr)
     )
   )
-  const diffVisible = !collapsed && activeSurfaceId === "diff"
+  const localBranchDiff = useLocalThreadPrDiff(
+    thread.id,
+    local && diffVisible && scope === "branch",
+    isRunning
+  )
+  const terminalAvailable = local || (!isLocalThread(thread) && Boolean(thread.sandboxId))
 
   const turnDiff = useAgentThreadWorkingTreeDiff(
     thread.id,
-    diffVisible && scope === "working-tree",
-    thread.status === "running"
+    !local && diffVisible && scope === "working-tree",
+    isRunning
   )
   const branchDiff = useAgentThreadBranchDiff(
     thread.id,
-    diffVisible && scope === "branch"
+    !local && diffVisible && scope === "branch"
   )
-  const diff =
-    scope === "branch"
+  const localDiffQuery = scope === "branch" ? localBranchDiff : localCheckpointDiff
+  const diff = local
+    ? {
+        files: localDiffQuery.data?.files ?? [],
+        status: localDiffQuery.data?.status,
+        truncated: localDiffQuery.data?.truncated,
+        isPending: localDiffQuery.isPending,
+        isFetching: localDiffQuery.isFetching,
+        error: localDiffQuery.error,
+        refetch: localDiffQuery.refetch,
+      }
+    : scope === "branch"
       ? {
           files: branchDiff.data?.files ?? [],
           // The branch endpoint answers from GitHub: a successful response is
@@ -100,6 +148,10 @@ export function AgentGitPanel({
           refetch: turnDiff.refetch,
         }
   const files = useMemo(() => toPanelFiles(diff.files), [diff.files])
+  const branch = local
+    ? (localRepository?.branch ?? thread.branch)
+    : thread.branch
+  const pr = local ? (localRepository?.pr ?? undefined) : thread.pr
 
   // Refresh whenever the window regains focus: the diff is read live, so a
   // push or a review landing elsewhere should be visible on return.
@@ -113,7 +165,9 @@ export function AgentGitPanel({
 
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
-  const canDownloadRecovery = thread.status !== "running"
+  // The recovery patch is built from the thread's sandbox, which a local
+  // thread does not have — its working tree is right there on disk.
+  const canDownloadRecovery = !local && thread.status !== "running"
   const downloadRecoveryPatch = useCallback(async () => {
     setRecoveringPatch(true)
     setRecoveryError(null)
@@ -142,10 +196,10 @@ export function AgentGitPanel({
     <AgentRightPanel
       threadRef={threadRef}
       terminals={terminals}
-      terminalTarget={{ kind: "cloud", threadId: thread.id }}
-      cwd=""
+      terminalTarget={terminalTarget}
+      cwd={cwd}
       terminalAvailable={terminalAvailable}
-      diffAvailable
+      diffAvailable={local || !isLocalThread(thread)}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (
@@ -156,8 +210,8 @@ export function AgentGitPanel({
           isFetching={diff.isFetching}
           error={diff.error}
           truncated={diff.truncated}
-          branch={thread.branch}
-          pr={thread.pr}
+          branch={branch}
+          pr={pr}
           revealFilePath={revealFilePath}
           fullScreen={fullScreen}
           onRefresh={() => void diff.refetch()}

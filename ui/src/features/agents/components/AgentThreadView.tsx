@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
   FolderOpen,
+  Monitor,
 } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 
@@ -39,6 +40,12 @@ import {
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
+import {
+  canRunThread,
+  isLocalThread,
+  runsElsewhereLabel,
+  useDeviceIdentity,
+} from "@/features/agents/lib/runLocation"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
@@ -91,7 +98,15 @@ export function AgentThreadView({
   const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
   const session = useSession()
-  const canPost = !thread.adminThread || session.data?.is_admin === true
+  const deviceIdentity = useDeviceIdentity()
+  const runsHere = canRunThread(thread, deviceIdentity.data?.deviceId)
+  const canPost =
+    (!thread.adminThread || session.data?.is_admin === true) && runsHere
+  const composerPlaceholder = !runsHere
+    ? runsElsewhereLabel(thread)
+    : canPost
+      ? "Add a follow up"
+      : "Only workspace admins can send messages in this thread"
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
@@ -262,6 +277,20 @@ export function AgentThreadView({
             </span>
           </div>
         </header>
+        {isLocalThread(thread) && !runsHere && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+            <Alert controlAlignment="first-line">
+              <Monitor />
+              <AlertDescription>
+                <span>
+                  This thread works in {thread.localProjectPath ?? "a folder"} on{" "}
+                  {thread.deviceName || "another computer"}. Open Open SWE there
+                  to continue it.
+                </span>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
@@ -318,11 +347,7 @@ export function AgentThreadView({
                   fixDisabled={!canPost || sendMessage.isPending}
                 />
                 <AgentPromptBar
-                  placeholder={
-                    canPost
-                      ? "Add a follow up"
-                      : "Only workspace admins can send messages in this thread"
-                  }
+                  placeholder={composerPlaceholder}
                   autoFocus={autoFocusComposer}
                   compact
                   disabled={!canPost}
@@ -379,9 +404,9 @@ export function AgentThreadView({
               />
               <AgentPromptBar
                 placeholder={
-                  canPost
+                  runsHere && canPost
                     ? "Send the first message"
-                    : "Only workspace admins can send messages in this thread"
+                    : composerPlaceholder
                 }
                 autoFocus={autoFocusComposer}
                 compact

@@ -40,7 +40,7 @@ async function typeIntoComposer(
   await editor.press("Enter");
 }
 
-test("Desktop runs a local thread on the Open SWE graph against the shared fakes", async ({
+test("Desktop relays a local thread's commands from the shared backend to this machine", async ({
   request,
 }, testInfo) => {
   mkdirSync(e2eTmp, { recursive: true });
@@ -82,9 +82,6 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       XDG_CONFIG_HOME: join(stateRoot, "xdg-config"),
       APPDATA: join(stateRoot, "app-data"),
       OPEN_SWE_BACKEND_URL: baseURL,
-      // The local backend runs the real graph with the scripted fake model, so
-      // the provider keys only have to satisfy the composer's credential gate.
-      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(e2eRoot, "langgraph.desktop.json"),
       ANTHROPIC_API_KEY: "e2e-fake-key",
       OPENAI_API_KEY: "e2e-fake-key",
       E2E_BASE: baseURL,
@@ -147,28 +144,13 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       await maybeLater.click();
     }
 
-    const cloudSource = page.getByRole("button", {
-      name: /Cloud threads, \d+/,
-    });
-    const localSource = page.getByRole("button", {
-      name: /This Mac threads, \d+/,
-    });
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
-
-    await cloudSource.click();
-    await expect(cloudSource).toHaveAttribute("aria-pressed", "true");
+    // One list now, so where a thread runs is chosen per thread in the
+    // composer rather than by a mode the whole sidebar sits in.
+    await page.getByRole("button", { name: "Cloud", exact: true }).click();
+    await page.getByRole("menuitem", { name: "This Mac" }).click();
     await expect(
-      page.getByRole("button", { name: "Cloud", exact: true }),
+      page.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
-    const cloudScreenshot = testInfo.outputPath("desktop-cloud-threads.png");
-    await page.screenshot({ path: cloudScreenshot, fullPage: true });
-    await testInfo.attach("desktop-cloud-threads", {
-      path: cloudScreenshot,
-      contentType: "image/png",
-    });
-
-    await localSource.click();
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
     await expect(
       page.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
@@ -187,7 +169,10 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR",
     );
 
-    await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
+    // A local thread lives on the same route as every other thread.
+    await expect(page).toHaveURL(
+      /open-swe:\/\/app\/agents\/[0-9a-f-]{36}$/,
+    );
     await expect(page.getByText(/Done! I added/)).toBeVisible();
     const prLink = page.getByRole("link", {
       name: "Add greet() helper",

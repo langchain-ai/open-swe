@@ -26,6 +26,15 @@ class _DummyAgent:
         return self
 
 
+_LOCAL_THREAD_METADATA = {
+    "run_location": "local",
+    "run_location_login": "octocat",
+    "device_id": "abc123",
+    "device_name": "Work laptop",
+    "local_project_path": "/tmp",
+}
+
+
 def _base_config() -> RunnableConfig:
     return {
         "configurable": {
@@ -192,10 +201,9 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
 @pytest.mark.asyncio
 async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     config = _base_config()
-    config.setdefault("configurable", {}).update(
-        {"source": "desktop", "local_project_path": "/tmp"}
-    )
-    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+    config.setdefault("configurable", {}).update({"source": "desktop"})
+    config["metadata"] = dict(_LOCAL_THREAD_METADATA)
+    with patch("agent.server.create_local_backend", return_value=MagicMock()):
         captured = await _capture_create_deep_agent_kwargs(config)
 
     assert captured["skills"] == ["/skills/", "/bundled-skills/"]
@@ -211,10 +219,9 @@ async def test_desktop_agent_honors_gateway_environment(
 ) -> None:
     monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
     config = _base_config()
-    config.setdefault("configurable", {}).update(
-        {"source": "desktop", "local_project_path": "/tmp"}
-    )
-    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+    config.setdefault("configurable", {}).update({"source": "desktop"})
+    config["metadata"] = dict(_LOCAL_THREAD_METADATA)
+    with patch("agent.server.create_local_backend", return_value=MagicMock()):
         captured = await _capture_create_deep_agent_kwargs(config)
 
     calls = captured["make_model_calls"]

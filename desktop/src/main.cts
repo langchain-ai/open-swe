@@ -9,12 +9,12 @@ const {
   dialog,
   net,
   protocol,
-  safeStorage,
   session,
   shell,
 } = require("electron");
-const { BackendSupervisor } = require("./backend-supervisor.cjs");
-const { LocalThreadStore } = require("./local-thread-store.cjs");
+const { LocalCheckpointStore } = require("./local-checkpoint-store.cjs");
+const { LocalRunner } = require("./local-runner.cjs");
+const { readDeviceIdentity } = require("./device-identity.cjs");
 const {
   captureCheckpoint,
   checkpointRef,
@@ -38,7 +38,6 @@ const {
   removeProject,
 } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
-const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
   APP_ORIGIN,
@@ -91,10 +90,9 @@ let mainWindow = null;
 let setupWindow = null;
 let loginFlow = null;
 let quitting = false;
-let localThreadStore = null;
-let lastActivity = {};
-let backendSupervisor = null;
-let openAiOAuth = null;
+let checkpointStore = null;
+let localRunner = null;
+let deviceIdentity = null;
 
 function sendDesktopCommand(commandId) {
   if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
@@ -142,12 +140,11 @@ function registeredProject(cwd) {
   }
 }
 
-function resolveLocalProjectPath(localSessionId, value) {
-  const localSession = localThreadStore.get(localSessionId);
-  if (!localSession || typeof value !== "string" || value.length === 0)
-    return null;
+function resolveLocalProjectPath(threadId, value) {
+  const record = checkpointStore.get(threadId);
+  if (!record || typeof value !== "string" || value.length === 0) return null;
   try {
-    const projectRoot = fs.realpathSync(localSession.cwd);
+    const projectRoot = fs.realpathSync(record.cwd);
     if (!registeredProject(projectRoot)) return null;
     const windowsAbsolute = path.win32.isAbsolute(value);
     if (windowsAbsolute && process.platform !== "win32") return null;
@@ -164,13 +161,13 @@ function resolveLocalProjectPath(localSessionId, value) {
   }
 }
 
-async function recordLocalCheckpoint(thread) {
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) return thread;
-  const ref = checkpointRef(thread.id);
+async function recordLocalCheckpoint(record) {
+  const repo = await repoRoot(record.cwd);
+  if (!repo) return record;
+  const ref = checkpointRef(record.id);
   await captureCheckpoint(repo, ref);
   const branch = await currentBranch(repo);
-  return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
+  return checkpointStore.setCheckpoint(record.id, { repo, ref, branch }) ?? record;
 }
 
 /**
@@ -178,24 +175,12 @@ async function recordLocalCheckpoint(thread) {
  * so the checked-out branch only belongs to a thread while that thread has it:
  * record it then, and read the recorded value afterwards.
  */
-async function syncThreadBranch(thread) {
-  if (!thread?.checkpoint.repo) return thread;
-  const branch = await currentBranch(thread.checkpoint.repo);
-  if (!branch || branch === thread.checkpoint.branch) return thread;
-  return (
-    localThreadStore.setCheckpoint(thread.id, {
-      ...thread.checkpoint,
-      branch,
-    }) ?? thread
-  );
-}
-
-/** A running thread owns the checkout, so its branch can still be changing. */
 async function diffThread(threadId) {
-  const thread = localThreadStore.get(threadId);
-  if (!thread) return thread;
-  const activity = await backendSupervisor.threadActivity();
-  return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
+  const record = checkpointStore.get(threadId);
+  if (!record?.repo) return record;
+  const branch = await currentBranch(record.repo);
+  if (!branch || branch === record.branch) return record;
+  return checkpointStore.setCheckpoint(threadId, { ...record, branch }) ?? record;
 }
 
 function configureDesktopIpc() {
@@ -278,18 +263,13 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:resolve-local-project-path", (event, input) => {
     requireTrustedDesktopIpc(event);
-    return resolveLocalProjectPath(input?.localSessionId, input?.path);
+    return resolveLocalProjectPath(input?.threadId, input?.path);
   });
-  ipcMain.handle("desktop:local-model-credential-status", (event, modelId) => {
+  ipcMain.handle("desktop:device-identity", (event) => {
     requireTrustedDesktopIpc(event);
-    return backendSupervisor.credentialStatus(modelId);
+    return deviceIdentity;
   });
-  ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
-    requireTrustedDesktopIpc(event);
-    if (!openAiOAuth) throw new Error("OpenAI sign-in is unavailable");
-    return openAiOAuth.login((url) => shell.openExternal(url));
-  });
-  ipcMain.handle("desktop:start-local-thread", async (event, input) => {
+  ipcMain.handle("desktop:register-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     const cwd =
       typeof input?.cwd === "string" ? registeredProject(input.cwd) : null;
@@ -297,94 +277,38 @@ function configureDesktopIpc() {
       throw new Error(
         "Add a valid project to Open SWE before starting a local agent",
       );
-    await backendSupervisor.start();
-    let thread = localThreadStore.create({ ...input, cwd });
+    if (typeof input?.threadId !== "string" || !input.threadId)
+      throw new Error("A local thread needs an id");
+    const record = checkpointStore.put(input.threadId, cwd);
     try {
-      thread = await recordLocalCheckpoint(thread);
-      await backendSupervisor.createThread(thread.id);
+      return await recordLocalCheckpoint(record);
     } catch (error) {
-      localThreadStore.delete(thread.id);
-      if (thread.checkpoint.repo && thread.checkpoint.ref)
-        deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
+      checkpointStore.delete(record.id);
       throw error;
     }
-    return thread;
-  });
-  ipcMain.handle("desktop:get-local-prompt", (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    return localThreadStore.pendingPrompt(threadId);
-  });
-  ipcMain.handle("desktop:clear-local-prompt", (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    return localThreadStore.clearPrompt(threadId);
-  });
-  ipcMain.handle("desktop:get-local-thread", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
-    if (!thread) return null;
-    await backendSupervisor.createThread(thread.id);
-    return thread;
   });
   ipcMain.handle("desktop:list-local-threads", (event) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.list();
+    return checkpointStore.list();
   });
-  ipcMain.handle("desktop:local-activity", async (event) => {
+  ipcMain.handle("desktop:forget-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const activity = await backendSupervisor.threadActivity();
-    if (!activity) throw new Error("Could not read local agent activity");
-    for (const [threadId, status] of Object.entries(lastActivity)) {
-      if (status === "running" && activity[threadId] !== "running")
-        localThreadStore.update(threadId, { viewed: false });
-    }
-    lastActivity = activity;
-    return activity;
-  });
-  ipcMain.handle("desktop:update-local-thread", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const updated = localThreadStore.update(input?.threadId, {
-      ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
-      ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
-      ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
-    });
-    return syncThreadBranch(updated);
-  });
-  ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
-    if (!thread) return false;
-    const activity = await backendSupervisor.threadActivity();
-    if (!activity || activity[threadId] === "running")
-      throw new Error("Stop the local agent before deleting it");
+    const record = checkpointStore.get(threadId);
+    if (!record) return false;
     await closeThreadTerminals(threadId);
-    try {
-      await backendSupervisor.deleteThread(threadId);
-    } catch (error) {
-      console.warn("Could not delete local LangGraph thread", error);
-    }
-    localThreadStore.delete(threadId);
-    if (thread.checkpoint.repo && thread.checkpoint.ref)
-      deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
+    if (record.repo && record.ref) deleteRefs(record.repo, [record.ref]);
+    checkpointStore.delete(threadId);
     return true;
   });
   ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const thread = await diffThread(threadId);
-    if (
-      !thread ||
-      !registeredProject(thread.cwd) ||
-      !thread.checkpoint.repo ||
-      !thread.checkpoint.ref
-    )
+    const record = await diffThread(threadId);
+    if (!record || !registeredProject(record.cwd) || !record.repo || !record.ref)
       return { status: "missing", files: [], truncated: false };
     try {
       const [diff, repository] = await Promise.all([
-        readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
-        repositoryMetadata(
-          thread.checkpoint.repo,
-          undefined,
-          thread.checkpoint.branch,
-        ),
+        readDiff(record.repo, record.ref),
+        repositoryMetadata(record.repo, undefined, record.branch),
       ]);
       return { ...diff, repository };
     } catch {
@@ -393,21 +317,21 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const thread = await diffThread(threadId);
-    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
+    const record = await diffThread(threadId);
+    if (!record || !registeredProject(record.cwd) || !record.repo)
       return { status: "missing", files: [], truncated: false };
     try {
       const repository = await repositoryMetadata(
-        thread.checkpoint.repo,
+        record.repo,
         undefined,
-        thread.checkpoint.branch,
+        record.branch,
       );
       if (!repository.pr)
         return { status: "missing", files: [], truncated: false, repository };
       const diff = await readBranchDiff(
-        thread.checkpoint.repo,
+        record.repo,
         repository.pr.baseRef,
-        thread.checkpoint.branch,
+        record.branch,
       );
       return { ...diff, repository };
     } catch {
@@ -581,6 +505,23 @@ async function storeResponseCookies(targetUrl, response) {
   }
 }
 
+async function backendApiRequest(pathname, init: RequestInit = {}) {
+  if (!backendUrl) throw new Error("Backend is not configured");
+  const target = new URL(pathname, backendUrl).toString();
+  const cookies = await session.defaultSession.cookies.get({ url: target });
+  const headers = new Headers(init.headers);
+  // The app is its own origin, and the backend's CSRF check knows it. Without
+  // this a main-process request looks origin-less and is refused.
+  headers.set("origin", APP_ORIGIN);
+  if (cookies.length) {
+    headers.set(
+      "cookie",
+      cookies.map(({ name, value }) => `${name}=${value}`).join("; "),
+    );
+  }
+  return fetch(target, { ...init, headers });
+}
+
 async function clearBackendCookies(url) {
   for (const cookie of await session.defaultSession.cookies.get({ url })) {
     await session.defaultSession.cookies.remove(
@@ -596,11 +537,6 @@ async function serveBundledUi(request) {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/dashboard/api"))
     return proxyBackendRequest(request);
-  if (
-    url.pathname === "/local-graph" ||
-    url.pathname.startsWith("/local-graph/")
-  )
-    return backendSupervisor.proxy(request);
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -1001,33 +937,17 @@ if (!hasSingleInstanceLock) {
     }
 
     if (process.platform === "darwin") app.dock.setIcon(iconPath());
-    localThreadStore = new LocalThreadStore(
-      path.join(app.getPath("userData"), "desktop-local-threads.json"),
+    checkpointStore = new LocalCheckpointStore(
+      path.join(app.getPath("userData"), "desktop-local-checkpoints.json"),
     );
-    openAiOAuth = new OpenAiOAuthManager({
-      storagePath: path.join(app.getPath("userData"), "openai-auth.bin"),
-      encryptString: (value) => {
-        if (!safeStorage.isEncryptionAvailable()) {
-          throw new Error("Secure credential storage is unavailable");
-        }
-        return safeStorage.encryptString(value);
-      },
-      decryptString: (value) => safeStorage.decryptString(value),
+    deviceIdentity = readDeviceIdentity(app.getPath("userData"));
+    localRunner = new LocalRunner({
+      deviceId: deviceIdentity.deviceId,
+      registeredProject,
+      knowsThread: (threadId) => Boolean(checkpointStore.get(threadId)),
+      request: backendApiRequest,
     });
-    await openAiOAuth.startBroker().catch((error) => {
-      console.warn("Could not start the local OpenAI credential broker", error);
-    });
-    backendSupervisor = new BackendSupervisor({
-      isPackaged: app.isPackaged,
-      repoRoot: path.resolve(__dirname, "../.."),
-      resourcesPath: process.resourcesPath,
-      stateDir: path.join(app.getPath("userData"), "local-backend"),
-      projectsFile: projectsPath(),
-      providerEnv: () => openAiOAuth?.backendEnv() || {},
-      openAiOAuthAvailable: () =>
-        openAiOAuth?.status().signedIn === true &&
-        Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
-    });
+    localRunner.start();
     protocol.handle("open-swe", serveBundledUi);
     configurePermissions();
     configureDesktopIpc();
@@ -1038,7 +958,7 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
-      getLocalThread: (id) => localThreadStore.get(id),
+      getLocalThread: (id) => checkpointStore.get(id),
       userDataPath: app.getPath("userData"),
     });
 
@@ -1055,11 +975,8 @@ if (!hasSingleInstanceLock) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    void Promise.all([
-      closeAllTerminals(),
-      backendSupervisor?.close(),
-      openAiOAuth?.close(),
-    ]).finally(() => {
+    localRunner?.stop();
+    void closeAllTerminals().finally(() => {
       app.quit();
     });
   });

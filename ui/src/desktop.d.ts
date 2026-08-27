@@ -1,6 +1,5 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
-import type { Skill } from "@/lib/api"
+import type { AgentPullRequest } from "@/features/agents/lib/types"
 
 export type DesktopCommandId =
   | "new-thread"
@@ -15,31 +14,25 @@ export interface DesktopProject {
   addedAt: number
 }
 
-export interface DesktopLocalThreadSummary {
+/** The git checkpoint a local thread left on this machine. */
+export interface DesktopLocalCheckpoint {
   id: string
   cwd: string
-  title: string
-  viewed: boolean
-  createdAt: number
-  updatedAt: number
-  modelId: string | null
-  effort: string | null
-  pending?: DesktopLocalPromptInput | null
+  repo: string | null
+  ref: string | null
+  branch: string | null
 }
 
-export type DesktopLocalActivity = Record<string, "running" | "error">
+export interface DesktopDeviceIdentity {
+  deviceId: string
+  deviceName: string
+}
 
 export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
   repository?: { branch: string | null; pr: AgentPullRequest | null }
-}
-
-export interface DesktopLocalPromptInput {
-  prompt: string
-  images: Array<ImageChunk>
-  skills: Array<Skill>
 }
 
 export type DesktopTerminalStatus = "starting" | "running" | "exited" | "error"
@@ -155,40 +148,16 @@ declare global {
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
       resolveLocalProjectPath: (input: {
-        localSessionId: string
+        threadId: string
         path: string
       }) => Promise<string | null>
-      localModelCredentialStatus: (modelId?: string) => Promise<{
-        available: boolean
-        variable: string | null
-        canSignIn?: boolean
-      }>
-      signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
-      startLocalThread: (
-        input: DesktopLocalPromptInput & {
-          cwd: string
-          modelId?: string
-          effort?: string
-        }
-      ) => Promise<DesktopLocalThreadSummary>
-      getLocalPrompt: (
+      deviceIdentity: () => Promise<DesktopDeviceIdentity>
+      registerLocalThread: (input: {
         threadId: string
-      ) => Promise<DesktopLocalPromptInput | null>
-      clearLocalPrompt: (
-        threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
-      getLocalThread: (
-        threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
-      listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
-      localActivity: () => Promise<DesktopLocalActivity>
-      updateLocalThread: (input: {
-        threadId: string
-        viewed?: boolean
-        modelId?: string
-        effort?: string
-      }) => Promise<DesktopLocalThreadSummary | null>
-      deleteLocalThread: (threadId: string) => Promise<boolean>
+        cwd: string
+      }) => Promise<DesktopLocalCheckpoint>
+      listLocalThreads: () => Promise<Array<DesktopLocalCheckpoint>>
+      forgetLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge

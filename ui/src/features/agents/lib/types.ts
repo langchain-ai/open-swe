@@ -347,6 +347,8 @@ export interface AgentPullRequestContextResponse {
   prompt: string
 }
 
+export type AgentRunLocation = "cloud" | "local"
+
 export interface AgentThread {
   id: string
   title: string
@@ -358,6 +360,11 @@ export interface AgentThread {
   planMode?: boolean
   planStatus?: string | null
   adminThread?: boolean
+  /** Where this thread's commands run: a cloud sandbox, or a user's machine. */
+  runLocation?: AgentRunLocation
+  deviceId?: string | null
+  deviceName?: string | null
+  localProjectPath?: string | null
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string

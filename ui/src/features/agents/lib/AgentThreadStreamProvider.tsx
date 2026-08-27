@@ -8,7 +8,6 @@ import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
 import type { ReactNode } from "react"
 
 const AGENT_ASSISTANT_ID = "agent"
-const LOCAL_AGENT_ASSISTANT_ID = "agent"
 
 const dashboardFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, credentials: "include" })
@@ -44,7 +43,6 @@ const agentStreamApiUrl = toAbsoluteApiUrl(agentsApi.langGraphApiUrl)
 export function AgentThreadStreamProvider({
   threadId,
   children,
-  transport = "cloud",
   onThreadId,
 }: {
   /**
@@ -56,22 +54,17 @@ export function AgentThreadStreamProvider({
    */
   threadId: string | null
   children: ReactNode
-  transport?: "cloud" | "local"
   onThreadId?: (threadId: string) => void
 }) {
   const queryClient = useQueryClient()
-  const apiUrl =
-    transport === "local" ? toAbsoluteApiUrl("/local-graph") : agentStreamApiUrl
-  const assistantId =
-    transport === "local" ? LOCAL_AGENT_ASSISTANT_ID : AGENT_ASSISTANT_ID
   const client = useMemo(
     () =>
       new Client({
-        apiUrl,
+        apiUrl: agentStreamApiUrl,
         apiKey: null,
-        ...(transport === "cloud" ? { onRequest: dashboardRequest } : {}),
+        onRequest: dashboardRequest,
       }),
-    [apiUrl, transport]
+    []
   )
 
   // The SDK captures the lifecycle callbacks once at controller creation, so
@@ -89,11 +82,10 @@ export function AgentThreadStreamProvider({
   }, [])
 
   const onCreated = useCallback(() => {
-    if (transport === "cloud") invalidateAgentThreadLists(queryClient)
-  }, [queryClient, transport])
+    invalidateAgentThreadLists(queryClient)
+  }, [queryClient])
 
   const onCompleted = useCallback(() => {
-    if (transport !== "cloud") return
     const id = threadIdRef.current
     if (id) {
       void queryClient.invalidateQueries({
@@ -101,12 +93,12 @@ export function AgentThreadStreamProvider({
       })
     }
     invalidateAgentThreadLists(queryClient)
-  }, [queryClient, transport])
+  }, [queryClient])
 
   return (
     <StreamProvider
-      apiUrl={apiUrl}
-      assistantId={assistantId}
+      apiUrl={agentStreamApiUrl}
+      assistantId={AGENT_ASSISTANT_ID}
       client={client}
       threadId={threadId ?? undefined}
       onThreadId={handleThreadId}

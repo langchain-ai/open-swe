@@ -9,8 +9,9 @@ import {
   ChatCircleIcon,
   CheckCircleIcon,
   CircleNotchIcon,
+  CloudIcon,
   CopyIcon,
-  FolderOpenIcon,
+  DesktopTowerIcon,
   GitMergeIcon,
   GitPullRequestIcon,
   LightningIcon,
@@ -29,13 +30,10 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
-import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
-import { DesktopThreadSourceToggle } from "@/features/agents/components/DesktopThreadSourceToggle"
 import { SidebarFilterMenu } from "@/features/agents/components/SidebarFilterMenu"
-import { SidebarProjectSelector } from "@/features/agents/components/SidebarProjectSelector"
 import { Button } from "@/components/ui/button"
 import {
   SidebarCollapseButton,
@@ -59,13 +57,7 @@ import {
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
-import {
-  useDesktopLocalThreads,
-  useLocalThreadActivity,
-  useRefreshLocalThreads,
-} from "@/features/agents/lib/desktopLocal"
-import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { isLocalThread } from "@/features/agents/lib/runLocation"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   useAppCommandControls,
@@ -131,9 +123,7 @@ function openContextMenuFromKeyboard(
 
 interface AgentsSidebarProps {
   user: SessionUser | null
-  localOnly?: boolean
   activeThreadId?: string
-  activeLocalSessionId?: string
   layout: SidebarLayout
 }
 
@@ -146,9 +136,7 @@ const NAV = [
 
 export function AgentsSidebar({
   user,
-  localOnly = false,
   activeThreadId,
-  activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
@@ -167,42 +155,9 @@ export function AgentsSidebar({
       prefs.filters.includeAutomations ||
       prefs.filters.sources.includes("schedule"),
     includeResolved: prefs.filters.includeResolved,
-    enabled: !localOnly,
   })
-  const localSessions = useDesktopLocalThreads().data ?? []
-  const activity = useLocalThreadActivity()
-  const refreshLocalThreads = useRefreshLocalThreads()
-  const deleteLocalSession = async (sessionId: string) => {
-    const deleted =
-      (await window.openSweDesktop?.deleteLocalThread(sessionId)) ?? false
-    if (deleted) refreshLocalThreads()
-    return deleted
-  }
-  const {
-    projects: localProjects,
-    addProject: addLocalProject,
-    removeProject: removeLocalProject,
-  } = useDesktopProjects()
-  const localGroups = groupLocalProjects(localProjects, localSessions)
-  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
-    null
-  )
-  const activeProjectPath = localProjects.some(
-    (project) => project.cwd === selectedProjectPath
-  )
-    ? selectedProjectPath
-    : null
-  const visibleLocalGroups = activeProjectPath
-    ? localGroups.filter((group) => group.project.cwd === activeProjectPath)
-    : localGroups
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
-  useEffect(() => {
-    if (!isDesktop) return
-    if (activeLocalSessionId) setDesktopThreadSource("local")
-    else if (activeThreadId) setDesktopThreadSource("cloud")
-  }, [activeLocalSessionId, activeThreadId, isDesktop, setDesktopThreadSource])
   const pinnedThreads = sidebar.data.pinned ?? []
   const pinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
   const allActiveThreads = sidebar.data.active.items
@@ -265,24 +220,6 @@ export function AgentsSidebar({
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
-  const cloudActivity = {
-    running: allActiveThreads.filter((thread) => thread.status === "running")
-      .length,
-    completed: allActiveThreads.filter(
-      (thread) => thread.status === "finished" && !thread.viewed
-    ).length,
-  }
-  const localActivity = {
-    running: localSessions.filter((thread) => activity[thread.id] === "running")
-      .length,
-    completed: localSessions.filter(
-      (thread) => !thread.viewed && activity[thread.id] !== "running"
-    ).length,
-  }
-  const showLocalThreads =
-    isDesktop && (localOnly || desktopThreadSource === "local")
-  const showCloudThreads =
-    !localOnly && (!isDesktop || desktopThreadSource === "cloud")
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -293,7 +230,7 @@ export function AgentsSidebar({
         )}
       >
         <Link
-          to={localOnly ? "/agents" : "/my-settings"}
+          to="/my-settings"
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
@@ -327,8 +264,7 @@ export function AgentsSidebar({
         </Link>
       </div>
 
-      {!localOnly && (
-        <nav
+      <nav
           className={cn(
             "flex flex-col gap-0.5 px-2",
             isDesktop ? "pb-3" : "pb-4"
@@ -353,68 +289,9 @@ export function AgentsSidebar({
             )
           })}
         </nav>
-      )}
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
-        {isDesktop && !localOnly && (
-          <DesktopThreadSourceToggle
-            source={desktopThreadSource}
-            localActivity={localActivity}
-            cloudActivity={cloudActivity}
-            onSourceChange={setDesktopThreadSource}
-          />
-        )}
-        {showLocalThreads && (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <SidebarProjectSelector
-              projects={localProjects}
-              selectedProjectPath={activeProjectPath}
-              onSelectProject={setSelectedProjectPath}
-              onAddProject={() => void addLocalProject()}
-              onRemoveProject={(cwd) => void removeLocalProject(cwd)}
-            />
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {activeProjectPath
-                ? visibleLocalGroups[0]?.sessions.map((session) => (
-                    <LocalThreadRow
-                      key={session.id}
-                      session={session}
-                      isActive={session.id === activeLocalSessionId}
-                      onNavigate={layout.closeOnMobile}
-                      onDelete={deleteLocalSession}
-                      compact={prefs.compact}
-                    />
-                  ))
-                : visibleLocalGroups.map((group) => (
-                    <LocalThreadGroup
-                      key={group.project.cwd}
-                      project={group.project}
-                      sessions={group.sessions}
-                      activeSessionId={activeLocalSessionId}
-                      onNavigate={layout.closeOnMobile}
-                      onDelete={deleteLocalSession}
-                      onRemove={() =>
-                        void removeLocalProject(group.project.cwd)
-                      }
-                      compact={prefs.compact}
-                    />
-                  ))}
-              {localGroups.length === 0 && (
-                <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
-                  No projects yet
-                </p>
-              )}
-              {activeProjectPath &&
-                visibleLocalGroups[0]?.sessions.length === 0 && (
-                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
-                    No threads yet
-                  </p>
-                )}
-            </div>
-          </div>
-        )}
-        {showCloudThreads && (
-          <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
             {sidebar.isPending && (
               <ThreadListSkeleton compact={prefs.compact} />
             )}
@@ -498,8 +375,7 @@ export function AgentsSidebar({
                 No threads match these filters.
               </p>
             )}
-          </div>
-        )}
+        </div>
       </div>
 
       <div className="flex items-center gap-1 p-2">
@@ -515,16 +391,14 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
-        {showCloudThreads && (
-          <SidebarFilterMenu
-            prefs={prefs}
-            facets={facets}
-            onGroupChange={setGroup}
-            onFiltersChange={setFilters}
-            onCompactChange={setCompact}
-            onResetFilters={resetFilters}
-          />
-        )}
+        <SidebarFilterMenu
+          prefs={prefs}
+          facets={facets}
+          onGroupChange={setGroup}
+          onFiltersChange={setFilters}
+          onCompactChange={setCompact}
+          onResetFilters={resetFilters}
+        />
       </div>
     </SidebarFrame>
   )
@@ -585,202 +459,6 @@ function DeleteThreadDialog({
   )
 }
 
-function groupLocalProjects(
-  projects: Array<DesktopProject>,
-  sessions: Array<DesktopLocalThreadSummary>
-) {
-  const sessionsByProject = new Map<string, Array<DesktopLocalThreadSummary>>()
-  for (const session of sessions) {
-    const group = sessionsByProject.get(session.cwd) ?? []
-    group.push(session)
-    sessionsByProject.set(session.cwd, group)
-  }
-  return projects
-    .map((project) => ({
-      project,
-      sessions: (sessionsByProject.get(project.cwd) ?? []).sort(
-        (left, right) => right.createdAt - left.createdAt
-      ),
-    }))
-    .sort((left, right) => right.project.addedAt - left.project.addedAt)
-}
-
-function LocalThreadGroup({
-  project,
-  sessions,
-  activeSessionId,
-  onNavigate,
-  onDelete,
-  onRemove,
-  compact = false,
-}: {
-  project: DesktopProject
-  sessions: Array<DesktopLocalThreadSummary>
-  activeSessionId?: string
-  onNavigate?: () => void
-  onDelete: (sessionId: string) => Promise<boolean>
-  onRemove: () => void
-  compact?: boolean
-}) {
-  const [collapsed, setCollapsed] = useState(false)
-  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
-
-  return (
-    <div className={cn("group/project", compact ? "mb-2" : "mb-3")}>
-      <div className="flex items-center">
-        <button
-          type="button"
-          onClick={() => setCollapsed((value) => !value)}
-          className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
-          aria-expanded={!collapsed}
-          title={project.cwd}
-        >
-          <ToggleIcon className="size-3" />
-          <FolderOpenIcon className="size-3.5" />
-          <span className="min-w-0 flex-1 truncate">{project.name}</span>
-          <span>{sessions.length}</span>
-        </button>
-        <button
-          aria-label={`Remove ${project.name}`}
-          className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity group-hover/project:opacity-100 hover:bg-sidebar-row-hover hover:text-destructive focus:opacity-100 [@media(hover:none)]:opacity-100"
-          onClick={onRemove}
-          title="Remove project"
-          type="button"
-        >
-          <TrashIcon className="size-3.5" />
-        </button>
-      </div>
-      {!collapsed &&
-        sessions.map((session) => (
-          <LocalThreadRow
-            key={session.id}
-            session={session}
-            isActive={session.id === activeSessionId}
-            onNavigate={onNavigate}
-            onDelete={onDelete}
-            compact={compact}
-          />
-        ))}
-    </div>
-  )
-}
-
-function LocalThreadRow({
-  session,
-  isActive,
-  onNavigate,
-  onDelete,
-  compact = false,
-}: {
-  session: DesktopLocalThreadSummary
-  isActive: boolean
-  onNavigate?: () => void
-  onDelete: (sessionId: string) => Promise<boolean>
-  compact?: boolean
-}) {
-  const navigate = useNavigate()
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [contextMenuOpen, setContextMenuOpen] = useState(false)
-  const running = useLocalThreadActivity()[session.id] === "running"
-
-  const confirmDelete = async () => {
-    if (isDeleting) return
-    setIsDeleting(true)
-    setDeleteError(null)
-    try {
-      if (!(await onDelete(session.id))) {
-        throw new Error("Local Open SWE thread not found")
-      }
-      setDeleteOpen(false)
-      if (isActive) {
-        onNavigate?.()
-        void navigate({ to: "/agents" })
-      }
-    } catch (error) {
-      setDeleteError(
-        error instanceof Error ? error.message : "Could not delete local thread"
-      )
-    } finally {
-      setIsDeleting(false)
-    }
-  }
-
-  return (
-    <>
-      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
-        <ContextMenu.Trigger
-          className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
-        >
-          <Link
-            to="/agents/local/$sessionId"
-            params={{ sessionId: session.id }}
-            onClick={(event) => {
-              if (contextMenuOpen) {
-                event.preventDefault()
-                return
-              }
-              onNavigate?.()
-            }}
-            onKeyDown={openContextMenuFromKeyboard}
-            className={cn(
-              "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
-              compact ? "h-7 gap-1.5" : "h-8",
-              isActive
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground group-hover:bg-sidebar-row-hover"
-            )}
-          >
-            {running ? (
-              <CircleNotchIcon
-                className="size-3 shrink-0 animate-spin text-primary"
-                aria-label="Local thread running"
-              />
-            ) : (
-              <span className="size-2 shrink-0 rounded-full bg-border" />
-            )}
-            <span className="min-w-0 flex-1 truncate text-[13px]">
-              {session.title}
-            </span>
-          </Link>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-              <ContextMenu.Item
-                onClick={() => setDeleteOpen(true)}
-                disabled={isDeleting}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-              >
-                <TrashIcon className="size-3.5" />
-                Delete thread
-              </ContextMenu.Item>
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
-      <DeleteThreadDialog
-        open={deleteOpen}
-        onOpenChange={(open) => {
-          setDeleteOpen(open)
-          if (!open) setDeleteError(null)
-        }}
-        threadTitle={session.title}
-        isDeleting={isDeleting}
-        onConfirm={() => void confirmDelete()}
-        detail="This removes its history but does not revert changes made to your project."
-        error={deleteError}
-      />
-    </>
-  )
-}
-
-/**
- * Mirrors the grouped thread list's shape so the sidebar reads as loading
- * rather than as an account with no threads. Widths vary per row because a
- * column of identical bars reads as a UI element, not as pending content.
- */
 function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
   const groups = [
     [90, 64, 76],
@@ -954,6 +632,29 @@ function LoadMoreThreadsButton({
   )
 }
 
+/**
+ * Where the thread runs, next to its title.
+ *
+ * Local and cloud threads share one list, so the icon is what distinguishes
+ * them — and for a local thread it also names the machine, which is the thing
+ * you need to know when its composer is disabled.
+ */
+function RunLocationIcon({ thread }: { thread: AgentThread }) {
+  const local = isLocalThread(thread)
+  const Icon = local ? DesktopTowerIcon : CloudIcon
+  const label = local
+    ? `Runs on ${thread.deviceName || "this computer"}`
+    : "Runs in the cloud"
+  return (
+    <Icon
+      className="size-3.5 shrink-0 text-muted-foreground/70"
+      aria-label={label}
+    >
+      <title>{label}</title>
+    </Icon>
+  )
+}
+
 function ThreadRow({
   thread,
   isActive,
@@ -1073,6 +774,7 @@ function ThreadRow({
                 }
               />
             )}
+            <RunLocationIcon thread={thread} />
             {source && SourceIcon && (
               <SourceIcon
                 className="size-3.5 shrink-0 text-muted-foreground/70"
@@ -1197,15 +899,11 @@ function ThreadRow({
 
 export function AgentsShell({
   user,
-  localOnly = false,
   activeThreadId,
-  activeLocalSessionId,
   children,
 }: {
   user: SessionUser | null
-  localOnly?: boolean
   activeThreadId?: string
-  activeLocalSessionId?: string
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -1231,9 +929,7 @@ export function AgentsShell({
       <div className="agents-ui flex h-svh overflow-hidden bg-background">
         <AgentsSidebar
           user={user}
-          localOnly={localOnly}
           activeThreadId={activeThreadId}
-          activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
         <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">

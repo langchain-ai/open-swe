@@ -6,20 +6,17 @@
 The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
 compatible Open SWE backend; they do not need a separately hosted dashboard.
 
-Desktop users can choose **This Mac** in the new-task composer to run the same Open SWE LangGraph agent over a selected local project. Electron owns a loopback-only LangGraph server, proxies it to the bundled UI, and stops it with the app. Local threads use the same streaming protocol, graph, tools, subagents, and middleware assembly as cloud threads; only the filesystem backend and unavailable cloud integrations differ.
+Desktop users can choose **This Mac** in the new-task composer to run a thread against a selected
+local project. Such a thread is an ordinary Open SWE thread — same backend, same graph, same
+storage, same list in the sidebar — and differs from a cloud thread only in where its shell
+commands land: the app holds outbound WebSockets to the backend, and the agent's commands are
+relayed back over them to run on this machine. A cloud icon or a computer icon on each row in the
+sidebar says which is which.
 
-The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
-
-For local OpenAI models, the app can use either `OPENAI_API_KEY` or Sign in with ChatGPT. When no
-API key is configured, sending the first local task opens the system browser for sign-in. OAuth
-credentials are encrypted with the operating system's secure storage, refreshed by Electron, and
-made available to the local model client through an authenticated loopback broker. Refresh tokens
-are never placed in the local backend environment or inherited by agent shell commands.
-
-Local model calls also honor `LANGSMITH_GATEWAY_*` configuration. On managed macOS installs, the
-app reads `LC_GATEWAY_KEY` from `launchctl` when no explicit gateway key is configured and enables
-gateway routing for the local backend. Gateway and provider credentials are not inherited by agent
-shell commands.
+Because a local thread's working tree exists on exactly one computer, only that computer can drive
+it. Opening it from the web, or from a second install, shows the transcript read-only and names the
+machine it belongs to. Models and credentials resolve on the backend, exactly as they do for cloud
+threads.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
@@ -39,11 +36,6 @@ deployments; switching clears the previous deployment's local session data.
 The backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a callback URL.
 Set `ALLOWED_GITHUB_ORGS` on the backend to prevent GitHub users outside the organization from
 creating dashboard sessions.
-
-The desktop sign-in screen also offers **Continue in local mode**. This skips GitHub sign-in and
-limits the Agents workspace to projects and threads on **This Mac**; cloud threads, settings, and
-other account-backed features remain behind sign-in. The choice is remembered on that computer,
-and **Sign in for cloud mode** remains available from the local sidebar.
 
 ## Install on macOS
 
@@ -74,14 +66,14 @@ make desktop
 make web
 ```
 
-`pnpm run dev:desktop` is equivalent to `make desktop`. The desktop app starts its private local-agent backend on a random loopback port while connecting cloud features and GitHub login to the shared backend at `http://localhost:2024`.
+`pnpm run dev:desktop` is equivalent to `make desktop`. The desktop app connects everything —
+threads, GitHub login, and the command relay for local threads — to the shared backend at
+`http://localhost:2024`.
 
 Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run
 beside an installed `Open SWE` app without sharing its login session, backend configuration,
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
-
-A separate agent installation is not required. Confirm `uv --version` succeeds before starting the desktop app in development.
 
 Development defaults to `http://localhost:2024`. Point to another backend with:
 
