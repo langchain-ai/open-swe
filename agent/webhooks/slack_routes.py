@@ -484,6 +484,7 @@ async def slack_webhook(
             "message_update": is_message_update,
             "code_channel": in_code_channel,
             "reply_thread_ts": reply_thread_ts if in_code_channel else "",
+            "app_context": updated_message.get("app_context") or event.get("app_context"),
         }
         repo_config = await common.get_slack_repo_config(
             channel_id,
