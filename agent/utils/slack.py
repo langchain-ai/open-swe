@@ -733,12 +733,15 @@ async def upload_slack_thread_file(
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
             ticket_response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/files.getUploadURLExternal",
-                headers=_slack_headers(),
-                json={"filename": filename, "length": len(content)},
+                headers={
+                    **_slack_headers(),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={"filename": filename, "length": str(len(content))},
             )
-            ticket_error = _slack_response_error(ticket_response)
+            ticket_error = _slack_response_error(ticket_response, include_details=True)
             if ticket_error:
-                return None, ticket_error
+                return None, _slack_upload_failure(ticket_error)
             ticket = ticket_response.json()
             upload_url = ticket.get("upload_url")
             file_id = ticket.get("file_id")
@@ -754,9 +757,9 @@ async def upload_slack_thread_file(
                 validate_url=_validate_slack_upload_url,
             )
             if blocked:
-                return None, "unsafe_upload_url"
+                return None, _slack_upload_failure("unsafe_upload_url")
             if upload_response is None:
-                return None, "upload_failed"
+                return None, _slack_upload_failure("upload_failed")
             upload_response.raise_for_status()
 
             payload: dict[str, Any] = {
@@ -771,13 +774,13 @@ async def upload_slack_thread_file(
                 headers=_slack_headers(),
                 json=payload,
             )
-            complete_error = _slack_response_error(complete_response)
+            complete_error = _slack_response_error(complete_response, include_details=True)
             if complete_error:
-                return None, complete_error
+                return None, _slack_upload_failure(complete_error)
             return file_id, None
     except httpx.HTTPError as exc:
         logger.exception("Slack file upload failed")
-        return None, f"http_error: {type(exc).__name__}"
+        return None, _slack_upload_failure(f"http_error: {type(exc).__name__}")
     except (TypeError, ValueError):
         logger.exception("Slack file upload returned an invalid response")
         return None, "invalid_slack_response"
@@ -796,7 +799,7 @@ def _validate_slack_upload_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _slack_response_error(response: httpx.Response) -> str | None:
+def _slack_response_error(response: httpx.Response, *, include_details: bool = False) -> str | None:
     if response.status_code == 429:
         retry_after = response.headers.get("Retry-After")
         return f"rate_limited: {retry_after}" if retry_after else "rate_limited"
@@ -807,7 +810,22 @@ def _slack_response_error(response: httpx.Response) -> str | None:
     if data.get("ok"):
         return None
     error = data.get("error")
-    return "rate_limited" if error == "ratelimited" else str(error or "slack_api_error")
+    if error == "ratelimited":
+        return "rate_limited"
+    message = str(error or "slack_api_error")
+    if include_details:
+        for key in ("response_metadata", "warning"):
+            value = data.get(key)
+            if value:
+                message += f"; {key}: {value}"
+    return message
+
+
+def _slack_upload_failure(error: str) -> str:
+    return (
+        f"{error}; use create_sandbox_file_download_url instead and do not retry the attachment "
+        "from another filesystem path"
+    )
 
 
 async def post_slack_thread_reply(
