@@ -177,6 +177,12 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     if model_id.startswith("baseten:"):
         init_model_id = model_id.split(":", 1)[1]
         model_kwargs["model_provider"] = "openai"
+        model_kwargs["metadata"] = {
+            **cast(dict[str, Any], model_kwargs.get("metadata", {})),
+            "ls_provider": "baseten",
+            "ls_model_name": init_model_id,
+        }
+        model_kwargs["stream_usage"] = False
         if not gateway_applied:
             api_key = os.environ.get("BASETEN_API_KEY")
             if not api_key:

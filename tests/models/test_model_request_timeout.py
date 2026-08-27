@@ -48,3 +48,17 @@ def test_explicit_timeout_wins() -> None:
 
 def test_unknown_provider_gets_no_timeout() -> None:
     assert "timeout" not in _make_model("ollama:llama4")
+
+
+def test_baseten_uses_provider_metadata_and_disables_stream_usage(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("BASETEN_API_KEY", "baseten-key")
+    captured = _make_model("baseten:zai-org/GLM-5.3-Flash")
+    assert captured["model"] == "zai-org/GLM-5.3-Flash"
+    assert captured["model_provider"] == "openai"
+    assert captured["metadata"] == {
+        "ls_provider": "baseten",
+        "ls_model_name": "zai-org/GLM-5.3-Flash",
+    }
+    assert captured["stream_usage"] is False

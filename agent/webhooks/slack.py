@@ -196,6 +196,7 @@ async def _dispatch_or_queue_slack_run(
     configurable: dict[str, Any],
     *,
     explicitly_tagged: bool,
+    model_id: str,
 ) -> dict[str, Any]:
     """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
     if isinstance(run_input, list):
@@ -207,7 +208,11 @@ async def _dispatch_or_queue_slack_run(
             configurable,
             source="slack",
             input=run_input,
-            metadata=common._AGENT_VERSION_METADATA,
+            metadata={
+                **common._AGENT_VERSION_METADATA,
+                "model": model_id,
+                "agent_model_id": model_id,
+            },
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -823,6 +828,7 @@ async def _process_slack_mention_impl(
         "user_email": user_email,
         "source": "slack",
     }
+    resolved_model_id = await common.resolve_agent_model_id(mapped_login)
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
@@ -835,6 +841,7 @@ async def _process_slack_mention_impl(
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
+        resolved_model_id = image_model_override[0]
 
     thread_plan_mode = await common._get_thread_plan_mode(thread_id)
     if thread_plan_mode is not None:
@@ -893,6 +900,7 @@ async def _process_slack_mention_impl(
             run_input,
             configurable,
             explicitly_tagged=explicitly_tagged,
+            model_id=resolved_model_id,
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear

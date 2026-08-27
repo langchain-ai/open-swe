@@ -929,6 +929,9 @@ def _setup_slack_mention_fakes(
     async def fake_login_for_email(email):
         return None
 
+    async def fake_resolve_agent_model_id(github_login):
+        return "openai:gpt-5.6-sol"
+
     async def fake_refresh_cache() -> list:
         return []
 
@@ -948,6 +951,7 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(slack_webhooks, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
+    monkeypatch.setattr(webhook_common, "resolve_agent_model_id", fake_resolve_agent_model_id)
     monkeypatch.setattr(webhook_common, "refresh_user_mapping_cache", fake_refresh_cache)
     monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
@@ -1053,6 +1057,8 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert kwargs["if_not_exists"] == "create"
     assert kwargs["multitask_strategy"] == "interrupt"
     assert kwargs["durability"] == "sync"
+    assert kwargs["metadata"]["model"] == "openai:gpt-5.6-sol"
+    assert kwargs["metadata"]["agent_model_id"] == "openai:gpt-5.6-sol"
     slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
     assert slack_thread_context["thread_ts"] == thread_ts
     assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
