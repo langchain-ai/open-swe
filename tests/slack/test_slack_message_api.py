@@ -47,7 +47,7 @@ async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatc
             "C1", "1.0", chunks, recipient_user_id="U1", recipient_team_id="T1"
         )
         appended = await slack_utils.append_slack_stream("C1", "1.0", chunks)
-        stopped = await slack_utils.stop_slack_stream("C1", "1.0")
+        stopped = await slack_utils.stop_slack_stream("C1", "1.0", chunks)
 
     assert started == ("1.0", None)
     assert appended == (True, None)
@@ -63,7 +63,12 @@ async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatc
         "recipient_team_id": "T1",
     }
     assert calls[1].args[0].endswith("/chat.appendStream")
-    assert calls[2].kwargs["json"]["session_status"] == "active"
+    assert calls[2].kwargs["json"] == {
+        "channel": "C1",
+        "ts": "1.0",
+        "chunks": chunks,
+        "session_status": "active",
+    }
 
 
 @pytest.mark.asyncio

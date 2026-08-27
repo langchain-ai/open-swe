@@ -31,6 +31,7 @@ class Step:
     title: str
     status: StepStatus
     details: str = ""
+    output: str = ""
 
     def chunk(self) -> dict[str, Any]:
         chunk: dict[str, Any] = {
@@ -41,6 +42,8 @@ class Step:
         }
         if self.details:
             chunk["details"] = self.details[:256]
+        if self.output:
+            chunk["output"] = self.output[:256]
         return chunk
 
 
@@ -55,7 +58,7 @@ def _basename(value: str) -> str:
     return PurePath(value).name if value else "file"
 
 
-def _tool_title(name: str, tool_input: Any) -> str:
+def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
     if name in {"read_file", "write_file", "edit_file", "delete"}:
         action = {
             "read_file": "Reading",
@@ -63,22 +66,24 @@ def _tool_title(name: str, tool_input: Any) -> str:
             "edit_file": "Editing",
             "delete": "Removing",
         }[name]
-        return f"{action} {_basename(_text_arg(tool_input, 'file_path'))}"
-    if name in {"glob", "grep", "web_search", "fetch_url"}:
-        return "Searching for relevant context"
+        return f"{action} {_basename(_text_arg(tool_input, 'file_path'))}", "Repository file"
+    if name in {"glob", "grep"}:
+        return "Searching repository files", "Search details hidden"
+    if name in {"web_search", "fetch_url"}:
+        return "Searching external documentation", "External source lookup"
     if name in {"execute", "background_execute"}:
-        return "Running a development command"
+        return "Running a development command", "Command details hidden"
     if name == "task":
         agent = _text_arg(tool_input, "subagent_type").replace("-", " ")
-        return f"Delegating to {agent or 'a specialist'}"
+        return f"Delegating to {agent or 'a specialist'}", "Specialized agent task"
     labels = {
-        "ls": "Inspecting repository files",
-        "open_pull_request": "Opening pull request",
-        "request_pr_review": "Starting pull request review",
-        "save_plan": "Publishing implementation plan",
-        "analyzePlan": "Checking implementation security",
+        "ls": ("Inspecting repository files", "Repository directory"),
+        "open_pull_request": ("Opening pull request", "GitHub operation"),
+        "request_pr_review": ("Starting pull request review", "GitHub operation"),
+        "save_plan": ("Publishing implementation plan", "Plan artifact"),
+        "analyzePlan": ("Checking implementation security", "Security analysis"),
     }
-    return labels.get(name, "Working on the request")
+    return labels.get(name, (f"Using {name.replace('_', ' ')}", "Tool call"))
 
 
 def _step_id(run_id: str, namespace: tuple[str, ...], call_id: str) -> str:
@@ -180,10 +185,12 @@ class SlackThinkingStream:
             if startup and startup.status == "in_progress":
                 startup.status = "complete"
                 self.pending[startup.task_id] = startup
+            title, details = _tool_step(name, data.get("input"))
             step = Step(
                 _step_id(self.run_id, namespace, call_id),
-                _tool_title(name, data.get("input")),
+                title,
                 "in_progress",
+                details,
             )
             self.steps[key] = step
             self.pending[step.task_id] = step
@@ -193,6 +200,7 @@ class SlackThinkingStream:
                 step = Step(_step_id(self.run_id, namespace, call_id), "Agent step", "complete")
                 self.steps[key] = step
             step.status = "error" if event == "tool-error" else "complete"
+            step.output = "Failed" if event == "tool-error" else "Completed"
             self.pending[step.task_id] = step
 
     async def flush(self, *, force: bool = False) -> None:
@@ -222,11 +230,14 @@ class SlackThinkingStream:
         for step in self.steps.values():
             if step.status == "in_progress":
                 step.status = "complete" if status == "success" else "error"
+                step.output = "Completed" if status == "success" else "Interrupted"
                 self.pending[step.task_id] = step
-        await self.flush(force=True)
         if self.message_ts:
-            ok, error = await stop_slack_stream(self.channel_id, self.message_ts)
-            if not ok:
+            chunks = [step.chunk() for step in self.pending.values()]
+            ok, error = await stop_slack_stream(self.channel_id, self.message_ts, chunks)
+            if ok:
+                self.pending.clear()
+            else:
                 logger.warning(
                     "Could not stop Slack Thinking Steps for run %s: %s", self.run_id, error
                 )

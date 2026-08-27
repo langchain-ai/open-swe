@@ -51,13 +51,52 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     )
 
     start.assert_awaited_once()
-    assert append.await_args is not None
-    chunks = append.await_args.args[2]
-    serialized = str(chunks)
+    stop.assert_awaited_once()
+    final_chunks = stop.await_args.args[2]
+    serialized = str(final_chunks)
     assert "Running a development command" in serialized
+    assert "Command details hidden" in serialized
     assert "secret-token" not in serialized
-    assert chunks[-1]["status"] == "complete"
-    stop.assert_awaited_once_with("C1", "2.0")
+    assert final_chunks[-1]["status"] == "complete"
+    assert final_chunks[-1]["output"] == "Completed"
+
+
+async def test_stop_sends_pending_updates_despite_append_backoff(monkeypatch) -> None:
+    stop = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(slack_thinking, "stop_slack_stream", stop)
+    stream = slack_thinking.SlackThinkingStream(
+        client=AsyncMock(),
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="0",
+        recipient_user_id="U1",
+        recipient_team_id="T1",
+        mapping_thread_ts="0",
+        original_message_ts="1.1",
+    )
+    stream.message_ts = "2.0"
+    stream.retry_at = float("inf")
+    step = slack_thinking.Step("step-1", "Reading", "in_progress")
+    stream.steps[((), "call-1")] = step
+    stream.pending[step.task_id] = step
+
+    await stream.stop("success")
+
+    stop.assert_awaited_once_with(
+        "C1",
+        "2.0",
+        [
+            {
+                "type": "task_update",
+                "id": "step-1",
+                "title": "Reading",
+                "status": "complete",
+                "output": "Completed",
+            }
+        ],
+    )
+    assert not stream.pending
 
 
 async def test_rate_limit_defers_append_until_retry_after(monkeypatch) -> None:
