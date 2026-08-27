@@ -24,6 +24,9 @@ manage_tool = import_module("agent.tools.manage_code_channel")
             "Fallback title",
         ),
         ({}, "Fallback title", "Fallback title"),
+        # Legacy metadata written before title generation stored a seed: a
+        # title without a title_seed key is not provably generated.
+        ({"title": "Legacy hand-written title"}, "Fallback title", "Fallback title"),
     ],
 )
 async def test_code_channel_title_prefers_thread_title(

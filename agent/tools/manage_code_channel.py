@@ -231,8 +231,14 @@ async def _code_channel_title(client: Any, thread_id: str, fallback: str) -> str
         thread = await client.threads.get(thread_id=thread_id)
     except Exception:  # noqa: BLE001
         return fallback
+    # Only trust metadata written by title generation: a missing title_seed key
+    # (e.g. legacy title-only metadata) has no proof of a generated title.
     metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
-    if not isinstance(metadata, Mapping) or metadata.get("title_seed") is not None:
+    if (
+        not isinstance(metadata, Mapping)
+        or "title_seed" not in metadata
+        or metadata["title_seed"] is not None
+    ):
         return fallback
     title = metadata.get("title")
     return title.strip() if isinstance(title, str) and title.strip() else fallback

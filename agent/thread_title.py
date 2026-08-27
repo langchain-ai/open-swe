@@ -130,7 +130,10 @@ async def generate_and_store_thread_title(
         thread_id=thread_id,
         metadata={"title": title, "title_seed": None},
     )
-    context = SourceContext.from_metadata(latest_metadata)
+    # Re-read after the update: the pre-update snapshot can be stale if the
+    # thread was promoted to a code channel between the check and the update.
+    latest = await client.threads.get(thread_id=thread_id)
+    context = SourceContext.from_metadata(_thread_metadata(latest))
     if context.slack_location and context.slack_location[1] == CODE_CHANNEL_SESSION_TS:
         await rename_session(context.slack_location[0], title)
 
