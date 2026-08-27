@@ -270,10 +270,10 @@ async def test_agent_session_stopped_cancels_without_followup_work(
         "value": {"messages": [{"content": "later"}]}
     }
     dispatched, claimed = _patch_handler(monkeypatch, client)
-    statuses: list[tuple[str, str, str]] = []
+    statuses: list[tuple[str, str]] = []
 
-    async def set_status(channel_id: str, status: str, thread_ts: str = "") -> bool:
-        statuses.append((channel_id, status, thread_ts))
+    async def set_status(channel_id: str, status: str) -> bool:
+        statuses.append((channel_id, status))
         return True
 
     monkeypatch.setattr(slack_stop, "set_session_status", set_status)
@@ -287,31 +287,8 @@ async def test_agent_session_stopped_cancels_without_followup_work(
     assert client.runs.cancelled[0]["run_ids"] == ["run-running"]
     assert (("queue", thread_id), "pending_messages") in client.store.deleted
     assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
-    assert statuses == [("C123", "active", "0")]
+    assert statuses == [("C123", "active")]
     assert dispatched == []
-
-
-async def test_agent_session_stopped_targets_agent_view_thread(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = FakeClient()
-    thread_id = _add_thread(client, "3.000")
-    client.runs.by_status["running"] = [{"run_id": "run-running"}]
-    _patch_handler(monkeypatch, client)
-    statuses: list[tuple[str, str, str]] = []
-
-    async def set_status(channel_id: str, status: str, thread_ts: str = "") -> bool:
-        statuses.append((channel_id, status, thread_ts))
-        return True
-
-    monkeypatch.setattr(slack_stop, "set_session_status", set_status)
-    await slack_stop.process_agent_session_stopped(
-        {"type": "agent_session_stopped", "channel": "C123", "thread_ts": "3.000"},
-        event_id="EvAgentViewStop",
-    )
-
-    assert client.runs.cancelled[0]["thread_id"] == thread_id
-    assert statuses == [("C123", "active", "3.000")]
 
 
 async def test_duplicate_stop_reaction_has_no_side_effects(
