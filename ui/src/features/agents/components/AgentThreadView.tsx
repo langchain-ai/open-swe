@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
+import {
+  ArrowUpRight,
+  CircleAlert as CircleAlertIcon,
+  FolderOpen,
+} from "lucide-react"
+import { IoLogoSlack } from "react-icons/io5"
 
 import type {
   AgentPullRequest,
@@ -54,6 +59,22 @@ function editedPaths(messages: Array<Message>): Array<string> {
     }
   }
   return [...paths]
+}
+
+function CodeChannelLink({ url }: { url?: string | null }) {
+  if (!url) return null
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <IoLogoSlack className="size-3.5" />
+      Open code channel
+      <ArrowUpRight className="size-3" />
+    </a>
+  )
 }
 
 // The stream lives at the `/agents` layout (one persistent provider that
@@ -288,6 +309,7 @@ export function AgentThreadView({
             />
             <div className="shrink-0 px-4 pb-4">
               <div className="mx-auto w-full max-w-3xl min-w-0">
+                <CodeChannelLink url={thread.codeChannelUrl} />
                 <ThreadPullRequests
                   pullRequests={thread.pullRequests ?? []}
                   health={pullRequestHealth}
@@ -348,6 +370,7 @@ export function AgentThreadView({
               </p>
             )}
             <div className="w-full max-w-3xl">
+              <CodeChannelLink url={thread.codeChannelUrl} />
               <ThreadPullRequests
                 pullRequests={thread.pullRequests ?? []}
                 health={pullRequestHealth}
