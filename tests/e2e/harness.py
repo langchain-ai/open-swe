@@ -283,31 +283,6 @@ async def slack_send(request: Request) -> JSONResponse:
     return await _slack_send_result(payload, await _deliver_slack_event(payload))
 
 
-@app.post("/mock/slack/reaction")
-async def slack_reaction(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel_id = str(CURRENT_THREAD.get("channel") or "")
-    thread_ts = str(body.get("thread_ts") or CURRENT_THREAD.get("thread_ts") or "")
-    message_ts = str(body.get("message_ts") or thread_ts)
-    user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
-    reaction = str(body.get("reaction") or "eyes")
-    payload = {
-        "type": "event_callback",
-        "event_id": f"Ev{EVENT_ID_SALT}{fakes.next_slack_ts()}",
-        "authorizations": [{"user_id": BOT_USER_ID}],
-        "event": {
-            "type": "reaction_added",
-            "user": user_id,
-            "reaction": reaction,
-            "item": {"type": "message", "channel": channel_id, "ts": message_ts},
-            "item_user": BOT_USER_ID,
-            "event_ts": fakes.next_slack_ts(),
-        },
-    }
-    response = await _deliver_slack_event(payload)
-    return JSONResponse(response.json(), status_code=response.status_code)
-
-
 @app.post("/mock/slack/action")
 async def slack_action(request: Request) -> JSONResponse:
     body = await request.json()

@@ -40,25 +40,6 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-_THREAD_VERSION_RE = re.compile(r'(?:Thread version: |"thread_version"\s*:\s*)(\d+)')
-
-
-def _thread_version_args(messages: list[BaseMessage]) -> dict[str, int]:
-    last_human = max(
-        (i for i, message in enumerate(messages) if isinstance(message, HumanMessage)), default=-1
-    )
-    promoted = any(
-        isinstance(message, ToolMessage)
-        and message.name == "manage_code_channel"
-        and '"action": "create"' in _text(message.content)
-        and '"success": true' in _text(message.content).lower()
-        for message in messages[last_human + 1 :]
-    )
-    if promoted:
-        return {"thread_version": 0}
-    matches = _THREAD_VERSION_RE.findall("\n".join(_text(message.content) for message in messages))
-    return {"thread_version": int(matches[-1]) if matches else 0}
-
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
     matches = re.findall(r"Thread TS: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
@@ -257,9 +238,7 @@ def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
         )
     )
     for call in message.tool_calls:
-        if call["name"] == "slack_thread_reply":
-            call["args"].update(_thread_version_args(messages))
-        elif call["name"] == "slack_read_thread_messages":
+        if call["name"] == "slack_read_thread_messages":
             call["args"].update(
                 {"channel_id": DEMO_CHANNEL, "message_ts": _slack_thread_ts(messages)}
             )
@@ -1166,50 +1145,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
-    "optimistic_lock": (
-        _tool_step(
-            "Acknowledging before testing the optimistic lock.",
-            "slack_thread_reply",
-            {"message": "Optimistic lock flow started."},
-            "call-lock-ack",
-        ),
-        _tool_step(
-            "Waiting for a reaction that must not invalidate the thread version.",
-            "execute",
-            {"command": "sleep 3"},
-            "call-lock-reaction-wait",
-        ),
-        _tool_step(
-            "Confirming a reaction did not invalidate the thread version.",
-            "slack_thread_reply",
-            {"message": "A reaction did not invalidate the thread version."},
-            "call-lock-reaction-reply",
-        ),
-        _tool_step(
-            "Waiting for a newer Slack message.",
-            "execute",
-            {"command": "sleep 5"},
-            "call-lock-wait",
-        ),
-        _tool_step(
-            "Trying to post with the version from the triggering context.",
-            "slack_thread_reply",
-            {"message": "This stale reply must not be posted."},
-            "call-lock-stale",
-        ),
-        _tool_step(
-            "Re-reading the Slack thread after the version mismatch.",
-            "slack_read_thread_messages",
-            {},
-            "call-lock-read",
-        ),
-        _tool_step(
-            "Retrying with the refreshed Slack thread version.",
-            "slack_thread_reply",
-            {"message": "Re-read the thread and posted with the updated version."},
-            "call-lock-retry",
-        ),
-    ),
     # Parent turn: implement, open the PR, self-review it, act on the findings.
     "self_review": (
         _tool_step(
@@ -1363,10 +1298,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
-    ),
-    ScriptRule(
-        "optimistic_lock",
-        lambda ctx: ctx.human_count <= 1 and "E2E_OPTIMISTIC_LOCK" in ctx.first_text,
     ),
     ScriptRule(
         "code_channel_followup",
