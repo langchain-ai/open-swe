@@ -314,7 +314,6 @@ async def _create(
         "channel_id": channel_id,
         "thread_ts": CODE_CHANNEL_SESSION_TS,
         "triggering_event_ts": origin_message_ts,
-        "thread_version": 0,
     }
     bound = False
     try:

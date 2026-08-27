@@ -428,8 +428,6 @@ def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | Non
     if slack_thread:
         return (
             f"{prompt}\n\n"
-            "The connected Slack thread version is 0. Pass `thread_version=0` to "
-            "`slack_thread_reply`. "
             "Use `slack_thread_reply` for clarifying questions, essential progress updates, "
             "the pull request link, and the final outcome in the connected Slack thread."
         )
@@ -610,7 +608,6 @@ async def _launch_agent_schedule_record(
         slack_thread = {
             "channel_id": slack_channel_id,
             "thread_ts": message_ts,
-            "thread_version": 0,
             "triggering_event_ts": message_ts,
             "triggering_user_id": await slack_id_for_login(
                 record.get("created_by") if isinstance(record.get("created_by"), str) else None

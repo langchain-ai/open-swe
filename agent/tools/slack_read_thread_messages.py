@@ -4,10 +4,8 @@ from ..utils.slack import (
     SLACK_THREAD_MAX_MESSAGES,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
-    get_slack_thread_version,
     get_slack_user_names,
 )
-from ..utils.thread_ops import langgraph_client
 
 
 async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
@@ -47,19 +45,13 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
     you can extract the channel_id (C0AME1J0) and convert the timestamp
     by inserting a dot 6 digits from the end (1776281321.762829).
 
-    Returns formatted thread messages with author names, forwarded-message context,
-    and the current `thread_version` required by `slack_thread_reply`."""
+    Returns formatted thread messages with author names and forwarded-message context."""
     if not channel_id or not channel_id.strip():
         return {"success": False, "error": "channel_id is required"}
     if not message_ts or not message_ts.strip():
         return {"success": False, "error": "message_ts is required"}
 
-    clean_channel_id = channel_id.strip()
-    clean_message_ts = message_ts.strip()
-    thread_version = await get_slack_thread_version(
-        langgraph_client(), clean_channel_id, clean_message_ts
-    )
-    result = await _fetch_and_format(clean_channel_id, clean_message_ts)
+    result = await _fetch_and_format(channel_id.strip(), message_ts.strip())
     if not result.get("success"):
         return {
             "success": False,
@@ -67,5 +59,4 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
             "that channel, or the message may have been deleted.",
         }
 
-    result["thread_version"] = thread_version
     return result
