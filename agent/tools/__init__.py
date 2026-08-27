@@ -50,7 +50,6 @@ _TOOL_MODULES = {
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
-    "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
     "slack_add_reaction": ".slack_add_reaction",
     "slack_attach_html": ".slack_attach_html",
@@ -110,7 +109,6 @@ __all__ = [
     "save_user_instructions",
     "save_user_skill",
     "delete_user_skill",
-    "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
     "slack_attach_html",
@@ -165,7 +163,6 @@ if TYPE_CHECKING:
     from .sandbox_reset import sandbox_reset
     from .save_plan import save_plan
     from .save_user_instructions import save_user_instructions
-    from .schedule_thread_wakeup import schedule_thread_wakeup
     from .search_repo_code import search_repo_code
     from .slack_add_reaction import slack_add_reaction
     from .slack_attach_html import slack_attach_html

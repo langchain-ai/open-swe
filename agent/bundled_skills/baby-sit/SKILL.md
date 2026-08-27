@@ -24,7 +24,7 @@ Always resolve the target to a canonical `https://github.com/<owner>/<repo>/pull
 4. For cloud `stop`, call `manage_baby_sit` with action `stop`, report the result in the source thread, and end.
 5. If the PR is closed or all checks are already terminal and non-failing, report that no watch is needed.
 6. Otherwise, on cloud runs call `manage_baby_sit` with action `start`. The watch reacts immediately to failing GitHub webhooks and uses a deterministic 10-minute fallback that consumes no model tokens while state is unchanged.
-7. If cloud checks are only pending, report the current state and end the run. Do not start a shell polling loop and do not call `schedule_thread_wakeup`.
+7. If cloud checks are only pending, report the current state and end the run. Do not start a shell polling loop or schedule a thread wakeup.
 8. If checks fail, continue with failure diagnosis in this run. If the local watch times out while checks remain pending, report the timeout and latest complete check state.
 
 ## Failure diagnosis
