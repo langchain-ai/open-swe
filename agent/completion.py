@@ -27,12 +27,8 @@ from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
-from .utils.slack import (
-    lookup_slack_run_message_mapping,
-    post_slack_thread_reply,
-    stop_slack_stream,
-)
-from .utils.slack_code_channels import set_session_status
+from .utils.slack import post_slack_thread_reply
+from .utils.slack_code_channels import is_code_channel_session, set_session_status
 from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
 
@@ -219,12 +215,16 @@ def _prepare_run_id(payload: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-async def _settle_slack_session(
+async def _settle_code_channel_session(
     client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
 ) -> None:
-    """Return a Slack agent session to ``active`` once its work stops."""
+    """Return a code channel session to ``active`` once its work stops.
+
+    A later message can already have started another run, so a completion that
+    arrives out of order must not clear the loading UI that run is relying on.
+    """
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or not slack_thread.location:
+    if slack_thread is None or not is_code_channel_session(slack_thread.thread_ts):
         return
     try:
         for status in ("pending", "running"):
@@ -232,7 +232,7 @@ async def _settle_slack_session(
                 return
     except Exception:  # noqa: BLE001
         logger.debug("run-complete: could not list runs for %s", thread_id, exc_info=True)
-    await set_session_status(slack_thread.channel_id, "active", slack_thread.thread_ts)
+    await set_session_status(slack_thread.channel_id, "active")
 
 
 async def _schedule_success_cost_refresh(
@@ -251,7 +251,7 @@ async def _schedule_success_cost_refresh(
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
-    await _settle_slack_session(client, thread_id, metadata)
+    await _settle_code_channel_session(client, thread_id, metadata)
     prepare_run_id = _prepare_run_id(payload)
     if prepare_run_id is None:
         return {"status": "ignored", "reason": "missing prepare_run_id"}
@@ -288,25 +288,6 @@ async def _schedule_success_cost_refresh(
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
-async def _settle_thinking_stream(
-    client: LangGraphClient, thread_id: str, run_id: str | None
-) -> None:
-    if run_id is None:
-        return
-    try:
-        thread = await client.threads.get(thread_id)
-        metadata = thread.get("metadata") if isinstance(thread, dict) else None
-        slack_thread = SourceContext.from_metadata(metadata).slack_thread
-        if slack_thread is None:
-            return
-        mapping = await lookup_slack_run_message_mapping(client, slack_thread.channel_id, run_id)
-        message_ts = mapping.get("thinking_message_ts") if mapping else None
-        if isinstance(message_ts, str) and message_ts:
-            await stop_slack_stream(slack_thread.channel_id, message_ts)
-    except Exception:  # noqa: BLE001
-        logger.debug("run-complete: could not settle Thinking Steps for %s", run_id, exc_info=True)
-
-
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -318,8 +299,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
-    client = langgraph_client()
-    await _settle_thinking_stream(client, thread_id, run_id)
     if status == "success":
         return await _schedule_success_cost_refresh(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
@@ -332,6 +311,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if status not in _TERMINAL_FAILURE_STATUSES:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
 
+    client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
     except Exception:  # noqa: BLE001
@@ -341,7 +321,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     await _settle_failed_reviewer_check(thread_id, metadata)
-    await _settle_slack_session(client, thread_id, metadata)
+    await _settle_code_channel_session(client, thread_id, metadata)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

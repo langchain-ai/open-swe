@@ -166,23 +166,16 @@ async def create_code_channel(
 
 
 async def set_session_status_result(
-    channel_id: str, status: SessionStatus, thread_ts: str = "", title: str = ""
+    channel_id: str, status: SessionStatus
 ) -> tuple[dict[str, Any] | None, str | None]:
     if status not in {"processing", "active", "suspended", "closed"}:
         return None, "invalid_status"
-    payload = {"channel_id": channel_id, "status": status}
-    if thread_ts and not is_code_channel_session(thread_ts):
-        payload["thread_ts"] = thread_ts
-    if title:
-        payload["title"] = title
-    return await _call("agents.sessions.setStatus", payload)
+    return await _call("agents.sessions.setStatus", {"channel_id": channel_id, "status": status})
 
 
-async def set_session_status(
-    channel_id: str, status: SessionStatus, thread_ts: str = "", title: str = ""
-) -> bool:
-    """Set a Slack agent session's lifecycle status."""
-    _, error = await set_session_status_result(channel_id, status, thread_ts, title)
+async def set_session_status(channel_id: str, status: SessionStatus) -> bool:
+    """Set a code channel's lifecycle status."""
+    _, error = await set_session_status_result(channel_id, status)
     return error is None
 
 

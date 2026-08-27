@@ -18,28 +18,9 @@ const LEGACY_BOT_SCOPES = [
 ]
 
 const LEGACY_BOT_EVENTS = ["app_mention", "message.im", "message.mpim"]
-const AGENT_BOT_EVENTS = [
-  "agent_session_stopped",
-  "app_context_changed",
-  "app_home_opened",
-]
 
 export function slackAppManifest(codeChannelsEnabled = false) {
   const features: Record<string, unknown> = {
-    agent_view: {
-      agent_description:
-        "A software engineering agent that works in isolated sandboxes and opens pull requests.",
-      suggested_prompts: [
-        {
-          title: "Start a coding task",
-          message: "Please implement this change: ",
-        },
-        {
-          title: "Investigate an issue",
-          message: "Please investigate this issue: ",
-        },
-      ],
-    },
     app_home: {
       home_tab_enabled: false,
       messages_tab_enabled: true,
@@ -69,13 +50,8 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       ],
       scopes: {
         bot: codeChannelsEnabled
-          ? [
-              ...LEGACY_BOT_SCOPES,
-              "assistant:write",
-              "code_channels:manage",
-              "files:read",
-            ]
-          : [...LEGACY_BOT_SCOPES, "assistant:write"],
+          ? [...LEGACY_BOT_SCOPES, "code_channels:manage", "files:read"]
+          : LEGACY_BOT_SCOPES,
       },
     },
     settings: {
@@ -83,13 +59,15 @@ export function slackAppManifest(codeChannelsEnabled = false) {
         request_url: "https://<your-ngrok-url>/webhooks/slack",
         bot_events: codeChannelsEnabled
           ? [
-              ...LEGACY_BOT_EVENTS,
-              ...AGENT_BOT_EVENTS,
+              "app_mention",
+              "agent_session_stopped",
               "code_channel_action",
               "message.channels",
               "message.groups",
+              "message.im",
+              "message.mpim",
             ]
-          : [...LEGACY_BOT_EVENTS, ...AGENT_BOT_EVENTS],
+          : LEGACY_BOT_EVENTS,
       },
       interactivity: {
         is_enabled: true,

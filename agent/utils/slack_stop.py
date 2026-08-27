@@ -229,11 +229,8 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     channel_id = event.get("channel") or event.get("channel_id")
     if not isinstance(channel_id, str) or not channel_id:
         return
-    thread_ts = event.get("thread_ts") or CODE_CHANNEL_SESSION_TS
-    if not isinstance(thread_ts, str) or not thread_ts:
-        return
     client = get_client(url=LANGGRAPH_URL)
-    thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+    thread_id = await lookup_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS)
     if not thread_id:
         return
     try:
@@ -241,7 +238,10 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     except Exception:  # noqa: BLE001
         logger.debug("Ignoring session stop for unknown thread %s", thread_id)
         return
-    if _matching_slack_context(_thread_metadata(thread), channel_id, thread_ts) is None:
+    if (
+        _matching_slack_context(_thread_metadata(thread), channel_id, CODE_CHANNEL_SESSION_TS)
+        is None
+    ):
         logger.warning("Ignoring session stop with mismatched thread metadata: %s", thread_id)
         return
     if event_id and not await claim_slack_event(event_id):
@@ -258,7 +258,7 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
             "stop_requested_at_ms": int(datetime.now(UTC).timestamp() * 1000),
         },
     )
-    await set_session_status(channel_id, "active", thread_ts)
+    await set_session_status(channel_id, "active")
 
 
 async def process_agent_session_stopped(event: dict[str, Any], event_id: str = "") -> None:
