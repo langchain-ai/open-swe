@@ -123,6 +123,7 @@ Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task 
 ## Conventions
 
 - Tests are unit-only by default (`tests/`). Integration tests would go under `tests/integration_tests/` (currently empty — `make integration_tests` no-ops if missing).
+- Do not add tests that only assert or restate static prompt text. Prompt tests must verify rendering, composition, precedence, or another meaningful behavioral contract.
 - New sandbox providers: add a module under `agent/integrations/` and wire it into `SANDBOX_FACTORIES` in `agent/utils/sandbox.py`. See `docs/CUSTOMIZATION.md`.
 - New tools: add to `agent/tools/`, export from `agent/tools/__init__.py`, add to the `tools=[...]` list in `server.py:get_agent` (or `reviewer.py` for reviewer-only tools).
 - New middleware: add to `agent/middleware/`, export from `agent/middleware/__init__.py`, add to the `middleware=[...]` list in `server.py:get_agent` — order is significant (see the stack above).
