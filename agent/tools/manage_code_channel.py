@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
@@ -84,8 +85,8 @@ async def manage_code_channel(
 ) -> dict[str, Any]:
     """Manage the complete Slack code-channel surface for this session.
 
-    Use `create` to promote the current Slack thread. Use `status`, `rename`,
-    `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
+    Use `create` to promote the current Slack thread using its generated title. Use
+    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
     upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
     can be passed directly or read from `file_path`, while Block Kit uses `blocks`
     plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
@@ -121,7 +122,7 @@ async def manage_code_channel(
             client,
             thread_id,
             active,
-            title,
+            await _code_channel_title(client, thread_id, title),
             repo if isinstance(repo, dict) else None,
             team_id=team_id,
             is_private=is_private,
@@ -223,6 +224,24 @@ async def manage_code_channel(
             result["warnings"] = [f"Could not set session status to closed: {status_error}"]
         return result
     return {"success": False, "error": f"Unknown action {action}"}
+
+
+async def _code_channel_title(client: Any, thread_id: str, fallback: str) -> str:
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:  # noqa: BLE001
+        return fallback
+    # Only trust metadata written by title generation: a missing title_seed key
+    # (e.g. legacy title-only metadata) has no proof of a generated title.
+    metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+    if (
+        not isinstance(metadata, Mapping)
+        or "title_seed" not in metadata
+        or metadata["title_seed"] is not None
+    ):
+        return fallback
+    title = metadata.get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else fallback
 
 
 def _result(
