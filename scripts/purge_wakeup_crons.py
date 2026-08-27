@@ -17,15 +17,53 @@ import asyncio
 import logging
 import os
 from datetime import UTC, datetime
+from typing import Any
 
 from langgraph_sdk import get_client
 
-from agent.tools.schedule_thread_wakeup import (
-    find_expired_wakeup_cron_ids,
-    purge_expired_wakeup_crons,
-)
-
 logger = logging.getLogger(__name__)
+_WAKEUP_KIND = "thread_wakeup"
+_PURGE_PAGE_SIZE = 100
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[str]:
+    expired_ids: list[str] = []
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            metadata={"kind": _WAKEUP_KIND},
+            limit=_PURGE_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        for cron in page:
+            if not isinstance(cron, dict):
+                continue
+            end_time = _parse_iso(cron.get("end_time"))
+            cron_id = cron.get("cron_id")
+            if end_time is not None and end_time < now and isinstance(cron_id, str) and cron_id:
+                expired_ids.append(cron_id)
+        if len(page) < _PURGE_PAGE_SIZE:
+            break
+        offset += len(page)
+    return expired_ids
+
+
+async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
+    expired_ids = await find_expired_wakeup_cron_ids(client, now=now)
+    for cron_id in expired_ids:
+        await client.crons.delete(cron_id)
+    return len(expired_ids)
 
 
 def _load_dotenv_if_available() -> None:
