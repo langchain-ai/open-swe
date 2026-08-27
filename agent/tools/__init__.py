@@ -9,6 +9,7 @@ _TOOL_MODULES = {
     "background_task": ".background_execute",
     "capture_environment_snapshot": ".environments",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
+    "create_sandbox_service_url": ".create_sandbox_service_url",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
@@ -68,6 +69,7 @@ __all__ = [
     "background_task",
     "capture_environment_snapshot",
     "create_sandbox_file_download_url",
+    "create_sandbox_service_url",
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
@@ -125,6 +127,7 @@ if TYPE_CHECKING:
     from .approve_plan import approve_plan
     from .background_execute import background_execute, background_task
     from .create_sandbox_file_download_url import create_sandbox_file_download_url
+    from .create_sandbox_service_url import create_sandbox_service_url
     from .enter_plan_mode import enter_plan_mode
     from .environments import (
         capture_environment_snapshot,

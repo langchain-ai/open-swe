@@ -447,10 +447,11 @@ def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
     assert path.endswith("-thread-abc-123.html")
 
 
-def test_http_request_excluded_in_plan_mode() -> None:
+def test_external_mutations_excluded_in_plan_mode() -> None:
     from agent.server import PLAN_MODE_EXCLUDED_TOOLS
 
     assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
+    assert "create_sandbox_service_url" in PLAN_MODE_EXCLUDED_TOOLS
 
 
 def test_file_edit_tools_available_in_plan_mode_for_plan_file() -> None:

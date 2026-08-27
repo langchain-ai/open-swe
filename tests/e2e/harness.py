@@ -281,31 +281,6 @@ async def slack_send(request: Request) -> JSONResponse:
     return await _slack_send_result(payload, await _deliver_slack_event(payload))
 
 
-@app.post("/mock/slack/reaction")
-async def slack_reaction(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel_id = str(CURRENT_THREAD.get("channel") or "")
-    thread_ts = str(body.get("thread_ts") or CURRENT_THREAD.get("thread_ts") or "")
-    message_ts = str(body.get("message_ts") or thread_ts)
-    user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
-    reaction = str(body.get("reaction") or "eyes")
-    payload = {
-        "type": "event_callback",
-        "event_id": f"Ev{EVENT_ID_SALT}{fakes.next_slack_ts()}",
-        "authorizations": [{"user_id": BOT_USER_ID}],
-        "event": {
-            "type": "reaction_added",
-            "user": user_id,
-            "reaction": reaction,
-            "item": {"type": "message", "channel": channel_id, "ts": message_ts},
-            "item_user": BOT_USER_ID,
-            "event_ts": fakes.next_slack_ts(),
-        },
-    }
-    response = await _deliver_slack_event(payload)
-    return JSONResponse(response.json(), status_code=response.status_code)
-
-
 @app.post("/mock/slack/action")
 async def slack_action(request: Request) -> JSONResponse:
     body = await request.json()
@@ -783,23 +758,55 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
-    return JSONResponse(
-        {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                fakes.review_thread_graphql(thread)
-                                for thread in pr["review_threads"]
-                            ],
-                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+    review_threads = {
+        "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+    pull_request: dict[str, Any] = {"reviewThreads": review_threads}
+    query = body.get("query", "")
+    if "PullRequestFixReviews" in query:
+        pull_request.update(
+            {
+                "reviewDecision": pr["review_decision"],
+                "mergeStateStatus": "DIRTY" if not pr["mergeable"] else "CLEAN",
+                "latestOpinionatedReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": review.get("author")},
+                            "state": review.get("state"),
+                            "body": review.get("body", ""),
+                            "url": review.get("url"),
+                        }
+                        for review in pr["reviews"]
+                    ]
+                },
+            }
+        )
+    if "PullRequestFixChecks" in query:
+        pull_request = {
+            "commits": {
+                "nodes": [
+                    {
+                        "commit": {
+                            "oid": pr["head_sha"],
+                            "statusCheckRollup": {
+                                "contexts": {
+                                    "nodes": [
+                                        *[fakes.check_graphql(check) for check in pr["check_runs"]],
+                                        *[
+                                            fakes.status_graphql(status)
+                                            for status in pr["statuses"]
+                                        ],
+                                    ],
+                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                }
+                            },
                         }
                     }
-                }
+                ]
             }
         }
-    )
+    return JSONResponse({"data": {"repository": {"pullRequest": pull_request}}})
 
 
 # --- fake Slack API (real slack code hits this) ----------------------------

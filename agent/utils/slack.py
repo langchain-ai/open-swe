@@ -51,8 +51,6 @@ SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
 SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
 SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
 SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
-_SLACK_THREAD_VERSION_NAMESPACE = "slack_thread_versions"
-_SLACK_THREAD_VERSION_PAGE_SIZE = 100
 _SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES = 1
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.05
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
@@ -629,6 +627,10 @@ async def post_slack_thread_reply_with_ts(
     agent_thread_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
+    from .slack_code_channels import is_code_channel_session
+
+    if is_code_channel_session(thread_ts):
+        agent_thread_id = None
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
     blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
     text = append_slack_web_link_footer(text, dashboard_url, usage)
@@ -1175,11 +1177,6 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
-def _slack_thread_version_namespace(channel_id: str, thread_ts: str) -> tuple[str, str, str]:
-    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
-    return (_SLACK_THREAD_VERSION_NAMESPACE, channel, timestamp.replace(".", "_"))
-
-
 @asynccontextmanager
 async def slack_thread_mutation_lock(
     langgraph_client: LangGraphClient,
@@ -1218,41 +1215,6 @@ async def slack_thread_mutation_lock(
                 timestamp,
                 exc_info=True,
             )
-
-
-async def get_slack_thread_version(
-    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
-) -> int:
-    """Return the number of distinct inbound messages recorded for a Slack thread."""
-    namespace = _slack_thread_version_namespace(channel_id, thread_ts)
-    offset = 0
-    version = 0
-    while True:
-        response = await langgraph_client.store.search_items(
-            namespace, limit=_SLACK_THREAD_VERSION_PAGE_SIZE, offset=offset
-        )
-        items = response.get("items") if isinstance(response, Mapping) else None
-        page = items if isinstance(items, list) else []
-        version += len(page)
-        if len(page) < _SLACK_THREAD_VERSION_PAGE_SIZE:
-            return version
-        offset += len(page)
-
-
-async def increment_slack_thread_version(
-    langgraph_client: LangGraphClient,
-    channel_id: str,
-    thread_ts: str,
-    message_ts: str,
-) -> int:
-    """Record one inbound Slack event and return the resulting thread version."""
-    message_key = message_ts.strip()
-    if not _SLACK_MESSAGE_TS_RE.fullmatch(message_key):
-        raise ValueError("A valid Slack message timestamp is required")
-    async with slack_thread_mutation_lock(langgraph_client, channel_id, thread_ts):
-        namespace = _slack_thread_version_namespace(channel_id, thread_ts)
-        await langgraph_client.store.put_item(namespace, message_key, {"message_ts": message_key})
-        return await get_slack_thread_version(langgraph_client, channel_id, thread_ts)
 
 
 async def fetch_slack_thread_message_by_ts(

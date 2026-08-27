@@ -482,15 +482,24 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         )
     )
 
-    expected_thread_id = "mapped-thread"
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
+    expected_footer = "<https://app.example.com/agents/mapped-thread|Open in Web>"
     assert captured["text"] == f"Done {expected_footer}"
-    posted_blocks = captured["blocks"]
-    assert isinstance(posted_blocks, list)
-    assert posted_blocks == [
+    assert captured["blocks"] == [
         {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
         {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
     ]
+
+    captured.clear()
+    asyncio.run(
+        slack_utils.post_slack_thread_reply_with_ts(
+            "C-code",
+            webhook_common.CODE_CHANNEL_SESSION_TS,
+            "Done",
+            agent_thread_id="mapped-thread",
+        )
+    )
+    assert captured["text"] == "Done"
+    assert captured["blocks"] is None
 
 
 def test_post_slack_thread_reply_keeps_long_messages_text_only(
@@ -932,13 +941,7 @@ def _setup_slack_mention_fakes(
     async def fake_resolve_slack_thread_id(client, channel_id, thread_ts):
         return "mapped-thread"
 
-    async def fake_increment_slack_thread_version(*_args) -> int:
-        return 1
-
     monkeypatch.setattr(webhook_common, "post_slack_trace_reply", fake_post_slack_trace_reply)
-    monkeypatch.setattr(
-        webhook_common, "increment_slack_thread_version", fake_increment_slack_thread_version
-    )
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", fake_resolve_slack_thread_id)
     client = _FakeLangGraphClientForProcess()
     monkeypatch.setattr(webhook_common, "get_client", lambda url: client)
@@ -1052,7 +1055,6 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert kwargs["durability"] == "sync"
     slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
     assert slack_thread_context["thread_ts"] == thread_ts
-    assert slack_thread_context["thread_version"] == 1
     assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
     messages = kwargs["input"]["messages"]
     entities = [
@@ -1081,7 +1083,6 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     )
     assert prompt.count("## Slack Thread") == 1
     assert f"Thread TS: {thread_ts}" in prompt
-    assert "Thread version: 1" in prompt
     assert "## Open SWE Links" in prompt
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt
     assert "- Trace: https://smith/x" in prompt

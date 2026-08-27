@@ -6,6 +6,7 @@ from deepagents.backends import LocalShellBackend
 SANDBOX_GITCONFIG = ".gitconfig-sandbox"
 LOCAL_SHELL_ENV_EXCLUDE = {
     "ANTHROPIC_API_KEY",
+    "BASETEN_API_KEY",
     "FIREWORKS_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",

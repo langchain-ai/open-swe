@@ -139,7 +139,7 @@ async def create_code_channel(
     origin_channel_id: str,
     origin_message_ts: str,
     team_id: str = "",
-    is_private: bool | None = None,
+    is_private: bool = False,
 ) -> tuple[str | None, str | None]:
     """Create a code channel for a task and return its channel id."""
     if not 1 <= len(name.strip()) <= 200:
@@ -154,8 +154,7 @@ async def create_code_channel(
     }
     if team_id:
         payload["team_id"] = team_id
-    if is_private is not None:
-        payload["is_private"] = is_private
+    payload["is_private"] = is_private
     data, error = await _call("agents.conversations.create", payload)
     if error or data is None:
         return None, error
@@ -484,9 +483,13 @@ async def archive_code_channel(
 
 
 def repo_context_bar_items(
-    repo: dict[str, str] | None, *, branch: str = "", pr_url: str = ""
+    repo: dict[str, str] | None,
+    *,
+    branch: str = "",
+    pr_url: str = "",
+    dashboard_url: str = "",
 ) -> list[dict[str, Any]]:
-    """Build the standard repo/branch/PR context bar for an Open SWE session."""
+    """Build the standard context bar for an Open SWE session."""
     items: list[dict[str, Any]] = []
     owner = (repo or {}).get("owner", "")
     name = (repo or {}).get("name", "")
@@ -506,4 +509,6 @@ def repo_context_bar_items(
         items.append(item)
     if pr_url.startswith("https://"):
         items.append({"key": "pr", "label": "Pull request", "icon": "hierarchy", "url": pr_url})
+    if dashboard_url.startswith("https://"):
+        items.append({"key": "web", "label": "Open in Web", "icon": "globe", "url": dashboard_url})
     return items

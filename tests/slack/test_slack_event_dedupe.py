@@ -89,13 +89,9 @@ async def _post(
 
 
 @pytest.fixture(autouse=True)
-def _patch_slack_webhook(
-    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> _FakeClient:
+def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     slack_events.reset_slack_event_claims()
     client = _FakeClient()
-    increment_version = AsyncMock(return_value=1)
-    request.node.thread_version_increment = increment_version
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}
@@ -113,11 +109,10 @@ def _patch_slack_webhook(
     monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
 
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
-    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", increment_version)
     return client
 
 
-async def test_redelivered_event_starts_only_one_run(request: pytest.FixtureRequest) -> None:
+async def test_redelivered_event_starts_only_one_run() -> None:
     background_tasks = _FakeBackgroundTasks()
 
     first = await _post(_mention_payload(), background_tasks)
@@ -126,7 +121,6 @@ async def test_redelivered_event_starts_only_one_run(request: pytest.FixtureRequ
     assert first["status"] == "accepted"
     assert second["status"] == "ignored"
     assert [task[0] for task in background_tasks.tasks] == [slack_service.process_slack_mention]
-    request.node.thread_version_increment.assert_awaited_once()
 
 
 async def test_redelivered_event_without_retry_header_is_deduped() -> None:

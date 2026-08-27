@@ -87,6 +87,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "default_effort": "high",
         "supports_images": False,
     },
+    {
+        "id": "baseten:zai-org/GLM-5.3-Flash",
+        "label": "GLM-5.3 Flash",
+        "efforts": ["low", "high", "max"],
+        "default_effort": "high",
+        "supports_images": True,
+    },
 ]
 
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
@@ -131,6 +138,7 @@ CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
+    "baseten:zai-org/GLM-5.3-Flash": 1_000_000,
 }
 
 

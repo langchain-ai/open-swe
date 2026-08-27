@@ -73,9 +73,6 @@ async def _queue_code_channel_turn(
         channel_context=channel_context,
         thread_id=thread_id,
     )
-    thread_version = await common.increment_slack_thread_version(
-        client, channel_id, common.CODE_CHANNEL_SESSION_TS, event_ts
-    )
     background_tasks.add_task(
         service.process_slack_mention,
         {
@@ -89,7 +86,6 @@ async def _queue_code_channel_turn(
             "attachments": [],
             "bot_user_id": common.SLACK_BOT_USER_ID,
             "thread_id": thread_id,
-            "thread_version": thread_version,
             "treat_all_messages_as_mentions": True,
             "code_channel": True,
             "explicit_request": explicit_request,
@@ -156,9 +152,6 @@ async def _process_slack_message_update(
         common.logger.warning("Blocked Slack message update in ineligible channel=%s", channel_id)
         return
     event_data["thread_id"] = thread_id
-    event_data["thread_version"] = await common.increment_slack_thread_version(
-        langgraph_client, channel_id, thread_ts, str(event_data.get("event_ts") or "")
-    )
     event_data["channel_context"] = channel_context
     repo_config = await common.get_slack_repo_config(
         channel_id,
@@ -408,21 +401,6 @@ async def slack_webhook(
             )
         )
         if not should_handle_message:
-            langgraph_client = get_langgraph_client()
-            mapped_thread_id = await common.lookup_slack_thread_id(
-                langgraph_client, channel_id, thread_ts
-            )
-            if (
-                mapped_thread_id
-                and user_id != bot_user_id
-                and event.get("subtype") != "bot_message"
-                and not event.get("bot_id")
-                and updated_message.get("subtype") != "bot_message"
-                and not updated_message.get("bot_id")
-            ):
-                await common.increment_slack_thread_version(
-                    langgraph_client, channel_id, thread_ts, original_message_ts
-                )
             return {"status": "ignored", "reason": "Not an app mention, DM, or plan reply"}
 
     if (
@@ -516,9 +494,6 @@ async def slack_webhook(
             thread_id=thread_id,
         )
         if await common.claim_slack_event(event_id, channel_id, event_ts):
-            event_data["thread_version"] = await common.increment_slack_thread_version(
-                langgraph_client, channel_id, thread_ts, original_message_ts
-            )
             background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
             return {"status": "accepted", "message": "Slack mention queued"}
 
