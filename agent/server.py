@@ -1314,6 +1314,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        artifacts = configurable.get("local_import_artifacts")
+        if isinstance(artifacts, dict):
+            for file_path, content in artifacts.items():
+                if isinstance(file_path, str) and isinstance(content, str):
+                    await sandbox_backend.awrite(file_path, content)
+            configurable["local_import_artifacts"] = None
+            await client.threads.update(
+                thread_id=self._thread_id, metadata={"local_import_artifacts": None}
+            )
         async with aphase(self._thread_id, "prepare.environment"):
             environment = await resolve_environment(_environment_slug(configurable))
         async with aphase(self._thread_id, "prepare.sender_context"):

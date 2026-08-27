@@ -265,6 +265,35 @@ def test_sanitize_local_import_rejects_system_messages() -> None:
     assert exc_info.value.status_code == 422
 
 
+async def test_build_configurable_carries_import_artifacts_once(monkeypatch) -> None:
+    async def fake_profile(login: str) -> dict[str, object]:
+        return {}
+
+    async def fake_email(login: str, profile: dict[str, object]) -> str:
+        return "octocat@example.com"
+
+    monkeypatch.setattr(thread_api, "get_profile", fake_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_email)
+
+    configurable = await thread_api._build_dashboard_configurable(
+        "thread-1",
+        "octocat",
+        {
+            "source": "dashboard",
+            "local_import_artifacts": {"/conversation_history/context.md": "history"},
+        },
+    )
+
+    assert configurable["local_import_artifacts"] == {"/conversation_history/context.md": "history"}
+
+
+def test_sanitize_local_import_rejects_artifact_traversal() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        thread_api._sanitize_local_import_artifacts({"/conversation_history/../secret": "secret"})
+
+    assert exc_info.value.status_code == 422
+
+
 async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})

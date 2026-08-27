@@ -377,12 +377,43 @@ class BackendSupervisor {
     ) {
       throw new Error("The local agent has no transferable conversation state");
     }
+    const artifacts = {};
+    if (this.options.stateDir) {
+      const safeId =
+        threadId.replace(/[^A-Za-z0-9._-]/g, "-").replace(/^\.+/, "") ||
+        "thread";
+      const root = path.join(this.options.stateDir, "artifacts", safeId);
+      for (const directory of ["conversation_history", "large_tool_results"]) {
+        const base = path.join(root, directory);
+        if (!fs.existsSync(base)) continue;
+        const pending = [base];
+        while (pending.length) {
+          const current = pending.pop();
+          for (const entry of fs.readdirSync(current, {
+            withFileTypes: true,
+          })) {
+            const absolute = path.join(current, entry.name);
+            if (entry.isDirectory()) pending.push(absolute);
+            if (!entry.isFile()) continue;
+            const relative = path
+              .relative(base, absolute)
+              .split(path.sep)
+              .join("/");
+            artifacts[`/${directory}/${relative}`] = fs.readFileSync(
+              absolute,
+              "utf8",
+            );
+          }
+        }
+      }
+    }
     const payload = {
       format_version: 1,
       state: {
         messages: values.messages,
         ...(Array.isArray(values.todos) ? { todos: values.todos } : {}),
       },
+      artifacts,
     };
     if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 2 * 1024 * 1024) {
       throw new Error("The local conversation is too large to transfer");

@@ -34,6 +34,7 @@ export interface LocalThreadImportRequest {
   model_id?: string | null
   effort?: string | null
   state: { messages: Array<unknown>; todos?: Array<unknown> }
+  artifacts: Record<string, string>
 }
 
 export interface ThreadMessageRequest {

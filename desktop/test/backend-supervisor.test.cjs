@@ -142,6 +142,7 @@ test("exports completed local thread state for cloud transfer", async () => {
   assert.deepEqual(await supervisor.exportThreadState("thread-1"), {
     format_version: 1,
     state: { messages: [{ type: "human", content: "fix it" }], todos: [] },
+    artifacts: {},
   });
 });
 

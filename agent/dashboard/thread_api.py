@@ -105,6 +105,7 @@ _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 _LOCAL_IMPORT_MAX_BYTES = 2 * 1024 * 1024
 _LOCAL_IMPORT_MAX_MESSAGES = 500
+_LOCAL_IMPORT_ARTIFACT_ROOTS = ("/conversation_history/", "/large_tool_results/")
 _LOCAL_IMPORT_MESSAGE_TYPES = frozenset({"human", "user", "ai", "assistant", "tool"})
 _SANDBOX_CREATING_SENTINEL = "__creating__"
 
@@ -189,6 +190,7 @@ class LocalThreadImportBody(BaseModel):
     model_id: str | None = Field(default=None, alias="modelId")
     effort: str | None = None
     state: dict[str, Any]
+    artifacts: dict[str, str] = Field(default_factory=dict)
 
 
 async def _resolve_agent_model_choice(
@@ -1365,6 +1367,20 @@ async def _create_dashboard_thread_record(
     return as_thread_dict(thread)
 
 
+def _sanitize_local_import_artifacts(artifacts: Mapping[str, str]) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    for raw_path, content in artifacts.items():
+        normalized = posixpath.normpath(raw_path)
+        if (
+            not isinstance(content, str)
+            or normalized != raw_path
+            or not any(raw_path.startswith(root) for root in _LOCAL_IMPORT_ARTIFACT_ROOTS)
+        ):
+            raise HTTPException(422, "invalid local agent artifact")
+        sanitized[raw_path] = content
+    return sanitized
+
+
 def _sanitize_local_import_state(state: Mapping[str, Any]) -> dict[str, Any]:
     try:
         encoded = json.dumps(state, separators=(",", ":"), ensure_ascii=False).encode()
@@ -1431,6 +1447,9 @@ async def import_local_thread(
     if body.repo is not None and repo_config is None:
         raise HTTPException(422, "invalid repository")
     state = _sanitize_local_import_state(body.state)
+    artifacts = _sanitize_local_import_artifacts(body.artifacts)
+    if len(json.dumps({"state": state, "artifacts": artifacts}).encode()) > _LOCAL_IMPORT_MAX_BYTES:
+        raise HTTPException(413, "local agent context exceeds 2MB limit")
     profile = await get_profile(login) or {}
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
         profile, body.model_id, body.effort
@@ -1456,6 +1475,8 @@ async def import_local_thread(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if artifacts:
+        metadata["local_import_artifacts"] = artifacts
     if repo_config:
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
@@ -1520,6 +1541,9 @@ async def _build_dashboard_configurable(
     environment = metadata.get("environment")
     if isinstance(environment, str) and environment:
         configurable["environment"] = environment
+    artifacts = metadata.get("local_import_artifacts")
+    if isinstance(artifacts, dict):
+        configurable["local_import_artifacts"] = artifacts
     if overrides:
         for key, value in overrides.items():
             if value is not None:
