@@ -5,6 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  LocalRunner,
   downloadFiles,
   resolveWorkingDirectory,
   runCommand,
@@ -104,4 +105,44 @@ test("confines uploads and downloads to the project", async () => {
   assert.equal(Buffer.from(read.content, "base64").toString("utf8"), "hi");
   assert.equal(escaped.error, "invalid_path");
   assert.equal(missing.error, "file_not_found");
+});
+
+test("backs off instead of hammering a backend that refuses every socket", async () => {
+  const attempts = [];
+  const timers = [];
+  const runner = new LocalRunner({
+    deviceId: "abc",
+    registeredProject: allowAll,
+    knowsThread,
+    request: async (path) => {
+      attempts.push(path);
+      return { ok: false, status: 401 };
+    },
+  });
+  // Drive the clock by hand so the test does not sit through real backoff.
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, delay) => {
+    timers.push({ fn, delay });
+    return { unref() {} };
+  };
+  try {
+    runner.start();
+    await new Promise((resolve) => realSetTimeout(resolve, 20));
+    const firstBurst = attempts.length;
+    assert.ok(firstBurst <= 3, `opened ${firstBurst} sockets before any retry`);
+
+    // Every failure in the burst must collapse into one pending retry.
+    const retries = timers.filter((timer) => timer.delay >= 1000);
+    assert.equal(retries.length, 1);
+
+    retries[0].fn();
+    await new Promise((resolve) => realSetTimeout(resolve, 20));
+    assert.ok(
+      attempts.length <= firstBurst * 2,
+      `retry storm: ${attempts.length} attempts`,
+    );
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    runner.stop();
+  }
 });

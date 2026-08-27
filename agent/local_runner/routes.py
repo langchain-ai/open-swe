@@ -19,13 +19,18 @@ from .broker import LocalRunnerConnection, WantedDevice, runner_broker, wanted_d
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/dashboard/api/desktop/runner",
-    tags=["local-runner"],
-    dependencies=[Depends(require_same_origin_for_mutations)],
-)
+# The origin allowlist is not applied router-wide, because the socket route
+# below cannot satisfy it and does not need to: it is a CSRF defense for the
+# ambient session cookie, and that route never reads cookies. It authenticates
+# with an explicit signed ticket instead, and the only way to get one is the
+# `/connect` POST, which *is* origin-checked. A page on another origin can open
+# a WebSocket to us — that is not subject to CORS — but arrives ticketless and
+# is closed. Non-browser clients (Electron's main process) send no Origin at
+# all, so applying the check here would reject the only caller there is.
+router = APIRouter(prefix="/dashboard/api/desktop/runner", tags=["local-runner"])
 
 _SESSION_DEP = Depends(require_session)
+_SAME_ORIGIN_DEP = Depends(require_same_origin_for_mutations)
 _SUBPROTOCOL = "open-swe-runner"
 # Each connection is an idle socket most of its life; the cap is about bounding
 # a misbehaving client, not about concurrent work.
@@ -55,7 +60,7 @@ def _runner_websocket_url(device_id: str) -> str:
     return urlunsplit((scheme, parsed.netloc, path, "", ""))
 
 
-@router.post("/connect")
+@router.post("/connect", dependencies=[_SAME_ORIGIN_DEP])
 async def runner_connection(
     body: dict[str, Any],
     session: dict[str, Any] = _SESSION_DEP,

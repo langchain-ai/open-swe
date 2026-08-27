@@ -3,7 +3,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const WANTED_POLL_INTERVAL_MS = 1_000;
-const RECONNECT_DELAY_MS = 2_000;
+const RECONNECT_DELAY_MS = 1_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
 const BASE_SOCKETS = 3;
 const MAX_SOCKETS = 24;
 const MAX_OUTPUT_BYTES = 4_000_000;
@@ -146,6 +147,8 @@ class LocalRunner {
     this.stopped = true;
     this.pollTimer = null;
     this.openingCount = 0;
+    this.retryTimer = null;
+    this.retryDelay = RECONNECT_DELAY_MS;
   }
 
   start() {
@@ -160,6 +163,8 @@ class LocalRunner {
     this.stopped = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     const sockets = [...this.sockets];
     this.sockets.clear();
     for (const socket of sockets) {
@@ -176,6 +181,23 @@ class LocalRunner {
     while (!this.stopped && this.sockets.size + this.openingCount < wanted) {
       void this.openSocket();
     }
+  }
+
+  /**
+   * Reopen after a failure, backing off.
+   *
+   * Without this, a backend that rejects every handshake — the wrong URL, an
+   * expired session, a deploy in progress — turns each close into an immediate
+   * reopen, and the pool spins as fast as the network allows.
+   */
+  scheduleRetry() {
+    if (this.stopped || this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.retryDelay = Math.min(this.retryDelay * 2, MAX_RECONNECT_DELAY_MS);
+      this.ensureSockets(BASE_SOCKETS);
+    }, this.retryDelay);
+    this.retryTimer.unref?.();
   }
 
   async pollWanted() {
@@ -208,9 +230,7 @@ class LocalRunner {
       const { url, ticket } = await response.json();
       await this.attach(url, ticket);
     } catch {
-      if (!this.stopped && this.sockets.size < BASE_SOCKETS) {
-        setTimeout(() => this.ensureSockets(BASE_SOCKETS), RECONNECT_DELAY_MS).unref?.();
-      }
+      this.scheduleRetry();
     } finally {
       this.openingCount -= 1;
     }
@@ -222,6 +242,7 @@ class LocalRunner {
       let settled = false;
       socket.addEventListener("open", () => {
         settled = true;
+        this.retryDelay = RECONNECT_DELAY_MS;
         this.sockets.add(socket);
         resolve();
       });
@@ -241,7 +262,10 @@ class LocalRunner {
           reject(new Error("socket closed"));
           return;
         }
-        if (!this.stopped) this.ensureSockets(BASE_SOCKETS);
+        // A socket that served us and then dropped is an ordinary reconnect,
+        // but it can also be a backend that closes everything it is handed, so
+        // it goes through the same backoff rather than reopening at once.
+        this.scheduleRetry();
       });
     });
   }
