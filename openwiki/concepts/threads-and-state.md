@@ -66,8 +66,7 @@ This page explains three related mechanisms:
 
 Related reading: [workflows/invocation](../workflows/invocation.md) for how a
 trigger becomes a run, [architecture/sandbox-lifecycle](../architecture/sandbox-lifecycle.md)
-<!-- openwiki: broken internal link [./auth.md] file "./auth.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-for the sandbox bound to each thread, and [concepts/auth](./auth.md) for how a
+for the sandbox bound to each thread, and [concepts/auth](./auth-and-security.md) for how a
 run's participants are verified.
 
 ## Deterministic thread-id derivation
@@ -185,8 +184,7 @@ Thread metadata carries the long-lived, per-thread facts:
   (Slack resolution) and to resolve participants.
 - **participant maps** — `participant_logins` / `participant_emails`, stored as a
   key-per-person object so a JSONB-containment metadata search can match a single
-<!-- openwiki: broken internal link [./auth.md] file "./auth.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-  participant. See [concepts/auth](./auth.md).
+  participant. See [concepts/auth](./auth-and-security.md).
 - **reviewer fields** — `kind`, `pr`, `head_sha`, `last_reviewed_sha`, `watch`,
   and `findings` written by the reviewer's `store_thread_metadata`.
 - **thread settings** — the profile snapshot under `agent_settings` (below).

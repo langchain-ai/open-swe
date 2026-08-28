@@ -115,32 +115,32 @@ add sync/async dual implementations).
 Pick the section that matches what you are trying to do.
 
 ### Architecture
-- [System Architecture Overview](/openwiki/architecture/overview.md) — the five graphs, the FastAPI webapp, dashboard router, sandbox layer, and web/desktop UI, and how they connect.
-- [Agent Graph & get_agent Factory](/openwiki/architecture/agent-graph.md) — how a deep agent is assembled per-thread with resolved model, curated tools, backend, subagents, and middleware.
-- [Middleware Stack](/openwiki/architecture/middleware-stack.md) — the ordered middleware chain around every model call for the agent and reviewer.
-- [Sandbox Lifecycle & Providers](/openwiki/architecture/sandbox-lifecycle.md) — per-thread get-or-create-then-reconnect lifecycle, provider selection, the GitHub proxy, and failure handling.
-- [Reviewer & Review-Style Analyzer Graphs](/openwiki/architecture/reviewer-and-analyzer.md) — read-only reviewer graph and the analyzer that learns per-repo review style.
+- [System Architecture Overview](architecture/overview.md) — the five graphs, the FastAPI webapp, dashboard router, sandbox layer, and web/desktop UI, and how they connect.
+- [Agent Graph & get_agent Factory](architecture/agent-graph.md) — how a deep agent is assembled per-thread with resolved model, curated tools, backend, subagents, and middleware.
+- [Middleware Stack](architecture/middleware-stack.md) — the ordered middleware chain around every model call for the agent and reviewer.
+- [Sandbox Lifecycle & Providers](architecture/sandbox-lifecycle.md) — per-thread get-or-create-then-reconnect lifecycle, provider selection, the GitHub proxy, and failure handling.
+- [Reviewer & Review-Style Analyzer Graphs](architecture/reviewer-and-analyzer.md) — read-only reviewer graph and the analyzer that learns per-repo review style.
 
 ### Concepts
-- [Agent Tools (Curated Toolset)](/openwiki/concepts/tools.md) — what tools the agent/reviewer/analyzer expose and the agent/UI parity principle.
-- [Models, Profiles, Team Defaults & Instructions](/openwiki/concepts/models-profiles-instructions.md) — model + reasoning-effort resolution precedence and layered instructions.
-- [Threads, Thread IDs & Persistence](/openwiki/concepts/threads-and-state.md) — deterministic thread-id derivation, thread metadata/state, and Slack code-channel keying.
-- [Authentication, Authorization & Security Boundaries](/openwiki/concepts/auth-and-security.md) — GitHub dual-mode auth, webhook signature verification, dashboard OAuth, and encryption at rest.
+- [Agent Tools (Curated Toolset)](concepts/tools.md) — what tools the agent/reviewer/analyzer expose and the agent/UI parity principle.
+- [Models, Profiles, Team Defaults & Instructions](concepts/models-profiles-instructions.md) — model + reasoning-effort resolution precedence and layered instructions.
+- [Threads, Thread IDs & Persistence](concepts/threads-and-state.md) — deterministic thread-id derivation, thread metadata/state, and Slack code-channel keying.
+- [Authentication, Authorization & Security Boundaries](concepts/auth-and-security.md) — GitHub dual-mode auth, webhook signature verification, dashboard OAuth, and encryption at rest.
 
 ### Workflows
-- [Invocation: Slack, Linear & GitHub Webhooks](/openwiki/workflows/invocation.md) — how an inbound mention/comment/event becomes a dispatched run.
-- [PR Creation & GitHub Delivery](/openwiki/workflows/pr-creation.md) — commit, push, and draft-PR flow plus guards and CI feedback.
-- [PR Review Workflow](/openwiki/workflows/pr-review.md) — auto-review and comment-triggered reviews from webhook to published findings.
-- [Scheduling, Cron & Baby-Sit CI Monitoring](/openwiki/workflows/scheduling-and-baby-sit.md) — scheduler graph and the opt-in `/baby-sit` CI monitoring flow.
-- [Context Engineering: AGENTS.md, Source Context & Skills](/openwiki/workflows/context-engineering.md) — how the agent gathers context and uses skills.
-- [Mid-Run Follow-Up Messages](/openwiki/workflows/follow-up-messages.md) — how messages sent while the agent is working are queued and injected.
+- [Invocation: Slack, Linear & GitHub Webhooks](workflows/invocation.md) — how an inbound mention/comment/event becomes a dispatched run.
+- [PR Creation & GitHub Delivery](workflows/pr-creation.md) — commit, push, and draft-PR flow plus guards and CI feedback.
+- [PR Review Workflow](workflows/pr-review.md) — auto-review and comment-triggered reviews from webhook to published findings.
+- [Scheduling, Cron & Baby-Sit CI Monitoring](workflows/scheduling-and-baby-sit.md) — scheduler graph and the opt-in `/baby-sit` CI monitoring flow.
+- [Context Engineering: AGENTS.md, Source Context & Skills](workflows/context-engineering.md) — how the agent gathers context and uses skills.
+- [Mid-Run Follow-Up Messages](workflows/follow-up-messages.md) — how messages sent while the agent is working are queued and injected.
 
 ### Integrations
-- [Dashboard API & Web/Desktop UI](/openwiki/integrations/dashboard-ui.md) — the dashboard router and the `ui/` React dashboard + `desktop/` Electron wrapper.
-- [Observability & MCP Integrations](/openwiki/integrations/observability-and-mcp.md) — Datadog/LangSmith tools, Corridor/Notion MCP, Currents, and Stagehand browser.
-- [Sandbox Provider Integrations](/openwiki/integrations/sandbox-providers.md) — pluggable sandbox providers and how to add a new one.
+- [Dashboard API & Web/Desktop UI](integrations/dashboard-ui.md) — the dashboard router and the `ui/` React dashboard + `desktop/` Electron wrapper.
+- [Observability & MCP Integrations](integrations/observability-and-mcp.md) — Datadog/LangSmith tools, Corridor/Notion MCP, Currents, and Stagehand browser.
+- [Sandbox Provider Integrations](integrations/sandbox-providers.md) — pluggable sandbox providers and how to add a new one.
 
 ### Operations & Testing
-- [Configuration & Environment Variables](/openwiki/operations/configuration.md) — environment variables across sandbox, models, auth, webhooks, and integrations.
-- [Local Dev, Build & Deployment](/openwiki/operations/deployment.md) — running locally, building, and deploying the backend and dashboard.
-- [Testing Guide](/openwiki/testing/overview.md) — test layout, conventions, and how to run unit and e2e tests.
+- [Configuration & Environment Variables](operations/configuration.md) — environment variables across sandbox, models, auth, webhooks, and integrations.
+- [Local Dev, Build & Deployment](operations/deployment.md) — running locally, building, and deploying the backend and dashboard.
+- [Testing Guide](testing/overview.md) — test layout, conventions, and how to run unit and e2e tests.

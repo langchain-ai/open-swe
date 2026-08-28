@@ -181,8 +181,7 @@ Payload helpers (`branch_from_check_payload`, `head_sha_from_check_payload`,
 `is_failing_ci_payload`) extract the branch, head SHA, and failure state from
 CI webhooks. `handle_ci_webhook` in the baby-sit flow consumes `is_failing_ci_payload`
 and only proceeds for a completed failure that matches an active watch; see
-<!-- openwiki: broken internal link [../workflows/baby-sit-ci.md] file "../workflows/baby-sit-ci.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-[Baby-sit CI](../workflows/baby-sit-ci.md).
+[Baby-sit CI](../workflows/scheduling-and-baby-sit.md).
 
 ## PR feedback: review comments
 

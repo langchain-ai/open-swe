@@ -128,8 +128,7 @@ passed through `gate_fable_model` before building `provider_model_kwargs`. Model
 construction uses `_make_model_or_defer`, which returns a deferred error model
 rather than raising, so a provider misconfiguration surfaces at call time
 instead of failing the whole factory. See
-<!-- openwiki: broken internal link [../concepts/models-profiles.md] file "../concepts/models-profiles.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-[Models & Profiles](../concepts/models-profiles.md).
+[Models & Profiles](../concepts/models-profiles-instructions.md).
 
 ## System prompt assembly
 
