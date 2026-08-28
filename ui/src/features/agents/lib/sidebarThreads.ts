@@ -24,6 +24,8 @@ interface SidebarThreadItemBase {
   updatedAt: number
   planStatus?: string | null
   pr?: AgentThread["pr"]
+  /** `owner/repo` + number of `pr`, when the thread carries a full PR record. */
+  prRef?: { repoFullName: string; number: number }
 }
 
 export interface CloudSidebarThreadItem extends SidebarThreadItemBase {
@@ -43,9 +45,24 @@ export interface SidebarProjectOption {
   label: string
 }
 
+export interface SidebarProjectGroup extends SidebarProjectOption {
+  threads: Array<SidebarThreadItem>
+}
+
 export function projectKey(name?: string | null): string | null {
   const normalized = name?.trim().toLowerCase()
   return normalized ? `project:${normalized}` : null
+}
+
+function pullRequestRef(
+  thread: AgentThread
+): { repoFullName: string; number: number } | undefined {
+  const latest = thread.pullRequests?.at(-1)
+  if (latest) {
+    return { repoFullName: latest.repoFullName, number: latest.number }
+  }
+  if (!thread.pr || thread.repoFullName.split("/").length !== 2) return undefined
+  return { repoFullName: thread.repoFullName, number: thread.pr.number }
 }
 
 export function cloudSidebarThread(
@@ -69,6 +86,7 @@ export function cloudSidebarThread(
     updatedAt: thread.updatedAt,
     planStatus: thread.planStatus,
     pr: thread.pr,
+    prRef: pullRequestRef(thread),
     thread,
   }
 }
@@ -76,7 +94,8 @@ export function cloudSidebarThread(
 export function localSidebarThread(
   thread: DesktopLocalThreadSummary,
   project: DesktopProject | undefined,
-  activity: DesktopLocalActivity[string] | undefined
+  activity: DesktopLocalActivity[string] | undefined,
+  archived = false
 ): LocalSidebarThreadItem {
   const projectLabel = project?.name.trim() || localProjectName(thread.cwd)
   return {
@@ -98,7 +117,7 @@ export function localSidebarThread(
             ? "idle"
             : "finished",
     viewed: thread.viewed,
-    resolved: false,
+    resolved: archived,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     thread,
@@ -124,6 +143,36 @@ export function sidebarProjectOptions(
     .sort((left, right) => left.label.localeCompare(right.label))
 }
 
+/**
+ * Split the sidebar into one bucket per project plus the leftovers shown under
+ * "Recents". Projects keep their own most-recent-first order and are ranked by
+ * their freshest thread, so the project you just worked in stays on top.
+ */
+export function groupSidebarThreadsByProject(
+  threads: ReadonlyArray<SidebarThreadItem>,
+  projects: ReadonlyArray<SidebarProjectOption>,
+  mode: SidebarSort = "updated"
+): { projects: Array<SidebarProjectGroup>; recents: Array<SidebarThreadItem> } {
+  const buckets = new Map<string, SidebarProjectGroup>(
+    projects.map((project) => [project.key, { ...project, threads: [] }])
+  )
+  const recents: Array<SidebarThreadItem> = []
+  for (const thread of sortSidebarThreads(threads, mode)) {
+    const bucket = thread.projectKey ? buckets.get(thread.projectKey) : undefined
+    if (bucket) bucket.threads.push(thread)
+    else recents.push(thread)
+  }
+  return {
+    projects: [...buckets.values()]
+      .filter((group) => group.threads.length > 0)
+      .sort(
+        (left, right) =>
+          (right.threads[0]?.updatedAt ?? 0) - (left.threads[0]?.updatedAt ?? 0)
+      ),
+    recents,
+  }
+}
+
 export function filterSidebarProject(
   threads: ReadonlyArray<SidebarThreadItem>,
   selectedProjectKey: string | null
@@ -133,14 +182,40 @@ export function filterSidebarProject(
     : [...threads]
 }
 
+export type SidebarSort = "priority" | "updated" | "manual"
+
+/**
+ * Priority ranks what still wants the user's attention: live runs first, then
+ * anything unread, then everything else. Within a rank it falls back to
+ * recency, so the ordering only ever reorders across those three bands.
+ */
+function priorityRank(thread: SidebarThreadItem): number {
+  if (thread.status === "running") return 0
+  return thread.viewed ? 2 : 1
+}
+
+function byRecency(
+  left: SidebarThreadItem,
+  right: SidebarThreadItem
+): number {
+  return (
+    right.updatedAt - left.updatedAt ||
+    right.createdAt - left.createdAt ||
+    left.key.localeCompare(right.key)
+  )
+}
+
 export function sortSidebarThreads(
-  threads: ReadonlyArray<SidebarThreadItem>
+  threads: ReadonlyArray<SidebarThreadItem>,
+  mode: SidebarSort = "updated"
 ): Array<SidebarThreadItem> {
+  // "manual" keeps the order the caller supplied — for pins that is the stored
+  // pin order, which is the only manual ordering the user can actually set.
+  if (mode === "manual") return [...threads]
+  if (mode === "updated") return [...threads].sort(byRecency)
   return [...threads].sort(
     (left, right) =>
-      right.updatedAt - left.updatedAt ||
-      right.createdAt - left.createdAt ||
-      left.key.localeCompare(right.key)
+      priorityRank(left) - priorityRank(right) || byRecency(left, right)
   )
 }
 

@@ -1,64 +1,66 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
-import { Dialog } from "@base-ui/react/dialog"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
-  ArrowCounterClockwiseIcon,
-  CalendarBlankIcon,
-  CaretDownIcon,
-  CaretRightIcon,
-  ChatCircleIcon,
-  CheckCircleIcon,
   CircleNotchIcon,
-  CopyIcon,
-  GitMergeIcon,
+  FolderIcon,
+  FolderOpenIcon,
   GitPullRequestIcon,
   LightningIcon,
   MagnifyingGlassIcon,
+  NotePencilIcon,
   PlusIcon,
+  TrashIcon,
   PushPinIcon,
   PushPinSlashIcon,
   SparkleIcon,
-  TrashIcon,
-  TreeStructureIcon,
 } from "@phosphor-icons/react"
 import { Kanban } from "lucide-react"
-import {
-  IoCloudOutline,
-  IoLaptopOutline,
-  IoLogoGithub,
-  IoLogoSlack,
-} from "react-icons/io5"
-import { SiLinear } from "react-icons/si"
-import { useCallback, useMemo, useState } from "react"
-import type { ComponentType, SVGProps } from "react"
+import { useCallback, useMemo } from "react"
 
 import type { SessionUser } from "@/lib/api"
-import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
-import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
+import type {
+  SidebarProjectGroup,
+  SidebarThreadItem,
+} from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
-import { SidebarFilterMenu } from "@/features/agents/components/SidebarFilterMenu"
-import { SidebarProjectSelector } from "@/features/agents/components/SidebarProjectSelector"
-import { Button } from "@/components/ui/button"
+import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  SidebarSectionAction,
+  SidebarSectionHeader,
+  SidebarSectionMenu,
+} from "@/features/agents/components/SidebarSectionHeader"
+import {
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+} from "@/components/ui/menu"
 import {
   SidebarCollapseButton,
   SidebarFrame,
   SidebarLayoutProvider,
   useSidebarLayout,
 } from "@/components/sidebar-layout"
-import {
-  availableFacets,
-  filterThreads,
-  hasActiveFilters,
-} from "@/features/agents/lib/sidebarFilter"
+import { filterThreads, hasActiveFilters } from "@/features/agents/lib/sidebarFilter"
+import type {
+  ChatSort,
+  OrganizeMode,
+  PinnedSort,
+} from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
-  useDeleteAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
+import { useSidebarPullRequestChecks } from "@/features/agents/lib/prChecks"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
@@ -68,73 +70,18 @@ import {
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
   cloudSidebarThread,
-  filterSidebarProject,
+  groupSidebarThreadsByProject,
   localSidebarThread,
   sidebarProjectOptions,
   sortSidebarThreads,
 } from "@/features/agents/lib/sidebarThreads"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
-
-type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
-
-const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
-  dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
-  github: { icon: IoLogoGithub, label: "Triggered from GitHub" },
-  slack: { icon: IoLogoSlack, label: "Triggered from Slack" },
-  linear: { icon: SiLinear, label: "Triggered from Linear" },
-  schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
-}
-
-type PrState = NonNullable<AgentThread["pr"]>["state"]
-
-const PR_STATE_META: Record<
-  PrState,
-  { icon: SourceIcon; label: string; className: string }
-> = {
-  draft: {
-    icon: GitPullRequestIcon,
-    label: "Draft pull request",
-    className: "text-muted-foreground/70",
-  },
-  open: {
-    icon: GitPullRequestIcon,
-    label: "Open pull request",
-    className: "text-success-foreground",
-  },
-  merged: {
-    icon: GitMergeIcon,
-    label: "Merged pull request",
-    className: "text-primary",
-  },
-  closed: {
-    icon: GitPullRequestIcon,
-    label: "Closed pull request",
-    className: "text-destructive",
-  },
-}
-
-function openContextMenuFromKeyboard(
-  event: React.KeyboardEvent<HTMLAnchorElement>
-) {
-  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
-    return
-  }
-  event.preventDefault()
-  const rect = event.currentTarget.getBoundingClientRect()
-  event.currentTarget.dispatchEvent(
-    new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2,
-    })
-  )
-}
 
 interface AgentsSidebarProps {
   user: SessionUser | null
@@ -151,6 +98,9 @@ const NAV = [
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
 
+/** Threads shown per project before the group needs a "Show more". */
+const PROJECT_PREVIEW_COUNT = 12
+
 export function AgentsSidebar({
   user,
   localOnly = false,
@@ -166,7 +116,18 @@ export function AgentsSidebar({
     },
     [navigate]
   )
-  const { prefs, setCompact, setFilters, resetFilters } = useSidebarPrefs()
+  const {
+    prefs,
+    setCompact,
+    setFilters,
+    toggleLocalPin,
+    toggleLocalArchived,
+    toggleProjectPin,
+    toggleProjectCollapsed,
+    toggleSectionCollapsed,
+    expandProject,
+    setView,
+  } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const sidebar = useSidebarThreads({
@@ -181,70 +142,225 @@ export function AgentsSidebar({
   const localSessions = localThreads.data ?? []
   const activity = useLocalThreadActivity()
   const refreshLocalThreads = useRefreshLocalThreads()
+  const pinThread = usePinAgentThread()
+  const resolveThread = useResolveAgentThread()
   const {
     projects: localProjects,
     addProject: addLocalProject,
     removeProject: removeLocalProject,
   } = useDesktopProjects()
-  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(
-    null
-  )
+
   const pinnedThreads = sidebar.data.pinned ?? []
-  const pinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
+  const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
   const activeThreads = sidebar.data.active.items.filter(
-    (thread) => !pinnedIds.has(thread.id)
+    (thread) => !cloudPinnedIds.has(thread.id)
   )
   const resolvedThreads = sidebar.data.resolved.items.filter(
-    (thread) => !pinnedIds.has(thread.id)
+    (thread) => !cloudPinnedIds.has(thread.id)
   )
-  const activeHasMore = sidebar.data.active.hasMore
-  const resolvedHasMore = sidebar.data.resolved.hasMore
-  const visibleThreads = [
-    ...pinnedThreads,
-    ...activeThreads,
-    ...resolvedThreads,
-  ]
+  const visibleThreads = [...pinnedThreads, ...activeThreads, ...resolvedThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
   const projectByPath = new Map(
     localProjects.map((project) => [project.cwd, project])
   )
-  const pinnedItems = pinnedThreads.map(cloudSidebarThread)
-  const threadItems: Array<SidebarThreadItem> = [
-    ...activeThreads.map(cloudSidebarThread),
-    ...resolvedThreads.map(cloudSidebarThread),
-    ...localSessions.map((thread) =>
+  const localPinnedIds = new Set(prefs.pinnedLocalIds)
+  const localArchivedIds = new Set(prefs.archivedLocalIds)
+  const localItems = localSessions
+    .map((thread) =>
       localSidebarThread(
         thread,
         projectByPath.get(thread.cwd),
-        activity[thread.id]
+        activity[thread.id],
+        localArchivedIds.has(thread.id)
       )
-    ),
+    )
+    // Cloud threads are omitted server-side unless includeResolved; local
+    // archiving is client-side, so it has to honour the same switch here.
+    .filter((item) => prefs.filters.includeResolved || !item.resolved)
+  const pinnedItems = [
+    ...pinnedThreads.map(cloudSidebarThread),
+    ...localItems.filter((item) => localPinnedIds.has(item.id)),
+  ]
+  const threadItems: Array<SidebarThreadItem> = [
+    ...activeThreads.map(cloudSidebarThread),
+    ...resolvedThreads.map(cloudSidebarThread),
+    ...localItems.filter((item) => !localPinnedIds.has(item.id)),
   ]
   const allItems = [...pinnedItems, ...threadItems]
   const projects = sidebarProjectOptions(allItems, localProjects)
-  const activeProjectKey = projects.some(
-    (project) => project.key === selectedProjectKey
-  )
-    ? selectedProjectKey
-    : null
-  const filteredPinnedItems = filterSidebarProject(
+  const filteredPinnedItems = sortSidebarThreads(
     filterThreads(pinnedItems, prefs.filters),
-    activeProjectKey
+    prefs.sortPinned
   )
-  const filteredThreadItems = sortSidebarThreads(
-    filterSidebarProject(
-      filterThreads(threadItems, prefs.filters),
-      activeProjectKey
-    )
+  const filteredThreadItems = filterThreads(threadItems, prefs.filters)
+  // "In one list" drops the per-project buckets and pours everything into
+  // Recents, so the Projects section disappears along with its groups.
+  const grouped =
+    prefs.organize === "list"
+      ? {
+          projects: [],
+          recents: sortSidebarThreads(filteredThreadItems, prefs.sortChats),
+        }
+      : groupSidebarThreadsByProject(
+          filteredThreadItems,
+          projects,
+          prefs.sortChats
+        )
+  const pinnedProjectKeys = new Set(prefs.pinnedProjectKeys)
+  const pinnedGroups = grouped.projects.filter((group) =>
+    pinnedProjectKeys.has(group.key)
   )
-  const loadedFacets = availableFacets(allItems)
-  const facets = {
-    models: [
-      ...new Set([...prefs.filters.models, ...loadedFacets.models]),
-    ].sort((a, b) => a.localeCompare(b)),
+  const unpinnedGroups = grouped.projects.filter(
+    (group) => !pinnedProjectKeys.has(group.key)
+  )
+
+  const checksFor = useSidebarPullRequestChecks(allItems, !localOnly)
+  const isPinned = (item: SidebarThreadItem) =>
+    item.location === "cloud"
+      ? cloudPinnedIds.has(item.id)
+      : localPinnedIds.has(item.id)
+  const isArchived = (item: SidebarThreadItem) =>
+    item.location === "cloud"
+      ? item.thread.resolved === true
+      : localArchivedIds.has(item.id)
+  const toggleArchived = (item: SidebarThreadItem) => {
+    if (item.location === "local") {
+      toggleLocalArchived(item.id)
+      return
+    }
+    if (!resolveThread.isPending) {
+      resolveThread.mutate({
+        threadId: item.id,
+        resolved: !isArchived(item),
+      })
+    }
   }
+  const togglePin = (item: SidebarThreadItem) => {
+    if (item.location === "local") {
+      toggleLocalPin(item.id)
+      return
+    }
+    if (!pinThread.isPending) {
+      pinThread.mutate({ threadId: item.id, pinned: !cloudPinnedIds.has(item.id) })
+    }
+  }
+
+  const activeKey = activeLocalSessionId
+    ? `local:${activeLocalSessionId}`
+    : activeThreadId
+      ? `cloud:${activeThreadId}`
+      : undefined
+
+  const rowProps = (item: SidebarThreadItem) => ({
+    item,
+    isActive: item.key === activeKey,
+    pinned: isPinned(item),
+    archived: isArchived(item),
+    checks: checksFor(item),
+    compact: prefs.compact,
+    onNavigate: layout.closeOnMobile,
+    onDeleteLocal: refreshLocalThreads,
+    onTogglePin: () => togglePin(item),
+    onToggleArchived: () => toggleArchived(item),
+  })
+
+  const sectionCollapsed = (key: string) =>
+    prefs.collapsedSectionKeys.includes(key)
+
+  // Projects and Recents share one menu: both control the same list.
+  const removeProjectItems = isDesktop && localProjects.length > 0 && (
+    <>
+      <MenuSeparator />
+      <MenuSub>
+        <MenuSubTrigger>
+          <TrashIcon />
+          Remove project…
+        </MenuSubTrigger>
+        <MenuSubPopup className="w-56">
+          <MenuGroup>
+            {localProjects.map((project) => (
+              <MenuItem
+                key={project.cwd}
+                onClick={() => void removeLocalProject(project.cwd)}
+                variant="destructive"
+              >
+                <TrashIcon />
+                <span className="min-w-0 truncate">{project.name}</span>
+              </MenuItem>
+            ))}
+          </MenuGroup>
+        </MenuSubPopup>
+      </MenuSub>
+    </>
+  )
+
+  const viewMenuItems = (
+    <>
+      <MenuGroup>
+        <MenuGroupLabel>Organize sidebar</MenuGroupLabel>
+        <MenuRadioGroup
+          value={prefs.organize}
+          onValueChange={(value) =>
+            setView({ organize: value as OrganizeMode })
+          }
+        >
+          <MenuRadioItem value="project">By project</MenuRadioItem>
+          <MenuRadioItem value="list">In one list</MenuRadioItem>
+        </MenuRadioGroup>
+      </MenuGroup>
+      <MenuGroup>
+        <MenuGroupLabel>Sort chats by</MenuGroupLabel>
+        <MenuRadioGroup
+          value={prefs.sortChats}
+          onValueChange={(value) => setView({ sortChats: value as ChatSort })}
+        >
+          <MenuRadioItem value="priority">Priority</MenuRadioItem>
+          <MenuRadioItem value="updated">Last updated</MenuRadioItem>
+        </MenuRadioGroup>
+      </MenuGroup>
+      <MenuSeparator />
+      <MenuGroup>
+        <MenuCheckboxItem
+          checked={prefs.filters.includeResolved}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeResolved: checked })
+          }
+        >
+          Show archived
+        </MenuCheckboxItem>
+        <MenuCheckboxItem
+          checked={prefs.filters.includeAutomations}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeAutomations: checked })
+          }
+        >
+          Show automations
+        </MenuCheckboxItem>
+        <MenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
+          Compact rows
+        </MenuCheckboxItem>
+      </MenuGroup>
+    </>
+  )
+
+  const renderProjectGroup = (group: SidebarProjectGroup) => (
+    <ProjectGroup
+      key={group.key}
+      group={group}
+      collapsed={prefs.collapsedProjectKeys.includes(group.key)}
+      expanded={prefs.expandedProjectKeys.includes(group.key)}
+      pinned={pinnedProjectKeys.has(group.key)}
+      onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
+      onExpand={() => expandProject(group.key)}
+      onTogglePin={() => toggleProjectPin(group.key)}
+      renderRow={(item) => (
+        <SidebarThreadRow key={item.key} {...rowProps(item)} indent />
+      )}
+    />
+  )
+
   const cloudPending = !localOnly && sidebar.isPending
   const resolvedLoading =
     !localOnly &&
@@ -257,12 +373,8 @@ export function AgentsSidebar({
     (!isDesktop || !localThreads.isPending) &&
     !resolvedLoading &&
     filteredPinnedItems.length === 0 &&
-    filteredThreadItems.length === 0
-  const activeKey = activeLocalSessionId
-    ? `local:${activeLocalSessionId}`
-    : activeThreadId
-      ? `cloud:${activeThreadId}`
-      : undefined
+    grouped.projects.length === 0 &&
+    grouped.recents.length === 0
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -302,7 +414,7 @@ export function AgentsSidebar({
           onClick={layout.closeOnMobile}
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
-          <PlusIcon className="size-4" />
+          <NotePencilIcon className="size-4" />
           New Thread
         </Link>
       </div>
@@ -335,18 +447,8 @@ export function AgentsSidebar({
         </nav>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
-        <SidebarProjectSelector
-          projects={projects}
-          localProjects={isDesktop ? localProjects : undefined}
-          selectedProjectKey={activeProjectKey}
-          onSelectProject={setSelectedProjectKey}
-          onAddProject={isDesktop ? () => void addLocalProject() : undefined}
-          onRemoveProject={
-            isDesktop ? (cwd) => void removeLocalProject(cwd) : undefined
-          }
-        />
-        <div className="min-h-0 flex-1 overflow-y-auto">
+      <TooltipProvider delay={500} closeDelay={100}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {sourcesLoading && allItems.length === 0 && (
             <ThreadListSkeleton compact={prefs.compact} />
           )}
@@ -368,27 +470,104 @@ export function AgentsSidebar({
               Loading threads…
             </div>
           )}
-          {filteredPinnedItems.length > 0 && (
-            <ThreadGroup
-              label="Pinned"
-              threads={filteredPinnedItems}
-              activeKey={activeKey}
-              onNavigate={layout.closeOnMobile}
-              onDeleteLocal={refreshLocalThreads}
-              compact={prefs.compact}
-            />
+
+          {(filteredPinnedItems.length > 0 || pinnedGroups.length > 0) && (
+            <section className="mb-3">
+              <SidebarSectionHeader
+                label="Pinned"
+                collapsed={sectionCollapsed("pinned")}
+                onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
+                menu={
+                  <SidebarSectionMenu label="Pinned options">
+                    <MenuGroup>
+                      <MenuGroupLabel>Sort pinned by</MenuGroupLabel>
+                      <MenuRadioGroup
+                        value={prefs.sortPinned}
+                        onValueChange={(value) =>
+                          setView({ sortPinned: value as PinnedSort })
+                        }
+                      >
+                        <MenuRadioItem value="priority">Priority</MenuRadioItem>
+                        <MenuRadioItem value="updated">
+                          Last updated
+                        </MenuRadioItem>
+                        <MenuRadioItem value="manual">
+                          Manual order
+                        </MenuRadioItem>
+                      </MenuRadioGroup>
+                    </MenuGroup>
+                  </SidebarSectionMenu>
+                }
+              />
+              {!sectionCollapsed("pinned") && (
+                <>
+                  {filteredPinnedItems.map((item) => (
+                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                  ))}
+                  {pinnedGroups.map(renderProjectGroup)}
+                </>
+              )}
+            </section>
           )}
-          {filteredThreadItems.map((thread) => (
-            <ThreadRow
-              key={thread.key}
-              item={thread}
-              isActive={thread.key === activeKey}
-              onNavigate={layout.closeOnMobile}
-              onDeleteLocal={refreshLocalThreads}
-              compact={prefs.compact}
-            />
-          ))}
-          {!sidebar.isPending && activeHasMore && (
+
+          {prefs.organize === "project" &&
+            (unpinnedGroups.length > 0 || isDesktop) && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Projects"
+                  collapsed={sectionCollapsed("projects")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                  menu={
+                    <SidebarSectionMenu label="Projects options">
+                      {viewMenuItems}
+                      {removeProjectItems}
+                    </SidebarSectionMenu>
+                  }
+                  action={
+                    isDesktop ? (
+                      <SidebarSectionAction
+                        label="Add project"
+                        icon={<PlusIcon className="size-4" />}
+                        onClick={() => void addLocalProject()}
+                      />
+                    ) : undefined
+                  }
+                />
+                {!sectionCollapsed("projects") &&
+                  unpinnedGroups.map(renderProjectGroup)}
+              </section>
+            )}
+
+          {grouped.recents.length > 0 && (
+            <section className="mb-3">
+              <SidebarSectionHeader
+                label="Recents"
+                collapsed={sectionCollapsed("recents")}
+                onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+                menu={
+                  <SidebarSectionMenu label="Recents options">
+                    {viewMenuItems}
+                  </SidebarSectionMenu>
+                }
+                action={
+                  <SidebarSectionAction
+                    label="New thread"
+                    icon={<NotePencilIcon className="size-4" />}
+                    onClick={() => {
+                      layout.closeOnMobile()
+                      void navigate({ to: "/agents" })
+                    }}
+                  />
+                }
+              />
+              {!sectionCollapsed("recents") &&
+                grouped.recents.map((item) => (
+                  <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                ))}
+            </section>
+          )}
+
+          {!sidebar.isPending && sidebar.data.active.hasMore && (
             <LoadMoreThreadsButton
               label="Load more cloud threads"
               loading={sidebar.activeQuery.isFetchingNextPage}
@@ -397,9 +576,9 @@ export function AgentsSidebar({
           )}
           {!sidebar.isPending &&
             prefs.filters.includeResolved &&
-            resolvedHasMore && (
+            sidebar.data.resolved.hasMore && (
               <LoadMoreThreadsButton
-                label="Load more resolved cloud threads"
+                label="Load more archived cloud threads"
                 loading={sidebar.resolvedQuery.isFetchingNextPage}
                 onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
               />
@@ -407,23 +586,21 @@ export function AgentsSidebar({
           {resolvedLoading && (
             <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
               <CircleNotchIcon className="size-3.5 animate-spin" />
-              Loading resolved threads…
+              Loading archived threads…
             </div>
           )}
           {isEmpty && !sidebar.isError && !localThreads.isError && (
             <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
-              {activeProjectKey
-                ? "No threads in this project."
-                : hasActiveFilters(prefs.filters)
-                  ? "No threads match these filters."
-                  : "No threads yet."}
+              {hasActiveFilters(prefs.filters)
+                ? "No threads match these filters."
+                : "No threads yet."}
             </p>
           )}
         </div>
-      </div>
+      </TooltipProvider>
 
-      <div className="flex items-center gap-1 p-2">
-        <div className="min-w-0 flex-1">
+      <div className="p-2">
+        <div className="min-w-0">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
           ) : (
@@ -435,70 +612,78 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
-        <SidebarFilterMenu
-          prefs={prefs}
-          facets={facets}
-          onFiltersChange={setFilters}
-          onCompactChange={setCompact}
-          onResetFilters={resetFilters}
-        />
       </div>
     </SidebarFrame>
   )
 }
 
-function DeleteThreadDialog({
-  open,
-  onOpenChange,
-  threadTitle,
-  isDeleting,
-  onConfirm,
-  detail = "This cannot be undone.",
-  error,
+function ProjectGroup({
+  group,
+  collapsed,
+  expanded,
+  pinned,
+  onToggleCollapsed,
+  onExpand,
+  onTogglePin,
+  renderRow,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  threadTitle: string
-  isDeleting: boolean
-  onConfirm: () => void
-  detail?: string
-  error?: string | null
+  group: SidebarProjectGroup
+  collapsed: boolean
+  expanded: boolean
+  pinned: boolean
+  onToggleCollapsed: () => void
+  onExpand: () => void
+  onTogglePin: () => void
+  renderRow: (item: SidebarThreadItem) => React.ReactNode
 }) {
+  const Folder = collapsed ? FolderIcon : FolderOpenIcon
+  const shown = expanded
+    ? group.threads
+    : group.threads.slice(0, PROJECT_PREVIEW_COUNT)
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-          <div className="flex flex-col gap-4">
-            <Dialog.Title className="text-sm font-medium">
-              Delete thread
-            </Dialog.Title>
-            <Dialog.Description className="text-xs text-muted-foreground">
-              Delete "{threadTitle}"? {detail}
-            </Dialog.Description>
-            {error && <p className="text-xs text-destructive">{error}</p>}
-            <div className="mt-2 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onOpenChange(false)}
-                disabled={isDeleting}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={onConfirm}
-                disabled={isDeleting}
-              >
-                {isDeleting ? "Deleting..." : "Delete"}
-              </Button>
-            </div>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <div className="mb-1">
+      <div
+        className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+        >
+          <Folder className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{group.label}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
+          title={pinned ? "Unpin project" : "Pin project"}
+          onClick={onTogglePin}
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground group-hover/folder:flex"
+        >
+          {pinned ? (
+            <PushPinSlashIcon className="size-3.5" />
+          ) : (
+            <PushPinIcon className="size-3.5" />
+          )}
+        </button>
+      </div>
+      {!collapsed && (
+        <>
+          {shown.map(renderRow)}
+          {shown.length < group.threads.length && (
+            <button
+              type="button"
+              onClick={onExpand}
+              className="flex w-full items-center rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+            >
+              Show more
+            </button>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -536,57 +721,6 @@ function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
           ))}
         </div>
       ))}
-    </div>
-  )
-}
-
-function ThreadGroup({
-  label,
-  threads,
-  activeKey,
-  onNavigate,
-  onDeleteLocal,
-  compact = false,
-}: {
-  label: string
-  threads: Array<SidebarThreadItem>
-  activeKey?: string
-  onNavigate?: () => void
-  onDeleteLocal: (threadId?: string) => void
-  compact?: boolean
-}) {
-  const [collapsed, setCollapsed] = useState(false)
-  if (threads.length === 0) return null
-
-  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
-
-  return (
-    <div className={compact ? "mb-2" : "mb-3"}>
-      <button
-        type="button"
-        onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
-        aria-expanded={!collapsed}
-      >
-        <ToggleIcon className="size-3" />
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span>{threads.length}</span>
-      </button>
-      {!collapsed && (
-        <>
-          {threads.map((thread) => (
-            <ThreadRow
-              key={thread.key}
-              item={thread}
-              isActive={thread.key === activeKey}
-              onNavigate={onNavigate}
-              onDeleteLocal={onDeleteLocal}
-              compact={compact}
-              pinned={label === "Pinned"}
-            />
-          ))}
-        </>
-      )}
     </div>
   )
 }
@@ -631,336 +765,6 @@ function LoadMoreThreadsButton({
       {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
       {loading ? "Loading…" : label}
     </button>
-  )
-}
-
-function ThreadRow({
-  item,
-  isActive,
-  onNavigate,
-  onDeleteLocal,
-  compact = false,
-  pinned = false,
-}: {
-  item: SidebarThreadItem
-  isActive: boolean
-  onNavigate?: () => void
-  onDeleteLocal: (threadId?: string) => void
-  compact?: boolean
-  pinned?: boolean
-}) {
-  const navigate = useNavigate()
-  const deleteThread = useDeleteAgentThread()
-  const pinThread = usePinAgentThread()
-  const resolveThread = useResolveAgentThread()
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deletingLocal, setDeletingLocal] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [contextMenuOpen, setContextMenuOpen] = useState(false)
-  const thread = item.location === "cloud" ? item.thread : null
-  const badge =
-    thread?.diffStats && thread.diffStats.additions > 0
-      ? `+${thread.diffStats.additions}`
-      : null
-  const isDeleting =
-    deletingLocal ||
-    (item.location === "cloud" &&
-      deleteThread.isPending &&
-      deleteThread.variables === item.id)
-
-  const onDelete = (e?: React.MouseEvent) => {
-    e?.preventDefault()
-    e?.stopPropagation()
-    if (isDeleting) return
-    setDeleteOpen(true)
-  }
-
-  const onConfirmDelete = async () => {
-    if (isDeleting) return
-    if (item.location === "cloud") {
-      deleteThread.mutate(item.id, {
-        onSuccess: () => setDeleteOpen(false),
-      })
-      return
-    }
-    setDeletingLocal(true)
-    setDeleteError(null)
-    try {
-      const deleted =
-        (await window.openSweDesktop?.deleteLocalThread(item.id)) ?? false
-      if (deleted) {
-        onDeleteLocal(item.id)
-        setDeleteOpen(false)
-        if (isActive) {
-          onNavigate?.()
-          void navigate({ to: "/agents" })
-        }
-      } else {
-        setDeleteError("Local Open SWE thread not found")
-      }
-    } catch (error) {
-      setDeleteError(
-        error instanceof Error ? error.message : "Could not delete local thread"
-      )
-    }
-    setDeletingLocal(false)
-  }
-
-  const onTogglePinned = () => {
-    if (!thread || pinThread.isPending) return
-    pinThread.mutate({ threadId: thread.id, pinned: !pinned })
-  }
-
-  const isResolved = thread?.resolved === true
-  const onToggleResolved = (e?: React.MouseEvent) => {
-    e?.preventDefault()
-    e?.stopPropagation()
-    if (!thread || resolveThread.isPending) return
-    resolveThread.mutate({ threadId: thread.id, resolved: !isResolved })
-  }
-
-  const source =
-    thread?.source && thread.source !== "dashboard"
-      ? SOURCE_META[thread.source]
-      : null
-  const SourceIcon = source?.icon
-  const prMeta = thread?.pr ? PR_STATE_META[thread.pr.state] : null
-  const PrIcon = prMeta?.icon
-  const isAutomation =
-    thread?.threadCategory === "automation" || thread?.source === "schedule"
-  const showFinishedIndicator = item.status === "finished" && !item.viewed
-
-  const copySandboxId = () => {
-    if (!thread?.sandboxId) return
-    void navigator.clipboard.writeText(thread.sandboxId)
-  }
-
-  const handleNavigate = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (contextMenuOpen) {
-      event.preventDefault()
-      return
-    }
-    onNavigate?.()
-  }
-
-  const rowClassName = cn(
-    "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
-    compact ? "h-7 gap-1.5" : "h-8",
-    isActive
-      ? thread?.adminThread
-        ? "bg-destructive/10 text-foreground"
-        : "bg-accent text-foreground"
-      : thread?.adminThread
-        ? "bg-destructive/5 text-muted-foreground group-hover:bg-destructive/10"
-        : "text-muted-foreground group-hover:bg-sidebar-row-hover"
-  )
-
-  const rowContent = (
-    <>
-      {pinned && (
-        <PushPinIcon
-          className="size-3 shrink-0 text-primary"
-          aria-label="Pinned thread"
-        />
-      )}
-      {item.status === "running" ? (
-        <CircleNotchIcon
-          className="size-3 shrink-0 animate-spin text-primary"
-          aria-label="Thread running"
-        />
-      ) : (
-        <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            item.status === "error"
-              ? "bg-destructive"
-              : showFinishedIndicator
-                ? "bg-primary"
-                : "bg-border"
-          )}
-          aria-label={
-            item.status === "error"
-              ? "Thread error"
-              : showFinishedIndicator
-                ? "Thread finished"
-                : "Thread viewed"
-          }
-        />
-      )}
-      {item.location === "local" ? (
-        <span title="This Mac" className="flex shrink-0">
-          <IoLaptopOutline
-            className="size-3.5 text-muted-foreground/70"
-            aria-label="This Mac"
-          />
-        </span>
-      ) : (
-        <span title="Cloud" className="flex shrink-0">
-          <IoCloudOutline
-            className="size-3.5 text-muted-foreground/70"
-            aria-label="Cloud"
-          />
-        </span>
-      )}
-      {source && SourceIcon && (
-        <SourceIcon
-          className="size-3.5 shrink-0 text-muted-foreground/70"
-          aria-label={source.label}
-        >
-          <title>{source.label}</title>
-        </SourceIcon>
-      )}
-      <span className="min-w-0 flex-1 truncate text-[13px]">{item.title}</span>
-      {thread?.automationActionPosted && (
-        <IoLogoSlack
-          className="size-3.5 shrink-0 text-success-foreground"
-          aria-label="Action posted to Slack"
-        >
-          <title>Action posted to Slack</title>
-        </IoLogoSlack>
-      )}
-      {!compact && isAutomation && (
-        <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
-          Automation
-        </span>
-      )}
-      {!compact && prMeta && PrIcon && (
-        <PrIcon
-          className={cn("size-3.5 shrink-0", prMeta.className)}
-          aria-label={prMeta.label}
-        >
-          <title>{prMeta.label}</title>
-        </PrIcon>
-      )}
-      {!compact && badge && (
-        <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-success-foreground">
-          {badge}
-        </span>
-      )}
-    </>
-  )
-
-  return (
-    <>
-      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
-        <ContextMenu.Trigger
-          className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
-        >
-          {item.location === "cloud" ? (
-            <Link
-              to="/agents/$threadId"
-              params={{ threadId: item.id }}
-              onClick={handleNavigate}
-              onKeyDown={openContextMenuFromKeyboard}
-              className={rowClassName}
-            >
-              {rowContent}
-            </Link>
-          ) : (
-            <Link
-              to="/agents/local/$sessionId"
-              params={{ sessionId: item.id }}
-              onClick={handleNavigate}
-              onKeyDown={openContextMenuFromKeyboard}
-              className={rowClassName}
-            >
-              {rowContent}
-            </Link>
-          )}
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-              {thread?.traceUrl && (
-                <ContextMenu.LinkItem
-                  href={thread.traceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-                >
-                  <TreeStructureIcon className="size-3.5" />
-                  Open trace
-                </ContextMenu.LinkItem>
-              )}
-              {thread?.sourceUrl && (
-                <ContextMenu.LinkItem
-                  href={thread.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-                >
-                  <IoLogoSlack className="size-3.5" />
-                  Open Slack thread
-                </ContextMenu.LinkItem>
-              )}
-              {thread && (
-                <>
-                  <ContextMenu.Item
-                    onClick={onTogglePinned}
-                    disabled={pinThread.isPending}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    {pinned ? (
-                      <PushPinSlashIcon className="size-3.5" />
-                    ) : (
-                      <PushPinIcon className="size-3.5" />
-                    )}
-                    {pinned ? "Unpin thread" : "Pin thread"}
-                  </ContextMenu.Item>
-                  <ContextMenu.Item
-                    disabled={!thread.sandboxId}
-                    onClick={copySandboxId}
-                    title={thread.sandboxId ?? undefined}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    <CopyIcon className="size-3.5" />
-                    Copy sandbox ID
-                  </ContextMenu.Item>
-                  <ContextMenu.Item
-                    onClick={() => onToggleResolved()}
-                    disabled={resolveThread.isPending}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    {isResolved ? (
-                      <ArrowCounterClockwiseIcon className="size-3.5" />
-                    ) : (
-                      <CheckCircleIcon className="size-3.5" />
-                    )}
-                    {isResolved ? "Unresolve thread" : "Resolve thread"}
-                  </ContextMenu.Item>
-                </>
-              )}
-              <ContextMenu.Item
-                onClick={() => onDelete()}
-                disabled={isDeleting}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-              >
-                <TrashIcon className="size-3.5" />
-                Delete thread
-              </ContextMenu.Item>
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
-      <DeleteThreadDialog
-        open={deleteOpen}
-        onOpenChange={(open) => {
-          setDeleteOpen(open)
-          if (!open) setDeleteError(null)
-        }}
-        threadTitle={item.title}
-        isDeleting={isDeleting}
-        onConfirm={() => void onConfirmDelete()}
-        detail={
-          item.location === "local"
-            ? "This removes its history but does not revert changes made to your project."
-            : undefined
-        }
-        error={deleteError}
-      />
-    </>
   )
 }
 

@@ -749,39 +749,29 @@ test.describe("threads workspace", () => {
         `/agents/${THREAD_IDS.ready}`,
       ]);
 
-    const projectSelector = sidebar.getByRole("button", {
-      name: "All projects",
-      exact: true,
-    });
-    await projectSelector.click();
+    const betaGroup = sidebar.getByRole("button", { name: "beta", exact: true });
     await expect(
-      page.getByRole("menuitem", { name: "alpha", exact: true }),
+      sidebar.getByRole("button", { name: "alpha", exact: true }),
     ).toBeVisible();
+    await expect(betaGroup).toBeVisible();
     await expect(sidebar.getByText("acme/alpha", { exact: true })).toHaveCount(
       0,
     );
-    await page.getByRole("menuitem", { name: "beta", exact: true }).click();
-    const selectedProject = sidebar.getByRole("button", {
-      name: "beta",
-      exact: true,
-    });
-    await expect(selectedProject).toBeVisible();
-    await expect(workspaceLinks).toHaveCount(1);
-    await expect(workspaceLinks).toHaveAttribute(
-      "href",
-      `/agents/${THREAD_IDS.running}`,
-    );
 
-    await selectedProject.click();
+    // Collapsing a project hides only that project's threads.
+    await betaGroup.click();
+    await expect(betaGroup).toHaveAttribute("aria-expanded", "false");
+    await expect(workspaceLinks).toHaveCount(4);
+    await expect(
+      workspaceLinks.filter({ hasText: TITLES.running }),
+    ).toHaveCount(0);
+    await betaGroup.click();
+    await expect(workspaceLinks).toHaveCount(5);
+
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
     await page
-      .getByRole("menuitem", { name: "All projects", exact: true })
+      .getByRole("menuitemcheckbox", { name: "Show archived", exact: true })
       .click();
-    await sidebar.getByRole("button", { name: "Filter threads" }).click();
-    await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-    await page
-      .getByRole("menuitemcheckbox", { name: "Include resolved", exact: true })
-      .click();
-    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
 
     for (const group of ["Needs attention", "In progress", "Ready", "Done"]) {
@@ -791,7 +781,7 @@ test.describe("threads workspace", () => {
     }
     await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
     const loadMore = sidebar.getByRole("button", {
-      name: "Load more resolved cloud threads",
+      name: "Load more archived cloud threads",
     });
     await loadMore.click();
     await expect(sidebar).toContainText("E2E Workspace Resolved overflow 20");

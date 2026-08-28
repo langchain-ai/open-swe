@@ -8,7 +8,7 @@ import logging
 import os
 import posixpath
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -68,6 +68,7 @@ from .options import (
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
+from .pull_request_checks import get_pull_request_check_states
 from .pull_request_context import get_pull_request_context
 from .pull_request_status import get_pull_request_statuses
 from .slack_oauth import SLACK_TEAM_ID
@@ -2018,6 +2019,16 @@ async def get_dashboard_thread_pull_request_status(
         return {"pullRequests": []}
     token = await _github_token_for_login(login)
     return {"pullRequests": await get_pull_request_statuses(tracked, token)}
+
+
+async def get_dashboard_pull_request_checks(
+    records: Sequence[object], login: str
+) -> dict[str, str]:
+    """Return batched check verdicts for the pull requests the sidebar is showing."""
+    if not records:
+        return {}
+    token = await _github_token_for_login(login)
+    return dict(await get_pull_request_check_states(records, login, token))
 
 
 async def get_dashboard_thread_pull_request_context(

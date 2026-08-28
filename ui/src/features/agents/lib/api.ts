@@ -257,6 +257,12 @@ function buildSidebarThreadsQuery(params: {
   return query ? `?${query}` : ""
 }
 
+export type PullRequestCheckState =
+  | "failing"
+  | "passing"
+  | "pending"
+  | "unknown"
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
   listSidebarThreads: (params: {
@@ -310,6 +316,13 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}${
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
+    ),
+  getPullRequestChecks: (
+    pullRequests: Array<{ repoFullName: string; number: number }>
+  ) =>
+    agentsRequest<Record<string, PullRequestCheckState>>(
+      "/threads/pull-request-checks",
+      { method: "POST", body: JSON.stringify({ pullRequests }) }
     ),
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(

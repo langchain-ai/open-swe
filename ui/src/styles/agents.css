@@ -53,7 +53,7 @@ html[data-agents-theme] {
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
   --sidebar-control-surface: oklch(94.2% 0.003 106);
-  --sidebar-row-hover: oklch(97.9% 0.002 106);
+  --sidebar-row-hover: oklch(93.8% 0.003 106);
   --sidebar-row-active: var(--card);
   --sidebar-row-selected: var(--card);
   --sidebar-border: var(--border);
@@ -156,5 +156,29 @@ html[data-agents-theme] .shimmer-text {
   }
   100% {
     background-position: -200% center;
+  }
+}
+
+/*
+ * Long sidebar titles slide far enough to read the tail on hover, then snap
+ * back. The distance is set per row from JS (`--marquee-shift`) because it
+ * depends on how far the text actually overflows; rows that fit never get the
+ * class and so never animate.
+ */
+.sidebar-title-marquee {
+  animation: sidebar-title-marquee 6s ease-in-out 0.4s infinite;
+}
+
+@keyframes sidebar-title-marquee {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  55%,
+  70% {
+    transform: translateX(var(--marquee-shift, 0px));
+  }
+  100% {
+    transform: translateX(0);
   }
 }

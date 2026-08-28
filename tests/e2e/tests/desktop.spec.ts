@@ -153,24 +153,20 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
     await expect(
       page.getByRole("button", { name: /This Mac threads, \d+/ }),
     ).toHaveCount(0);
-    const projectFilter = page.getByRole("button", {
-      name: "All projects",
-      exact: true,
-    });
-    await expect(projectFilter).toBeVisible();
-    await projectFilter.click();
+    const sidebar = page.locator("[data-sidebar-frame]");
+    await expect(sidebar.getByText("Projects", { exact: true })).toBeVisible();
     await expect(
-      page.getByRole("menuitem", { name: "demo", exact: true }),
+      sidebar.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
-    await page.keyboard.press("Escape");
+    const composer = page.locator("main");
     await expect(
-      page.getByRole("button", { name: "This Mac", exact: true }),
+      composer.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "demo", exact: true }),
+      composer.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "main", exact: true }),
+      composer.getByRole("button", { name: "main", exact: true }),
     ).toBeVisible();
     const unifiedScreenshot = testInfo.outputPath(
       "desktop-unified-threads.png",

@@ -8,6 +8,7 @@ import { agentsApi } from "./api"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
+  markAgentThreadViewed,
   setAgentThreadStatus,
   useAgentThreadWorkingTreeDiff,
   useResolveAgentThread,
@@ -505,5 +506,47 @@ describe("useSidebarThreads", () => {
     expect(
       client.getQueryData<AgentThread>(agentThreadKeys.detail(unrelated.id))
     ).toMatchObject({ title: "After" })
+  })
+})
+
+describe("markAgentThreadViewed", () => {
+  const unread = { id: "thread-1", viewed: false } as AgentThread
+
+  it("clears the unread flag across the sidebar caches", () => {
+    const client = testClient()
+    const sidebarKey = [...agentThreadKeys.lists, "sidebar", { limit: 10 }]
+    client.setQueryData(sidebarKey, {
+      pinned: [unread],
+      active: { items: [unread], limit: 10, hasMore: false },
+      resolved: { items: [], limit: 10, hasMore: false },
+    })
+    client.setQueryData(agentThreadKeys.sidebarActive("thread-1"), unread)
+
+    markAgentThreadViewed(client, "thread-1")
+
+    const sidebar = client.getQueryData<{
+      pinned: Array<AgentThread>
+      active: { items: Array<AgentThread> }
+    }>(sidebarKey)
+    expect(sidebar?.pinned[0].viewed).toBe(true)
+    expect(sidebar?.active.items[0].viewed).toBe(true)
+    expect(
+      client.getQueryData<AgentThread>(
+        agentThreadKeys.sidebarActive("thread-1")
+      )?.viewed
+    ).toBe(true)
+  })
+
+  it("leaves the detail cache stale so the mark-viewed GET still fires", () => {
+    const client = testClient()
+    const key = agentThreadKeys.detail("thread-1")
+    client.setQueryData(key, unread)
+
+    markAgentThreadViewed(client, "thread-1")
+
+    // A fresh detail entry would suppress the refetch that marks the thread
+    // viewed server-side, and the dot would come back on the next list refetch.
+    expect(client.getQueryData<AgentThread>(key)?.viewed).toBe(true)
+    expect(client.getQueryState(key)?.dataUpdatedAt).toBe(0)
   })
 })

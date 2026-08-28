@@ -138,6 +138,22 @@ export function useLocalThreadPrDiff(
   return query
 }
 
+/**
+ * Clear a local thread's unread dot on click. Opening the thread is what marks
+ * it viewed for real; this only covers the poll interval until that lands.
+ */
+export function useMarkLocalThreadViewed() {
+  const queryClient = useQueryClient()
+  return (threadId: string) =>
+    queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+      localThreadKeys.all,
+      (prev) =>
+        prev?.map((thread) =>
+          thread.id === threadId ? { ...thread, viewed: true } : thread
+        )
+    )
+}
+
 export function useRefreshLocalThreads() {
   const queryClient = useQueryClient()
   return (threadId?: string) => {

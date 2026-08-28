@@ -156,6 +156,51 @@ function restoreAgentThreadQueries(
   }
 }
 
+/**
+ * Clear a thread's unread dot the instant its row is clicked. The detail GET
+ * that navigation triggers is what actually marks the thread viewed
+ * server-side; this only stops the dot from lingering for that round trip.
+ */
+export function markAgentThreadViewed(
+  queryClient: QueryClient,
+  threadId: string
+): void {
+  const view = (thread: AgentThread) =>
+    thread.id === threadId && !thread.viewed
+      ? { ...thread, viewed: true, viewedAt: Date.now() }
+      : thread
+  const viewList = (threads: Array<AgentThread>) => threads.map(view)
+
+  // Patched as already-stale: the detail GET is what marks the thread viewed
+  // server-side, and a plain setQueryData would stamp this fresh under the
+  // detail query's staleTime — suppressing that fetch, so the next list refetch
+  // would serve `viewed: false` right back and the dot would return.
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId),
+    (prev) => (prev ? view(prev) : prev),
+    { updatedAt: 0 }
+  )
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(threadId),
+    (prev) => (prev ? view(prev) : prev)
+  )
+  for (const [key, data] of queryClient.getQueriesData<SidebarThreads>({
+    queryKey: ["agent-threads", "lists", "sidebar"],
+  })) {
+    if (!data) continue
+    queryClient.setQueryData<SidebarThreads>(key, (prev) =>
+      prev
+        ? {
+            ...prev,
+            pinned: prev.pinned && viewList(prev.pinned),
+            active: { ...prev.active, items: viewList(prev.active.items) },
+            resolved: { ...prev.resolved, items: viewList(prev.resolved.items) },
+          }
+        : prev
+    )
+  }
+}
+
 function setAgentThreadResolved(
   queryClient: QueryClient,
   threadId: string,
