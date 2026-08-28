@@ -22,11 +22,6 @@ export interface SidebarPrefs {
    * threads only exist on this machine, so their pins do too.
    */
   pinnedLocalIds: Array<string>
-  /**
-   * Archived local threads. The desktop bridge has no archived field to
-   * persist to, so unlike cloud threads this lives on the client.
-   */
-  archivedLocalIds: Array<string>
   /** Projects pinned into the sidebar's Pinned section. Client-side only. */
   pinnedProjectKeys: Array<string>
   collapsedProjectKeys: Array<string>
@@ -42,7 +37,6 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   compact: false,
   filters: DEFAULT_SIDEBAR_FILTERS,
   pinnedLocalIds: [],
-  archivedLocalIds: [],
   pinnedProjectKeys: [],
   collapsedProjectKeys: [],
   expandedProjectKeys: [],
@@ -100,7 +94,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
         : DEFAULT_SIDEBAR_PREFS.compact,
     filters: sanitizeFilters(raw.filters),
     pinnedLocalIds: asStringArray(raw.pinnedLocalIds),
-    archivedLocalIds: asStringArray(raw.archivedLocalIds),
     pinnedProjectKeys: asStringArray(raw.pinnedProjectKeys),
     collapsedProjectKeys: asStringArray(raw.collapsedProjectKeys),
     expandedProjectKeys: asStringArray(raw.expandedProjectKeys),
@@ -176,14 +169,6 @@ export function useSidebarPrefs() {
       })),
     []
   )
-  const toggleLocalArchived = useCallback(
-    (threadId: string) =>
-      setPrefs((prev) => ({
-        ...prev,
-        archivedLocalIds: toggleMembership(prev.archivedLocalIds, threadId),
-      })),
-    []
-  )
   const toggleProjectPin = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
@@ -230,7 +215,6 @@ export function useSidebarPrefs() {
     setFilters,
     resetFilters,
     toggleLocalPin,
-    toggleLocalArchived,
     toggleProjectPin,
     toggleProjectCollapsed,
     toggleSectionCollapsed,

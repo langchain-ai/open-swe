@@ -153,9 +153,13 @@ describe("groupSidebarThreadsByProject", () => {
 })
 
 describe("localSidebarThread archiving", () => {
-  it("carries client-side archived state onto the item", () => {
+  it("reads archived state persisted on the desktop thread", () => {
     const active = localSidebarThread(localThread(), undefined, undefined)
-    const archived = localSidebarThread(localThread(), undefined, undefined, true)
+    const archived = localSidebarThread(
+      localThread({ archived: true }),
+      undefined,
+      undefined
+    )
 
     expect(active.resolved).toBe(false)
     expect(archived.resolved).toBe(true)

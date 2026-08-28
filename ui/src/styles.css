@@ -18,6 +18,8 @@
     --color-warning: var(--warning);
     --color-info-foreground: var(--info-foreground);
     --color-info: var(--info);
+    --color-merged-foreground: var(--merged-foreground);
+    --color-merged: var(--merged);
     --color-surface-raised: var(--surface-raised);
     --color-app-chrome-background: var(--app-chrome-background);
     --color-sidebar-muted-foreground: var(--sidebar-muted-foreground);

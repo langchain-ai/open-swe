@@ -60,7 +60,7 @@ import {
   useSeedAgentThreadDetails,
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
-import { useSidebarPullRequestChecks } from "@/features/agents/lib/prChecks"
+import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
@@ -121,7 +121,6 @@ export function AgentsSidebar({
     setCompact,
     setFilters,
     toggleLocalPin,
-    toggleLocalArchived,
     toggleProjectPin,
     toggleProjectCollapsed,
     toggleSectionCollapsed,
@@ -166,14 +165,12 @@ export function AgentsSidebar({
     localProjects.map((project) => [project.cwd, project])
   )
   const localPinnedIds = new Set(prefs.pinnedLocalIds)
-  const localArchivedIds = new Set(prefs.archivedLocalIds)
   const localItems = localSessions
     .map((thread) =>
       localSidebarThread(
         thread,
         projectByPath.get(thread.cwd),
-        activity[thread.id],
-        localArchivedIds.has(thread.id)
+        activity[thread.id]
       )
     )
     // Cloud threads are omitted server-side unless includeResolved; local
@@ -216,7 +213,7 @@ export function AgentsSidebar({
     (group) => !pinnedProjectKeys.has(group.key)
   )
 
-  const checksFor = useSidebarPullRequestChecks(allItems, !localOnly)
+  const pullRequestFor = useSidebarPullRequests(allItems, !localOnly)
   const isPinned = (item: SidebarThreadItem) =>
     item.location === "cloud"
       ? cloudPinnedIds.has(item.id)
@@ -224,10 +221,12 @@ export function AgentsSidebar({
   const isArchived = (item: SidebarThreadItem) =>
     item.location === "cloud"
       ? item.thread.resolved === true
-      : localArchivedIds.has(item.id)
+      : item.thread.archived === true
   const toggleArchived = (item: SidebarThreadItem) => {
     if (item.location === "local") {
-      toggleLocalArchived(item.id)
+      void window.openSweDesktop
+        ?.updateLocalThread({ threadId: item.id, archived: !isArchived(item) })
+        .then(() => refreshLocalThreads(item.id))
       return
     }
     if (!resolveThread.isPending) {
@@ -258,7 +257,7 @@ export function AgentsSidebar({
     isActive: item.key === activeKey,
     pinned: isPinned(item),
     archived: isArchived(item),
-    checks: checksFor(item),
+    live: pullRequestFor(item),
     compact: prefs.compact,
     onNavigate: layout.closeOnMobile,
     onDeleteLocal: refreshLocalThreads,
@@ -368,6 +367,11 @@ export function AgentsSidebar({
     prefs.filters.includeResolved &&
     sidebar.resolvedQuery.isLoading
   const sourcesLoading = cloudPending || (isDesktop && localThreads.isPending)
+  const hasMoreActive = !sidebar.isPending && sidebar.data.active.hasMore
+  const hasMoreArchived =
+    !sidebar.isPending &&
+    prefs.filters.includeResolved &&
+    sidebar.data.resolved.hasMore
   const isEmpty =
     !cloudPending &&
     (!isDesktop || !localThreads.isPending) &&
@@ -538,7 +542,10 @@ export function AgentsSidebar({
               </section>
             )}
 
-          {grouped.recents.length > 0 && (
+          {(grouped.recents.length > 0 ||
+            hasMoreActive ||
+            hasMoreArchived ||
+            resolvedLoading) && (
             <section className="mb-3">
               <SidebarSectionHeader
                 label="Recents"
@@ -560,34 +567,34 @@ export function AgentsSidebar({
                   />
                 }
               />
-              {!sectionCollapsed("recents") &&
-                grouped.recents.map((item) => (
-                  <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                ))}
+              {!sectionCollapsed("recents") && (
+                <>
+                  {grouped.recents.map((item) => (
+                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                  ))}
+                  {hasMoreActive && (
+                    <LoadMoreThreadsButton
+                      label="Load more cloud threads"
+                      loading={sidebar.activeQuery.isFetchingNextPage}
+                      onClick={() => void sidebar.activeQuery.fetchNextPage()}
+                    />
+                  )}
+                  {hasMoreArchived && (
+                    <LoadMoreThreadsButton
+                      label="Load more archived cloud threads"
+                      loading={sidebar.resolvedQuery.isFetchingNextPage}
+                      onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
+                    />
+                  )}
+                  {resolvedLoading && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+                      <CircleNotchIcon className="size-3.5 animate-spin" />
+                      Loading archived threads…
+                    </div>
+                  )}
+                </>
+              )}
             </section>
-          )}
-
-          {!sidebar.isPending && sidebar.data.active.hasMore && (
-            <LoadMoreThreadsButton
-              label="Load more cloud threads"
-              loading={sidebar.activeQuery.isFetchingNextPage}
-              onClick={() => void sidebar.activeQuery.fetchNextPage()}
-            />
-          )}
-          {!sidebar.isPending &&
-            prefs.filters.includeResolved &&
-            sidebar.data.resolved.hasMore && (
-              <LoadMoreThreadsButton
-                label="Load more archived cloud threads"
-                loading={sidebar.resolvedQuery.isFetchingNextPage}
-                onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
-              />
-            )}
-          {resolvedLoading && (
-            <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-              <CircleNotchIcon className="size-3.5 animate-spin" />
-              Loading archived threads…
-            </div>
           )}
           {isEmpty && !sidebar.isError && !localThreads.isError && (
             <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
@@ -676,7 +683,7 @@ function ProjectGroup({
             <button
               type="button"
               onClick={onExpand}
-              className="flex w-full items-center rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+              className="flex w-full items-center rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground"
             >
               Show more
             </button>
@@ -751,6 +758,7 @@ function LoadMoreThreadsButton({
   loading,
   onClick,
 }: {
+  /** Screen-reader label; the button itself just reads "Show more". */
   label: string
   loading: boolean
   onClick: () => void
@@ -760,10 +768,11 @@ function LoadMoreThreadsButton({
       type="button"
       onClick={onClick}
       disabled={loading}
-      className="mt-0.5 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      aria-label={label}
+      className="mt-0.5 flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-2.5 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
       {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
-      {loading ? "Loading…" : label}
+      {loading ? "Loading…" : "Show more"}
     </button>
   )
 }

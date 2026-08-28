@@ -21,7 +21,7 @@ import { SiLinear } from "react-icons/si"
 import { useEffect, useRef, useState } from "react"
 import type { ComponentType, SVGProps } from "react"
 
-import type { PullRequestCheckState } from "@/features/agents/lib/api"
+import type { PullRequestSnapshot } from "@/features/agents/lib/api"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
@@ -60,7 +60,7 @@ const PR_STATE_META: Record<PrState, { icon: Icon; label: string; className: str
   merged: {
     icon: GitMergeIcon,
     label: "Merged pull request",
-    className: "text-primary",
+    className: "text-merged-foreground",
   },
   closed: {
     icon: GitPullRequestIcon,
@@ -115,19 +115,21 @@ function useTitleMarquee() {
 
 function PullRequestIcon({
   state,
-  checks,
+  live,
   className,
 }: {
   state: PrState
-  checks?: PullRequestCheckState
+  live?: PullRequestSnapshot
   className?: string
 }) {
-  const meta = PR_STATE_META[state]
+  // Thread metadata records the state the PR had when it was opened; live
+  // truth wins so a merged PR stops rendering as open.
+  const meta = PR_STATE_META[live?.state ?? state]
   const Glyph = meta.icon
   return (
     <span className={cn("relative flex shrink-0", className)} title={meta.label}>
       <Glyph className={cn("size-3.5", meta.className)} aria-label={meta.label} />
-      {checks === "failing" && (
+      {live?.checks === "failing" && (
         <span
           className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-destructive ring-2 ring-sidebar"
           aria-label="Checks failing"
@@ -142,7 +144,7 @@ export function SidebarThreadRow({
   isActive,
   pinned,
   archived,
-  checks,
+  live,
   compact = false,
   indent = false,
   onNavigate,
@@ -154,7 +156,7 @@ export function SidebarThreadRow({
   isActive: boolean
   pinned: boolean
   archived: boolean
-  checks?: PullRequestCheckState
+  live?: PullRequestSnapshot
   compact?: boolean
   /** Nested under a project: indent the content, not the highlight box. */
   indent?: boolean
@@ -290,7 +292,7 @@ export function SidebarThreadRow({
             aria-label={source.label}
           />
         )}
-        {item.pr && <PullRequestIcon state={item.pr.state} checks={checks} />}
+        {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
         {item.status === "running" ? (
           <CircleNotchIcon
             className="size-3.5 animate-spin text-muted-foreground"
@@ -325,7 +327,11 @@ export function SidebarThreadRow({
           onClick={onArchiveClick}
           className="flex size-5 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
         >
-          <ArchiveIcon className="size-3.5" />
+          {archived ? (
+            <ArrowCounterClockwiseIcon className="size-3.5" />
+          ) : (
+            <ArchiveIcon className="size-3.5" />
+          )}
         </button>
       </span>
     </>
@@ -334,6 +340,9 @@ export function SidebarThreadRow({
   const rowClassName = cn(
     "flex items-center gap-2 rounded-lg pr-2.5 transition-colors",
     indent ? "pl-6" : "pl-2.5",
+    // Only ever on screen while "Show archived" is on; without this an
+    // archived row is indistinguishable from a live one.
+    archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     isActive
       ? thread?.adminThread
@@ -380,7 +389,7 @@ export function SidebarThreadRow({
               sideOffset={8}
               className="pointer-events-auto max-w-80 rounded-xl p-3"
             >
-              <ThreadHoverCard item={item} checks={checks} />
+              <ThreadHoverCard item={item} live={live} />
             </TooltipPopup>
           </Tooltip>
         </ContextMenu.Trigger>
@@ -482,10 +491,10 @@ export function SidebarThreadRow({
 
 function ThreadHoverCard({
   item,
-  checks,
+  live,
 }: {
   item: SidebarThreadItem
-  checks?: PullRequestCheckState
+  live?: PullRequestSnapshot
 }) {
   const EnvironmentIcon = item.location === "local" ? IoLaptopOutline : IoCloudOutline
   const environmentLabel = item.location === "local" ? "This Mac" : "Cloud"
@@ -518,7 +527,7 @@ function ThreadHoverCard({
           onClick={(event) => event.stopPropagation()}
           className="pointer-events-auto flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 -mx-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <PullRequestIcon state={item.pr.state} checks={checks} />
+          <PullRequestIcon state={item.pr.state} live={live} />
           <span className="min-w-0 truncate text-[12px]">{item.pr.title}</span>
         </a>
       )}

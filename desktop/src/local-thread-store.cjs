@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
-const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "viewed"]);
+const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "viewed", "archived"]);
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function isRecord(value) {
@@ -90,6 +90,7 @@ function normalizeThread(value) {
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
     viewed: value.viewed !== false,
+    archived: value.archived === true,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     checkpoint,
@@ -167,6 +168,7 @@ class LocalThreadStore {
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
       viewed: true,
+      archived: false,
       createdAt: now,
       updatedAt: now,
       checkpoint: { repo: null, ref: null, branch: null },
@@ -202,7 +204,13 @@ class LocalThreadStore {
         throw new Error("Invalid viewed state");
       next.viewed = patch.viewed;
     }
-    if (Object.keys(patch).some((key) => key !== "viewed"))
+    if ("archived" in patch) {
+      if (typeof patch.archived !== "boolean")
+        throw new Error("Invalid archived state");
+      next.archived = patch.archived;
+    }
+    // Neither reading nor archiving is an edit, so neither reorders the list.
+    if (Object.keys(patch).some((key) => key !== "viewed" && key !== "archived"))
       next.updatedAt = this.now();
     this.threads.set(id, next);
     this.persist();

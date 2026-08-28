@@ -263,6 +263,14 @@ export type PullRequestCheckState =
   | "pending"
   | "unknown"
 
+export type PullRequestLiveState = "open" | "draft" | "merged" | "closed"
+
+/** Live GitHub truth for one PR, keyed `owner/repo#number`. */
+export interface PullRequestSnapshot {
+  checks: PullRequestCheckState
+  state: PullRequestLiveState | null
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
   listSidebarThreads: (params: {
@@ -320,7 +328,7 @@ export const agentsApi = {
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>
   ) =>
-    agentsRequest<Record<string, PullRequestCheckState>>(
+    agentsRequest<Record<string, PullRequestSnapshot>>(
       "/threads/pull-request-checks",
       { method: "POST", body: JSON.stringify({ pullRequests }) }
     ),

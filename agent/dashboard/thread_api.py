@@ -68,7 +68,7 @@ from .options import (
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
-from .pull_request_checks import get_pull_request_check_states
+from .pull_request_checks import PullRequestState, get_pull_request_check_states
 from .pull_request_context import get_pull_request_context
 from .pull_request_status import get_pull_request_statuses
 from .slack_oauth import SLACK_TEAM_ID
@@ -2023,8 +2023,8 @@ async def get_dashboard_thread_pull_request_status(
 
 async def get_dashboard_pull_request_checks(
     records: Sequence[object], login: str
-) -> dict[str, str]:
-    """Return batched check verdicts for the pull requests the sidebar is showing."""
+) -> dict[str, PullRequestState]:
+    """Return batched live state for the pull requests the sidebar is showing."""
     if not records:
         return {}
     token = await _github_token_for_login(login)

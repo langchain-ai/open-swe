@@ -94,8 +94,7 @@ export function cloudSidebarThread(
 export function localSidebarThread(
   thread: DesktopLocalThreadSummary,
   project: DesktopProject | undefined,
-  activity: DesktopLocalActivity[string] | undefined,
-  archived = false
+  activity: DesktopLocalActivity[string] | undefined
 ): LocalSidebarThreadItem {
   const projectLabel = project?.name.trim() || localProjectName(thread.cwd)
   return {
@@ -117,7 +116,7 @@ export function localSidebarThread(
             ? "idle"
             : "finished",
     viewed: thread.viewed,
-    resolved: archived,
+    resolved: thread.archived === true,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     thread,

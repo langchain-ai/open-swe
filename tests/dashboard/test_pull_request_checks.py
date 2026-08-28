@@ -2,12 +2,14 @@ import agent.dashboard.pull_request_checks as checks_module
 from agent.dashboard.pull_request_checks import get_pull_request_check_states
 
 
-def _rollup(state: str | None) -> dict[str, object]:
+def _rollup(state: str | None, pr_state: str = "OPEN", is_draft: bool = False) -> dict[str, object]:
     return {
         "pullRequest": {
+            "state": pr_state,
+            "isDraft": is_draft,
             "commits": {
                 "nodes": [{"commit": {"statusCheckRollup": {"state": state} if state else None}}]
-            }
+            },
         }
     }
 
@@ -64,9 +66,9 @@ async def test_maps_rollup_states_and_skips_invalid_records(monkeypatch):
     )
 
     assert result == {
-        "acme/alpha#1": "failing",
-        "acme/beta#2": "passing",
-        "acme/gamma#3": "passing",
+        "acme/alpha#1": {"checks": "failing", "state": "open"},
+        "acme/beta#2": {"checks": "passing", "state": "open"},
+        "acme/gamma#3": {"checks": "passing", "state": "open"},
     }
     # Invalid identities never reach GitHub.
     assert len(calls) == 1
@@ -79,12 +81,9 @@ async def test_caches_per_login(monkeypatch):
     _patch_github(monkeypatch, {"data": {"p0": _rollup("FAILURE")}}, calls)
     record = [{"repoFullName": "acme/alpha", "number": 1}]
 
-    assert await get_pull_request_check_states(record, "octocat", "token") == {
-        "acme/alpha#1": "failing"
-    }
-    assert await get_pull_request_check_states(record, "octocat", "token") == {
-        "acme/alpha#1": "failing"
-    }
+    expected = {"acme/alpha#1": {"checks": "failing", "state": "open"}}
+    assert await get_pull_request_check_states(record, "octocat", "token") == expected
+    assert await get_pull_request_check_states(record, "octocat", "token") == expected
     assert len(calls) == 1
 
     await get_pull_request_check_states(record, "someone-else", "token")
@@ -100,5 +99,36 @@ async def test_returns_unknown_when_github_fails(monkeypatch):
         [{"repoFullName": "acme/alpha", "number": 1}], "octocat", "token"
     )
 
-    assert result == {"acme/alpha#1": "unknown"}
+    assert result == {"acme/alpha#1": {"checks": "unknown", "state": None}}
     assert not checks_module._cache
+
+
+async def test_reports_merged_and_draft_state(monkeypatch):
+    """The sidebar renders from this, so a merged PR must stop reading as open."""
+    checks_module._cache.clear()
+    calls: list[dict[str, object]] = []
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "p0": _rollup("SUCCESS", pr_state="MERGED"),
+                "p1": _rollup("PENDING", is_draft=True),
+                "p2": _rollup(None, pr_state="CLOSED"),
+            }
+        },
+        calls,
+    )
+
+    result = await get_pull_request_check_states(
+        [
+            {"repoFullName": "acme/alpha", "number": 1},
+            {"repoFullName": "acme/beta", "number": 2},
+            {"repoFullName": "acme/gamma", "number": 3},
+        ],
+        "octocat",
+        "token",
+    )
+
+    assert result["acme/alpha#1"]["state"] == "merged"
+    assert result["acme/beta#2"]["state"] == "draft"
+    assert result["acme/gamma#3"]["state"] == "closed"

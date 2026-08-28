@@ -97,6 +97,7 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
+from .pull_request_checks import PullRequestState
 from .repo_access import require_repo_access_for_user
 from .repo_cache import (
     REPO_LIST_FRESH_MS,
@@ -1940,7 +1941,7 @@ class PullRequestChecksRequest(BaseModel):
 async def api_get_pull_request_checks(
     payload: PullRequestChecksRequest,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, str]:
+) -> dict[str, PullRequestState]:
     return await get_dashboard_pull_request_checks(
         [ref.model_dump() for ref in payload.pullRequests], session["sub"]
     )

@@ -18,10 +18,22 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 import httpx
+from typing_extensions import TypedDict
 
 from ..utils.github_http import GITHUB_GRAPHQL, github_client, github_request
 
 CheckState = Literal["failing", "passing", "pending", "unknown"]
+PrState = Literal["open", "draft", "merged", "closed"]
+
+
+# typing_extensions, not typing: pydantic rejects a stdlib TypedDict in a
+# response model below Python 3.12, and this project supports 3.11.
+class PullRequestState(TypedDict):
+    """Live GitHub truth for one PR: check verdict plus open/merged/closed."""
+
+    checks: CheckState
+    state: PrState | None
+
 
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
@@ -37,7 +49,7 @@ _ROLLUP_STATES: dict[str, CheckState] = {
     "ERROR": "failing",
 }
 
-_cache: dict[tuple[str, str, int], tuple[float, CheckState]] = {}
+_cache: dict[tuple[str, str, int], tuple[float, PullRequestState]] = {}
 
 
 def pull_request_key(repo_full_name: str, number: int) -> str:
@@ -70,19 +82,36 @@ def _evict_expired(now: float) -> None:
         _cache.pop(next(iter(_cache)), None)
 
 
-def _rollup_state(node: object) -> CheckState:
-    pull = node.get("pullRequest") if isinstance(node, Mapping) else None
-    commits = pull.get("commits") if isinstance(pull, Mapping) else None
-    nodes = commits.get("nodes") if isinstance(commits, Mapping) else None
-    head = nodes[0] if isinstance(nodes, list) and nodes else None
-    commit = head.get("commit") if isinstance(head, Mapping) else None
-    rollup = commit.get("statusCheckRollup") if isinstance(commit, Mapping) else None
+def _checks_state(commit: object, rollup: object) -> CheckState:
     if rollup is None:
         # A PR the token can see but with no checks configured reads as passing
         # rather than unknown, so the row stays dot-free instead of ambiguous.
         return "passing" if isinstance(commit, Mapping) else "unknown"
     state = rollup.get("state") if isinstance(rollup, Mapping) else None
     return _ROLLUP_STATES.get(state, "unknown") if isinstance(state, str) else "unknown"
+
+
+def _pr_state(pull: Mapping[str, Any]) -> PrState | None:
+    state = pull.get("state")
+    if state == "MERGED":
+        return "merged"
+    if state == "CLOSED":
+        return "closed"
+    if state != "OPEN":
+        return None
+    return "draft" if pull.get("isDraft") is True else "open"
+
+
+def _pull_request_state(node: object) -> PullRequestState:
+    pull = node.get("pullRequest") if isinstance(node, Mapping) else None
+    if not isinstance(pull, Mapping):
+        return {"checks": "unknown", "state": None}
+    commits = pull.get("commits")
+    nodes = commits.get("nodes") if isinstance(commits, Mapping) else None
+    head = nodes[0] if isinstance(nodes, list) and nodes else None
+    commit = head.get("commit") if isinstance(head, Mapping) else None
+    rollup = commit.get("statusCheckRollup") if isinstance(commit, Mapping) else None
+    return {"checks": _checks_state(commit, rollup), "state": _pr_state(pull)}
 
 
 def _build_query(identities: Sequence[tuple[str, str, int]]) -> tuple[str, dict[str, Any]]:
@@ -94,6 +123,7 @@ def _build_query(identities: Sequence[tuple[str, str, int]]) -> tuple[str, dict[
         selections.append(
             f"p{index}: repository(owner:$o{index}, name:$r{index}) {{"
             f" pullRequest(number:$n{index}) {{"
+            " state isDraft"
             " commits(last:1) { nodes { commit { statusCheckRollup { state } } } } } }"
         )
         variables[f"o{index}"] = owner
@@ -105,12 +135,12 @@ def _build_query(identities: Sequence[tuple[str, str, int]]) -> tuple[str, dict[
 
 async def get_pull_request_check_states(
     records: Sequence[object], login: str, token: str
-) -> dict[str, CheckState]:
-    """Return one check verdict per requested pull request, keyed ``repo#number``."""
+) -> dict[str, PullRequestState]:
+    """Return live state per requested pull request, keyed ``repo#number``."""
     now = time.monotonic()
     _evict_expired(now)
 
-    results: dict[str, CheckState] = {}
+    results: dict[str, PullRequestState] = {}
     pending: list[tuple[str, str, int]] = []
     for record in records[:_MAX_PULL_REQUESTS]:
         identity = _identity(record)
@@ -143,8 +173,12 @@ async def get_pull_request_check_states(
     expires = time.monotonic() + _CACHE_TTL_SECONDS
     for index, (owner, repo, number) in enumerate(pending):
         full_name = f"{owner}/{repo}"
-        state = _rollup_state(data.get(f"p{index}")) if isinstance(data, Mapping) else "unknown"
-        results[pull_request_key(full_name, number)] = state
-        if state != "unknown":
-            _cache[(login, full_name, number)] = (expires, state)
+        resolved: PullRequestState = (
+            _pull_request_state(data.get(f"p{index}"))
+            if isinstance(data, Mapping)
+            else {"checks": "unknown", "state": None}
+        )
+        results[pull_request_key(full_name, number)] = resolved
+        if resolved["state"] is not None:
+            _cache[(login, full_name, number)] = (expires, resolved)
     return results
