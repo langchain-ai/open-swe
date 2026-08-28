@@ -37,6 +37,82 @@ def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:
     )
 
 
+class SandboxRetryableConnectionError(SandboxClientError):
+    pass
+
+
+@pytest.mark.asyncio
+async def test_transient_sandbox_error_retries_without_clearing_or_notifying() -> None:
+    middleware = ToolErrorMiddleware()
+    request = _tool_request()
+    set_sandbox_backend("thread-1", FakeSandboxBackend("sb-old"))
+    attempts = 0
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise SandboxRetryableConnectionError("WebSocket upgrade temporarily rejected")
+        return ToolMessage(content="ok", tool_call_id="tc1")
+
+    try:
+        with (
+            patch(
+                "agent.middleware.tool_error_handler.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+            patch(
+                "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+                new_callable=AsyncMock,
+            ) as mock_notify,
+            patch("agent.middleware.tool_error_handler.clear_sandbox_backend") as mock_clear,
+        ):
+            result = await middleware.awrap_tool_call(request, handler)
+
+        assert result.content == "ok"
+        assert attempts == 3
+        assert [call.args[0] for call in mock_sleep.await_args_list] == [1, 2]
+        mock_clear.assert_not_called()
+        mock_notify.assert_not_awaited()
+        assert "thread-1" in SANDBOX_BACKENDS
+    finally:
+        clear_sandbox_backend("thread-1")
+
+
+@pytest.mark.asyncio
+async def test_exhausted_transient_sandbox_error_reports_unstable_connection() -> None:
+    middleware = ToolErrorMiddleware()
+    request = _tool_request()
+    set_sandbox_backend("thread-1", FakeSandboxBackend("sb-old"))
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        raise SandboxRetryableConnectionError("HTTP 503 during WebSocket upgrade")
+
+    try:
+        with (
+            patch(
+                "agent.middleware.tool_error_handler.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+            patch(
+                "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+                new_callable=AsyncMock,
+            ) as mock_notify,
+        ):
+            result = await middleware.awrap_tool_call(request, handler)
+
+        assert isinstance(result, ToolMessage)
+        payload = json.loads(result.content)
+        assert payload["recovery"] == "sandbox_connection_unstable"
+        assert "probably still alive" in payload["error"]
+        assert "persist" in payload["error"]
+        assert [call.args[0] for call in mock_sleep.await_args_list] == [1, 2, 4]
+        mock_notify.assert_awaited_once()
+        assert "thread-1" not in SANDBOX_BACKENDS
+    finally:
+        clear_sandbox_backend("thread-1")
+
+
 @pytest.mark.asyncio
 async def test_sandbox_client_error_notifies_and_never_recreates() -> None:
     """A dead sandbox surfaces an error to the user; it is never swapped out.

@@ -4,8 +4,10 @@ Wraps all tool calls in try/except so that unhandled exceptions are
 returned as error ToolMessages instead of crashing the agent run.
 """
 
+import asyncio
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -28,6 +30,8 @@ from .sandbox_circuit_breaker import (
 logger = logging.getLogger(__name__)
 
 SANDBOX_UNREACHABLE = "sandbox_unreachable"
+SANDBOX_CONNECTION_UNSTABLE = "sandbox_connection_unstable"
+MAX_TRANSIENT_SANDBOX_ATTEMPTS = 4
 
 
 def _get_name(candidate: object) -> str | None:
@@ -92,6 +96,37 @@ def _to_sandbox_unreachable_payload(
     return data
 
 
+def _to_sandbox_connection_unstable_payload(
+    e: SandboxClientError,
+    request: ToolCallRequest | None = None,
+) -> dict[str, str]:
+    sandbox_id = extract_sandbox_id(str(e))
+    which = f" ({sandbox_id})" if sandbox_id else ""
+    data: dict[str, str] = {
+        "status": "error",
+        "error_type": e.__class__.__name__,
+        "previous_error": str(e),
+        "recovery": SANDBOX_CONNECTION_UNSTABLE,
+        "error": (
+            f"The sandbox connection{which} was refused repeatedly. The sandbox itself is "
+            "probably still alive, so commit or otherwise persist any in-progress work "
+            "before reporting this condition."
+        ),
+    }
+    if sandbox_id:
+        data["sandbox_id"] = sandbox_id
+    tool_name = _extract_tool_name(request)
+    if tool_name:
+        data["name"] = tool_name
+    return data
+
+
+def _is_transient_sandbox_error(e: Exception) -> bool:
+    return "retryable" in e.__class__.__name__.lower() or bool(
+        re.search(r"WebSocket upgrade temporarily rejected|HTTP\s+50[23]", str(e), re.IGNORECASE)
+    )
+
+
 def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     if isinstance(request.tool_call, dict):
         return request.tool_call.get("id")
@@ -133,6 +168,18 @@ def _sandbox_unreachable_tool_message(
     )
 
 
+def _sandbox_connection_unstable_tool_message(
+    e: SandboxClientError,
+    request: ToolCallRequest,
+) -> ToolMessage:
+    data = _to_sandbox_connection_unstable_payload(e, request)
+    return ToolMessage(
+        content=json.dumps(data),
+        tool_call_id=_get_tool_call_id(request),
+        status="error",
+    )
+
+
 def _generic_error_tool_message(e: Exception, request: ToolCallRequest) -> ToolMessage:
     data = _to_error_payload(e, request)
     return ToolMessage(
@@ -157,22 +204,41 @@ class ToolErrorMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        try:
-            return await handler(request)
-        except SandboxClientError as e:
-            logger.exception("Sandbox error during tool call handling; request=%r", request)
-            thread_id = _get_thread_id(request)
-            if thread_id:
-                clear_sandbox_backend(thread_id)
-            config = _get_run_config(request)
-            if config is not None:
-                try:
-                    await post_sandbox_unreachable_notification(
-                        config, sandbox_id=extract_sandbox_id(str(e))
+        transient_attempts = 0
+        while True:
+            try:
+                return await handler(request)
+            except SandboxClientError as e:
+                is_transient = _is_transient_sandbox_error(e)
+                if is_transient and transient_attempts < MAX_TRANSIENT_SANDBOX_ATTEMPTS - 1:
+                    transient_attempts += 1
+                    backoff_seconds = min(2 ** (transient_attempts - 1), 4)
+                    logger.warning(
+                        "Retrying transient sandbox tool error",
+                        extra={
+                            "tool_name": _extract_tool_name(request),
+                            "attempt": transient_attempts,
+                            "error": str(e),
+                        },
                     )
-                except Exception:
-                    logger.exception("Failed to notify user of dead sandbox for %s", thread_id)
-            return _sandbox_unreachable_tool_message(e, request)
-        except Exception as e:
-            logger.exception("Error during tool call handling; request=%r", request)
-            return _generic_error_tool_message(e, request)
+                    await asyncio.sleep(backoff_seconds)
+                    continue
+
+                logger.exception("Sandbox error during tool call handling; request=%r", request)
+                thread_id = _get_thread_id(request)
+                if thread_id:
+                    clear_sandbox_backend(thread_id)
+                config = _get_run_config(request)
+                if config is not None:
+                    try:
+                        await post_sandbox_unreachable_notification(
+                            config, sandbox_id=extract_sandbox_id(str(e))
+                        )
+                    except Exception:
+                        logger.exception("Failed to notify user of dead sandbox for %s", thread_id)
+                if is_transient:
+                    return _sandbox_connection_unstable_tool_message(e, request)
+                return _sandbox_unreachable_tool_message(e, request)
+            except Exception as e:
+                logger.exception("Error during tool call handling; request=%r", request)
+                return _generic_error_tool_message(e, request)
