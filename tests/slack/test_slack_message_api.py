@@ -57,7 +57,7 @@ async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatc
     assert calls[0].kwargs["json"] == {
         "channel": "C1",
         "chunks": chunks,
-        "task_display_mode": "timeline",
+        "task_display_mode": "plan",
         "thread_ts": "1.0",
         "recipient_user_id": "U1",
         "recipient_team_id": "T1",
