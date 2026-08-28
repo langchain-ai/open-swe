@@ -55,7 +55,7 @@ export interface SidebarProjectGroup extends SidebarProjectOption {
  * `other/api`, and two local projects both called `api`, into one folder that
  * cannot be told apart.
  */
-export function projectKey(identity?: string | null): string | null {
+function projectKey(identity?: string | null): string | null {
   const normalized = identity?.trim().toLowerCase()
   return normalized ? `project:${normalized}` : null
 }
@@ -219,15 +219,6 @@ export function groupSidebarThreadsByProject(
       ),
     recents,
   }
-}
-
-export function filterSidebarProject(
-  threads: ReadonlyArray<SidebarThreadItem>,
-  selectedProjectKey: string | null
-): Array<SidebarThreadItem> {
-  return selectedProjectKey
-    ? threads.filter((thread) => thread.projectKey === selectedProjectKey)
-    : [...threads]
 }
 
 export type SidebarSort = "priority" | "updated" | "manual"

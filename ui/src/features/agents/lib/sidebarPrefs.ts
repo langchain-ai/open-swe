@@ -6,9 +6,9 @@ import type { SidebarFilters } from "./sidebarFilter"
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-export const ORGANIZE_MODES = ["project", "list"] as const
-export const CHAT_SORTS = ["priority", "updated"] as const
-export const PINNED_SORTS = ["priority", "updated", "manual"] as const
+const ORGANIZE_MODES = ["project", "list"] as const
+const CHAT_SORTS = ["priority", "updated"] as const
+const PINNED_SORTS = ["priority", "updated", "manual"] as const
 
 export type OrganizeMode = (typeof ORGANIZE_MODES)[number]
 export type ChatSort = (typeof CHAT_SORTS)[number]
@@ -68,11 +68,7 @@ function sanitizeFilters(value: unknown): SidebarFilters {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
   return {
-    statuses: asStringArray(raw.statuses) as SidebarFilters["statuses"],
     sources: asStringArray(raw.sources) as SidebarFilters["sources"],
-    locations: asStringArray(raw.locations) as SidebarFilters["locations"],
-    pr: asStringArray(raw.pr) as SidebarFilters["pr"],
-    models: asStringArray(raw.models),
     includeAutomations:
       typeof raw.includeAutomations === "boolean"
         ? raw.includeAutomations
@@ -152,15 +148,6 @@ export function useSidebarPrefs() {
     (filters: SidebarFilters) => setPrefs((prev) => ({ ...prev, filters })),
     []
   )
-  const resetFilters = useCallback(
-    () =>
-      setPrefs((prev) => ({
-        ...prev,
-        filters: { ...DEFAULT_SIDEBAR_FILTERS },
-      })),
-    []
-  )
-
   const toggleLocalPin = useCallback(
     (threadId: string) =>
       setPrefs((prev) => ({
@@ -216,7 +203,6 @@ export function useSidebarPrefs() {
     prefs,
     setCompact,
     setFilters,
-    resetFilters,
     toggleLocalPin,
     toggleProjectPin,
     toggleProjectCollapsed,
@@ -225,5 +211,3 @@ export function useSidebarPrefs() {
     setView,
   }
 }
-
-export type UseSidebarPrefs = ReturnType<typeof useSidebarPrefs>

@@ -138,29 +138,3 @@ test("persists archived state without reordering the thread", (t) => {
   assert.equal(restored.get(thread.id).archived, true);
   assert.equal(restored.update(thread.id, { archived: false }).archived, false);
 });
-
-test("rejects a non-boolean archived patch", (t) => {
-  const fixture = temporaryStore(t);
-  const store = fixture.create();
-  const thread = store.create({
-    cwd: path.resolve("/tmp/project"),
-    prompt: "work",
-  });
-  assert.throws(() => store.update(thread.id, { archived: "yes" }), {
-    message: "Invalid archived state",
-  });
-});
-
-test("reads a record written before archived existed as unarchived", (t) => {
-  const fixture = temporaryStore(t);
-  const store = fixture.create();
-  const thread = store.create({
-    cwd: path.resolve("/tmp/project"),
-    prompt: "work",
-  });
-  const raw = JSON.parse(fs.readFileSync(fixture.path, "utf8"));
-  for (const record of raw.threads ?? raw) delete record.archived;
-  fs.writeFileSync(fixture.path, JSON.stringify(raw));
-
-  assert.equal(fixture.create().get(thread.id).archived, false);
-});

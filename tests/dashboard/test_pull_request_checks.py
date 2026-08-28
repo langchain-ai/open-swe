@@ -44,12 +44,20 @@ def _patch_github(monkeypatch, payload, calls: list[dict[str, object]]):
     monkeypatch.setattr(checks_module, "github_request", request)
 
 
-async def test_maps_rollup_states_and_skips_invalid_records(monkeypatch):
+async def test_maps_pull_request_state_and_skips_invalid_records(monkeypatch):
     checks_module._cache.clear()
     calls: list[dict[str, object]] = []
     _patch_github(
         monkeypatch,
-        {"data": {"p0": _rollup("FAILURE"), "p1": _rollup("SUCCESS"), "p2": _rollup(None)}},
+        {
+            "data": {
+                "p0": _rollup("FAILURE"),
+                "p1": _rollup(None),
+                "p2": _rollup("SUCCESS", pr_state="MERGED"),
+                "p3": _rollup("PENDING", is_draft=True),
+                "p4": _rollup(None, pr_state="CLOSED"),
+            }
+        },
         calls,
     )
 
@@ -58,17 +66,22 @@ async def test_maps_rollup_states_and_skips_invalid_records(monkeypatch):
             {"repoFullName": "acme/alpha", "number": 1},
             {"repoFullName": "acme/beta", "number": 2},
             {"repoFullName": "acme/gamma", "number": 3},
-            {"repoFullName": "acme/../etc", "number": 4},
-            {"repoFullName": "no-slash", "number": 5},
+            {"repoFullName": "acme/delta", "number": 4},
+            {"repoFullName": "acme/epsilon", "number": 5},
+            {"repoFullName": "acme/../etc", "number": 6},
+            {"repoFullName": "no-slash", "number": 7},
         ],
         "octocat",
         "token",
     )
 
+    # A merged or closed PR must stop reading as open — the sidebar renders from this.
     assert result == {
         "acme/alpha#1": {"checks": "failing", "state": "open"},
         "acme/beta#2": {"checks": "passing", "state": "open"},
-        "acme/gamma#3": {"checks": "passing", "state": "open"},
+        "acme/gamma#3": {"checks": "passing", "state": "merged"},
+        "acme/delta#4": {"checks": "pending", "state": "draft"},
+        "acme/epsilon#5": {"checks": "passing", "state": "closed"},
     }
     # Invalid identities never reach GitHub.
     assert len(calls) == 1
@@ -101,34 +114,3 @@ async def test_returns_unknown_when_github_fails(monkeypatch):
 
     assert result == {"acme/alpha#1": {"checks": "unknown", "state": None}}
     assert not checks_module._cache
-
-
-async def test_reports_merged_and_draft_state(monkeypatch):
-    """The sidebar renders from this, so a merged PR must stop reading as open."""
-    checks_module._cache.clear()
-    calls: list[dict[str, object]] = []
-    _patch_github(
-        monkeypatch,
-        {
-            "data": {
-                "p0": _rollup("SUCCESS", pr_state="MERGED"),
-                "p1": _rollup("PENDING", is_draft=True),
-                "p2": _rollup(None, pr_state="CLOSED"),
-            }
-        },
-        calls,
-    )
-
-    result = await get_pull_request_check_states(
-        [
-            {"repoFullName": "acme/alpha", "number": 1},
-            {"repoFullName": "acme/beta", "number": 2},
-            {"repoFullName": "acme/gamma", "number": 3},
-        ],
-        "octocat",
-        "token",
-    )
-
-    assert result["acme/alpha#1"]["state"] == "merged"
-    assert result["acme/beta#2"]["state"] == "draft"
-    assert result["acme/gamma#3"]["state"] == "closed"

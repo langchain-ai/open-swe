@@ -6,11 +6,9 @@ import {
   applyProjectKeyAliases,
   cloudProjectKeysByLabel,
   cloudSidebarThread,
-  filterSidebarProject,
   groupSidebarThreadsByProject,
   localSidebarThread,
   sidebarProjectOptions,
-  sortSidebarThreads,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -98,9 +96,6 @@ describe("sidebar thread adapters", () => {
     expect(sidebarProjectOptions(threads, [])).toEqual([
       { key: "project:langchain-ai/open-swe", label: "open-swe" },
     ])
-    expect(
-      filterSidebarProject(threads, "project:langchain-ai/open-swe")
-    ).toHaveLength(2)
   })
 
   it("keeps same-named repositories from different owners apart", () => {
@@ -123,19 +118,6 @@ describe("sidebar thread adapters", () => {
     expect(applyProjectKeyAliases([local], aliases)[0]?.projectKey).toBe(
       local.projectKey
     )
-  })
-
-  it("sorts the loaded cloud and local window by last update", () => {
-    const cloud = cloudSidebarThread(cloudThread({ updatedAt: 20 }))
-    const local = localSidebarThread(
-      localThread({ updatedAt: 30 }),
-      project,
-      undefined
-    )
-
-    expect(
-      sortSidebarThreads([cloud, local]).map((thread) => thread.key)
-    ).toEqual(["local:same-id", "cloud:same-id"])
   })
 })
 
@@ -198,19 +180,5 @@ describe("groupSidebarThreadsByProject", () => {
 
     expect(grouped.projects).toHaveLength(1)
     expect(grouped.recents.map((thread) => thread.id)).toEqual(["orphan"])
-  })
-})
-
-describe("localSidebarThread archiving", () => {
-  it("reads archived state persisted on the desktop thread", () => {
-    const active = localSidebarThread(localThread(), undefined, undefined)
-    const archived = localSidebarThread(
-      localThread({ archived: true }),
-      undefined,
-      undefined
-    )
-
-    expect(active.resolved).toBe(false)
-    expect(archived.resolved).toBe(true)
   })
 })

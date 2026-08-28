@@ -512,7 +512,7 @@ describe("useSidebarThreads", () => {
 describe("markAgentThreadViewed", () => {
   const unread = { id: "thread-1", viewed: false } as AgentThread
 
-  it("clears the unread flag across the sidebar caches", () => {
+  it("clears the unread flag across the caches, leaving the detail stale", () => {
     const client = testClient()
     const sidebarKey = [...agentThreadKeys.lists, "sidebar", { limit: 10 }]
     client.setQueryData(sidebarKey, {
@@ -521,6 +521,7 @@ describe("markAgentThreadViewed", () => {
       resolved: { items: [], limit: 10, hasMore: false },
     })
     client.setQueryData(agentThreadKeys.sidebarActive("thread-1"), unread)
+    client.setQueryData(agentThreadKeys.detail("thread-1"), unread)
 
     markAgentThreadViewed(client, "thread-1")
 
@@ -535,18 +536,14 @@ describe("markAgentThreadViewed", () => {
         agentThreadKeys.sidebarActive("thread-1")
       )?.viewed
     ).toBe(true)
-  })
-
-  it("leaves the detail cache stale so the mark-viewed GET still fires", () => {
-    const client = testClient()
-    const key = agentThreadKeys.detail("thread-1")
-    client.setQueryData(key, unread)
-
-    markAgentThreadViewed(client, "thread-1")
-
     // A fresh detail entry would suppress the refetch that marks the thread
     // viewed server-side, and the dot would come back on the next list refetch.
-    expect(client.getQueryData<AgentThread>(key)?.viewed).toBe(true)
-    expect(client.getQueryState(key)?.dataUpdatedAt).toBe(0)
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail("thread-1"))
+        ?.viewed
+    ).toBe(true)
+    expect(
+      client.getQueryState(agentThreadKeys.detail("thread-1"))?.dataUpdatedAt
+    ).toBe(0)
   })
 })
