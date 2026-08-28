@@ -59,6 +59,7 @@ from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import ENVIRONMENTS, slugify
 from .options import (
+    DEPRECATED_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     default_vision_model_pair,
@@ -185,12 +186,13 @@ async def _resolve_agent_model_choice(
     effort: str | None,
 ) -> tuple[str, str]:
     resolved_model, resolved_effort = await get_team_default_model("agent")
-    profile_model, profile_effort = normalize_profile_overrides(profile)
-    if profile_model and profile_effort:
-        resolved_model, resolved_effort = profile_model, profile_effort
-    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
-    if chosen_model and chosen_effort:
-        resolved_model, resolved_effort = chosen_model, chosen_effort
+    if model_id not in DEPRECATED_MODEL_IDS:
+        profile_model, profile_effort = normalize_profile_overrides(profile)
+        if profile_model and profile_effort:
+            resolved_model, resolved_effort = profile_model, profile_effort
+        chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
+        if chosen_model and chosen_effort:
+            resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
         resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
     )
