@@ -165,9 +165,11 @@ html[data-agents-theme] .shimmer-text {
 
 /*
  * Long sidebar titles slide far enough to read the tail on hover, then snap
- * back. The distance is set per row from JS (`--marquee-shift`) because it
- * depends on how far the text actually overflows; rows that fit never get the
- * class and so never animate.
+ * back. Distance and duration are both set per row from JS (`--marquee-shift`,
+ * `--marquee-duration`) because they depend on how far the text actually
+ * overflows: the duration is the distance divided by a fixed px/s speed, so
+ * every title travels at the same rate rather than every title taking the same
+ * time. Rows that fit never get the class and so never animate.
  */
 .sidebar-title-viewport {
   mask-image: linear-gradient(
@@ -180,17 +182,20 @@ html[data-agents-theme] .shimmer-text {
 }
 
 .sidebar-title-marquee {
-  animation: sidebar-title-marquee 3.5s ease-in-out 0.15s forwards;
+  animation: sidebar-title-marquee var(--marquee-duration, 3.5s) linear 0.15s
+    forwards;
 }
 
 /*
  * Fades the leading edge in once the title is actually moving. A static
  * two-sided mask would dim the first characters while the title still sits at
  * rest, so the stops are tweened instead — both gradients carry the same four
- * stops of the same types, which is what lets them interpolate.
+ * stops of the same types, which is what lets them interpolate. Its duration is
+ * fixed rather than shared with the travel: the fade covers the first moments of
+ * movement, not a proportion of a trip whose length varies by title.
  */
 .sidebar-title-marquee-mask {
-  animation: sidebar-title-marquee-mask 3.5s ease-in-out 0.15s forwards;
+  animation: sidebar-title-marquee-mask 0.4s ease-out 0.15s forwards;
 }
 
 @keyframes sidebar-title-marquee {
@@ -212,7 +217,6 @@ html[data-agents-theme] .shimmer-text {
       transparent 100%
     );
   }
-  12%,
   100% {
     mask-image: linear-gradient(
       to right,

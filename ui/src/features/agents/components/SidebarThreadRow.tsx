@@ -94,10 +94,16 @@ function openContextMenuFromKeyboard(event: React.KeyboardEvent<HTMLAnchorElemen
   )
 }
 
+/** Pixels per second every title travels at, whatever its length. */
+const MARQUEE_SPEED = 45
+/** Keeps a barely-overflowing title from flicking past in a few frames. */
+const MARQUEE_MIN_DURATION = 0.5
+
 /**
  * Slides an overflowing title far enough to read its tail while hovered. The
  * shift is measured on enter rather than tracked continuously because it only
- * matters for the row the pointer is actually over.
+ * matters for the row the pointer is actually over, and the duration is derived
+ * from it so long and short titles read at the same speed.
  */
 function useTitleMarquee() {
   const viewport = useRef<HTMLSpanElement>(null)
@@ -110,7 +116,12 @@ function useTitleMarquee() {
     setShift(overflow > 4 ? -overflow : 0)
   }
 
-  return { viewport, text, shift, measure, reset: () => setShift(0) }
+  const duration = Math.max(
+    MARQUEE_MIN_DURATION,
+    Math.abs(shift) / MARQUEE_SPEED
+  )
+
+  return { viewport, text, shift, duration, measure, reset: () => setShift(0) }
 }
 
 function PullRequestIcon({
@@ -266,7 +277,12 @@ export function SidebarThreadRow({
             "block w-max whitespace-nowrap text-[13px] will-change-transform",
             marquee.shift !== 0 && "sidebar-title-marquee"
           )}
-          style={{ "--marquee-shift": `${marquee.shift}px` } as React.CSSProperties}
+          style={
+            {
+              "--marquee-shift": `${marquee.shift}px`,
+              "--marquee-duration": `${marquee.duration}s`,
+            } as React.CSSProperties
+          }
         >
           {item.title}
         </span>
