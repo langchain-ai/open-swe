@@ -15,6 +15,7 @@ _CLIENT: Any = None
 _SESSION: Any = None
 _PROXY: asyncio.Server | None = None
 _PROXY_PORT: int | None = None
+_ALLOWED_NON_GLOBAL_NETWORKS = (ipaddress.ip_network("100.64.0.0/10"),)
 
 
 def _resolve(url: str) -> tuple[bool, str, str | None]:
@@ -26,7 +27,11 @@ def _resolve(url: str) -> tuple[bool, str, str | None]:
         resolved = []
         for address in addresses:
             ip = ipaddress.ip_address(address[4][0])
-            if not ip.is_loopback and not ip.is_global:
+            if (
+                not ip.is_loopback
+                and not ip.is_global
+                and not any(ip in network for network in _ALLOWED_NON_GLOBAL_NETWORKS)
+            ):
                 return False, f"URL resolves to blocked address: {ip}", None
             resolved.append(str(ip))
         return True, "", resolved[0]
@@ -115,7 +120,7 @@ async def _proxy_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 async def _proxy() -> int:
     global _PROXY, _PROXY_PORT
     if _PROXY is None:
-        _PROXY = await asyncio.start_server(_proxy_client, "127.0.0.1", 0)
+        _PROXY = await asyncio.start_server(_proxy_client, "0.0.0.0", 0)
         _PROXY_PORT = _PROXY.sockets[0].getsockname()[1]
     assert _PROXY_PORT is not None
     return _PROXY_PORT
@@ -141,7 +146,10 @@ async def _close() -> bool:
 async def _session(request: dict[str, Any]) -> Any:
     global _CLIENT, _SESSION
     if _SESSION is None:
-        proxy_port = await _proxy()
+        await _proxy()
+        proxy_url = request.get("proxy_url")
+        if not isinstance(proxy_url, str) or not proxy_url:
+            raise RuntimeError("no reachable proxy endpoint")
         _CLIENT = AsyncStagehand(
             server="local",
             model_api_key=os.environ.get("MODEL_API_KEY", "proxy-injected"),
@@ -157,7 +165,7 @@ async def _session(request: dict[str, Any]) -> Any:
                     "executable_path": os.environ.get(
                         "STAGEHAND_LOCAL_CHROME_PATH", "/usr/bin/chromium"
                     ),
-                    "args": [f"--proxy-server=http://127.0.0.1:{proxy_port}"],
+                    "args": [f"--proxy-server={proxy_url}"],
                 },
             },
         )
@@ -168,6 +176,8 @@ async def _handle(request: dict[str, Any]) -> dict[str, Any]:
     operation = request.get("operation")
     if operation == "health":
         return {"success": True}
+    if operation == "proxy":
+        return {"success": True, "port": await _proxy()}
     if operation == "close":
         return {"success": True, "closed": await _close()}
     if operation == "navigate":
@@ -175,7 +185,15 @@ async def _handle(request: dict[str, Any]) -> dict[str, Any]:
         safe, reason = _safe(url)
         if not safe:
             return {"success": False, "error": f"browser_navigate blocked: {reason}"}
-        session = await _session(request)
+        try:
+            session = await _session(request)
+        except RuntimeError as exc:
+            if str(exc) == "no reachable proxy endpoint":
+                return {
+                    "success": False,
+                    "error": "browser automation is unavailable in this sandbox: no reachable proxy endpoint",
+                }
+            raise
         await session.navigate(url=url)
         return {"success": True, "url": url, "session_id": session.id}
     if _SESSION is None:

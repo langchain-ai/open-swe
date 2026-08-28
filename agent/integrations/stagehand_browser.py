@@ -6,8 +6,12 @@ import logging
 import os
 import shlex
 from typing import Any
+from urllib.parse import urlparse
 
 from langgraph.config import get_config
+
+from agent.integrations.langsmith import get_async_sandbox_client
+from agent.utils.sandbox_state import unwrap_sandbox_backend
 
 from ..utils.sandbox_state import get_sandbox_backend
 
@@ -42,6 +46,26 @@ def browser_tools_enabled() -> bool:
     )
 
 
+async def _proxy_url() -> str:
+    response = await _request("proxy")
+    if not response.get("success"):
+        raise RuntimeError(response.get("error", "unable to start browser proxy"))
+    port = response.get("port")
+    if not isinstance(port, int):
+        fallback_url = response.get("url")
+        parsed = urlparse(fallback_url) if isinstance(fallback_url, str) else None
+        if parsed is None or parsed.port is None:
+            raise RuntimeError("browser runtime returned an invalid proxy port")
+        return f"{parsed.scheme}://{parsed.netloc}"
+    backend_proxy = await get_sandbox_backend(_thread_id())
+    backend = unwrap_sandbox_backend(backend_proxy)
+    async with get_async_sandbox_client() as client:
+        service = await client.service(backend.id, port, expires_in_seconds=600)
+    if not service.browser_url:
+        raise RuntimeError("LangSmith did not return a service URL")
+    return service.browser_url
+
+
 def _thread_id() -> str:
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
@@ -53,6 +77,14 @@ def _thread_id() -> str:
 
 async def _request(operation: str, **payload: Any) -> dict[str, Any]:
     backend = await get_sandbox_backend(_thread_id())
+    if operation == "navigate" and "proxy_url" not in payload:
+        try:
+            payload["proxy_url"] = await _proxy_url()
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": f"browser automation is unavailable in this sandbox: {exc}",
+            }
     request = base64.urlsafe_b64encode(
         json.dumps(
             {
@@ -114,9 +146,12 @@ async def browser_close() -> dict[str, Any]:
     return await _request("close")
 
 
-def load_browser_tools() -> list[Any]:
+async def load_browser_tools() -> list[Any]:
     """Return sandbox-local Stagehand tools when securely configured."""
     if not browser_tools_enabled():
+        return []
+    health = await _request("health")
+    if not health.get("success"):
         return []
     logger.info("Sandbox-local Stagehand tools enabled (model=%s)", _model_name())
     return [browser_navigate, browser_act, browser_observe, browser_extract, browser_close]

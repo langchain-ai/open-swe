@@ -9,6 +9,7 @@ the agent itself is stateless.
 # ruff: noqa: E402
 
 import hashlib
+import inspect
 import logging
 import os
 import warnings
@@ -1607,7 +1608,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
+        loaded_browser_tools = load_browser_tools()
+        browser_tools = (
+            await loaded_browser_tools
+            if inspect.isawaitable(loaded_browser_tools)
+            else loaded_browser_tools
+        )
         observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
