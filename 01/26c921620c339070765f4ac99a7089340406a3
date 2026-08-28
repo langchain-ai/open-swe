@@ -1,0 +1,27 @@
+openwiki/concepts/threads-and-state.md
+  s_4d7098b75c5711::t_fcb0602df7bab7 69,187
+openwiki/workflows/pr-creation.md
+  s_4d7098b75c5711::t_fcb0602df7bab7 184
+openwiki/architecture/agent-graph.md
+  s_4d7098b75c5711::t_fcb0602df7bab7 131
+openwiki/quickstart.md
+  s_4d7098b75c5711::t_fcb0602df7bab7 118-122,125-128,131-136,139-141,144-146
+.github/workflows/openwiki-update.yml
+  s_4d7098b75c5711::t_fcb0602df7bab7 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0126c921620c339070765f4ac99a7089340406a3",
+  "prompts": {},
+  "sessions": {
+    "s_4d7098b75c5711": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a045f2-f42d-77b3-99a5-4e6c5694cb6e",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Colin Francis <colin.francis@langchain.dev>"
+    }
+  }
+}
