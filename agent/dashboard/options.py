@@ -74,13 +74,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": False,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
-        "label": "DeepSeek V4 Pro",
-        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": False,
-    },
-    {
         "id": "fireworks:accounts/fireworks/models/glm-5p2",
         "label": "GLM 5.2",
         "efforts": ["none", "high", "max"],
@@ -117,6 +110,11 @@ DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
     # Never a real Fireworks deployment: the K2.7 rename kept the `-code` suffix,
     # which K3 does not use, so selections stored under it 404 at request time.
     "fireworks:accounts/fireworks/models/kimi-k3-code": (
+        "fireworks:accounts/fireworks/models/kimi-k3"
+    ),
+    # Never a live Fireworks deployment and 404s at request time, so migrate
+    # stored selections onto K3 instead of discarding them.
+    "fireworks:accounts/fireworks/models/deepseek-v4-pro": (
         "fireworks:accounts/fireworks/models/kimi-k3"
     ),
 }

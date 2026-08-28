@@ -5,6 +5,7 @@ import pytest
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
     DEFAULT_MODEL_ID,
+    DEPRECATED_MODEL_REPLACEMENTS,
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     SUPPORTED_MODELS,
@@ -30,6 +31,7 @@ SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
 SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
+DEPRECATED_DEEPSEEK = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
@@ -58,7 +60,7 @@ def test_supported_openai_models_are_the_gpt_5_6_family() -> None:
     ]
 
 
-@pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC])
+@pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_DEEPSEEK])
 def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
     assert model_id not in SUPPORTED_MODEL_IDS
     assert all(model["id"] != model_id for model in SUPPORTED_MODELS)
@@ -67,6 +69,11 @@ def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
 def test_canonical_model_pair_migrates_deprecated_ids() -> None:
     assert canonical_model_pair(DEPRECATED_OPENAI, "xhigh") == (SUPPORTED_OPENAI, "xhigh")
     assert canonical_model_pair(DEPRECATED_ANTHROPIC, "max") == (SUPPORTED_ANTHROPIC, "max")
+    assert canonical_model_pair(DEPRECATED_DEEPSEEK, "high") == (SUPPORTED_KIMI, "high")
+
+
+def test_deprecated_model_replacements_target_supported_models() -> None:
+    assert set(DEPRECATED_MODEL_REPLACEMENTS.values()) <= SUPPORTED_MODEL_IDS
 
 
 def test_canonical_model_pair_falls_back_to_replacement_default_effort() -> None:

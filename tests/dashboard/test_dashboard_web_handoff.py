@@ -353,7 +353,7 @@ async def test_dashboard_followup_on_busy_text_only_thread_rejects_images(
     metadata = {
         "source": "dashboard",
         "github_login": "octocat",
-        "resolved_model": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
+        "resolved_model": "fireworks:accounts/fireworks/models/kimi-k3",
     }
     client = _FakeClient(metadata)
     queued_messages: list[object] = []
