@@ -15,7 +15,7 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
-from agent.server import _registered_tool_name, get_agent
+from agent.server import DesktopAgentState, _registered_tool_name, get_agent
 from agent.utils.read_only_backend import ReadOnlyBackend
 from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
@@ -166,6 +166,7 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
     assert isinstance(backend, CompositeBackend)
     assert isinstance(backend.default, SandboxBackendProxy)
     assert not callable(backend.default)
+    assert captured["state_schema"] is None
 
 
 @pytest.mark.asyncio
@@ -203,6 +204,8 @@ async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     assert isinstance(backend, CompositeBackend)
     assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
     assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
+    assert captured["state_schema"] is DesktopAgentState
+    assert "files" in DesktopAgentState.__annotations__
 
 
 @pytest.mark.asyncio
