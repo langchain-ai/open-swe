@@ -1685,6 +1685,43 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
     assert updates[-1]["resolved_at_ms"] is None
 
 
+def test_pr_query_matches_legacy_and_current_thread_metadata() -> None:
+    metadata = {
+        "title": "Unrelated title",
+        "repo_full_name": "langchain-ai/open-swe",
+        "pr_number": 42,
+        "pr_url": "https://github.com/langchain-ai/open-swe/pull/42",
+        "pull_requests": [
+            {
+                "repo_full_name": "langchain-ai/langchain",
+                "number": 42,
+                "url": "https://github.com/langchain-ai/langchain/pull/42",
+            }
+        ],
+    }
+
+    assert thread_api._metadata_matches_query(metadata, "42")
+    assert thread_api._metadata_matches_query(metadata, "#42")
+    assert thread_api._metadata_matches_query(
+        metadata, "https://github.com/langchain-ai/open-swe/pull/42"
+    )
+    assert thread_api._metadata_matches_query(
+        metadata, "https://github.com/langchain-ai/langchain/pull/42"
+    )
+    assert not thread_api._metadata_matches_query(
+        metadata, "https://github.com/langchain-ai/deepagents/pull/42"
+    )
+    assert not thread_api._metadata_matches_query(metadata, "43")
+    summary = {
+        "title": "Unrelated title",
+        "pullRequests": [{"repoFullName": "langchain-ai/open-swe", "number": 42}],
+    }
+    assert thread_api._summary_matches_query(summary, "42")
+    assert thread_api._summary_matches_query(
+        summary, "https://github.com/langchain-ai/open-swe/pull/42"
+    )
+
+
 def test_summary_matches_filters() -> None:
     summary = {
         "resolved": True,

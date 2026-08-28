@@ -53,6 +53,48 @@ function commandMatches(command: AppCommand, query: string): boolean {
   return haystack.includes(query.toLowerCase())
 }
 
+function parsePullRequestQuery(
+  query: string
+): { repoFullName?: string; number: number } | null {
+  const trimmed = query.trim()
+  const numberMatch = /^#?([1-9]\d*)$/.exec(trimmed)
+  if (numberMatch) return { number: Number(numberMatch[1]) }
+  const urlMatch =
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)(?:[/?#].*)?$/i.exec(
+      trimmed
+    )
+  if (!urlMatch) return null
+  return {
+    repoFullName: `${urlMatch[1]}/${urlMatch[2]}`.toLowerCase(),
+    number: Number(urlMatch[3]),
+  }
+}
+
+function cloudThreadMatches(thread: AgentThread, query: string): boolean {
+  const titleMatches = thread.title.toLowerCase().includes(query.toLowerCase())
+  const prQuery = parsePullRequestQuery(query)
+  if (!prQuery) return titleMatches
+  const pullRequests =
+    thread.pullRequests ??
+    (thread.pr
+      ? [
+          {
+            ...thread.pr,
+            repoFullName: thread.repoFullName,
+          },
+        ]
+      : [])
+  return (
+    titleMatches ||
+    pullRequests.some(
+      (pullRequest) =>
+        pullRequest.number === prQuery.number &&
+        (!prQuery.repoFullName ||
+          pullRequest.repoFullName.toLowerCase() === prQuery.repoFullName)
+    )
+  )
+}
+
 export function buildPaletteResults(
   commands: ReadonlyArray<AppCommand>,
   cloudThreads: ReadonlyArray<AgentThread>,
@@ -76,7 +118,7 @@ export function buildPaletteResults(
   const cloudResults: Array<CloudThreadResult> = cloudThreads
     .filter(
       (thread) =>
-        !normalizedQuery || thread.title.toLowerCase().includes(normalizedQuery)
+        !normalizedQuery || cloudThreadMatches(thread, normalizedQuery)
     )
     .map((thread) => ({
       id: `cloud:${thread.id}`,

@@ -82,6 +82,56 @@ describe("app commands", () => {
     ).toEqual([])
   })
 
+  it("finds associated threads by PR number or URL", () => {
+    const cloud = {
+      id: "cloud-1",
+      title: "Unrelated work",
+    } as AgentThread
+    const pullRequest: NonNullable<AgentThread["pullRequests"]>[number] = {
+      repoFullName: "langchain-ai/langchain",
+      number: 2295,
+      title: "Other PR",
+      state: "open",
+      headRef: "feature",
+      baseRef: "main",
+      url: "https://github.com/langchain-ai/langchain/pull/2295",
+      author: null,
+      authorAvatarUrl: null,
+      createdAt: null,
+      diffStats: { files: 1, additions: 1, deletions: 0 },
+    }
+    const otherRepo: AgentThread = {
+      ...cloud,
+      id: "cloud-2",
+      pullRequests: [pullRequest],
+    }
+    const matchingPr: AgentThread = {
+      ...cloud,
+      id: "cloud-3",
+      pullRequests: [
+        {
+          ...pullRequest,
+          repoFullName: "langchain-ai/open-swe",
+          url: "https://github.com/langchain-ai/open-swe/pull/2295",
+        },
+      ],
+    }
+
+    expect(
+      buildPaletteResults([], [otherRepo, matchingPr], [], "2295").map(
+        (item) => item.id
+      )
+    ).toEqual(["cloud:cloud-2", "cloud:cloud-3"])
+    expect(
+      buildPaletteResults(
+        [],
+        [otherRepo, matchingPr],
+        [],
+        "https://github.com/langchain-ai/open-swe/pull/2295"
+      ).map((item) => item.id)
+    ).toEqual(["cloud:cloud-3"])
+  })
+
   it("filters commands and merges cloud and local thread results", () => {
     const cloud = {
       id: "cloud-1",

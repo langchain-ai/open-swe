@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import posixpath
+import re
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
@@ -734,6 +735,63 @@ def _thread_updated_ms(thread: ThreadLike) -> int:
     return _thread_timestamp_ms(thread, "updated_at")
 
 
+def _pull_request_query(query: str) -> tuple[str | None, int] | None:
+    number_match = re.fullmatch(r"#?([1-9][0-9]*)", query.strip())
+    if number_match:
+        return None, int(number_match.group(1))
+    pr_ref = parse_github_pr_url(query)
+    if pr_ref:
+        return f"{pr_ref.owner}/{pr_ref.repo}".lower(), pr_ref.number
+    return None
+
+
+def _pull_request_matches_query(record: object, query: tuple[str | None, int]) -> bool:
+    if not isinstance(record, Mapping):
+        return False
+    repo_full_name, number = query
+    if record.get("number") != number:
+        return False
+    if repo_full_name is None:
+        return True
+    record_repo = record.get("repo_full_name") or record.get("repoFullName")
+    return isinstance(record_repo, str) and record_repo.lower() == repo_full_name
+
+
+def _metadata_matches_query(metadata: Mapping[str, Any], query: str) -> bool:
+    pr_query = _pull_request_query(query)
+    if pr_query:
+        records = metadata.get("pull_requests")
+        if isinstance(records, list) and any(
+            _pull_request_matches_query(record, pr_query) for record in records
+        ):
+            return True
+        legacy_record = {
+            "repo_full_name": metadata.get("repo_full_name"),
+            "number": metadata.get("pr_number"),
+        }
+        if pr_ref := parse_github_pr_url(str(metadata.get("pr_url") or "")):
+            legacy_record["repo_full_name"] = f"{pr_ref.owner}/{pr_ref.repo}"
+        if _pull_request_matches_query(legacy_record, pr_query):
+            return True
+    title = metadata.get("title")
+    title = title if isinstance(title, str) else "Untitled agent"
+    return query.lower() in title.lower()
+
+
+def _summary_matches_query(summary: Mapping[str, Any], query: str) -> bool:
+    pr_query = _pull_request_query(query)
+    if pr_query:
+        records = summary.get("pullRequests")
+        if isinstance(records, list) and any(
+            _pull_request_matches_query(record, pr_query) for record in records
+        ):
+            return True
+        if _pull_request_matches_query(summary.get("pr"), pr_query):
+            return True
+    title = summary.get("title")
+    return isinstance(title, str) and query.lower() in title.lower()
+
+
 def _metadata_matches_filters(
     metadata: Mapping[str, Any],
     *,
@@ -755,11 +813,8 @@ def _metadata_matches_filters(
         return False
     if source and _thread_source(metadata) != source:
         return False
-    if query:
-        title = metadata.get("title")
-        title = title if isinstance(title, str) else "Untitled agent"
-        if query.lower() not in title.lower():
-            return False
+    if query and not _metadata_matches_query(metadata, query):
+        return False
     return True
 
 
@@ -780,10 +835,8 @@ def _summary_matches_filters(
         return False
     if status and summary.get("status") != status:
         return False
-    if query:
-        title = summary.get("title")
-        if not isinstance(title, str) or query.lower() not in title.lower():
-            return False
+    if query and not _summary_matches_query(summary, query):
+        return False
     return True
 
 
