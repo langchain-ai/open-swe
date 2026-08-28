@@ -2,6 +2,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.run_config import RunConfig
+
 from ..review.findings import (
     Finding,
     ReviewerThreadMissingError,
@@ -54,15 +56,8 @@ async def resolve_finding_thread(
         }
 
     config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
-    pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
-    if (
-        not isinstance(repo_config, dict)
-        or not repo_config.get("owner")
-        or not repo_config.get("name")
-        or not isinstance(pr_number, int)
-    ):
+    cfg = RunConfig.from_config(config)
+    if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 
     token = get_github_token()
@@ -74,20 +69,19 @@ async def resolve_finding_thread(
             finding_id=finding_id,
             status=status,
             note=normalized_note,
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
-            pr_number=pr_number,
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
+            pr_number=cfg.pr_number,
             token=token,
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     if result.get("success") and isinstance(result.get("finding"), dict):
-        thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
         await emit_finding_status_outcome(
             result["finding"],
             status,
-            configurable=configurable,
-            thread_id=thread_id if isinstance(thread_id, str) else None,
+            cfg=cfg,
+            thread_id=cfg.thread_id,
         )
     return result
 

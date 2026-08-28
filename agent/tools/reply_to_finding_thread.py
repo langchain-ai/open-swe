@@ -2,6 +2,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.run_config import RunConfig
+
 from ..review.findings import (
     FindingInteraction,
     ReviewerThreadMissingError,
@@ -22,15 +24,8 @@ async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
         return {"success": False, "error": "Reply body is required"}
 
     config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
-    pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
-    if (
-        not isinstance(repo_config, dict)
-        or not repo_config.get("owner")
-        or not repo_config.get("name")
-        or not isinstance(pr_number, int)
-    ):
+    cfg = RunConfig.from_config(config)
+    if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 
     token = get_github_token()
@@ -41,9 +36,9 @@ async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
         return await _reply_to_finding_thread_async(
             finding_id=finding_id,
             body=body,
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
-            pr_number=pr_number,
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
+            pr_number=cfg.pr_number,
             token=token,
         )
     except ReviewerThreadMissingError as exc:

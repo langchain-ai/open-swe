@@ -8,6 +8,8 @@ from langchain_core.tools import InjectedToolCallId
 from langgraph.config import get_config
 from langgraph.types import Command
 
+from agent.run_config import RunConfig
+
 from ..dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,5 @@ def _thread_id_from_config() -> str | None:
         config = get_config()
     except Exception:
         return None
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    thread_id = RunConfig.from_config(config).thread_id
     return str(thread_id) if thread_id else None

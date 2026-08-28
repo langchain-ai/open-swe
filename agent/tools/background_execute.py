@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from langgraph.config import get_config
 
+from agent.run_config import RunConfig
+
 from ..utils.sandbox_state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
@@ -273,8 +275,7 @@ async def _execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
 
 def _current_backend() -> tuple[str, Any]:
     config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id")
+    thread_id = RunConfig.from_config(config).thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("No thread_id in current run config")
     backend = SANDBOX_BACKENDS.get(thread_id)

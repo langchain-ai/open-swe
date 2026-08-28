@@ -39,6 +39,8 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from agent.run_config import RunConfig
+
 from .dashboard.options import gate_fable_model
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -865,20 +867,16 @@ def _on_background_task_done(task: asyncio.Task[None]) -> None:
         logger.warning("Background reviewer task failed: %s", exc)
 
 
-async def _resolve_grouping_model(
-    configurable: dict[str, object], *, use_gateway: bool
-) -> BaseChatModel:
+async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseChatModel:
     """Resolve the model for the diff-grouping pass.
 
     Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
     otherwise the team default, which itself inherits the reviewer subagent
     model when no grouping-specific model is configured.
     """
-    configured_model_id = configurable.get("grouping_model_id")
-    configured_effort = configurable.get("grouping_reasoning_effort")
-    if isinstance(configured_model_id, str) and configured_model_id:
-        model_id = configured_model_id
-        effort = configured_effort if isinstance(configured_effort, str) else None
+    if cfg.grouping_model_id:
+        model_id = cfg.grouping_model_id
+        effort = cfg.grouping_reasoning_effort
     else:
         model_id, effort = await get_team_default_grouping_model()
     model_id, effort = gate_fable_model(
@@ -932,14 +930,13 @@ class PrepareReviewerRunState(PrepareRunState):
 
 async def _ensure_reviewer_sandbox_for_thread(
     thread_id: str,
-    configurable: dict[str, Any],
+    cfg: RunConfig,
 ) -> tuple[SandboxBackendProtocol, str | None]:
-    repo_config = configurable.get("repo") or {}
+    repo_name = cfg.repo.name if cfg.repo else ""
     github_token: str | None = None
-    if configurable.get("source"):
-        repo_name_for_token = str(repo_config.get("name") or "")
+    if cfg.source:
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
-            repositories=[repo_name_for_token] if repo_name_for_token else None
+            repositories=[repo_name] if repo_name else None
         )
         if not github_token:
             raise RuntimeError(
@@ -949,12 +946,11 @@ async def _ensure_reviewer_sandbox_for_thread(
             thread_id, github_token, expires_at=expires_at, is_bot_token=True
         )
 
-    repo_name_for_scope = str(repo_config.get("name") or "")
     return (
         await ensure_sandbox_for_thread(
             thread_id,
             github_proxy_token=github_token,
-            github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
+            github_proxy_repositories=[repo_name] if repo_name else None,
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
@@ -980,38 +976,26 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         self._use_gateway = use_gateway
 
     def _prepare_config_fingerprint(self) -> Any:
-        configurable = self._config.get("configurable", {})
-        repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id")
-            if isinstance(configurable, dict)
-            else None,
+            "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
-            "repo": repo_config,
-            "pr_number": configurable.get("pr_number") if isinstance(configurable, dict) else None,
-            "base_sha": configurable.get("base_sha") if isinstance(configurable, dict) else None,
-            "head_sha": configurable.get("head_sha") if isinstance(configurable, dict) else None,
-            "last_reviewed_sha": configurable.get("last_reviewed_sha")
-            if isinstance(configurable, dict)
-            else None,
-            "reviewer_event": configurable.get("reviewer_event")
-            if isinstance(configurable, dict)
-            else None,
-            "reviewer_eval": configurable.get("reviewer_eval")
-            if isinstance(configurable, dict)
-            else None,
-            "eval": configurable.get("eval") if isinstance(configurable, dict) else None,
-            "finding_reply_id": configurable.get("finding_reply_id")
-            if isinstance(configurable, dict)
-            else None,
+            "repo": cfg.repo.model_dump() if cfg.repo else None,
+            "pr_number": cfg.pr_number,
+            "base_sha": cfg.base_sha,
+            "head_sha": cfg.head_sha,
+            "last_reviewed_sha": cfg.last_reviewed_sha,
+            "reviewer_event": cfg.reviewer_event,
+            "reviewer_eval": cfg.reviewer_eval,
+            "eval": cfg.eval,
+            "finding_reply_id": cfg.finding_reply_id,
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
-        configurable = self._config.get("configurable") or {}
-        repo_config = configurable.get("repo") or {}
+        cfg = RunConfig.from_config(self._config)
         try:
             sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
-                self._thread_id, configurable
+                self._thread_id, cfg
             )
         except SandboxUnreachableError as exc:
             # Replacement was allowed and still failed, so this run dies without a
@@ -1022,11 +1006,11 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             raise
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
-        repo_owner = str(repo_config.get("owner", ""))
-        repo_name = str(repo_config.get("name", ""))
-        base_sha = str(configurable.get("base_sha", "") or "")
-        head_sha = str(configurable.get("head_sha", "") or "")
-        pr_number = configurable.get("pr_number")
+        repo_owner = cfg.repo.owner if cfg.repo else ""
+        repo_name = cfg.repo.name if cfg.repo else ""
+        base_sha = cfg.base_sha or ""
+        head_sha = cfg.head_sha or ""
+        pr_number = cfg.pr_number
 
         repo_ready = await prepare_review_repo(
             sandbox_backend,
@@ -1034,7 +1018,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             repo_owner=repo_owner,
             repo_name=repo_name,
             head_sha=head_sha,
-            pr_number=pr_number if isinstance(pr_number, int) else None,
+            pr_number=pr_number,
             base_sha=base_sha,
         )
         skill_sources: list[str] = []
@@ -1043,19 +1027,13 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
             )
 
-        pr_url = str(configurable.get("pr_url", "") or "")
-        last_reviewed_sha = str(configurable.get("last_reviewed_sha", "") or "")
-        is_re_review = bool(configurable.get("re_review"))
-        reviewer_event = str(configurable.get("reviewer_event", "") or "")
-        reviewer_eval = (
-            configurable.get("reviewer_eval") is True or configurable.get("eval") is True
-        )
+        pr_url = cfg.pr_url or ""
+        last_reviewed_sha = cfg.last_reviewed_sha or ""
+        is_re_review = bool(cfg.re_review)
+        reviewer_event = cfg.reviewer_event or ""
+        reviewer_eval = cfg.is_eval
         can_fetch_pr = (
-            pr_number is not None
-            and isinstance(pr_number, int)
-            and bool(repo_owner)
-            and bool(repo_name)
-            and bool(github_token)
+            pr_number is not None and bool(repo_owner) and bool(repo_name) and bool(github_token)
         )
 
         async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
@@ -1164,7 +1142,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         async def _prepare_pr_trace_context() -> PRTraceContext | None:
             try:
                 return await prepare_pr_trace_context(
-                    configurable=configurable,
+                    cfg=cfg,
                     sandbox_backend=sandbox_backend,
                     work_dir=work_dir,
                 )
@@ -1202,7 +1180,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         pr_title, pr_body = pr_overview
 
         review_context = ""
-        if pr_number is not None and isinstance(pr_number, int):
+        if pr_number is not None:
             if reviewer_event == "finding_reply":
                 existing_findings = await list_findings_async(self._thread_id)
                 review_context = _build_finding_reply_context(
@@ -1210,9 +1188,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                     repo_owner=repo_owner,
                     repo_name=repo_name,
                     pr_number=pr_number,
-                    finding_id=str(configurable.get("finding_reply_id", "") or ""),
-                    reply_author=str(configurable.get("finding_reply_author", "") or ""),
-                    reply_body=str(configurable.get("finding_reply_body", "") or ""),
+                    finding_id=cfg.finding_reply_id or "",
+                    reply_author=cfg.finding_reply_author or "",
+                    reply_body=cfg.finding_reply_body or "",
                     existing_findings_block=_format_existing_findings(existing_findings),
                     pr_title=pr_title,
                     pr_body=pr_body,
@@ -1297,9 +1275,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
 
         if reviewer_event != "finding_reply" and pr_diff_text and self._thread_id:
-            grouping_model = await _resolve_grouping_model(
-                configurable, use_gateway=self._use_gateway
-            )
+            grouping_model = await _resolve_grouping_model(cfg, use_gateway=self._use_gateway)
             grouping_task = asyncio.create_task(
                 maybe_generate_and_store_diff_groups(
                     thread_id=self._thread_id,
@@ -1325,17 +1301,16 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
     config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.parse(configurable)
+    thread_id = cfg.thread_id
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    configured_model_id = configurable.get("reviewer_model_id")
-    configured_effort = configurable.get("reviewer_reasoning_effort")
-    if isinstance(configured_model_id, str) and configured_model_id:
-        model_id = configured_model_id
-        reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
+    if cfg.reviewer_model_id:
+        model_id = cfg.reviewer_model_id
+        reasoning_effort = cfg.reviewer_reasoning_effort
         subagent_model_id = model_id
         subagent_effort = reasoning_effort
     else:
@@ -1353,13 +1328,9 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id,
             subagent_effort,
         )
-    configured_subagent_model_id = configurable.get("reviewer_subagent_model_id")
-    configured_subagent_effort = configurable.get("reviewer_subagent_reasoning_effort")
-    if isinstance(configured_subagent_model_id, str) and configured_subagent_model_id:
-        subagent_model_id = configured_subagent_model_id
-        subagent_effort = (
-            configured_subagent_effort if isinstance(configured_subagent_effort, str) else None
-        )
+    if cfg.reviewer_subagent_model_id:
+        subagent_model_id = cfg.reviewer_subagent_model_id
+        subagent_effort = cfg.reviewer_subagent_reasoning_effort
     fable_enabled = await get_team_fable_enabled()
     model_id, reasoning_effort = gate_fable_model(
         model_id, reasoning_effort, fable_enabled=fable_enabled
@@ -1388,11 +1359,9 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
-        _configurable: dict[str, Any] = configurable,
+        _cfg: RunConfig = cfg,
     ) -> SandboxBackendProtocol:
-        sandbox_backend, _github_token = await _ensure_reviewer_sandbox_for_thread(
-            _thread_id, _configurable
-        )
+        sandbox_backend, _github_token = await _ensure_reviewer_sandbox_for_thread(_thread_id, _cfg)
         return sandbox_backend
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)

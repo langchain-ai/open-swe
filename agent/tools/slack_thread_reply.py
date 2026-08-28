@@ -5,6 +5,8 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from agent.run_config import RunConfig
+
 from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.slack import (
     convert_mentions_to_slack_format,
@@ -50,14 +52,14 @@ async def slack_thread_reply(
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
     Example: <@U06KD8BFY95> will tag that user in the message."""
     config = get_config()
-    configurable = config.get("configurable", {})
+    cfg = RunConfig.parse(config.get("configurable"))
     run_id = _current_run_id(config)
-    slack_thread = configurable.get("slack_thread", {})
-    thread_id = configurable.get("thread_id")
+    slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
+    thread_id = cfg.thread_id
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
-        thread_id if isinstance(thread_id, str) else None,
+        thread_id,
         slack_thread if isinstance(slack_thread, dict) else None,
     )
     active = active or {}
@@ -105,7 +107,7 @@ async def slack_thread_reply(
             ),
             langgraph_client=client,
             run_id=run_id,
-            triggering_user_id=_triggering_user_id(configurable),
+            triggering_user_id=_triggering_user_id(cfg),
         )
     if message_ts is None:
         return {
@@ -119,21 +121,12 @@ async def slack_thread_reply(
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
-    candidates = [config.get("run_id")]
-    configurable = config.get("configurable")
-    if isinstance(configurable, dict):
-        candidates.append(configurable.get("run_id"))
+    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
     return next((str(candidate) for candidate in candidates if candidate), None)
 
 
-def _triggering_user_id(configurable: object) -> str | None:
-    if not isinstance(configurable, dict):
-        return None
-    slack_thread = configurable.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return None
-    user_id = slack_thread.get("triggering_user_id")
-    return user_id if isinstance(user_id, str) and user_id else None
+def _triggering_user_id(cfg: RunConfig) -> str | None:
+    return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
 
 
 def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:

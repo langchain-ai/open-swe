@@ -14,6 +14,8 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from agent.run_config import RunConfig
+
 from ..review.findings import get_thread_metadata
 from ..review.publish import settle_review_check_run
 from ..utils.github_token import get_github_token
@@ -27,18 +29,11 @@ async def settle_review_check_on_exit(
     runtime: Runtime,
 ) -> dict[str, Any] | None:
     """Fail the tracked review check run if the run ended without publishing."""
-    config = get_config()
-    configurable = config.get("configurable", {})
-    if not isinstance(configurable, dict):
+    cfg = RunConfig.from_config(get_config())
+    thread_id = cfg.thread_id
+    if not thread_id or not cfg.repo:
         return None
-    thread_id = configurable.get("thread_id")
-    repo_config = configurable.get("repo")
-    if not isinstance(thread_id, str) or not thread_id or not isinstance(repo_config, dict):
-        return None
-    owner = repo_config.get("owner")
-    repo = repo_config.get("name")
-    if not isinstance(owner, str) or not owner or not isinstance(repo, str) or not repo:
-        return None
+    owner, repo = cfg.repo.owner, cfg.repo.name
 
     try:
         metadata = await get_thread_metadata(thread_id)

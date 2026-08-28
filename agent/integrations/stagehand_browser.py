@@ -9,6 +9,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.run_config import RunConfig
+
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -44,8 +46,7 @@ def browser_tools_enabled() -> bool:
 
 def _thread_id() -> str:
     config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    thread_id = RunConfig.from_config(config).thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("no thread_id in run config")
     return thread_id

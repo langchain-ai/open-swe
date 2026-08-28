@@ -16,6 +16,8 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
+from agent.run_config import RunConfig
+
 from ..dashboard.workflow_approval import (
     ensure_workflow_push_pending,
     mark_workflow_push_notified,
@@ -106,15 +108,12 @@ def _config(request: ToolCallRequest) -> Mapping[str, Any]:
     return config if isinstance(config, Mapping) else {}
 
 
-def _configurable(request: ToolCallRequest) -> Mapping[str, Any]:
-    config = _config(request)
-    configurable = config.get("configurable")
-    return configurable if isinstance(configurable, Mapping) else {}
+def _configurable(request: ToolCallRequest) -> RunConfig:
+    return RunConfig.from_config(_config(request))
 
 
 def _thread_id(request: ToolCallRequest) -> str | None:
-    thread_id = _configurable(request).get("thread_id")
-    return thread_id if isinstance(thread_id, str) and thread_id else None
+    return _configurable(request).thread_id or None
 
 
 def _backend(thread_id: str | None) -> Any | None:
@@ -465,13 +464,11 @@ async def _post_slack_approval_if_needed(
 ) -> None:
     if record.get("notified") is True:
         return
-    configurable = _configurable(request)
-    slack_thread = configurable.get("slack_thread")
-    thread_id = _thread_id(request)
+    cfg = _configurable(request)
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
-        thread_id,
-        slack_thread if isinstance(slack_thread, Mapping) else None,
+        cfg.thread_id,
+        cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     if not active:
         return
@@ -487,7 +484,7 @@ async def _post_slack_approval_if_needed(
         thread_ts,
         message,
         blocks=build_workflow_approval_blocks(message, change.fingerprint),
-        agent_thread_id=thread_id,
+        agent_thread_id=cfg.thread_id,
     )
     if message_ts and not error:
         thread_id = _thread_id(request)

@@ -17,6 +17,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
+from agent.run_config import Repo, RunConfig
 from agent.thread_ids import reviewer_thread_id
 
 from ..review.findings import (
@@ -767,12 +768,12 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
 
     head = pr_metadata.get("head") or {}
     base = pr_metadata.get("base") or {}
-    configurable = {
-        "repo": {"owner": owner, "name": repo},
-        "pr_number": pr_number,
-        "pr_url": pr_metadata.get("html_url") or pr_ref.url,
-        "branch_name": head.get("ref", ""),
-        "head_sha": head.get("sha", ""),
-        "base_sha": base.get("sha", ""),
-    }
-    return asdict(await resolve_pr_trace(configurable=configurable))
+    cfg = RunConfig(
+        repo=Repo(owner=owner, name=repo),
+        pr_number=pr_number,
+        pr_url=pr_metadata.get("html_url") or pr_ref.url,
+        branch_name=head.get("ref", ""),
+        head_sha=head.get("sha", ""),
+        base_sha=base.get("sha", ""),
+    )
+    return asdict(await resolve_pr_trace(cfg=cfg))

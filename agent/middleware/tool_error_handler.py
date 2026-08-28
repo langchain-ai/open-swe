@@ -19,6 +19,8 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import SandboxClientError
 
+from agent.run_config import RunConfig
+
 from ..utils.sandbox_state import clear_sandbox_backend
 from .sandbox_circuit_breaker import (
     extract_sandbox_id,
@@ -114,11 +116,7 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
     config = _get_run_config(request)
     if config is None:
         return None
-    configurable = config.get("configurable", {})
-    if not isinstance(configurable, Mapping):
-        return None
-    thread_id = configurable.get("thread_id")
-    return thread_id if isinstance(thread_id, str) and thread_id else None
+    return RunConfig.from_config(config).thread_id or None
 
 
 def _sandbox_unreachable_tool_message(

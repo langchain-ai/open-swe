@@ -30,6 +30,8 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from agent.run_config import RunConfig
+
 from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
@@ -121,28 +123,24 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
 
     def _prepare_config_fingerprint(self) -> object:
-        configurable = self._config.get("configurable", {})
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id")
-            if isinstance(configurable, dict)
-            else None,
+            "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
-            "full_name": configurable.get("review_style_full_name")
-            if isinstance(configurable, dict)
-            else None,
-            "mode": configurable.get("analyzer_mode") if isinstance(configurable, dict) else None,
+            "full_name": cfg.review_style_full_name,
+            "mode": cfg.analyzer_mode,
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-        configurable = self._config.get("configurable") or {}
-        full_name = str(configurable.get("review_style_full_name") or "owner/repo")
+        cfg = RunConfig.from_config(self._config)
+        full_name = cfg.review_style_full_name or "owner/repo"
         owner, _, name = full_name.partition("/")
-        samples_text = str(configurable.get("review_style_samples_text") or "")
-        mode = str(configurable.get("analyzer_mode") or "bootstrap")
-        github_token = configurable.get("review_style_github_token")
-        if not (isinstance(github_token, str) and github_token):
+        samples_text = cfg.review_style_samples_text or ""
+        mode = cfg.analyzer_mode or "bootstrap"
+        github_token = cfg.review_style_github_token
+        if not github_token:
             github_token = await get_github_app_installation_token()
         if isinstance(github_token, str) and github_token:
             await _configure_sandbox_github_proxy(sandbox_backend, github_token)
@@ -162,8 +160,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:
-    configurable = config.get("configurable") or {}
-    thread_id = configurable.get("thread_id")
+    thread_id = RunConfig.from_config(config).thread_id
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):

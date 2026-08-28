@@ -7,6 +7,7 @@ from langgraph.graph.state import RunnableConfig
 from agent import server
 from agent.dashboard.environments import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.run_config import RunConfig
 from agent.tools import admin_gate
 from agent.tools import environments as env_tools
 
@@ -85,10 +86,9 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
 
 
 def test_environment_slug_reads_the_run_config() -> None:
-    assert server._environment_slug({"environment": "staging"}) == "staging"
-    assert server._environment_slug({"environment": "  "}) is None
-    assert server._environment_slug({}) is None
-    assert server._environment_slug(None) is None
+    assert server._environment_slug(RunConfig(environment="staging")) == "staging"
+    assert server._environment_slug(RunConfig(environment="  ")) is None
+    assert server._environment_slug(RunConfig()) is None
 
 
 # --- admin thread gate ---

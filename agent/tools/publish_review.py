@@ -7,6 +7,8 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from agent.run_config import RunConfig
+
 from ..dashboard.agent_usage import record_reviewer_publication
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
@@ -118,35 +120,23 @@ async def publish_review(
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
 
     config = get_config()
-    raw_configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    configurable = raw_configurable if isinstance(raw_configurable, dict) else {}
-    repo_config = configurable.get("repo")
-    pr_number = configurable.get("pr_number")
-    head_sha = configurable.get("head_sha")
-    is_re_review = bool(configurable.get("re_review"))
+    cfg = RunConfig.from_config(config)
+    pr_number = cfg.pr_number
+    head_sha = cfg.head_sha
+    is_re_review = bool(cfg.re_review)
 
-    if (
-        not isinstance(repo_config, dict)
-        or not repo_config.get("owner")
-        or not repo_config.get("name")
-    ):
+    if not cfg.repo:
         return {"success": False, "error": "Missing repo info in run config"}
-    if not isinstance(pr_number, int):
+    if pr_number is None:
         return {"success": False, "error": "Missing pr_number in run config"}
-    if not isinstance(head_sha, str) or not head_sha:
+    if not head_sha:
         return {"success": False, "error": "Missing head_sha in run config"}
 
-    if _is_reviewer_eval_mode(configurable):
-        eval_threshold = configurable.get("reviewer_eval_severity_threshold")
-        if isinstance(eval_threshold, str) and eval_threshold in {
-            "low",
-            "medium",
-            "high",
-            "critical",
-        }:
-            severity_threshold = eval_threshold
-        eval_cap = configurable.get("reviewer_eval_cap")
-        if not isinstance(eval_cap, int) or isinstance(eval_cap, bool) or eval_cap < 0:
+    if cfg.is_eval:
+        if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
+            severity_threshold = cfg.reviewer_eval_severity_threshold or severity_threshold
+        eval_cap = cfg.reviewer_eval_cap
+        if eval_cap is None or eval_cap < 0:
             eval_cap = REVIEW_FINDING_CAP
         try:
             return await _publish_review_eval_dry_run_async(
@@ -163,8 +153,8 @@ async def publish_review(
 
     try:
         return await _publish_review_async(
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
@@ -172,7 +162,7 @@ async def publish_review(
             cap=REVIEW_FINDING_CAP,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
-            trace_link_config_override=configurable.get("review_trace_link_enabled"),
+            trace_link_config_override=cfg.review_trace_link_enabled,
             state=state,
         )
     except ReviewerThreadMissingError as exc:
@@ -195,7 +185,7 @@ def _cast_severity(value: str) -> Severity:
     return value  # type: ignore[return-value]
 
 
-async def _resolve_review_trace_url(thread_id: str, config_override: object) -> str | None:
+async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:
     if config_override is False:
         return None
     if not await get_team_review_trace_links_enabled():
@@ -203,10 +193,6 @@ async def _resolve_review_trace_url(thread_id: str, config_override: object) -> 
     if not thread_id:
         return None
     return await get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
-
-
-def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:
-    return configurable.get("reviewer_eval") is True or configurable.get("eval") is True
 
 
 async def _publish_review_eval_dry_run_async(
@@ -270,7 +256,7 @@ async def _publish_review_async(
     cap: int,
     is_re_review: bool,
     langgraph_run_id: str | None = None,
-    trace_link_config_override: object = None,
+    trace_link_config_override: bool | None = None,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
@@ -278,7 +264,7 @@ async def _publish_review_async(
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
-    head_sha = await resolve_review_head_sha(thread_id, {"head_sha": head_sha})
+    head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -790,10 +776,8 @@ async def _resolve_diff_line_set(
         state_cached = state.get("diff_line_set")
         if isinstance(state_cached, dict):
             return state_cached
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    cached = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
-    if isinstance(cached, dict):
+    cached = RunConfig.from_config(get_config()).diff_line_set
+    if cached is not None:
         return cached
 
     diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
@@ -1030,10 +1014,7 @@ async def _resolve_threads_for_resolved_findings(
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
-    candidates = [config.get("run_id")]
-    configurable = config.get("configurable")
-    if isinstance(configurable, dict):
-        candidates.append(configurable.get("run_id"))
+    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
     for candidate in candidates:
         if isinstance(candidate, str) and candidate:
             return candidate

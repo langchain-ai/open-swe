@@ -4,22 +4,23 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 
+from agent.run_config import RunConfig
+
 SHELL_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
 
 
-def is_desktop_run(configurable: dict[str, Any]) -> bool:
-    return configurable.get("source") == "desktop"
+def is_desktop_run(cfg: RunConfig) -> bool:
+    return cfg.source == "desktop"
 
 
-def resolve_desktop_project(configurable: dict[str, Any]) -> str:
-    requested = configurable.get("local_project_path")
+def resolve_desktop_project(cfg: RunConfig) -> str:
+    requested = cfg.local_project_path
     allowlist_path = os.environ.get("OPEN_SWE_LOCAL_PROJECTS_FILE")
-    if not isinstance(requested, str) or not requested or not allowlist_path:
+    if not requested or not allowlist_path:
         raise ValueError("Desktop runs require an allowlisted local_project_path")
     with open(allowlist_path, encoding="utf-8") as file:
         entries = json.load(file)
@@ -36,9 +37,9 @@ def resolve_desktop_project(configurable: dict[str, Any]) -> str:
     return project
 
 
-def create_desktop_backend(configurable: dict[str, Any]) -> LocalShellBackend:
+def create_desktop_backend(cfg: RunConfig) -> LocalShellBackend:
     return LocalShellBackend(
-        root_dir=resolve_desktop_project(configurable),
+        root_dir=resolve_desktop_project(cfg),
         virtual_mode=False,
         env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},
     )

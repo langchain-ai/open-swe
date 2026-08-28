@@ -52,9 +52,8 @@ async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
     if error := require_admin("reset sandboxes"):
         return {"success": False, "error": error}
 
-    values = configurable()
-    thread_id = values.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    thread_id = configurable().thread_id
+    if not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
 
     create_params = {
