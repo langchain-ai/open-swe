@@ -528,8 +528,8 @@ describe("markAgentThreadViewed", () => {
       pinned: Array<AgentThread>
       active: { items: Array<AgentThread> }
     }>(sidebarKey)
-    expect(sidebar?.pinned[0].viewed).toBe(true)
-    expect(sidebar?.active.items[0].viewed).toBe(true)
+    expect(sidebar?.pinned[0]?.viewed).toBe(true)
+    expect(sidebar?.active.items[0]?.viewed).toBe(true)
     expect(
       client.getQueryData<AgentThread>(
         agentThreadKeys.sidebarActive("thread-1")

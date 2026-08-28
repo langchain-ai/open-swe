@@ -14,7 +14,7 @@ import {
   SparkleIcon,
 } from "@phosphor-icons/react"
 import { Kanban } from "lucide-react"
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type {
@@ -101,6 +101,40 @@ const NAV = [
 /** Threads shown per project before the group needs a "Show more". */
 const PROJECT_PREVIEW_COUNT = 12
 
+/**
+ * Tracks whether the scroll container has content hidden above or below, so
+ * the sidebar can show an edge hairline + fade only where there is more to
+ * reach. Measured after every render because the thread list polls, and on
+ * container resize.
+ */
+function useScrollEdges() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ top: false, bottom: false })
+
+  const measure = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const top = el.scrollTop > 0
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight > 1
+    // Returning the previous object when nothing moved lets React bail out —
+    // without it the dependency-free effect below would re-render forever.
+    setEdges((prev) =>
+      prev.top === top && prev.bottom === bottom ? prev : { top, bottom }
+    )
+  }, [])
+
+  useEffect(measure)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [measure])
+
+  return { ref, edges, measure }
+}
+
 export function AgentsSidebar({
   user,
   localOnly = false,
@@ -109,6 +143,7 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const scroll = useScrollEdges()
   const { openPalette } = useAppCommandControls()
   const openThread = useCallback(
     (threadId: string) => {
@@ -423,186 +458,203 @@ export function AgentsSidebar({
         </Link>
       </div>
 
-      {!localOnly && (
-        <nav
-          className={cn(
-            "flex flex-col gap-0.5 px-2",
-            isDesktop ? "pb-3" : "pb-4"
-          )}
-        >
-          {NAV.map((item) => {
-            const Icon = item.icon
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                onClick={layout.closeOnMobile}
-                className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-                activeProps={{
-                  className:
-                    "bg-sidebar-row-hover !text-foreground font-medium",
-                }}
-              >
-                <Icon className="size-4" />
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
-      )}
-
       <TooltipProvider delay={500} closeDelay={100}>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {sourcesLoading && allItems.length === 0 && (
-            <ThreadListSkeleton compact={prefs.compact} />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {scroll.edges.top && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 top-px z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
+            </>
           )}
-          {sidebar.isError && (
-            <ThreadSourceError
-              label="Cloud threads unavailable"
-              onRetry={() => void sidebar.refetch()}
-            />
+          {scroll.edges.bottom && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-px z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
+            </>
           )}
-          {localThreads.isError && (
-            <ThreadSourceError
-              label="Local threads unavailable"
-              onRetry={() => void localThreads.refetch()}
-            />
-          )}
-          {sourcesLoading && allItems.length > 0 && (
-            <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-              <CircleNotchIcon className="size-3.5 animate-spin" />
-              Loading threads…
-            </div>
-          )}
-
-          {(filteredPinnedItems.length > 0 || pinnedGroups.length > 0) && (
-            <section className="mb-3">
-              <SidebarSectionHeader
-                label="Pinned"
-                collapsed={sectionCollapsed("pinned")}
-                onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
-                menu={
-                  <SidebarSectionMenu label="Pinned options">
-                    <MenuGroup>
-                      <MenuGroupLabel>Sort pinned by</MenuGroupLabel>
-                      <MenuRadioGroup
-                        value={prefs.sortPinned}
-                        onValueChange={(value) =>
-                          setView({ sortPinned: value as PinnedSort })
-                        }
-                      >
-                        <MenuRadioItem value="priority">Priority</MenuRadioItem>
-                        <MenuRadioItem value="updated">
-                          Last updated
-                        </MenuRadioItem>
-                        <MenuRadioItem value="manual">
-                          Manual order
-                        </MenuRadioItem>
-                      </MenuRadioGroup>
-                    </MenuGroup>
-                  </SidebarSectionMenu>
-                }
+          <div
+            ref={scroll.ref}
+            className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+            onScroll={scroll.measure}
+          >
+            {!localOnly && (
+              <nav
+                className={cn(
+                  "flex flex-col gap-0.5",
+                  isDesktop ? "pb-3" : "pb-4"
+                )}
+              >
+                {NAV.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      onClick={layout.closeOnMobile}
+                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                      activeProps={{
+                        className:
+                          "bg-sidebar-row-hover !text-foreground font-medium",
+                      }}
+                    >
+                      <Icon className="size-4" />
+                      {item.label}
+                    </Link>
+                  )
+                })}
+              </nav>
+            )}
+            {sourcesLoading && allItems.length === 0 && (
+              <ThreadListSkeleton compact={prefs.compact} />
+            )}
+            {sidebar.isError && (
+              <ThreadSourceError
+                label="Cloud threads unavailable"
+                onRetry={() => void sidebar.refetch()}
               />
-              {!sectionCollapsed("pinned") && (
-                <>
-                  {filteredPinnedItems.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                  ))}
-                  {pinnedGroups.map(renderProjectGroup)}
-                </>
-              )}
-            </section>
-          )}
+            )}
+            {localThreads.isError && (
+              <ThreadSourceError
+                label="Local threads unavailable"
+                onRetry={() => void localThreads.refetch()}
+              />
+            )}
+            {sourcesLoading && allItems.length > 0 && (
+              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+                <CircleNotchIcon className="size-3.5 animate-spin" />
+                Loading threads…
+              </div>
+            )}
 
-          {prefs.organize === "project" &&
-            (unpinnedGroups.length > 0 || isDesktop) && (
+            {(filteredPinnedItems.length > 0 || pinnedGroups.length > 0) && (
               <section className="mb-3">
                 <SidebarSectionHeader
-                  label="Projects"
-                  collapsed={sectionCollapsed("projects")}
-                  onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                  label="Pinned"
+                  collapsed={sectionCollapsed("pinned")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
                   menu={
-                    <SidebarSectionMenu label="Projects options">
-                      {viewMenuItems}
-                      {removeProjectItems}
+                    <SidebarSectionMenu label="Pinned options">
+                      <MenuGroup>
+                        <MenuGroupLabel>Sort pinned by</MenuGroupLabel>
+                        <MenuRadioGroup
+                          value={prefs.sortPinned}
+                          onValueChange={(value) =>
+                            setView({ sortPinned: value as PinnedSort })
+                          }
+                        >
+                          <MenuRadioItem value="priority">Priority</MenuRadioItem>
+                          <MenuRadioItem value="updated">
+                            Last updated
+                          </MenuRadioItem>
+                          <MenuRadioItem value="manual">
+                            Manual order
+                          </MenuRadioItem>
+                        </MenuRadioGroup>
+                      </MenuGroup>
                     </SidebarSectionMenu>
                   }
-                  action={
-                    isDesktop ? (
-                      <SidebarSectionAction
-                        label="Add project"
-                        icon={<PlusIcon className="size-4" />}
-                        onClick={() => void addLocalProject()}
-                      />
-                    ) : undefined
-                  }
                 />
-                {!sectionCollapsed("projects") &&
-                  unpinnedGroups.map(renderProjectGroup)}
+                {!sectionCollapsed("pinned") && (
+                  <>
+                    {filteredPinnedItems.map((item) => (
+                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                    ))}
+                    {pinnedGroups.map(renderProjectGroup)}
+                  </>
+                )}
               </section>
             )}
 
-          {(grouped.recents.length > 0 ||
-            hasMoreActive ||
-            hasMoreArchived ||
-            resolvedLoading) && (
-            <section className="mb-3">
-              <SidebarSectionHeader
-                label="Recents"
-                collapsed={sectionCollapsed("recents")}
-                onToggleCollapsed={() => toggleSectionCollapsed("recents")}
-                menu={
-                  <SidebarSectionMenu label="Recents options">
-                    {viewMenuItems}
-                  </SidebarSectionMenu>
-                }
-                action={
-                  <SidebarSectionAction
-                    label="New thread"
-                    icon={<NotePencilIcon className="size-4" />}
-                    onClick={() => {
-                      layout.closeOnMobile()
-                      void navigate({ to: "/agents" })
-                    }}
+            {prefs.organize === "project" &&
+              (unpinnedGroups.length > 0 || isDesktop) && (
+                <section className="mb-3">
+                  <SidebarSectionHeader
+                    label="Projects"
+                    collapsed={sectionCollapsed("projects")}
+                    onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                    menu={
+                      <SidebarSectionMenu label="Projects options">
+                        {viewMenuItems}
+                        {removeProjectItems}
+                      </SidebarSectionMenu>
+                    }
+                    action={
+                      isDesktop ? (
+                        <SidebarSectionAction
+                          label="Add project"
+                          icon={<PlusIcon className="size-4" />}
+                          onClick={() => void addLocalProject()}
+                        />
+                      ) : undefined
+                    }
                   />
-                }
-              />
-              {!sectionCollapsed("recents") && (
-                <>
-                  {grouped.recents.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                  ))}
-                  {hasMoreActive && (
-                    <LoadMoreThreadsButton
-                      label="Load more cloud threads"
-                      loading={sidebar.activeQuery.isFetchingNextPage}
-                      onClick={() => void sidebar.activeQuery.fetchNextPage()}
-                    />
-                  )}
-                  {hasMoreArchived && (
-                    <LoadMoreThreadsButton
-                      label="Load more archived cloud threads"
-                      loading={sidebar.resolvedQuery.isFetchingNextPage}
-                      onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
-                    />
-                  )}
-                  {resolvedLoading && (
-                    <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-                      <CircleNotchIcon className="size-3.5 animate-spin" />
-                      Loading archived threads…
-                    </div>
-                  )}
-                </>
+                  {!sectionCollapsed("projects") &&
+                    unpinnedGroups.map(renderProjectGroup)}
+                </section>
               )}
-            </section>
-          )}
-          {isEmpty && !sidebar.isError && !localThreads.isError && (
-            <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
-              {hasActiveFilters(prefs.filters)
-                ? "No threads match these filters."
-                : "No threads yet."}
-            </p>
-          )}
+
+            {(grouped.recents.length > 0 ||
+              hasMoreActive ||
+              hasMoreArchived ||
+              resolvedLoading) && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Recents"
+                  collapsed={sectionCollapsed("recents")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+                  menu={
+                    <SidebarSectionMenu label="Recents options">
+                      {viewMenuItems}
+                    </SidebarSectionMenu>
+                  }
+                  action={
+                    <SidebarSectionAction
+                      label="New thread"
+                      icon={<NotePencilIcon className="size-4" />}
+                      onClick={() => {
+                        layout.closeOnMobile()
+                        void navigate({ to: "/agents" })
+                      }}
+                    />
+                  }
+                />
+                {!sectionCollapsed("recents") && (
+                  <>
+                    {grouped.recents.map((item) => (
+                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                    ))}
+                    {hasMoreActive && (
+                      <LoadMoreThreadsButton
+                        label="Load more cloud threads"
+                        loading={sidebar.activeQuery.isFetchingNextPage}
+                        onClick={() => void sidebar.activeQuery.fetchNextPage()}
+                      />
+                    )}
+                    {hasMoreArchived && (
+                      <LoadMoreThreadsButton
+                        label="Load more archived cloud threads"
+                        loading={sidebar.resolvedQuery.isFetchingNextPage}
+                        onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
+                      />
+                    )}
+                    {resolvedLoading && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+                        <CircleNotchIcon className="size-3.5 animate-spin" />
+                        Loading archived threads…
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+            {isEmpty && !sidebar.isError && !localThreads.isError && (
+              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+                {hasActiveFilters(prefs.filters)
+                  ? "No threads match these filters."
+                  : "No threads yet."}
+              </p>
+            )}
+          </div>
         </div>
       </TooltipProvider>
 

@@ -31,7 +31,7 @@ function renderRow(archived: boolean, onToggleArchived = vi.fn()) {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <SidebarThreadRow
-        item={localSidebarThread(local, undefined, undefined, archived)}
+        item={localSidebarThread({ ...local, archived }, undefined, undefined)}
         isActive={false}
         pinned={false}
         archived={archived}
