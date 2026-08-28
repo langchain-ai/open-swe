@@ -8,6 +8,7 @@ const {
   Menu,
   dialog,
   net,
+  nativeTheme,
   protocol,
   safeStorage,
   session,
@@ -466,10 +467,10 @@ function errorPage(error) {
     <meta name="color-scheme" content="light dark">
     <title>Open SWE</title>
     <style>
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 14px system-ui, sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: light-dark(#fff, #111); color: light-dark(#000, #fff); font: 14px system-ui, sans-serif; }
       main { max-width: 520px; padding: 32px; text-align: center; }
       h1 { font-size: 22px; }
-      p { color: GrayText; line-height: 1.5; overflow-wrap: anywhere; }
+      p { color: light-dark(#666, #b8b8b8); line-height: 1.5; overflow-wrap: anywhere; }
     </style>
   </head>
   <body>
@@ -839,7 +840,7 @@ function createWindow() {
     height: 900,
     minWidth: 480,
     minHeight: 600,
-    backgroundColor: "#ffffff",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#111111" : "#ffffff",
     icon: iconPath(),
     show: false,
     ...(process.platform === "darwin"
@@ -906,7 +907,7 @@ function createSetupWindow() {
     height: 460,
     minWidth: 480,
     minHeight: 420,
-    backgroundColor: "#ffffff",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#111111" : "#ffffff",
     icon: iconPath(),
     show: false,
     webPreferences: {
