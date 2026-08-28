@@ -1,6 +1,8 @@
 {
-  "updatedAt": "2026-07-16T05:38:42.189Z",
+  "updatedAt": "2026-08-27T18:51:28.736Z",
   "command": "init",
-  "gitHead": "697adaa7efa409fd692d7e00f9bac470aa87cf2c",
-  "model": "gpt-5.6-terra"
+  "gitHead": "5abb1a375177ce6c0d76a4cebab89cd05cdebc5f",
+  "model": "claude-opus-4-8",
+  "status": "complete",
+  "language": "en"
 }
