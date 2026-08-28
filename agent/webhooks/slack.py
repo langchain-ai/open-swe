@@ -196,6 +196,7 @@ async def _dispatch_or_queue_slack_run(
     configurable: dict[str, Any],
     *,
     explicitly_tagged: bool,
+    metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
     if isinstance(run_input, list):
@@ -207,7 +208,7 @@ async def _dispatch_or_queue_slack_run(
             configurable,
             source="slack",
             input=run_input,
-            metadata=common._AGENT_VERSION_METADATA,
+            metadata={**common._AGENT_VERSION_METADATA, **metadata},
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -732,9 +733,8 @@ async def _process_slack_mention_impl(
     if not mapped_login and user_email:
         mapped_login = await common.login_for_email(user_email)
 
-    image_model_override: tuple[str, str] | None = None
+    resolved_model_id, resolved_effort = await common.resolve_agent_model_pair(mapped_login)
     if image_urls:
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -745,7 +745,7 @@ async def _process_slack_mention_impl(
                 resolved_model_id,
             )
             resolved_model_id = fallback_model_id
-            image_model_override = (fallback_model_id, fallback_effort)
+            resolved_effort = fallback_effort
         common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
         async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
             for image_url in image_urls:
@@ -832,9 +832,8 @@ async def _process_slack_mention_impl(
     thread_environment = environment_slug or await common._get_thread_environment(thread_id)
     if thread_environment:
         configurable["environment"] = thread_environment
-    if image_model_override:
-        configurable["agent_model_id"] = image_model_override[0]
-        configurable["agent_effort"] = image_model_override[1]
+    configurable["agent_model_id"] = resolved_model_id
+    configurable["agent_effort"] = resolved_effort
 
     thread_plan_mode = await common._get_thread_plan_mode(thread_id)
     if thread_plan_mode is not None:
@@ -893,6 +892,7 @@ async def _process_slack_mention_impl(
             run_input,
             configurable,
             explicitly_tagged=explicitly_tagged,
+            metadata={"model": resolved_model_id, "effort": resolved_effort},
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear

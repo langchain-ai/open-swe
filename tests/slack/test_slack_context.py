@@ -1368,6 +1368,12 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", fake_upsert_owner)
 
+    async def fake_resolve_agent_model_pair(login: str | None) -> tuple[str, str]:
+        assert login == "mason-gh"
+        return "anthropic:claude-sonnet-4-5", "high"
+
+    monkeypatch.setattr(webhook_common, "resolve_agent_model_pair", fake_resolve_agent_model_pair)
+
     asyncio.run(
         slack_webhooks.process_slack_mention(
             {
@@ -1388,6 +1394,11 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     config = cast(dict[str, object], kwargs["config"])
     configurable = cast(dict[str, object], config["configurable"])
     assert configurable["github_login"] == "mason-gh"
+    assert configurable["agent_model_id"] == "anthropic:claude-sonnet-4-5"
+    assert configurable["agent_effort"] == "high"
+    metadata = cast(dict[str, object], kwargs["metadata"])
+    assert metadata["model"] == configurable["agent_model_id"]
+    assert metadata["effort"] == configurable["agent_effort"]
     # The thread is tagged with the login resolved from the Slack user id, so it
     # surfaces in the web Agents UI even when the Slack profile email does not
     # resolve to a mapping (login_for_email returns None in this harness).

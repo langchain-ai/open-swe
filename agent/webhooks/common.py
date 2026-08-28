@@ -18,6 +18,8 @@ from agent.source_context import SourceContext
 
 from ..dashboard.agent_overrides import (
     get_profile_default_repo,
+    load_profile,
+    normalize_profile_overrides,
     resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
@@ -31,6 +33,7 @@ from ..dashboard.profiles import (  # noqa: F401
     has_access_token_record,
 )
 from ..dashboard.team_settings import (
+    get_team_default_model,
     get_team_default_repo,
     get_team_settings,
 )
@@ -276,6 +279,7 @@ __all__ = [
     "repo_context_bar_items",
     "refresh_user_mapping_cache",
     "resolve_agent_model_id",
+    "resolve_agent_model_pair",
     "resolve_login_from_email_async",
     "resolve_slack_links_in_context",
     "resolve_slack_thread_id",
@@ -544,6 +548,18 @@ def _run_id_for_logging(run: Any) -> str:
     else:
         run_id = getattr(run, "run_id", None)
     return run_id if isinstance(run_id, str) and run_id else "<unknown>"
+
+
+async def resolve_agent_model_pair(github_login: str | None) -> tuple[str, str]:
+    """Resolve the agent model and effort using team defaults and profile overrides."""
+    model_id, effort = await get_team_default_model("agent")
+    if github_login:
+        profile = await load_profile(github_login)
+        if profile:
+            overridden_model, overridden_effort = normalize_profile_overrides(profile)
+            if overridden_model and overridden_effort:
+                model_id, effort = overridden_model, overridden_effort
+    return model_id, effort
 
 
 async def _get_slack_channel_context(channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
