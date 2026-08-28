@@ -513,6 +513,9 @@ export function useSidebarThreads({
         setResolvedLimit((limit) => limit + SIDEBAR_PAGE_SIZE),
     },
     isPending: query.isPending,
+    isError: query.isError,
+    error: query.error,
+    refetch: query.refetch,
   }
 }
 

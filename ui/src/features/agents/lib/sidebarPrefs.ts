@@ -1,32 +1,18 @@
 import { useCallback, useEffect, useState } from "react"
 
 import { DEFAULT_SIDEBAR_FILTERS } from "./sidebarFilter"
-import type { SidebarFilters, SidebarGroupMode } from "./sidebarFilter"
+import type { SidebarFilters } from "./sidebarFilter"
 
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-const GROUP_MODES: ReadonlyArray<SidebarGroupMode> = [
-  "none",
-  "focus",
-  "date",
-  "status",
-  "repo",
-]
-
-export type SidebarSection = "local" | "cloud"
-
 export interface SidebarPrefs {
-  group: SidebarGroupMode
   compact: boolean
-  collapsed: Record<SidebarSection, boolean>
   filters: SidebarFilters
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
-  group: "repo",
   compact: false,
-  collapsed: { local: false, cloud: false },
   filters: DEFAULT_SIDEBAR_FILTERS,
 }
 
@@ -42,9 +28,9 @@ function sanitizeFilters(value: unknown): SidebarFilters {
   return {
     statuses: asStringArray(raw.statuses) as SidebarFilters["statuses"],
     sources: asStringArray(raw.sources) as SidebarFilters["sources"],
+    locations: asStringArray(raw.locations) as SidebarFilters["locations"],
     pr: asStringArray(raw.pr) as SidebarFilters["pr"],
     models: asStringArray(raw.models),
-    repos: asStringArray(raw.repos),
     includeAutomations:
       typeof raw.includeAutomations === "boolean"
         ? raw.includeAutomations
@@ -56,25 +42,14 @@ function sanitizeFilters(value: unknown): SidebarFilters {
   }
 }
 
-function sanitizeCollapsed(value: unknown): Record<SidebarSection, boolean> {
-  const raw =
-    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
-  return { local: raw.local === true, cloud: raw.cloud === true }
-}
-
 function sanitizePrefs(value: unknown): SidebarPrefs {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
-  const group = raw.group
   return {
-    group: GROUP_MODES.includes(group as SidebarGroupMode)
-      ? (group as SidebarGroupMode)
-      : DEFAULT_SIDEBAR_PREFS.group,
     compact:
       typeof raw.compact === "boolean"
         ? raw.compact
         : DEFAULT_SIDEBAR_PREFS.compact,
-    collapsed: sanitizeCollapsed(raw.collapsed),
     filters: sanitizeFilters(raw.filters),
   }
 }
@@ -101,20 +76,8 @@ export function useSidebarPrefs() {
     }
   }, [prefs])
 
-  const setGroup = useCallback(
-    (group: SidebarGroupMode) => setPrefs((prev) => ({ ...prev, group })),
-    []
-  )
   const setCompact = useCallback(
     (compact: boolean) => setPrefs((prev) => ({ ...prev, compact })),
-    []
-  )
-  const toggleSection = useCallback(
-    (section: SidebarSection) =>
-      setPrefs((prev) => ({
-        ...prev,
-        collapsed: { ...prev.collapsed, [section]: !prev.collapsed[section] },
-      })),
     []
   )
   const setFilters = useCallback(
@@ -132,9 +95,7 @@ export function useSidebarPrefs() {
 
   return {
     prefs,
-    setGroup,
     setCompact,
-    toggleSection,
     setFilters,
     resetFilters,
   }

@@ -147,38 +147,37 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       await maybeLater.click();
     }
 
-    const cloudSource = page.getByRole("button", {
-      name: /Cloud threads, \d+/,
-    });
-    const localSource = page.getByRole("button", {
-      name: /This Mac threads, \d+/,
-    });
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
-
-    await cloudSource.click();
-    await expect(cloudSource).toHaveAttribute("aria-pressed", "true");
     await expect(
-      page.getByRole("button", { name: "Cloud", exact: true }),
-    ).toBeVisible();
-    const cloudScreenshot = testInfo.outputPath("desktop-cloud-threads.png");
-    await page.screenshot({ path: cloudScreenshot, fullPage: true });
-    await testInfo.attach("desktop-cloud-threads", {
-      path: cloudScreenshot,
-      contentType: "image/png",
+      page.getByRole("button", { name: /Cloud threads, \d+/ }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /This Mac threads, \d+/ }),
+    ).toHaveCount(0);
+    const projectFilter = page.getByRole("button", {
+      name: "All projects",
+      exact: true,
     });
-
-    await localSource.click();
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
+    await expect(projectFilter).toBeVisible();
+    await projectFilter.click();
+    await expect(
+      page.getByRole("menuitem", { name: "demo", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(
+      page.getByRole("button", { name: "This Mac", exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "main", exact: true }),
     ).toBeVisible();
-    const localScreenshot = testInfo.outputPath("desktop-local-threads.png");
-    await page.screenshot({ path: localScreenshot, fullPage: true });
-    await testInfo.attach("desktop-local-threads", {
-      path: localScreenshot,
+    const unifiedScreenshot = testInfo.outputPath(
+      "desktop-unified-threads.png",
+    );
+    await page.screenshot({ path: unifiedScreenshot, fullPage: true });
+    await testInfo.attach("desktop-unified-threads", {
+      path: unifiedScreenshot,
       contentType: "image/png",
     });
 

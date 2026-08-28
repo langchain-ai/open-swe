@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/react"
 
 import type { DesktopProject } from "@/desktop"
+import type { SidebarProjectOption } from "@/features/agents/lib/sidebarThreads"
 import {
   Menu,
   MenuGroup,
@@ -21,19 +22,21 @@ import {
 
 export function SidebarProjectSelector({
   projects,
-  selectedProjectPath,
+  localProjects,
+  selectedProjectKey,
   onSelectProject,
   onAddProject,
   onRemoveProject,
 }: {
-  projects: Array<DesktopProject>
-  selectedProjectPath: string | null
-  onSelectProject: (cwd: string | null) => void
-  onAddProject: () => void
-  onRemoveProject: (cwd: string) => void
+  projects: Array<SidebarProjectOption>
+  localProjects?: Array<DesktopProject>
+  selectedProjectKey: string | null
+  onSelectProject: (key: string | null) => void
+  onAddProject?: () => void
+  onRemoveProject?: (cwd: string) => void
 }) {
   const selectedProject = projects.find(
-    (project) => project.cwd === selectedProjectPath
+    (project) => project.key === selectedProjectKey
   )
 
   return (
@@ -41,11 +44,11 @@ export function SidebarProjectSelector({
       <Menu>
         <MenuTrigger
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
-          title={selectedProject?.cwd}
+          title={selectedProject?.label}
         >
           <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate text-left">
-            {selectedProject?.name ?? "All projects"}
+            {selectedProject?.label ?? "All projects"}
           </span>
           <CaretDownIcon className="size-3 shrink-0 text-muted-foreground" />
         </MenuTrigger>
@@ -58,19 +61,19 @@ export function SidebarProjectSelector({
             </MenuItem>
             {projects.map((project) => (
               <MenuItem
-                key={project.cwd}
-                onClick={() => onSelectProject(project.cwd)}
-                title={project.cwd}
+                key={project.key}
+                onClick={() => onSelectProject(project.key)}
+                title={project.label}
               >
                 <FolderIcon />
-                <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                {selectedProject?.cwd === project.cwd && (
+                <span className="min-w-0 flex-1 truncate">{project.label}</span>
+                {selectedProject?.key === project.key && (
                   <CheckIcon className="ml-auto" />
                 )}
               </MenuItem>
             ))}
           </MenuGroup>
-          {projects.length > 0 && (
+          {localProjects && localProjects.length > 0 && onRemoveProject && (
             <>
               <MenuSeparator />
               <MenuSub>
@@ -80,11 +83,10 @@ export function SidebarProjectSelector({
                 </MenuSubTrigger>
                 <MenuSubPopup className="w-60">
                   <MenuGroup>
-                    {projects.map((project) => (
+                    {localProjects.map((project) => (
                       <MenuItem
                         key={project.cwd}
                         onClick={() => onRemoveProject(project.cwd)}
-                        title={project.cwd}
                         variant="destructive"
                       >
                         <FolderIcon />
@@ -98,15 +100,17 @@ export function SidebarProjectSelector({
           )}
         </MenuPopup>
       </Menu>
-      <button
-        aria-label="Add project"
-        className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-        onClick={onAddProject}
-        title="Add project"
-        type="button"
-      >
-        <FolderPlusIcon className="size-4" />
-      </button>
+      {onAddProject && (
+        <button
+          aria-label="Add project"
+          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+          onClick={onAddProject}
+          title="Add project"
+          type="button"
+        >
+          <FolderPlusIcon className="size-4" />
+        </button>
+      )}
     </div>
   )
 }

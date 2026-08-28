@@ -1,16 +1,16 @@
 import { Menu } from "@base-ui/react/menu"
 import { CaretRightIcon, CheckIcon, FunnelIcon } from "@phosphor-icons/react"
 
+import type { SidebarThreadLocation } from "@/features/agents/lib/sidebarThreads"
 import type { AgentSource, AgentStatus } from "@/features/agents/lib/types"
 import type {
   PrFilter,
   SidebarFacets,
   SidebarFilters,
-  SidebarGroupMode,
 } from "@/features/agents/lib/sidebarFilter"
 import type { SidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
-  GROUP_MODE_OPTIONS,
+  LOCATION_FILTER_OPTIONS,
   PR_FILTER_OPTIONS,
   SOURCE_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
@@ -25,14 +25,7 @@ const POPUP_CLASS =
 const ITEM_CLASS =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
 
-const LABEL_CLASS =
-  "px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
-
 const SEPARATOR_CLASS = "my-1 h-px bg-border"
-
-function Indicator() {
-  return <CheckIcon className="size-3.5 shrink-0" weight="bold" />
-}
 
 function CountBadge({ count }: { count: number }) {
   if (count <= 0) return null
@@ -96,7 +89,6 @@ function CheckboxSubmenu({
 export interface SidebarFilterMenuProps {
   prefs: SidebarPrefs
   facets: SidebarFacets
-  onGroupChange: (mode: SidebarGroupMode) => void
   onFiltersChange: (filters: SidebarFilters) => void
   onCompactChange: (compact: boolean) => void
   onResetFilters: () => void
@@ -105,7 +97,6 @@ export interface SidebarFilterMenuProps {
 export function SidebarFilterMenu({
   prefs,
   facets,
-  onGroupChange,
   onFiltersChange,
   onCompactChange,
   onResetFilters,
@@ -122,7 +113,7 @@ export function SidebarFilterMenu({
         render={
           <button
             type="button"
-            aria-label="Group and filter threads"
+            aria-label="Filter threads"
             className="relative flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-sidebar-row-hover hover:text-foreground data-popup-open:bg-sidebar-row-hover data-popup-open:text-foreground"
           >
             <FunnelIcon className="size-4" />
@@ -140,30 +131,6 @@ export function SidebarFilterMenu({
           className="z-50 outline-none"
         >
           <Menu.Popup className={POPUP_CLASS}>
-            <div className={LABEL_CLASS}>Group</div>
-            <Menu.RadioGroup
-              value={prefs.group}
-              onValueChange={(value) =>
-                onGroupChange(value as SidebarGroupMode)
-              }
-            >
-              {GROUP_MODE_OPTIONS.map((option) => (
-                <Menu.RadioItem
-                  key={option.value}
-                  value={option.value}
-                  closeOnClick={false}
-                  className={ITEM_CLASS}
-                >
-                  <span className="truncate">{option.label}</span>
-                  <Menu.RadioItemIndicator className="ml-auto flex">
-                    <Indicator />
-                  </Menu.RadioItemIndicator>
-                </Menu.RadioItem>
-              ))}
-            </Menu.RadioGroup>
-
-            <Menu.Separator className={SEPARATOR_CLASS} />
-
             <Menu.SubmenuRoot>
               <Menu.SubmenuTrigger className={ITEM_CLASS}>
                 <span className="truncate">Filter</span>
@@ -203,6 +170,19 @@ export function SidebarFilterMenu({
                       }
                     />
                     <CheckboxSubmenu
+                      label="Location"
+                      options={LOCATION_FILTER_OPTIONS}
+                      selected={filters.locations}
+                      onToggle={(value) =>
+                        patch({
+                          locations: toggleArrayValue(
+                            filters.locations,
+                            value as SidebarThreadLocation
+                          ),
+                        })
+                      }
+                    />
+                    <CheckboxSubmenu
                       label="Pull request"
                       options={PR_FILTER_OPTIONS}
                       selected={filters.pr}
@@ -225,18 +205,6 @@ export function SidebarFilterMenu({
                         })
                       }
                     />
-                    <CheckboxSubmenu
-                      label="Repo"
-                      options={facets.repos.map((r) => ({
-                        value: r,
-                        label: r,
-                      }))}
-                      selected={filters.repos}
-                      onToggle={(value) =>
-                        patch({ repos: toggleArrayValue(filters.repos, value) })
-                      }
-                    />
-
                     <Menu.Separator className={SEPARATOR_CLASS} />
 
                     <Menu.CheckboxItem
