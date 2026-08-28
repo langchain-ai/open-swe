@@ -359,6 +359,7 @@ def _slack_context_input(
     channel_id: str,
     bot_user_id: str,
     event_ts: str,
+    trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
     operational_context: str,
@@ -408,11 +409,17 @@ def _slack_context_input(
             },
         )
     )
-    trigger_id = next(
+    # An edit's `event_ts` matches no message, and the approve-button path passes
+    # the ts of Open SWE's own button message, so matching history attributes the
+    # run to nobody or to the bot. The caller already knows who triggered it.
+    trigger_id = trigger_user_id or next(
         (
             str(message.get("user"))
             for message in messages
-            if str(message.get("ts", "")) == str(event_ts) and message.get("user")
+            if str(message.get("ts", "")) == str(event_ts)
+            and message.get("user")
+            and not slack_utils.is_own_slack_message(message, bot_user_id)
+            and not slack_utils.slack_message_bot_id(message)
         ),
         "unknown",
     )
@@ -872,6 +879,7 @@ async def _process_slack_mention_impl(
         channel_id=channel_id,
         bot_user_id=bot_user_id,
         event_ts=event_ts,
+        trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,
         operational_context=operational_context,

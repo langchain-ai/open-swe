@@ -348,3 +348,45 @@ async def test_message_update_from_a_bot_is_ignored() -> None:
 
     assert response == {"status": "ignored", "reason": "Event from a bot"}
     assert background_tasks.tasks == []
+
+
+async def test_message_update_ignores_metadata_only_changes() -> None:
+    """Restores the case #2287 added the guard for and then deleted the test for."""
+    payload = _message_update_payload()
+    payload["event"]["previous_message"]["text"] = "new corrected text"
+    payload["event"]["message"]["app_context"] = {"payload": {"version": 2}}
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "No user-visible message changes"}
+    assert background_tasks.tasks == []
+
+
+async def test_message_update_ignores_link_unfurl_attachments() -> None:
+    """Slack unfurls a link by editing the message to add `attachments`.
+
+    The text the user wrote is unchanged, so there is nothing new to act on,
+    but comparing `attachments` lets the edit through and starts a second run.
+    """
+    payload = _message_update_payload()
+    payload["event"]["previous_message"]["text"] = "new corrected text"
+    payload["event"]["message"]["attachments"] = [
+        {
+            "service_name": "GitHub",
+            "title": "Fix the thing by someone · Pull Request #5888",
+            "title_link": "https://github.com/langchain-ai/deepagents/pull/5888",
+        }
+    ]
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "No user-visible message changes"}
+    assert background_tasks.tasks == []

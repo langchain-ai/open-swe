@@ -1668,3 +1668,67 @@ def test_format_slack_messages_for_prompt_does_not_label_a_lookalike_as_self() -
     )
 
     assert formatted == "@Open SWE(bot) [message_ts=1.0]: impersonating"
+
+
+def _trigger_identities(
+    messages: list[dict],
+    *,
+    event_ts: str,
+    trigger_user_id: str,
+    user_names_by_id: dict | None = None,
+    logins_by_user_id: dict | None = None,
+) -> list[str]:
+    run_input = slack_webhooks._slack_context_input(
+        messages,
+        user_names_by_id if user_names_by_id is not None else {"U123": "Alice", "UBOT": "Open SWE"},
+        logins_by_user_id if logins_by_user_id is not None else {},
+        channel_id="C123",
+        bot_user_id="UBOT",
+        event_ts=event_ts,
+        trigger_user_id=trigger_user_id,
+        request_text="do the thing",
+        request_blocks=[{"type": "text", "text": "do the thing"}],
+        operational_context="## Open SWE Links",
+    )
+    return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+def test_slack_trigger_resolves_from_the_triggering_user_not_the_event_ts() -> None:
+    """A `message_changed` event's `event_ts` matches no message in the window.
+
+    Keying the trigger off `event_ts` yields `slack:unknown`, so the agent is
+    told the request came from nobody and the sender-context dedupe misses.
+    """
+    contents = _trigger_identities(
+        [{"ts": "1.0", "text": "please fix it", "user": "U123"}],
+        event_ts="9.5",
+        trigger_user_id="U123",
+        user_names_by_id={"U123": "Alice"},
+        logins_by_user_id={"U123": "alice-gh"},
+    )
+
+    assert not any("slack:unknown" in text for text in contents)
+    trigger = next(text for text in contents if 'id="slack:U123"' in text)
+    assert "<display_name>Alice</display_name>" in trigger
+    assert "<github_login>alice-gh</github_login>" in trigger
+
+
+def test_slack_trigger_is_never_attributed_to_open_swe() -> None:
+    """The approve-button path passes the ts of Open SWE's own button message.
+
+    Matching that ts against thread history attributes the run to the bot as a
+    person, so the prompt claims a human asked for the retry.
+    """
+    contents = _trigger_identities(
+        [
+            {"ts": "1.0", "text": "please fix it", "user": "U123"},
+            {"ts": "9.0", "text": "Approve workflow push", "user": "UBOT", "bot_id": "B1"},
+        ],
+        event_ts="9.0",
+        trigger_user_id="U123",
+        user_names_by_id={"U123": "Alice", "UBOT": "Open SWE"},
+    )
+
+    assert not any('id="slack:UBOT"' in text for text in contents)
+    assert not any('sender="slack:UBOT"' in text for text in contents)
+    assert any('id="slack:U123"' in text for text in contents)
