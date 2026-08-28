@@ -147,7 +147,12 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             or os.environ.get("OPENAI_API_BASE")
             or OPENAI_RESPONSES_WS_BASE_URL
         )
-        model_kwargs["use_responses_api"] = True
+        # Allow OPENAI_USE_RESPONSES_API=false or caller kwargs to override default Responses wire
+        env_use_responses = os.environ.get("OPENAI_USE_RESPONSES_API")
+        if env_use_responses is not None:
+            model_kwargs["use_responses_api"] = env_use_responses.lower() not in ("0", "false", "no", "off")
+        else:
+            model_kwargs.setdefault("use_responses_api", True)
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
     gateway_applied = False
