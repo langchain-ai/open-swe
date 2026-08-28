@@ -39,7 +39,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from .dashboard.options import gate_fable_model
+from .dashboard.options import gate_fable_model, normalize_model_choice
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_org_review_guidelines,
@@ -874,12 +874,11 @@ async def _resolve_grouping_model(
     otherwise the team default, which itself inherits the reviewer subagent
     model when no grouping-specific model is configured.
     """
-    configured_model_id = configurable.get("grouping_model_id")
-    configured_effort = configurable.get("grouping_reasoning_effort")
-    if isinstance(configured_model_id, str) and configured_model_id:
-        model_id = configured_model_id
-        effort = configured_effort if isinstance(configured_effort, str) else None
-    else:
+    model_id, effort = normalize_model_choice(
+        configurable.get("grouping_model_id"),
+        configurable.get("grouping_reasoning_effort"),
+    )
+    if model_id is None or effort is None:
         model_id, effort = await get_team_default_grouping_model()
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
@@ -1331,18 +1330,19 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    configured_model_id = configurable.get("reviewer_model_id")
-    configured_effort = configurable.get("reviewer_reasoning_effort")
-    if isinstance(configured_model_id, str) and configured_model_id:
-        model_id = configured_model_id
-        reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
-        subagent_model_id = model_id
-        subagent_effort = reasoning_effort
+    configured_model, configured_effort = normalize_model_choice(
+        configurable.get("reviewer_model_id"),
+        configurable.get("reviewer_reasoning_effort"),
+    )
+    team_main, team_subagent = await _cached_reviewer_team_defaults()
+    if configured_model is not None and configured_effort is not None:
+        model_id, reasoning_effort = configured_model, configured_effort
+        subagent_model_id, subagent_effort = configured_model, configured_effort
     else:
-        (
-            (model_id, reasoning_effort),
-            (subagent_model_id, subagent_effort),
-        ) = await _cached_reviewer_team_defaults()
+        (model_id, reasoning_effort), (subagent_model_id, subagent_effort) = (
+            team_main,
+            team_subagent,
+        )
         logger.info(
             "Using team default reviewer model: model=%s effort=%s",
             model_id,
@@ -1353,12 +1353,14 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id,
             subagent_effort,
         )
-    configured_subagent_model_id = configurable.get("reviewer_subagent_model_id")
-    configured_subagent_effort = configurable.get("reviewer_subagent_reasoning_effort")
-    if isinstance(configured_subagent_model_id, str) and configured_subagent_model_id:
-        subagent_model_id = configured_subagent_model_id
-        subagent_effort = (
-            configured_subagent_effort if isinstance(configured_subagent_effort, str) else None
+    configured_subagent_model, configured_subagent_effort = normalize_model_choice(
+        configurable.get("reviewer_subagent_model_id"),
+        configurable.get("reviewer_subagent_reasoning_effort"),
+    )
+    if configured_subagent_model is not None and configured_subagent_effort is not None:
+        subagent_model_id, subagent_effort = (
+            configured_subagent_model,
+            configured_subagent_effort,
         )
     fable_enabled = await get_team_fable_enabled()
     model_id, reasoning_effort = gate_fable_model(

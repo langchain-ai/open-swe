@@ -16,9 +16,9 @@ from agent.store import get_value, now_iso, put_value
 
 from ..utils.gateway import resolve_gateway_enabled
 from .options import (
+    DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
     default_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -220,11 +220,8 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
 def _normalize_stale_model_pair(
     model: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
-    if model is None:
-        return model, effort
-    canonical = canonical_model_pair(model, effort)
-    if canonical is not None:
-        return canonical
+    if model in DEPRECATED_MODEL_IDS:
+        return None, None
     return model, effort
 
 

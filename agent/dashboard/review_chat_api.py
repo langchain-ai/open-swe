@@ -24,7 +24,7 @@ from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.json_types import as_json_object
 from ..utils.thread_ops import langgraph_client, langgraph_url
-from .options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from .options import normalize_model_choice
 from .review_api import classify_finding, get_pr_head_sha, get_review
 from .thread_api import (
     _DASHBOARD_STREAM_MODES,
@@ -304,19 +304,9 @@ async def _create_chat_thread(
 
 
 def _normalize_chat_model(configurable: dict[str, Any]) -> tuple[str | None, str | None]:
-    model_id = configurable.get("chat_model_id")
-    effort = configurable.get("chat_effort")
-    if (
-        isinstance(model_id, str)
-        and model_id in SUPPORTED_MODEL_IDS
-        and isinstance(effort, str)
-        and model_supports_effort(model_id, effort)
-    ):
-        return model_id, effort
-    canonical = canonical_model_pair(model_id, effort)
-    if canonical is not None:
-        return canonical
-    return None, None
+    return normalize_model_choice(
+        configurable.get("chat_model_id"), configurable.get("chat_effort")
+    )
 
 
 async def _enrich_chat_command(

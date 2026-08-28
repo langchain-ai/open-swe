@@ -8,10 +8,10 @@ from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     SUPPORTED_MODELS,
-    canonical_model_pair,
     default_model_pair,
     fable_disabled_fallback,
     gate_fable_model,
+    is_deprecated_model,
     model_profile_context_window,
     models_with_profile_context_windows,
     normalize_model_choice,
@@ -30,6 +30,8 @@ SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
 SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
+DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
+SUPPORTED_GLM = "fireworks:accounts/fireworks/models/glm-5p3"
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
@@ -58,35 +60,24 @@ def test_supported_openai_models_are_the_gpt_5_6_family() -> None:
     ]
 
 
-@pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC])
+@pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM])
 def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
     assert model_id not in SUPPORTED_MODEL_IDS
     assert all(model["id"] != model_id for model in SUPPORTED_MODELS)
+    assert is_deprecated_model(model_id)
 
 
-def test_canonical_model_pair_migrates_deprecated_ids() -> None:
-    assert canonical_model_pair(DEPRECATED_OPENAI, "xhigh") == (SUPPORTED_OPENAI, "xhigh")
-    assert canonical_model_pair(DEPRECATED_ANTHROPIC, "max") == (SUPPORTED_ANTHROPIC, "max")
-
-
-def test_canonical_model_pair_falls_back_to_replacement_default_effort() -> None:
-    assert canonical_model_pair(DEPRECATED_OPENAI, "bogus") == (SUPPORTED_OPENAI, "xhigh")
-    assert canonical_model_pair(DEPRECATED_ANTHROPIC, None) == (SUPPORTED_ANTHROPIC, "high")
-
-
-def test_normalize_model_choice_migrates_deprecated_ids() -> None:
-    assert normalize_model_choice(DEPRECATED_OPENAI, "high") == (SUPPORTED_OPENAI, "high")
-    assert normalize_model_choice(DEPRECATED_ANTHROPIC, "max") == (
-        SUPPORTED_ANTHROPIC,
-        "max",
+def test_fireworks_glm_5_3_replaces_glm_5_2() -> None:
+    assert any(
+        model["id"] == SUPPORTED_GLM and model["label"] == "GLM 5.3" for model in SUPPORTED_MODELS
     )
+
+
+def test_deprecated_models_defer_to_defaults() -> None:
+    for model_id in (DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM):
+        assert normalize_model_choice(model_id, "high") == (None, None)
+        assert provider_fallback_pair(model_id, "high") is None
     assert normalize_model_choice("mystery:model", "high") == (None, None)
-
-
-def test_canonical_model_pair_ignores_live_and_unknown_ids() -> None:
-    assert canonical_model_pair(SUPPORTED_OPENAI, "high") is None
-    assert canonical_model_pair("mystery:model", "high") is None
-    assert canonical_model_pair(None) is None
 
 
 def test_supported_models_do_not_hardcode_context_windows() -> None:
@@ -99,6 +90,7 @@ def test_model_profile_context_window_uses_codex_override() -> None:
 
 def test_model_profile_context_window_uses_fireworks_profile_for_kimi_k3() -> None:
     assert model_profile_context_window(SUPPORTED_KIMI) == 1_048_576
+    assert model_profile_context_window(SUPPORTED_GLM) == 1_048_576
 
 
 def test_models_with_profile_context_windows_enriches_copies() -> None:
@@ -161,71 +153,22 @@ def test_profile_update_defaults_draft_prs_to_none_for_legacy_clients() -> None:
     assert update.draft_prs is None
 
 
-def test_profile_update_migrates_deprecated_gpt_5_5_model() -> None:
-    update = ProfileUpdate(default_model=DEPRECATED_OPENAI, reasoning_effort="medium")
-    update.validate_pairing()
-    assert update.default_model == SUPPORTED_OPENAI
-    assert update.reasoning_effort == "medium"
-
-
-def test_profile_update_migrates_deprecated_opus_model() -> None:
-    update = ProfileUpdate(default_model=DEPRECATED_ANTHROPIC, reasoning_effort="high")
-    update.validate_pairing()
-    assert update.default_model == SUPPORTED_ANTHROPIC
-    assert update.reasoning_effort == "high"
-
-
-def test_profile_update_migrates_deprecated_subagent_model() -> None:
-    update = ProfileUpdate(
-        default_model="openai:gpt-5.6-terra",
-        reasoning_effort="high",
-        default_subagent_model=DEPRECATED_OPENAI,
-        subagent_reasoning_effort="low",
-    )
-    update.validate_pairing()
-    assert update.default_subagent_model == SUPPORTED_OPENAI
-    assert update.subagent_reasoning_effort == "low"
-
-
-def test_profile_response_migrates_deprecated_models() -> None:
+def test_profile_response_and_override_defer_deprecated_models() -> None:
     profile = normalize_profile_for_response(
         {
-            "default_model": DEPRECATED_OPENAI,
-            "reasoning_effort": "medium",
-            "default_subagent_model": DEPRECATED_ANTHROPIC,
+            "default_model": DEPRECATED_GLM,
+            "reasoning_effort": "high",
+            "default_subagent_model": DEPRECATED_OPENAI,
             "subagent_reasoning_effort": "low",
         }
     )
-    assert profile["default_model"] == SUPPORTED_OPENAI
-    assert profile["reasoning_effort"] == "medium"
-    assert profile["default_subagent_model"] == SUPPORTED_ANTHROPIC
-    assert profile["subagent_reasoning_effort"] == "low"
-
-
-def test_profile_overrides_migrate_deprecated_models() -> None:
+    assert "default_model" not in profile
+    assert "reasoning_effort" not in profile
+    assert "default_subagent_model" not in profile
+    assert "subagent_reasoning_effort" not in profile
     assert normalize_profile_overrides(
-        {"default_model": DEPRECATED_OPENAI, "reasoning_effort": "high"}
-    ) == (SUPPORTED_OPENAI, "high")
-    assert normalize_profile_overrides(
-        {"default_model": DEPRECATED_ANTHROPIC, "reasoning_effort": "max"}
-    ) == (SUPPORTED_ANTHROPIC, "max")
-
-
-def test_team_settings_update_migrates_deprecated_models() -> None:
-    update = TeamSettingsUpdate(
-        default_agent_model="openai:gpt-5.6-sol",
-        default_agent_reasoning_effort="medium",
-        default_agent_subagent_model=DEPRECATED_OPENAI,
-        default_agent_subagent_reasoning_effort="medium",
-        default_reviewer_model=DEPRECATED_ANTHROPIC,
-        default_reviewer_reasoning_effort="medium",
-        default_reviewer_subagent_model=DEPRECATED_OPENAI,
-        default_reviewer_subagent_reasoning_effort="low",
-    )
-
-    assert update.default_agent_subagent_model == SUPPORTED_OPENAI
-    assert update.default_reviewer_model == SUPPORTED_ANTHROPIC
-    assert update.default_reviewer_subagent_model == SUPPORTED_OPENAI
+        {"default_model": DEPRECATED_GLM, "reasoning_effort": "high"}
+    ) == (None, None)
 
 
 def test_team_settings_update_rejects_unknown_openai_model() -> None:
@@ -244,21 +187,16 @@ def test_team_settings_update_rejects_invalid_effort_for_openai_model() -> None:
         )
 
 
-def test_team_settings_response_migrates_deprecated_models() -> None:
+def test_team_settings_response_defers_deprecated_models() -> None:
     settings = normalize_team_settings_for_response(
         {
-            "default_agent_subagent_model": DEPRECATED_OPENAI,
-            "default_agent_subagent_reasoning_effort": "medium",
-            "default_reviewer_model": DEPRECATED_ANTHROPIC,
-            "default_reviewer_reasoning_effort": "medium",
-            "default_reviewer_subagent_model": DEPRECATED_OPENAI,
-            "default_reviewer_subagent_reasoning_effort": "low",
+            "default_agent_model": DEPRECATED_GLM,
+            "default_agent_reasoning_effort": "high",
         }
     )
 
-    assert settings["default_agent_subagent_model"] == SUPPORTED_OPENAI
-    assert settings["default_reviewer_model"] == SUPPORTED_ANTHROPIC
-    assert settings["default_reviewer_subagent_model"] == SUPPORTED_OPENAI
+    assert settings["default_agent_model"] is None
+    assert settings["default_agent_reasoning_effort"] is None
 
 
 def test_profile_update_rejects_unknown_provider() -> None:

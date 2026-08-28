@@ -16,7 +16,7 @@ from ..dashboard import plan_api, workflow_approval_api
 from ..dashboard.admin import is_admin
 from ..dashboard.agent_overrides import resolve_login_from_email_async
 from ..dashboard.oauth import enforce_org_login_gate
-from ..dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from ..dashboard.options import normalize_model_choice
 from ..dashboard.plan_store import get_plan_content, list_plan_comments
 from ..dashboard.thread_api import (
     ThreadMessageBody,
@@ -494,14 +494,9 @@ async def _send_message(
     if bool(model_id) != bool(effort):
         return _failure("model_id and effort must be provided together")
     if model_id and effort:
-        normalized = (
-            (model_id, effort)
-            if model_id in SUPPORTED_MODEL_IDS and model_supports_effort(model_id, effort)
-            else canonical_model_pair(model_id, effort)
-        )
-        if normalized is None:
+        model_id, effort = normalize_model_choice(model_id, effort)
+        if model_id is None or effort is None:
             return _failure("model_id and effort are not a supported combination")
-        model_id, effort = normalized
 
     summary = await get_dashboard_thread(
         thread_id,
