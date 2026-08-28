@@ -1732,3 +1732,83 @@ def test_slack_trigger_is_never_attributed_to_open_swe() -> None:
     assert not any('id="slack:UBOT"' in text for text in contents)
     assert not any('sender="slack:UBOT"' in text for text in contents)
     assert any('id="slack:U123"' in text for text in contents)
+
+
+def test_process_slack_mention_queues_a_message_edit_instead_of_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An edit is a correction to work already in flight, not a new request."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+        captured["queued"] = {"thread_id": thread_id, "content": content}
+        return True
+
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000300",
+                "user_id": "U123",
+                "text": "<@UBOT> actually use PR 5889",
+                "bot_user_id": "UBOT",
+                "message_update": True,
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    assert "run_create" not in captured
+    queued = captured["queued"]
+    assert isinstance(queued, dict)
+    assert queued["thread_id"] == "mapped-thread"
+    blocks = cast(list, queued["content"])
+    text = "\n".join(
+        block["text"] for block in blocks if isinstance(block, dict) and block.get("text")
+    )
+    assert "actually use PR 5889" in text
+    assert "edited" in text
+
+
+def test_process_slack_mention_runs_an_edit_when_queueing_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A store outage must not swallow the correction outright."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+        return False
+
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000300",
+                "user_id": "U123",
+                "text": "<@UBOT> actually use PR 5889",
+                "bot_user_id": "UBOT",
+                "message_update": True,
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    assert run_create["kwargs"]["multitask_strategy"] == "enqueue"

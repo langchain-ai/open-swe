@@ -29,8 +29,11 @@ from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.thread_ops import (
+    langgraph_client as get_langgraph_client,
+)
+from agent.utils.thread_ops import queue_message_for_thread
 
-from ..utils.thread_ops import langgraph_client as get_langgraph_client
 from ..utils.user_messages import warning
 from . import common
 
@@ -863,6 +866,16 @@ async def _process_slack_mention_impl(
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
     )
+
+    # An edit corrects a request the agent already has, so it belongs in the
+    # thread's message queue rather than in a run of its own. Nothing drains that
+    # queue while the thread is idle; an edit made after the agent finished waits
+    # for the next message.
+    if message_update and await queue_message_for_thread(
+        thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE.strip()}, *content_blocks]
+    ):
+        common.logger.info("Queued Slack message edit for thread %s", thread_id)
+        return
 
     explicitly_tagged = _interrupts_active_run(
         text,
