@@ -19,7 +19,11 @@ from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from langsmith.sandbox import SandboxClientError
+from langsmith.sandbox import (
+    ResourceNotFoundError,
+    SandboxConnectionError,
+    SandboxServerReloadError,
+)
 
 from agent.utils.sandbox_retry import is_transient_sandbox_error
 
@@ -68,7 +72,7 @@ def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> d
 
 
 def _to_transient_sandbox_payload(
-    e: SandboxClientError,
+    e: Exception,
     request: ToolCallRequest | None = None,
 ) -> dict[str, str]:
     data: dict[str, str] = {
@@ -88,6 +92,19 @@ def _to_transient_sandbox_payload(
     if tool_name:
         data["name"] = tool_name
     return data
+
+
+def _is_sandbox_unreachable(e: Exception) -> bool:
+    """Whether the failure means the sandbox itself did not answer.
+
+    A connection error does, once the two that carry their own meaning are
+    excluded: a retryable rejection never started the command, and a server
+    reload left it running. ``ResourceNotFoundError`` qualifies only for the
+    sandbox itself — a missing file is a tool-local failure.
+    """
+    if isinstance(e, SandboxConnectionError):
+        return not isinstance(e, SandboxServerReloadError)
+    return isinstance(e, ResourceNotFoundError) and e.resource_type == "sandbox"
 
 
 def _get_tool_call_id(request: ToolCallRequest) -> str | None:
@@ -120,7 +137,7 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
 
 
 def _transient_sandbox_tool_message(
-    e: SandboxClientError,
+    e: Exception,
     request: ToolCallRequest,
 ) -> ToolMessage:
     data = _to_transient_sandbox_payload(e, request)
@@ -161,7 +178,7 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return await handler(request)
-        except SandboxClientError as e:
+        except Exception as e:
             # The command never started, so nothing is known to be wrong with the
             # sandbox: ending the run here would turn a gateway blip into an
             # abandoned one.
@@ -170,6 +187,9 @@ class ToolErrorMiddleware(AgentMiddleware):
                     "Transient sandbox error during tool call; request=%r", request, exc_info=True
                 )
                 return _transient_sandbox_tool_message(e, request)
+            if not _is_sandbox_unreachable(e):
+                logger.exception("Error during tool call handling; request=%r", request)
+                return _generic_error_tool_message(e, request)
             logger.exception("Sandbox error during tool call handling; request=%r", request)
             thread_id = _get_thread_id(request)
             config = _get_run_config(request)
@@ -183,6 +203,3 @@ class ToolErrorMiddleware(AgentMiddleware):
             # Every later sandbox call would hit the same dead backend and notify
             # again, so end the run here now that the user has been told once.
             raise
-        except Exception as e:
-            logger.exception("Error during tool call handling; request=%r", request)
-            return _generic_error_tool_message(e, request)

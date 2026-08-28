@@ -5,7 +5,11 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
-from langsmith.sandbox import SandboxClientError, SandboxRetryableConnectionError
+from langsmith.sandbox import (
+    SandboxConnectionError,
+    SandboxOperationError,
+    SandboxRetryableConnectionError,
+)
 
 from agent.middleware.sandbox_circuit_breaker import (
     post_sandbox_unreachable_notification,
@@ -41,7 +45,7 @@ def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_client_error_notifies_then_ends_the_run() -> None:
+async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
     """A dead sandbox tells the user once, then kills the run; it is never swapped out.
 
     Replacing it mid-run gives the agent an empty filesystem while it still
@@ -54,7 +58,7 @@ async def test_sandbox_client_error_notifies_then_ends_the_run() -> None:
     set_sandbox_backend("thread-1", FakeSandboxBackend("sb-old"))
 
     async def handler(_request: ToolCallRequest) -> ToolMessage:
-        raise SandboxClientError("Sandbox request timed out: sb-dead")
+        raise SandboxConnectionError("WebSocket upgrade to sb-dead failed (no valid HTTP response)")
 
     try:
         with (
@@ -63,7 +67,7 @@ async def test_sandbox_client_error_notifies_then_ends_the_run() -> None:
                 new_callable=AsyncMock,
             ) as mock_notify,
             patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as mock_create,
-            pytest.raises(SandboxClientError),
+            pytest.raises(SandboxConnectionError),
         ):
             await middleware.awrap_tool_call(request, handler)
 
@@ -153,3 +157,32 @@ async def test_transient_sandbox_error_keeps_the_sandbox_and_asks_for_a_retry() 
         assert "will not be replaced" not in payload["error"]
     finally:
         SANDBOX_BACKENDS.pop("thread-transient", None)
+
+
+@pytest.mark.asyncio
+async def test_command_level_sandbox_error_does_not_end_the_run() -> None:
+    """A failed command says nothing about whether the sandbox is reachable.
+
+    ``SandboxOperationError`` covers command error frames — a missing binary, an
+    expired session — so killing the run and telling the user their sandbox died
+    would be both wrong and unrecoverable.
+    """
+    middleware = ToolErrorMiddleware()
+    request = _tool_request("thread-op")
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        raise SandboxOperationError("CommandNotFound: no such file or directory: fzf")
+
+    with patch(
+        "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+        new_callable=AsyncMock,
+    ) as mock_notify:
+        result = await middleware.awrap_tool_call(request, handler)
+
+    mock_notify.assert_not_awaited()
+    assert isinstance(result, ToolMessage)
+    assert isinstance(result.content, str)
+    payload = json.loads(result.content)
+    assert payload["status"] == "error"
+    assert payload["error_type"] == "SandboxOperationError"
+    assert "recovery" not in payload
