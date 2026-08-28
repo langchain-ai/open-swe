@@ -67,7 +67,8 @@ function pullRequestRef(
   if (latest) {
     return { repoFullName: latest.repoFullName, number: latest.number }
   }
-  if (!thread.pr || thread.repoFullName.split("/").length !== 2) return undefined
+  if (!thread.pr || thread.repoFullName.split("/").length !== 2)
+    return undefined
   return { repoFullName: thread.repoFullName, number: thread.pr.number }
 }
 
@@ -203,7 +204,9 @@ export function groupSidebarThreadsByProject(
   )
   const recents: Array<SidebarThreadItem> = []
   for (const thread of sortSidebarThreads(threads, mode)) {
-    const bucket = thread.projectKey ? buckets.get(thread.projectKey) : undefined
+    const bucket = thread.projectKey
+      ? buckets.get(thread.projectKey)
+      : undefined
     if (bucket) bucket.threads.push(thread)
     else recents.push(thread)
   }
@@ -239,10 +242,7 @@ function priorityRank(thread: SidebarThreadItem): number {
   return thread.viewed ? 2 : 1
 }
 
-function byRecency(
-  left: SidebarThreadItem,
-  right: SidebarThreadItem
-): number {
+function byRecency(left: SidebarThreadItem, right: SidebarThreadItem): number {
   return (
     right.updatedAt - left.updatedAt ||
     right.createdAt - left.createdAt ||

@@ -2,7 +2,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
-const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "viewed", "archived"]);
+const MUTABLE_FIELDS = new Set([
+  "title",
+  "modelId",
+  "effort",
+  "viewed",
+  "archived",
+]);
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function isRecord(value) {
@@ -210,7 +216,9 @@ class LocalThreadStore {
       next.archived = patch.archived;
     }
     // Neither reading nor archiving is an edit, so neither reorders the list.
-    if (Object.keys(patch).some((key) => key !== "viewed" && key !== "archived"))
+    if (
+      Object.keys(patch).some((key) => key !== "viewed" && key !== "archived")
+    )
       next.updatedAt = this.now();
     this.threads.set(id, next);
     this.persist();

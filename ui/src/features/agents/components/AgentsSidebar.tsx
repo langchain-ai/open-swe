@@ -47,7 +47,10 @@ import {
   SidebarLayoutProvider,
   useSidebarLayout,
 } from "@/components/sidebar-layout"
-import { filterThreads, hasActiveFilters } from "@/features/agents/lib/sidebarFilter"
+import {
+  filterThreads,
+  hasActiveFilters,
+} from "@/features/agents/lib/sidebarFilter"
 import type {
   ChatSort,
   OrganizeMode,
@@ -110,11 +113,11 @@ const PROJECT_PREVIEW_COUNT = 12
  * container resize.
  */
 function useScrollEdges() {
-  const ref = useRef<HTMLDivElement>(null)
+  const viewport = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ top: false, bottom: false })
 
   const measure = useCallback(() => {
-    const el = ref.current
+    const el = viewport.current
     if (!el) return
     const top = el.scrollTop > 0
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight > 1
@@ -127,14 +130,14 @@ function useScrollEdges() {
 
   useEffect(measure)
   useEffect(() => {
-    const el = ref.current
+    const el = viewport.current
     if (!el || typeof ResizeObserver === "undefined") return
     const observer = new ResizeObserver(measure)
     observer.observe(el)
     return () => observer.disconnect()
   }, [measure])
 
-  return { ref, edges, measure }
+  return { viewport, edges, measure }
 }
 
 export function AgentsSidebar({
@@ -145,7 +148,11 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
-  const scroll = useScrollEdges()
+  const {
+    viewport: scrollViewport,
+    edges: scrollEdges,
+    measure: measureScrollEdges,
+  } = useScrollEdges()
   const { openPalette } = useAppCommandControls()
   const openThread = useCallback(
     (threadId: string) => {
@@ -194,7 +201,11 @@ export function AgentsSidebar({
   const resolvedThreads = sidebar.data.resolved.items.filter(
     (thread) => !cloudPinnedIds.has(thread.id)
   )
-  const visibleThreads = [...pinnedThreads, ...activeThreads, ...resolvedThreads]
+  const visibleThreads = [
+    ...pinnedThreads,
+    ...activeThreads,
+    ...resolvedThreads,
+  ]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
@@ -291,7 +302,10 @@ export function AgentsSidebar({
       return
     }
     if (!pinThread.isPending) {
-      pinThread.mutate({ threadId: item.id, pinned: !cloudPinnedIds.has(item.id) })
+      pinThread.mutate({
+        threadId: item.id,
+        pinned: !cloudPinnedIds.has(item.id),
+      })
     }
   }
 
@@ -474,22 +488,22 @@ export function AgentsSidebar({
 
       <TooltipProvider delay={500} closeDelay={100}>
         <div className="relative flex min-h-0 flex-1 flex-col">
-          {scroll.edges.top && (
+          {scrollEdges.top && (
             <>
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-border" />
               <div className="pointer-events-none absolute inset-x-0 top-px z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
             </>
           )}
-          {scroll.edges.bottom && (
+          {scrollEdges.bottom && (
             <>
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-px bg-border" />
               <div className="pointer-events-none absolute inset-x-0 bottom-px z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
             </>
           )}
           <div
-            ref={scroll.ref}
+            ref={scrollViewport}
             className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
-            onScroll={scroll.measure}
+            onScroll={measureScrollEdges}
           >
             {!localOnly && (
               <nav
@@ -556,7 +570,9 @@ export function AgentsSidebar({
                             setView({ sortPinned: value as PinnedSort })
                           }
                         >
-                          <MenuRadioItem value="priority">Priority</MenuRadioItem>
+                          <MenuRadioItem value="priority">
+                            Priority
+                          </MenuRadioItem>
                           <MenuRadioItem value="updated">
                             Last updated
                           </MenuRadioItem>
@@ -648,7 +664,9 @@ export function AgentsSidebar({
                       <LoadMoreThreadsButton
                         label="Load more archived cloud threads"
                         loading={sidebar.resolvedQuery.isFetchingNextPage}
-                        onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
+                        onClick={() =>
+                          void sidebar.resolvedQuery.fetchNextPage()
+                        }
                       />
                     )}
                     {resolvedLoading && (
@@ -716,9 +734,7 @@ function ProjectGroup({
 
   return (
     <div className="mb-1">
-      <div
-        className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-      >
+      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -733,7 +749,7 @@ function ProjectGroup({
           aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
           title={pinned ? "Unpin project" : "Pin project"}
           onClick={onTogglePin}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground group-hover/folder:flex"
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
         >
           {pinned ? (
             <PushPinSlashIcon className="size-3.5" />

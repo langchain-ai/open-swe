@@ -1,4 +1,8 @@
-import { CaretDownIcon, CaretRightIcon, DotsThreeIcon } from "@phosphor-icons/react"
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  DotsThreeIcon,
+} from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
 import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
@@ -60,7 +64,7 @@ export function SidebarSectionMenu({
       <MenuTrigger
         aria-label={label}
         title={label}
-        className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 data-popup-open:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground"
+        className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground data-popup-open:opacity-100"
       >
         <DotsThreeIcon className="size-4" />
       </MenuTrigger>

@@ -749,7 +749,10 @@ test.describe("threads workspace", () => {
         `/agents/${THREAD_IDS.ready}`,
       ]);
 
-    const betaGroup = sidebar.getByRole("button", { name: "beta", exact: true });
+    const betaGroup = sidebar.getByRole("button", {
+      name: "beta",
+      exact: true,
+    });
     await expect(
       sidebar.getByRole("button", { name: "alpha", exact: true }),
     ).toBeVisible();

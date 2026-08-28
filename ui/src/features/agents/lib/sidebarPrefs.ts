@@ -204,8 +204,11 @@ export function useSidebarPrefs() {
     []
   )
   const setView = useCallback(
-    (patch: Partial<Pick<SidebarPrefs, "organize" | "sortChats" | "sortPinned">>) =>
-      setPrefs((prev) => ({ ...prev, ...patch })),
+    (
+      patch: Partial<
+        Pick<SidebarPrefs, "organize" | "sortChats" | "sortPinned">
+      >
+    ) => setPrefs((prev) => ({ ...prev, ...patch })),
     []
   )
 

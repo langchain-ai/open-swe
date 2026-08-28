@@ -283,7 +283,8 @@ function configureDesktopIpc() {
   // inactive dots all but disappear.
   ipcMain.handle("desktop:set-appearance", (event, value) => {
     requireTrustedDesktopIpc(event);
-    if (value !== "light" && value !== "dark" && value !== "system") return false;
+    if (value !== "light" && value !== "dark" && value !== "system")
+      return false;
     nativeTheme.themeSource = value;
     return true;
   });

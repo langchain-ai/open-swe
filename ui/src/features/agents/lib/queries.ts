@@ -194,7 +194,10 @@ export function markAgentThreadViewed(
             ...prev,
             pinned: prev.pinned && viewList(prev.pinned),
             active: { ...prev.active, items: viewList(prev.active.items) },
-            resolved: { ...prev.resolved, items: viewList(prev.resolved.items) },
+            resolved: {
+              ...prev.resolved,
+              items: viewList(prev.resolved.items),
+            },
           }
         : prev
     )

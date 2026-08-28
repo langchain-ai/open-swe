@@ -16,7 +16,12 @@ import {
   TreeStructureIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
-import { IoCloudOutline, IoLaptopOutline, IoLogoGithub, IoLogoSlack } from "react-icons/io5"
+import {
+  IoCloudOutline,
+  IoLaptopOutline,
+  IoLogoGithub,
+  IoLogoSlack,
+} from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { useEffect, useRef, useState } from "react"
 import type { ComponentType, SVGProps } from "react"
@@ -46,7 +51,10 @@ const SOURCE_META: Record<AgentSource, { icon: Icon; label: string }> = {
 
 type PrState = NonNullable<AgentThread["pr"]>["state"]
 
-const PR_STATE_META: Record<PrState, { icon: Icon; label: string; className: string }> = {
+const PR_STATE_META: Record<
+  PrState,
+  { icon: Icon; label: string; className: string }
+> = {
   draft: {
     icon: GitPullRequestIcon,
     label: "Draft pull request",
@@ -80,8 +88,11 @@ function compactAge(timestamp: number): string {
   return days < 7 ? `${days}d` : `${Math.round(days / 7)}w`
 }
 
-function openContextMenuFromKeyboard(event: React.KeyboardEvent<HTMLAnchorElement>) {
-  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return
+function openContextMenuFromKeyboard(
+  event: React.KeyboardEvent<HTMLAnchorElement>
+) {
+  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))
+    return
   event.preventDefault()
   const rect = event.currentTarget.getBoundingClientRect()
   event.currentTarget.dispatchEvent(
@@ -138,8 +149,14 @@ function PullRequestIcon({
   const meta = PR_STATE_META[live?.state ?? state]
   const Glyph = meta.icon
   return (
-    <span className={cn("relative flex shrink-0", className)} title={meta.label}>
-      <Glyph className={cn("size-3.5", meta.className)} aria-label={meta.label} />
+    <span
+      className={cn("relative flex shrink-0", className)}
+      title={meta.label}
+    >
+      <Glyph
+        className={cn("size-3.5", meta.className)}
+        aria-label={meta.label}
+      />
       {live?.checks === "failing" && (
         <span
           className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-destructive ring-2 ring-sidebar"
@@ -222,7 +239,8 @@ export function SidebarThreadRow({
     setDeletingLocal(true)
     setDeleteError(null)
     try {
-      const deleted = (await window.openSweDesktop?.deleteLocalThread(item.id)) ?? false
+      const deleted =
+        (await window.openSweDesktop?.deleteLocalThread(item.id)) ?? false
       if (deleted) {
         onDeleteLocal(item.id)
         setDeleteOpen(false)
@@ -274,7 +292,7 @@ export function SidebarThreadRow({
         <span
           ref={marquee.text}
           className={cn(
-            "block w-max whitespace-nowrap text-[13px] will-change-transform",
+            "block w-max text-[13px] whitespace-nowrap will-change-transform",
             marquee.shift !== 0 && "sidebar-title-marquee"
           )}
           style={
@@ -391,7 +409,10 @@ export function SidebarThreadRow({
     <>
       <ContextMenu.Root onOpenChange={setContextMenuOpen}>
         <ContextMenu.Trigger
-          className={cn("group/row relative mb-0.5", isDeleting && "opacity-50")}
+          className={cn(
+            "group/row relative mb-0.5",
+            isDeleting && "opacity-50"
+          )}
           onMouseEnter={marquee.measure}
           onMouseLeave={marquee.reset}
         >
@@ -511,7 +532,8 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const EnvironmentIcon = item.location === "local" ? IoLaptopOutline : IoCloudOutline
+  const EnvironmentIcon =
+    item.location === "local" ? IoLaptopOutline : IoCloudOutline
   const environmentLabel = item.location === "local" ? "This Mac" : "Cloud"
 
   return (
@@ -531,7 +553,9 @@ function ThreadHoverCard({
       {item.projectLabel && (
         <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
           <FolderIcon className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate text-[12px]">{item.projectLabel}</span>
+          <span className="min-w-0 truncate text-[12px]">
+            {item.projectLabel}
+          </span>
         </div>
       )}
       {item.pr && (
@@ -540,7 +564,7 @@ function ThreadHoverCard({
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 -mx-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="pointer-events-auto -mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <PullRequestIcon state={item.pr.state} live={live} />
           <span className="min-w-0 truncate text-[12px]">{item.pr.title}</span>
