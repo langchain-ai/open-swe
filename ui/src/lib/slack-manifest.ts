@@ -34,6 +34,15 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       slash_command_url:
         "https://<your-backend-url>/webhooks/slack/code-channel-commands",
     }
+    features.slash_commands = [
+      {
+        command: "/openswe",
+        description: "Start an Open SWE task in a new code channel",
+        should_escape: true,
+        usage_hint: "<task>",
+        url: "https://<your-backend-url>/webhooks/slack/code-channel-commands",
+      },
+    ]
   }
 
   return {
@@ -50,7 +59,13 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       ],
       scopes: {
         bot: codeChannelsEnabled
-          ? [...LEGACY_BOT_SCOPES, "code_channels:manage", "files:read"]
+          ? [
+              ...LEGACY_BOT_SCOPES,
+              "code_channels:manage",
+              "commands",
+              "chat:write.public",
+              "files:read",
+            ]
           : LEGACY_BOT_SCOPES,
       },
     },

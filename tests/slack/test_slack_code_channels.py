@@ -82,6 +82,173 @@ async def test_runtime_slash_command_routes_to_code_channel_session(
     assert "/run-tests tests/slack" in event_data["text"]
 
 
+async def test_global_slash_command_acknowledges_before_creating_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
+    body = urlencode(
+        {
+            "channel_id": "C-origin",
+            "user_id": "U1",
+            "command": "/openswe",
+            "text": "fix flaky CI",
+            "trigger_id": "trigger-1",
+            "team_id": "T1",
+            "response_url": "https://hooks.slack.com/commands/1/2/secret",
+        }
+    ).encode()
+    background_tasks = BackgroundTasks()
+
+    response = await slack_routes.slack_code_channel_command(
+        cast(Request, _FakeRequest(body)), background_tasks
+    )
+
+    assert response == {
+        "response_type": "ephemeral",
+        "text": "Creating an Open SWE code channel…",
+    }
+    assert len(background_tasks.tasks) == 1
+    assert background_tasks.tasks[0].func is slack_routes._start_code_channel_from_command
+
+
+async def test_global_slash_command_creates_and_dispatches_code_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requester = slack_service.SlackRequester("user@example.com", "User", "America/New_York", "user")
+    channel_context = {
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+        "is_private": True,
+    }
+    claim = AsyncMock(return_value=True)
+    contexts = AsyncMock(side_effect=[channel_context, {"name": "code-task"}])
+    create = AsyncMock(return_value=("C-code", None))
+    bind = AsyncMock()
+    process = AsyncMock(return_value=True)
+    respond = AsyncMock()
+    monkeypatch.setattr(webhook_common, "claim_slack_event", claim)
+    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", contexts)
+    monkeypatch.setattr(slack_service, "resolve_slack_requester", AsyncMock(return_value=requester))
+    monkeypatch.setattr(slack_service, "slack_requester_auth_reason", AsyncMock(return_value=None))
+    repo_config = AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"})
+    monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
+    monkeypatch.setattr(
+        slack_routes,
+        "post_slack_top_level_message_with_ts",
+        AsyncMock(return_value=("1.000", None)),
+    )
+    monkeypatch.setattr(slack_routes, "create_code_channel", create)
+    monkeypatch.setattr(slack_routes, "bind_slack_thread_id", bind)
+    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
+    monkeypatch.setattr(slack_service, "process_slack_mention", process)
+    monkeypatch.setattr(slack_routes, "_respond_to_slash_command", respond)
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+
+    await slack_routes._start_code_channel_from_command_impl(
+        channel_id="C-origin",
+        user_id="U1",
+        task="fix flaky CI",
+        trigger_id="trigger-1",
+        team_id="T1",
+        response_url="https://hooks.slack.com/commands/1/2/secret",
+    )
+
+    assert repo_config.await_args.kwargs["github_login"] == "user"
+    assert create.await_args.kwargs["origin_message_ts"] == "1.000"
+    assert create.await_args.kwargs["is_private"] is True
+    assert bind.await_args.args[1:3] == ("C-code", "0")
+    event_data = process.await_args.args[0]
+    assert event_data["channel_id"] == "C-code"
+    assert event_data["thread_ts"] == "0"
+    assert event_data["text"] == "fix flaky CI"
+    assert event_data["explicit_request"] is True
+    respond.assert_awaited_once_with(
+        "https://hooks.slack.com/commands/1/2/secret",
+        "Open SWE started the task in <#C-code>.",
+    )
+
+
+async def test_global_slash_command_duplicate_has_no_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "claim_slack_event", AsyncMock(return_value=False))
+    context = AsyncMock()
+    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", context)
+
+    await slack_routes._start_code_channel_from_command_impl(
+        channel_id="C-origin",
+        user_id="U1",
+        task="fix flaky CI",
+        trigger_id="trigger-1",
+        team_id="T1",
+        response_url="https://hooks.slack.com/commands/1/2/secret",
+    )
+
+    context.assert_not_awaited()
+
+
+async def test_global_slash_command_archives_channel_when_binding_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requester = slack_service.SlackRequester(None, "User", "", "user")
+    monkeypatch.setattr(webhook_common, "claim_slack_event", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+    )
+    monkeypatch.setattr(slack_service, "resolve_slack_requester", AsyncMock(return_value=requester))
+    monkeypatch.setattr(slack_service, "slack_requester_auth_reason", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common,
+        "get_slack_repo_config",
+        AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
+    )
+    monkeypatch.setattr(
+        slack_routes,
+        "post_slack_top_level_message_with_ts",
+        AsyncMock(return_value=("1.000", None)),
+    )
+    monkeypatch.setattr(
+        slack_routes, "create_code_channel", AsyncMock(return_value=("C-code", None))
+    )
+    monkeypatch.setattr(
+        slack_routes, "bind_slack_thread_id", AsyncMock(side_effect=RuntimeError("boom"))
+    )
+    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
+    archive = AsyncMock(return_value=(True, None))
+    respond = AsyncMock()
+    monkeypatch.setattr(slack_routes, "archive_code_channel", archive)
+    monkeypatch.setattr(slack_routes, "_respond_to_slash_command", respond)
+
+    await slack_routes._start_code_channel_from_command_impl(
+        channel_id="C-origin",
+        user_id="U1",
+        task="fix flaky CI",
+        trigger_id="trigger-1",
+        team_id="T1",
+        response_url="https://hooks.slack.com/commands/1/2/secret",
+    )
+
+    archive.assert_awaited_once_with("C-code")
+    respond.assert_awaited_once_with(
+        "https://hooks.slack.com/commands/1/2/secret",
+        "Open SWE could not initialize the code channel.",
+    )
+
+
+async def test_delayed_slash_response_rejects_non_slack_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    monkeypatch.setattr(slack_routes.common.httpx, "AsyncClient", lambda **_kwargs: client)
+
+    await slack_routes._respond_to_slash_command("https://example.com/commands/1/2/secret", "nope")
+
+    client.post.assert_not_awaited()
+
+
 async def test_context_bar_action_routes_to_code_channel_session(
     code_channel_route: AsyncMock,
 ) -> None:

@@ -2,12 +2,17 @@
 
 import asyncio
 import hashlib
+import uuid
+from contextlib import suppress
 from time import time_ns
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
 
+from ..utils.slack import bind_slack_thread_id, post_slack_top_level_message_with_ts
+from ..utils.slack_code_channels import archive_code_channel, create_code_channel
 from ..utils.thread_ops import langgraph_client as get_langgraph_client
 from . import common
 from . import slack as service
@@ -510,6 +515,158 @@ async def slack_webhook(
     return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
 
+async def _respond_to_slash_command(response_url: str, text: str) -> None:
+    parsed = urlparse(response_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in {"hooks.slack.com", "hooks.slack-gov.com"}
+        or parsed.netloc != parsed.hostname
+        or not parsed.path.startswith("/commands/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        common.logger.warning("Ignoring invalid Slack slash-command response URL")
+        return
+    try:
+        async with common.httpx.AsyncClient(
+            timeout=common.DEFAULT_HTTP_TIMEOUT, follow_redirects=False
+        ) as http_client:
+            response = await http_client.post(
+                response_url,
+                json={"response_type": "ephemeral", "text": text[:3000]},
+            )
+            response.raise_for_status()
+    except common.httpx.HTTPError:
+        common.logger.warning("Could not send delayed Slack slash-command response", exc_info=True)
+
+
+def _code_channel_title(task: str) -> str:
+    title = " ".join(task.split())
+    return title[:200].rstrip() or "Open SWE task"
+
+
+async def _start_code_channel_from_command_impl(
+    *,
+    channel_id: str,
+    user_id: str,
+    task: str,
+    trigger_id: str,
+    team_id: str,
+    response_url: str,
+) -> None:
+    event_id = f"global-code-channel-command:{team_id}:{trigger_id}"
+    if not await common.claim_slack_event(event_id):
+        return
+
+    channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+    if not common.slack_channel_allows_operations(channel_context):
+        await _respond_to_slash_command(
+            response_url, "Open SWE does not operate in external or unverified channels."
+        )
+        return
+
+    requester = await service.resolve_slack_requester(user_id)
+    auth_reason = await service.slack_requester_auth_reason(requester)
+    if auth_reason:
+        await _respond_to_slash_command(
+            response_url,
+            "Connect or refresh GitHub in your Open SWE settings, then run /openswe again.",
+        )
+        return
+
+    thread_id = str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-command:{team_id}:{trigger_id}")
+    )
+    try:
+        repo_config = await common.get_slack_repo_config(
+            channel_id,
+            common.CODE_CHANNEL_SESSION_TS,
+            slack_user_id=user_id,
+            channel_context=channel_context,
+            thread_id=thread_id,
+            github_login=requester.github_login,
+        )
+    except Exception:  # noqa: BLE001
+        common.logger.exception("Could not resolve a repository for Slack slash command")
+        await _respond_to_slash_command(
+            response_url, "Open SWE could not resolve a repository for this task."
+        )
+        return
+
+    origin_message_ts, post_error = await post_slack_top_level_message_with_ts(
+        channel_id, f"*Open SWE task from <@{user_id}>:* {task}"
+    )
+    if not origin_message_ts:
+        common.logger.warning("Could not post Slack slash-command task anchor: %s", post_error)
+        await _respond_to_slash_command(
+            response_url, "Open SWE could not post the task in this channel."
+        )
+        return
+
+    code_channel_id, create_error = await create_code_channel(
+        name=_code_channel_title(task),
+        session_id=thread_id,
+        origin_channel_id=channel_id,
+        origin_message_ts=origin_message_ts,
+        team_id=team_id,
+        is_private=bool(channel_context.get("is_im") or channel_context.get("is_private")),
+    )
+    if not code_channel_id:
+        common.logger.warning("Could not create Slack code channel: %s", create_error)
+        await _respond_to_slash_command(response_url, "Open SWE could not create the code channel.")
+        return
+
+    client = get_langgraph_client()
+    try:
+        await bind_slack_thread_id(
+            client, code_channel_id, common.CODE_CHANNEL_SESSION_TS, thread_id
+        )
+    except Exception:  # noqa: BLE001
+        common.logger.exception("Could not bind Slack code channel to Open SWE thread")
+        with suppress(Exception):
+            await archive_code_channel(code_channel_id)
+        await _respond_to_slash_command(
+            response_url, "Open SWE could not initialize the code channel."
+        )
+        return
+
+    code_channel_context = await common._get_slack_channel_context(code_channel_id, use_cache=False)
+    started = await service.process_slack_mention(
+        {
+            "channel_id": code_channel_id,
+            "channel_context": code_channel_context,
+            "thread_ts": common.CODE_CHANNEL_SESSION_TS,
+            "event_ts": origin_message_ts,
+            "original_message_ts": origin_message_ts,
+            "user_id": user_id,
+            "text": task,
+            "attachments": [],
+            "bot_user_id": common.SLACK_BOT_USER_ID,
+            "thread_id": thread_id,
+            "treat_all_messages_as_mentions": True,
+            "code_channel": True,
+            "explicit_request": True,
+            "team_id": team_id,
+            "_requester": requester,
+            "_auth_reason": None,
+        },
+        repo_config,
+    )
+    if started:
+        await _respond_to_slash_command(
+            response_url, f"Open SWE started the task in <#{code_channel_id}>."
+        )
+
+
+async def _start_code_channel_from_command(**payload: str) -> None:
+    response_url = payload["response_url"]
+    try:
+        await _start_code_channel_from_command_impl(**payload)
+    except Exception:  # noqa: BLE001
+        common.logger.exception("Unexpected error while starting Slack code channel")
+        await _respond_to_slash_command(response_url, "Open SWE could not start the code channel.")
+
+
 @router.post("/webhooks/slack/code-channel-commands")
 async def slack_code_channel_command(
     request: common.Request, background_tasks: common.BackgroundTasks
@@ -535,6 +692,30 @@ async def slack_code_channel_command(
     command_text = value("text")
     trigger_id = value("trigger_id")
     team_id = value("team_id")
+    response_url = value("response_url")
+    if command == "openswe":
+        if not (
+            channel_id
+            and user_id
+            and trigger_id
+            and response_url
+            and command_text
+            and len(command_text) <= 4000
+        ):
+            return {"response_type": "ephemeral", "text": "Usage: /openswe <task>"}
+        background_tasks.add_task(
+            _start_code_channel_from_command,
+            channel_id=channel_id,
+            user_id=user_id,
+            task=command_text,
+            trigger_id=trigger_id,
+            team_id=team_id,
+            response_url=response_url,
+        )
+        return {
+            "response_type": "ephemeral",
+            "text": "Creating an Open SWE code channel…",
+        }
     if not (channel_id and user_id and 1 <= len(command) <= 31 and len(command_text) <= 4000):
         return {"response_type": "ephemeral", "text": "That code-channel command was invalid."}
 

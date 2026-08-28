@@ -1120,6 +1120,7 @@ def normalize_slack_channel_context(
         channel.get("is_pending_ext_shared") if isinstance(channel, dict) else None
     )
     is_im = channel.get("is_im") if isinstance(channel, dict) else None
+    is_private = channel.get("is_private") if isinstance(channel, dict) else None
     return {
         "id": channel_id,
         "name": name,
@@ -1132,6 +1133,7 @@ def normalize_slack_channel_context(
             is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
         ),
         "is_im": is_im if isinstance(is_im, bool) else None,
+        "is_private": is_private if isinstance(is_private, bool) else None,
     }
 
 

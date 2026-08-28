@@ -5,6 +5,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 """
 
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -285,6 +286,75 @@ async def _format_slack_run_links_section(thread_id: str) -> str:
 _OPEN_SWE_SENDER_ID = "system:open-swe"
 
 
+@dataclass(frozen=True)
+class SlackRequester:
+    email: str | None
+    name: str
+    timezone: str
+    github_login: str
+
+
+async def resolve_slack_requester(user_id: str) -> SlackRequester:
+    try:
+        await common.refresh_user_mapping_cache()
+    except Exception:  # noqa: BLE001
+        common.logger.debug("Could not refresh user mapping cache for Slack request", exc_info=True)
+
+    user_email: str | None = None
+    user_name = ""
+    user_timezone = ""
+    if user_id:
+        slack_user = await common.get_slack_user_info(user_id)
+        if slack_user:
+            profile = slack_user.get("profile", {})
+            if isinstance(profile, dict):
+                email = profile.get("email")
+                user_email = email if isinstance(email, str) else None
+                user_name = str(
+                    profile.get("display_name")
+                    or profile.get("real_name")
+                    or slack_user.get("real_name")
+                    or slack_user.get("name")
+                    or ""
+                )
+            timezone_value = slack_user.get("tz")
+            if isinstance(timezone_value, str):
+                user_timezone = timezone_value.strip()
+
+    mapped_login = await common.login_for_slack_id(user_id)
+    if not mapped_login and user_email:
+        mapped_login = await common.login_for_email(user_email)
+    return SlackRequester(user_email, user_name, user_timezone, mapped_login or "")
+
+
+async def slack_requester_auth_reason(requester: SlackRequester) -> str | None:
+    if common.is_bot_token_only_mode():
+        return None
+    user_token: str | None = None
+    if requester.github_login:
+        try:
+            user_token = await common.get_valid_access_token(requester.github_login)
+        except Exception:  # noqa: BLE001
+            common.logger.debug(
+                "Failed to resolve GitHub token for %s; treating as unauthenticated",
+                requester.github_login,
+                exc_info=True,
+            )
+    if user_token:
+        return None
+    if requester.github_login:
+        try:
+            if await common.has_access_token_record(requester.github_login):
+                return "revoked"
+        except Exception:  # noqa: BLE001
+            common.logger.debug(
+                "Failed to check GitHub token record for %s; prompting sign-in",
+                requester.github_login,
+                exc_info=True,
+            )
+    return "unlinked"
+
+
 async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
     """Map Slack user ids to the GitHub logins of linked Open SWE accounts."""
     logins: dict[str, str] = {}
@@ -446,13 +516,15 @@ def _slack_context_input(
     return {"messages": run_messages}
 
 
-async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
+async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> bool:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
         await _process_slack_mention_impl(event_data, repo_config)
     except Exception:  # noqa: BLE001
         common.logger.exception("Unexpected error while processing Slack mention")
         await _notify_slack_processing_error(event_data, repo_config)
+        return False
+    return True
 
 
 async def process_slack_plan_approval(
@@ -588,31 +660,15 @@ async def _process_slack_mention_impl(
     thread_id = event_data.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
-    # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
-    try:
-        await common.refresh_user_mapping_cache()
-    except Exception:  # noqa: BLE001
-        common.logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
-
-    user_email = None
-    user_name = ""
-    user_timezone = ""
-    if user_id:
-        slack_user = await common.get_slack_user_info(user_id)
-        if slack_user:
-            profile = slack_user.get("profile", {})
-            if isinstance(profile, dict):
-                user_email = profile.get("email")
-                user_name = (
-                    profile.get("display_name")
-                    or profile.get("real_name")
-                    or slack_user.get("real_name")
-                    or slack_user.get("name")
-                    or ""
-                )
-            timezone_value = slack_user.get("tz")
-            if isinstance(timezone_value, str):
-                user_timezone = timezone_value.strip()
+    requester_value = event_data.get("_requester")
+    requester = (
+        requester_value
+        if isinstance(requester_value, SlackRequester)
+        else await resolve_slack_requester(user_id)
+    )
+    user_email = requester.email
+    user_name = requester.name
+    user_timezone = requester.timezone
 
     context_thread_ts = reply_thread_ts or thread_ts
     thread_messages = (
@@ -728,9 +784,7 @@ async def _process_slack_mention_impl(
         + image_urls_from_links
     )
 
-    mapped_login = await common.login_for_slack_id(user_id)
-    if not mapped_login and user_email:
-        mapped_login = await common.login_for_email(user_email)
+    mapped_login = requester.github_login
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
@@ -753,44 +807,17 @@ async def _process_slack_mention_impl(
                 if image_block:
                     content_blocks.append(cast(dict[str, Any], image_block))
 
-    # Open SWE opens PRs as the triggering user, so a run only proceeds when we
-    # have a valid user GitHub token. Users who have never signed in with
-    # GitHub, and users whose stored authorization is no longer usable, are
-    # blocked and prompted to set up via the dashboard. Bot-token-only
-    # deployments are exempt — they run on the installation token.
-    user_token: str | None = None
-    if mapped_login:
-        try:
-            user_token = await common.get_valid_access_token(mapped_login)
-        except Exception:  # noqa: BLE001
-            common.logger.debug(
-                "Failed to resolve GitHub token for %s; treating as unauthenticated",
-                mapped_login,
-                exc_info=True,
-            )
-            user_token = None
-    has_valid_user_token = bool(user_token)
-
-    if not has_valid_user_token and not common.is_bot_token_only_mode():
-        # A stored-but-unusable token means "sign in again"; no record at all
-        # means the user has never connected GitHub + Slack via the dashboard.
-        # Guard the store read like token resolution above so a transient
-        # failure still yields an actionable prompt and clears the status.
-        has_token_record = False
-        if mapped_login:
-            try:
-                has_token_record = await common.has_access_token_record(mapped_login)
-            except Exception:  # noqa: BLE001
-                common.logger.debug(
-                    "Failed to check GitHub token record for %s; prompting sign-in",
-                    mapped_login,
-                    exc_info=True,
-                )
-        reason = "revoked" if has_token_record else "unlinked"
+    auth_reason_value = event_data.get("_auth_reason")
+    auth_reason = (
+        auth_reason_value
+        if auth_reason_value in {None, "unlinked", "revoked"} and "_auth_reason" in event_data
+        else await slack_requester_auth_reason(requester)
+    )
+    if auth_reason:
         common.logger.info(
             "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
             thread_id,
-            reason,
+            auth_reason,
         )
         if user_id:
             await common._post_account_link_prompt(
@@ -798,7 +825,7 @@ async def _process_slack_mention_impl(
                 thread_ts,
                 user_id,
                 user_email,
-                reason=reason,
+                reason=auth_reason,
                 agent_thread_id=thread_id,
             )
         return

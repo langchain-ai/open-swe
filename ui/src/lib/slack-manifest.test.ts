@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import { slackAppManifest } from "./slack-manifest"
 
-const CODE_CHANNEL_SCOPES = ["code_channels:manage", "files:read"]
+const CODE_CHANNEL_SCOPES = [
+  "code_channels:manage",
+  "commands",
+  "chat:write.public",
+  "files:read",
+]
 const CODE_CHANNEL_EVENTS = [
   "agent_session_stopped",
   "code_channel_action",
@@ -15,6 +20,7 @@ describe("slackAppManifest", () => {
     const manifest = slackAppManifest()
 
     expect(manifest.features).not.toHaveProperty("code_channels")
+    expect(manifest.features).not.toHaveProperty("slash_commands")
     expect(manifest.oauth_config.scopes.bot).not.toEqual(
       expect.arrayContaining(CODE_CHANNEL_SCOPES)
     )
@@ -31,6 +37,15 @@ describe("slackAppManifest", () => {
       slash_command_url:
         "https://<your-backend-url>/webhooks/slack/code-channel-commands",
     })
+    expect(manifest.features.slash_commands).toEqual([
+      {
+        command: "/openswe",
+        description: "Start an Open SWE task in a new code channel",
+        should_escape: true,
+        usage_hint: "<task>",
+        url: "https://<your-backend-url>/webhooks/slack/code-channel-commands",
+      },
+    ])
     expect(manifest.oauth_config.scopes.bot).toEqual(
       expect.arrayContaining(CODE_CHANNEL_SCOPES)
     )

@@ -1,5 +1,6 @@
 import asyncio
 from typing import cast
+from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
@@ -54,10 +55,11 @@ class _FakeClient:
 
 def test_channel_context_preserves_external_sharing_status() -> None:
     context = slack_utils.normalize_slack_channel_context(
-        "C123", {"name": "shared", "is_ext_shared": True}
+        "C123", {"name": "shared", "is_ext_shared": True, "is_private": True}
     )
 
     assert context["is_ext_shared"] is True
+    assert context["is_private"] is True
     assert not slack_utils.slack_channel_allows_operations(context)
 
 
@@ -830,6 +832,27 @@ def test_get_slack_repo_config_applies_profile_default_repo(
     )
 
     assert repo == {"owner": "profile-owner", "name": "profile-repo"}
+
+
+def test_get_slack_repo_config_uses_explicit_github_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+    get_user = AsyncMock()
+    get_repo = AsyncMock(return_value={"owner": "profile-owner", "name": "profile-repo"})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "get_slack_user_info", get_user)
+    monkeypatch.setattr(webhook_common, "get_profile_default_repo", get_repo)
+
+    repo = asyncio.run(
+        webhook_common.get_slack_repo_config(
+            "C123", "1.234", slack_user_id="U123", github_login="mason", thread_id="new-thread"
+        )
+    )
+
+    assert repo == {"owner": "profile-owner", "name": "profile-repo"}
+    get_user.assert_not_awaited()
+    get_repo.assert_awaited_once_with("mason")
 
 
 def test_get_slack_repo_config_applies_team_default_repo(

@@ -804,6 +804,7 @@ async def get_slack_repo_config(
     slack_user_id: str | None = None,
     channel_context: dict[str, Any] | None = None,
     thread_id: str | None = None,
+    github_login: str | None = None,
 ) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs.
 
@@ -857,17 +858,17 @@ async def get_slack_repo_config(
         except Exception:  # noqa: BLE001
             logger.exception("Failed to resolve repo from Slack channel description")
 
-    if not repo_config and slack_user_id:
+    if not repo_config and (github_login or slack_user_id):
         try:
-            slack_user = await get_slack_user_info(slack_user_id)
-            slack_email = (
-                (slack_user or {}).get("profile", {}).get("email")
-                if isinstance(slack_user, dict)
-                else None
-            )
-            profile_repo = await get_profile_default_repo(
-                await resolve_login_from_email_async(slack_email)
-            )
+            if not github_login:
+                slack_user = await get_slack_user_info(slack_user_id or "")
+                slack_email = (
+                    (slack_user or {}).get("profile", {}).get("email")
+                    if isinstance(slack_user, dict)
+                    else None
+                )
+                github_login = await resolve_login_from_email_async(slack_email)
+            profile_repo = await get_profile_default_repo(github_login) if github_login else None
             if profile_repo:
                 logger.info(
                     "Applying dashboard default_repo for Slack user %s: %s/%s",
