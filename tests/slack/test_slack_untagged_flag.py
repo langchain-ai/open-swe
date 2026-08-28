@@ -338,6 +338,21 @@ async def test_message_update_rejects_changed_sender_identity() -> None:
     assert background_tasks.tasks == []
 
 
+async def test_message_update_ignores_metadata_only_changes() -> None:
+    payload = _message_update_payload()
+    payload["event"]["previous_message"]["text"] = "new corrected text"
+    payload["event"]["message"]["app_context"] = {"payload": {"version": 2}}
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "No user-visible message changes"}
+    assert background_tasks.tasks == []
+
+
 async def test_message_update_from_a_bot_is_ignored() -> None:
     background_tasks = _FakeBackgroundTasks()
 
