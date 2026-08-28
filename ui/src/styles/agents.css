@@ -169,20 +169,57 @@ html[data-agents-theme] .shimmer-text {
  * depends on how far the text actually overflows; rows that fit never get the
  * class and so never animate.
  */
+.sidebar-title-viewport {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 0,
+    #000 calc(100% - 1.25rem),
+    transparent 100%
+  );
+}
+
 .sidebar-title-marquee {
-  animation: sidebar-title-marquee 6s ease-in-out 0.4s infinite;
+  animation: sidebar-title-marquee 3.5s ease-in-out 0.15s forwards;
+}
+
+/*
+ * Fades the leading edge in once the title is actually moving. A static
+ * two-sided mask would dim the first characters while the title still sits at
+ * rest, so the stops are tweened instead — both gradients carry the same four
+ * stops of the same types, which is what lets them interpolate.
+ */
+.sidebar-title-marquee-mask {
+  animation: sidebar-title-marquee-mask 3.5s ease-in-out 0.15s forwards;
 }
 
 @keyframes sidebar-title-marquee {
-  0%,
-  15% {
+  0% {
     transform: translateX(0);
-  }
-  55%,
-  70% {
-    transform: translateX(var(--marquee-shift, 0px));
   }
   100% {
-    transform: translateX(0);
+    transform: translateX(var(--marquee-shift, 0px));
+  }
+}
+
+@keyframes sidebar-title-marquee-mask {
+  0% {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 0,
+      #000 calc(100% - 1.25rem),
+      transparent 100%
+    );
+  }
+  12%,
+  100% {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 1.25rem,
+      #000 calc(100% - 1.25rem),
+      transparent 100%
+    );
   }
 }

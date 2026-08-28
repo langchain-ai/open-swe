@@ -255,11 +255,10 @@ export function SidebarThreadRow({
     <>
       <span
         ref={marquee.viewport}
-        className="relative min-w-0 flex-1 overflow-hidden"
-        style={{
-          maskImage:
-            "linear-gradient(to right, black calc(100% - 1.25rem), transparent)",
-        }}
+        className={cn(
+          "sidebar-title-viewport relative min-w-0 flex-1 overflow-hidden",
+          marquee.shift !== 0 && "sidebar-title-marquee-mask"
+        )}
       >
         <span
           ref={marquee.text}
