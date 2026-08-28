@@ -138,8 +138,10 @@ from .tools import (
     background_execute,
     background_task,
     capture_environment_snapshot,
+    create_automation,
     create_sandbox_file_download_url,
     create_sandbox_service_url,
+    delete_automation,
     delete_environment,
     delete_organization_skill,
     delete_user_skill,
@@ -155,6 +157,7 @@ from .tools import (
     linear_list_teams,
     linear_search_issues,
     linear_update_issue,
+    list_automations,
     list_environments,
     list_threads,
     manage_baby_sit,
@@ -180,6 +183,8 @@ from .tools import (
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
+    trigger_automation,
+    update_automation,
     web_search,
 )
 from .utils import ttl_cache
@@ -804,6 +809,10 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "save_environment",
         "capture_environment_snapshot",
         "delete_environment",
+        "create_automation",
+        "update_automation",
+        "trigger_automation",
+        "delete_automation",
     }
 )
 
@@ -951,6 +960,11 @@ _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
     sandbox_reset,
+    list_automations,
+    create_automation,
+    update_automation,
+    trigger_automation,
+    delete_automation,
     list_environments,
     save_environment,
     capture_environment_snapshot,

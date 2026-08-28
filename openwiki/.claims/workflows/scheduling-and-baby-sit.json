@@ -1,0 +1,370 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:9e54ddb2f7d4863fc2ff6203fd964cb7663fff63f79b8cc497c969c83be37659",
+  "claims": [
+    {
+      "id": "claim_851e23a08e794421a0ac06c407e8a9d0",
+      "statement": "The scheduler graph (agent/scheduler.py) is a single-node StateGraph (START -> launch -> END) registered as the `scheduler` assistant in langgraph.json, and its `_launch` node deterministically fans one cron/run tick out to the handler matching the incoming `task`, invoking no LLM.",
+      "evidence": [
+        {
+          "resource": "repo://agent/graphs/scheduler.py#L1-L3",
+          "version": "repo-lines-v1:sha256:38f828039e6212641cf3ba7e13473711fbc24ea3c1d8e63de8f6722df7ec3ef2:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTBhNWRiODI1NDkyZmE5ZjAzODQ4NGI0OGIyNzE2YWNiNTk5MTRkNmFiYTE2MjAyMTI3M2FjNGZkZTE1MjlkMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGE1ZGYxM2U4MmM2NmQ3Y2U3NTE5MDI1YzNkNWFiYTc4MWViZmZiMWYyYTBiOTM4OTRhMWI4MmRkZDA2ZTlkNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://agent/scheduler.py#L33-L62",
+          "version": "repo-lines-v1:sha256:1dbcd1680223e3f536a3a78d1c2221b209b6fe00693f9f7f2196cd9d5ad416f2:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyMTc1NWE0NzlkNzgxYTY2NDkzYTBkMTI3Y2IyYmU5MzE4YTk5ZjZlZWQ3ZmY3MGMyYmE0NTU2MTk4OTk2YTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwMGM2YjYzMzk1NDBjOGFhN2M2ZTZmMjkyNDIwNzVmYjRkYjY4ZWIzN2VmYTBiZDE1MWVkZGRlMDdhOTIyYjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2MzM3MDFjMGFiZDcxM2EyYTA4ZjhhNjhlYTY1NzFlZTFhZDE3NzI3OTcwZTBlNTkwMzNkMmViY2Y3NzM2YTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://langgraph.json#L5-L11",
+          "version": "repo-lines-v1:sha256:8937854c8ed7235e3289ebe6d1011930b7c87b8232a8c51bf6b63c5f46a8e130:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjdlYTBjYWNkNTRlYWU4NTIwYjQzYWI1MTIwNWJkZDZiMTQxN2NjMDI1MGI5MmM2NDExNTFkYzQzZjkyOTBlMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_3682bb8bd72d486a95134e55f8c79184",
+      "statement": "The scheduler's `_launch` routes `task` values `reconcile`, `baby_sit`, `background_tasks`, and `session_cost` to reconcile_stale_runs, evaluate_watch, monitor_background_tasks, and run_session_cost_refresh respectively, and falls through to launch_scheduled_agent_run(schedule_id) when no task matches.",
+      "evidence": [
+        {
+          "resource": "repo://agent/scheduler.py#L33-L54",
+          "version": "repo-lines-v1:sha256:4484f4bec3b6fa48ed4fd7c34afd11001f0652b574e4d5ea9d1db4e598d842b5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyMTc1NWE0NzlkNzgxYTY2NDkzYTBkMTI3Y2IyYmU5MzE4YTk5ZjZlZWQ3ZmY3MGMyYmE0NTU2MTk4OTk2YTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiZTEwZTdmZWNhYzNmODFhOWUxYjJkYTVhOGY0NjkwZTViZDEwOGY1MTc5OTQ1M2MzYjg3ZDRiMjRiNDIwMTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2MzM3MDFjMGFiZDcxM2EyYTA4ZjhhNjhlYTY1NzFlZTFhZDE3NzI3OTcwZTBlNTkwMzNkMmViY2Y3NzM2YTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVkMTNhYjE2MzVhMzNhOWQ2ZTQzOTAwNjJmMzgxZTI5ZWM1ZGYyODY3NjMwOWZlYWY4ZDRhNWE2ZjYyZTJiNjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d9afc0d3df954f499b1b1e919b41a09c",
+      "statement": "When a scheduler tick is missing its required key (watch_key, thread_id, or schedule_id), `_launch` returns a `missing_*` status result instead of raising, so a malformed tick degrades to a no-op rather than crashing the cron.",
+      "evidence": [
+        {
+          "resource": "repo://agent/scheduler.py#L38-L53",
+          "version": "repo-lines-v1:sha256:e8933cb8aa5bd22ad56fc795c45276280e47adfe53f063b3651d42aa04476a7f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmNWNmNjRlZjU2MDQ2YzMxNzUxMjJmMDI0YzY1ZTVjZjhkMjliOTk4ZDNiYjU5NGM5ZmZjYTM5NzlkYWRkODciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlMGVkOWM0YzFhODEwZGJhNjY2ZjQwOWI4OGM5Yjg4MjRkZDE5OWQzOTQwMjc0NjMxNjE4MGMzMzJkNjZiMjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4YmUwZWM2NzNhNjU4OTdhMzk3NjVkYzRhYjkxMzNiYzEzMjc2MTZlODE2YzkyYjkzZjllMzk0OGIxMmRhYTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkMGY1ZTFmZGExNDE2NDczZTM3NmZiNDJjMDlhZGQyOWVmZTAyZjMzOWVhNzA1N2VjZjA5YzhhYjUzMDg4ZjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_57e56d5d78ff40fab76d5cf2f12301e8",
+      "statement": "Dashboard-managed recurring agent schedules validate cron strings with normalize_cron_schedule, which requires a five-field expression and range-checks each field (supporting steps, ranges, and lists) before a schedule is stored.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/schedules.py#L102-L137",
+          "version": "repo-lines-v1:sha256:d7ee4131512f45b47120dff443a9b0d11e1a003b527aeac60ce23eb43f79de32:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0ODRjZjg3NzBhOGEwMDlhNDcxZTFjNWY1MDkzNDczOTQ1MGU0ZjQxOGIyN2NhMjA4YWUzNjAwOTkzODdjYTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5M2ExMzA2MmYxMGVlNGYxMjE4ZDkzZTM3YTZmODFkMzQ2ZmYxMWVjN2U1NWRkNTQyZTJkMmQyZWYwNzExZjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjljMzVkOGJkNjMzZmUwYjEwZjg5ZWY3NzA0MTM0ZmU2NWZiMTZiY2E4NDYxODAxZmEzZmQ0MDllYTI0NDFjZWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk2ZTA3NWY5ZjRlNzkzNzhmZDQ0YzVlNjY5Yzc2ZmYzYWUzMjU0ZWM1ZTQ2NjY3MmZhYjIxNTQyMjcyMjNiM2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5c10bff511e1486a927941d0933d5dfa",
+      "statement": "launch_scheduled_agent_run loads a stored schedule record and launches a fresh agent run, recording last_thread_id / last_run_id / last_triggered_at (or last_error) in a separate schedule run-state namespace.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/schedules.py#L34-L36",
+          "version": "repo-lines-v1:sha256:ced3d84ee3c285bbd3942ff0aabcdd067f50b9431cb2beadfb3914b7d6e62020:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDliMWUyMmM2OGVhZDA0NWRlZWJlZDM1YTMyZjRlNjExOTYxZjA2Njg4MGQ5ZmU5ZDRkMjdkMzgxODdiNTBlNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzIyYWRlZGFlYjNhNjkzMzBkMWFlNjk5NWVhOWQwNDFiYThmZjJmMzAyNzExYTA3YmFhY2QwOTE2OWJmZDIxYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjMWM0NjJlMmEzOWQ3NDc1OWY1ZTFiMTI2Zjc2ODNhMmI3MzAxMThlMThmNTEyMmIwOGNlZGVlYjY1MGUyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZmQ4NGE0MTg2N2I4MWM0OTE3ZWRmNzk1NmQ4ZmVjOTkxNzQyMTJjZWNkZDQzMjc3OGVhODI5NWJjODg5ZTM2MSJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/schedules.py#L684-L706",
+          "version": "repo-lines-v1:sha256:e5e2e4e804a3e81a9180f06b8292c5ed6ecdec288f39d9d9d7966e22e585ce78:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVjOGYxODg0NmY5ZTZjMGQ3ZmM2ZWZmYzIxYTVmYmI4NmVjYTcwNjU5NzRmZGQwMzZmNjRlMDZhZjQ1MmQ5M2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI0NjQ5NDdmMTEwYWQ5MTZlMTdlMmEyODBiZDM2YjhhZTY1NmU2ZTFjYWQwYWNhY2ViMjYzODJiMzBjMGQxYmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5ODM1YzdkMGM5ODQ1ZTg0NTA1Y2VjYzU4ZDAxM2RlYWQwNDYzNzdiOGNlZmUyZWM5MTE0YWQzNmJkNDNhNWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ4MWUyY2NiYjllZmI2NGViMTRkNmI2MjhhNThmOGI3ODJhZmQ0YjYyOGM0ZTViYTFhMWEwYmEwOTdlNDI5NGYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_dc0c21bfc2f4429e883048e4f3ecf510",
+      "statement": "reconcile_stale_runs is the durable-dispatch safety net: it paginates every `busy` thread, lists its `pending` runs, and cancels (action=interrupt) those older than max_age_seconds (default 1800s), so runs whose completion webhook never fired do not hold a thread busy forever.",
+      "evidence": [
+        {
+          "resource": "repo://agent/reconcile.py#L1-L8",
+          "version": "repo-lines-v1:sha256:d1d4d2de36c0790eec16c819da236ce5419714d5e0e1f5a2fa8ff604e7deee08:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODIzZDczYWEwYmIxZTJmYTdhMTE5OTI5ODdmNzBhMTNjYjJiNjhlOTc5Njk0N2VjMmYxZDQ2YjU0YzAzZDc3MyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNWNlNTIwYjVkOWZiYWRjY2JmMDhlMWI2ODQyZDMxYzU5ODUzN2Q5NWYyYWFmOWE2YjBhZjRiNzVkN2FjNDE5NCJ9"
+        },
+        {
+          "resource": "repo://agent/reconcile.py#L37-L99",
+          "version": "repo-lines-v1:sha256:6ae080e6d07ee01626f1d0a8c67f630c3a6c80c7a246d707262fb7345a95d5a4:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjZWU0MjhiYWFiMWIzZDljMzQ2NTQwMDkwY2M2OTRkZDBkNzFhZTVkNjQyNzNjZjVmMjFmODZlMDJlZTE0NTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5ZjEzMGY5Njc1YzFkZjE2M2RjNTAyMjQ4YjZmYjBiOTUwMjZiMDZmMjcyMWFmZjE5ODZlOTFhMjQ0ZTk1MDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA2M2U3NDQ4OGRhM2U3YTM5M2E1NWNiZjBlM2YxOWU2ZTk1MzBjMWUwNDNkOTk5ZjhjMDJjZTQwYTk5MzliNDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRjZjFhOTA3NjE0NTA1MGU5MDlmYzY4YzNiOGUyZWJkNTY4MGRiOTQ4N2IxMzAxNTg5OWU2M2NhYzY1OGY2N2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c0ca9b93d007455891fa2d0a1a6a2dfa",
+      "statement": "The reconcile sweep wraps per-thread work in try/except so one bad thread never aborts the sweep, and returns counts of threads checked, stale runs found, and runs cancelled.",
+      "evidence": [
+        {
+          "resource": "repo://agent/reconcile.py#L68-L118",
+          "version": "repo-lines-v1:sha256:e9b6b487be3b1065e05ff6b35f956c733a2144e3331d1d2db979202267f01066:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4ZDYyYTQ4MzVhODNmYmUzYWU2ZTVmNzYyY2JlODkwMjBjNTRhZWYwYWZhMmNjNjM4NjJhY2U2OGI3NzM0ZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3NjZlZWZkYzNjYzdlOWZmMzRkNDVkYjczNzBmZTVmNDkyYTdlNDhjOTI5ZWQ0OTQ1ZGY0OTIyMzg3ZmQ1NjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU0OGVlMjBlZTM1ZjY4YTA1MTAxMjc0NjQ5NzJlOWFiZTRiZjVjMGVmOTdjNWM1NzcyM2M3Zjg3OGM3YzZjYTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU5YmE5NWNiNDQ1NTEwODQ4YmVhYTMzNGQ5Y2VhODQyNjI0M2IwYmJlMGQ5MThiOGIxNjIxNzJjYTgwMTg2NzkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_714c904bc212446ab1bfe07f63cdd21e",
+      "statement": "session-cost refresh is a self-terminating chain of stateless delayed runs: agent completion schedules a `session_cost` run, and run_session_cost_refresh performs one bounded Slack-footer update attempt, enqueuing the next attempt on a transient `pending` result up to a fixed retry-delay list.",
+      "evidence": [
+        {
+          "resource": "repo://agent/completion.py#L269-L269",
+          "version": "repo-lines-v1:sha256:f09d6bcd5175768598e8fa911ef053580caf00b70f613de072eabc402db18b73:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjA5ZDZiY2Q1MTc1NzY4NTk4ZThmYTkxMWVmMDUzNTgwY2FmMDBiNzBmNjEzZGUwNzJlYWJjNDAyZGIxOGI3MyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjA5ZDZiY2Q1MTc1NzY4NTk4ZThmYTkxMWVmMDUzNTgwY2FmMDBiNzBmNjEzZGUwNzJlYWJjNDAyZGIxOGI3MyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZDNhNTYwMTcwYzU1N2JkM2JhNzY2NDlhOTIxM2YzYTc2ZGU2YjZiMzFjODhhZDU4YTE3MzhhZGI2OTU0YjViMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTk0YTdlNGRlMzU3Zjk4ZTg3MTk4ZWY3NThlYjExZDYwZTk2ZmQ4NTUzMjBiYmZiMGY2MGQ4MjFmNDgyOWY4ZSJ9"
+        },
+        {
+          "resource": "repo://agent/session_cost.py#L150-L177",
+          "version": "repo-lines-v1:sha256:2a4d16c8eb7b5a9053ad51164d48edef08ea447c2744bd0f461d0db7376f5ed7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5OGI0MTczMmZkYTRmZTdmOThhODA5NDIzYjgxNjg3NWQ4ZTA1NTY2NDUyZjBhNmFiN2JjOTM3NjI2YzkyMTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhNWY0ZTRlMjkxNTkzMTI2MWZhYzNkMDFiZmE0NDdhM2U1MDE0OGZjMTdmY2I5MjhiMzQ5NmQxNjFkZjg1YjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4ZTViZTE2NzUxY2U3Mjc1ZWFkYTQ2YzMzMjM0YTI5NGE0Y2QyZjQxMmZlZGE4MThiMmM2Y2ZjY2ViZDY3NTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIyNTE0MWM4MmI4NmRiNDM4ZTc5MWY2YTQ1OTAyZGIzNDcxYThjMzU2NjE3MzMyZDZkZGZkNDk0Mzk1MWFjZmMifQ"
+        },
+        {
+          "resource": "repo://agent/session_cost.py#L57-L82",
+          "version": "repo-lines-v1:sha256:b7ba41f2ef64a883cc2ee40e1d3e0372e9569ca2dc055ad9b25f5e5c1f6806d6:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVmMTE1MGVjOGU4ZmVmNjc3MTE1OTRmOTkwMTQzYzkzMjcxMzA4MDUzMTFmNjE2YzgwNWZmYzczZTk4MTQ1ZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwZTJhNDY1MDA5NWZhOTVkMGUyYmI0MWIyZGIyOTA5NGQzNDA0ZDI4Y2UxMjMzOWVjODhiYjRiNWM1YmU4ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1ZWQxYzM2MDliZWZlMWY5ZjliNzNiZDM3NGVmMGMzYjRjYjA0YzIxZjIxNTk2MzAwNzc4ZjQ1Zjc4NTY1ZTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_50ebd887b29648f5b2c8fadedee19336",
+      "statement": "Each baby-sit watch is a BabySitWatch persisted in the `baby_sit_watches` store keyed by lower-cased owner/repo#pr_number, binding the watch to the originating agent thread_id, head SHA/ref, GitHub App installation id, captured run_config, and a SourceContext.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L156-L179",
+          "version": "repo-lines-v1:sha256:89975394e45323e7cb98f1e83c8978ea6b6a3176c941449e3feb11c8e58decd2:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMxYWQ4Y2I2MjkxZGFhYTdkZTI3ZDEyNjVkNTY3ZTgyMGVhNDBmODhiNWUxMDJhOGNiZjJmYjZlZmRiMzdlMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4ODRkYmNmOGQ4MTM2ZDY1OWUyZjRlZWZlM2UzOGE5ODJhNjU0ZGU5MWEzNzRlM2RlOWRmNjg1ZDFmNTFmNjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZjMzVlOTVlZjcxYjk3ZWQxMGRiYmY2NmExOWZmMWUxZDRiZmFmN2E4Y2I3MGNjMWUyY2ZhMGY3OTEyMGQ5M2QifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L217-L257",
+          "version": "repo-lines-v1:sha256:185076bf4d73da6fee98f6b327c965b9df2182fcf4386ab6e96f7bac42f7ccfb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5N2E4YTUwN2ViZGFkMDYyMDJjYzgzMWY0NmQwNGE2YjkwOTFiNTZiYjY0NzlkYjZiNjVjMzBlNTVlYzk2ZGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhNTk4NDBlMzYyMTg1ZTg2NDY0YmRmNTIwMGRmN2UxZjAzN2FmNWEzNGVkOGZhNDA0ZWFjM2NlNDE2NmUxMmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk0YmFiMjI5MmNiZjA5YWM5OGViN2U0ZjZmOWJhYzU3Zjc3NTM0N2UxODM0Njc2MzViMTc3NzMwNDZiODMwZDEifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L35-L99",
+          "version": "repo-lines-v1:sha256:e70f46177c3b2bd3b63105446ad8b42ebce1e53d897a69cfdc7f77d390fa14ed:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI0YmRiNTI0NzhkODg5Y2E3MGNlMzc5OTE5NmJlNmU3OGQwOTZmZTFjZjQwZThhNWYzMjA1YmE5MTkyYzFkNmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MGQwZWUxMzkyYjk4ZWRiZmRlYTM3YzNlZTM0NjQ2ZDZhYWJmYWFjZmM3ZmNjYmExZTQ4MGI4MGQ1ZmFkZjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyYjY1N2ZmMjE1YTEyM2VkMGI1MDViN2VkOWQzYWNmMDM1MzM2NWUyOWIxOGIyN2UwNjZjYjA4OGQ0YTk4NWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_891f9d588149456dad7bfef4bc672ebd",
+      "statement": "A pull request may be watched from only one agent thread at a time: start_watch rejects a second thread that tries to watch an already-active PR, and carries over retry/dedupe state only when the head SHA is unchanged.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L217-L257",
+          "version": "repo-lines-v1:sha256:185076bf4d73da6fee98f6b327c965b9df2182fcf4386ab6e96f7bac42f7ccfb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5N2E4YTUwN2ViZGFkMDYyMDJjYzgzMWY0NmQwNGE2YjkwOTFiNTZiYjY0NzlkYjZiNjVjMzBlNTVlYzk2ZGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhNTk4NDBlMzYyMTg1ZTg2NDY0YmRmNTIwMGRmN2UxZjAzN2FmNWEzNGVkOGZhNDA0ZWFjM2NlNDE2NmUxMmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk0YmFiMjI5MmNiZjA5YWM5OGViN2U0ZjZmOWJhYzU3Zjc3NTM0N2UxODM0Njc2MzViMTc3NzMwNDZiODMwZDEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ba1fe3d1c54a452eadc1ec95d624c9e6",
+      "statement": "start_watch registers each watch's per-watch LangGraph cron via _ensure_watch_cron, which idempotently reuses an existing cron tagged kind=baby_sit_watch (deleting duplicates) or creates one, and rolls back the store row and partial cron if cron creation fails for a brand-new watch.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L182-L214",
+          "version": "repo-lines-v1:sha256:c465ff6929bd56c413cd88c2d53e831cbe4911701a5719a660d11d172f73970b:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiN2VmYzBlOGY1N2Q2NDUzZjdmZmFhYjYwMTA2YzI5MmY5YmJkZDdiM2NmYmYzNjlmMTNlZWQxZGRkNzFkZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjYWU2MzlkNzIyNDFlMjFmYzJlYzcwN2ZiNWRiZTFmMDdlMTM5ZWMyMzkyMGIxNDI0ZGRkNDVhOWY1MjNhODEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU2NDRjYzBlMDZjZGZkOGQ5N2M1NjBhZWQwOGMwMmRmMmExNjQ3NjU2ZDZjNzQ3NzI0ZTBkYmI1NDk1NTJiMmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI4Mzg4OTk3MDUxMjJhM2YyODkwYzc4NDE5ZTQyNWFiMGFmYzM1ODhhM2YyMTg2NTQ0YzVlYWIwNDY1NWQ5NzIifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L258-L270",
+          "version": "repo-lines-v1:sha256:6730aa6974c42ba2a19836ec97c7d96282d4692d26f4a102717dc4cd4cd3fb76:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM2YWI2NzU2YWI3YTc0MWQwOGM5NzIwN2NhOGFkMzMwZTM2MmM2YmMzMjkxZmEyM2ZhZTg4ZjVlYWVhNzI0ZDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzYjIyMzQzZTljNzU1OTIzM2RjNDZkY2VhNTg5OTY1OGY2Yzg2YTczMTRmYTQ2MjA5OGYyOTI4YWY2YWQzZjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5OTg0MmZjMzk1Yjk5YWE3MGQzOWM0Mzk5NTRiYmUwYjNjNDViMjM5NDE0YTlhYTExMGY2YjRiMTIxNjJmYmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc4MjNjNGJhYzcwYWZiZjhlZGNlYTZmY2IxNWRkMWM3Y2JiOThiN2E5ZTIwYjAzM2FmMmY0ODE0YTU4MzhiYjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e9c34bd6972d4dedb308576ab1dfddad",
+      "statement": "The per-watch baby_sit cron fires on the fixed */10 * * * * schedule against the scheduler assistant, providing a deterministic ~10-minute fallback that dispatches no agent run (returns statuses like pending, settling, or duplicate) while CI state is unchanged, so it consumes no model tokens for unchanged state.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L182-L194",
+          "version": "repo-lines-v1:sha256:586cb18882e54a83bacd7668cfd9cdeb32aa255c5c3eac815c8279660f85277b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiN2VmYzBlOGY1N2Q2NDUzZjdmZmFhYjYwMTA2YzI5MmY5YmJkZDdiM2NmYmYzNjlmMTNlZWQxZGRkNzFkZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0YmMxNTQ0NWEwZDM1NzFjZDljODgyNWY4ZWNjN2MxMjFkN2VmODBkZTQ5MjM5ZWFmNDc5Mjg4YjBkYTNiOTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU2NDRjYzBlMDZjZGZkOGQ5N2M1NjBhZWQwOGMwMmRmMmExNjQ3NjU2ZDZjNzQ3NzI0ZTBkYmI1NDk1NTJiMmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhlMzY3MjY0MjM5MWJhYWE1ZTdmN2IxYjI5MTk2MjU2MTFlMjhjMmE3ZjM3Mjk1NDhhOWE3Y2M5NjgzNGE4NTIifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L36-L37",
+          "version": "repo-lines-v1:sha256:f2693b0f3964aaabbe7242deba9def032a4d18aa824ff24b7e44cb7f086e048d:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjBkYzQ2NzdmZTY5YzIwMTE3ZGZlZjA0MjNiYTIyNzEzYTFkOWYzYWYyNmI0ZWZlN2U5OWE2ODZlN2M0OTUzYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDcyZDhiMWY1NGI2YzRkMjY3MGI2ZmNmOWEwNjY0YTJmNTY2MGY4YmRmYzM3MzlmYjdjODcwY2UxMDRmY2U1YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGMzZWE0ODZhMzQ4MjE1YWVkZGM3NTUyNzYwYzA3NDcwYTMzY2I4OGMxNDM5ZTBhYWEyMDYyMzQxN2QzZmUxYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2U2ZmJkMWViNDk4ODhiYzgyMzk2NGM3MWJmMDBiYmJhNGE4YWE2NzY3NDJiOGIyZjFjMTYyMDkyZjRkZjBhNyJ9"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L478-L509",
+          "version": "repo-lines-v1:sha256:a7640ecdadeaf54291868d83f25e95150e5f28af1eb8137c95db26273626dbe1:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4MjYwZjQzNzc1N2YyYTIyYzgzOGVlYTQ5NDhkZmU5ODFkN2U0NTliNzJkYTE1NzM3YWU0NThlYmVmMWZiZGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUwM2UwYjcwYjEwNGUwZDlkZDYxZjU5ZmJlYTAyMzkyZDZiZWNhYTBmYjgzYjU4ZDE4Y2Q2NDRjOTRmYTFhZjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRhODk3YzgzMGJjZGNjY2ZhZmVkMWZhNWQ0NGQ1ZmQ1OTAyNjNkNWU4YThiM2ZjOTVjYTljNDM0YWMzOWU3MmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmNmE0NGM5ZGU2Yzg5MDVmN2FjNGY4M2U2MTgxMmY0ZTVhM2VlZmM3NTA1Zjg5ZDYxY2M3N2M3N2VmMjcyZjcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_10f9b9d9504d4326878ee6787877feee",
+      "statement": "Signed GitHub CI webhooks trigger immediate watch evaluation: the webhook route verifies the X-Hub-Signature-256 HMAC before processing, and handle_ci_webhook ignores non-failing payloads, matches active watches by head SHA or branch, and de-duplicates by webhook delivery_id.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L531-L580",
+          "version": "repo-lines-v1:sha256:75f32f43b4ff31127db7fe0557e184fb18353af2842e6f4e556b81eceaecc086:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiNGZjNDBlNzcwZGNhZGVjZWRlN2ZhOGU3NjUwYjU4OGEzMzYyYmNhZmYzMjRmOWIzNWEyYTgwN2FlMzE5N2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiYjEzZGEzODcyNjZjOWQzNWRkM2NhYTk2NWU4NTVkNjFjMjU3Y2VlMWU1ZDdhZmRkMDNjZmNjMGEwYzlmMGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5ODVjM2RhMTkxNjQ2ODA5NjdjNTJkNGM2MDkxYjkzNTAyMTdiMGMxMmMyYjUyOTdhZGEzMGQzMzg4MWEyMTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4NTM5YzM2MTRlMDI1ZThkZDUyMWRjMzdhZmE3ZTM5NTkwMDM3MzJhYzRmY2IzZjYyYzg2NTI3ZDRhMTYyNzQifQ"
+        },
+        {
+          "resource": "repo://agent/utils/github_ci.py#L264-L273",
+          "version": "repo-lines-v1:sha256:07035fca040c4c928746dca639b115e8622d8fb260895d6b9d846957165d91a6:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY1Yjc0YzNkODZhNzhjZjg4MjgxNTQ4ODg2ZDhjZThhNDUwYzdmNmY5Yjc1OGFlYjZiMjc0YTAzODRmZGFhOGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1YmM0NzExZWNjYTA0NTBhZmM4MzI3NzlhODg2NzZhN2M2OTYwZmEzZGE1YWY0MTBlZTAyZDFlMDE1MTU5MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJlNGQ1YTY2MTVmMzczNGRjOGI5OTk5OWI3NGI2ODIyMmQxZWE4MWUwN2FhMTUxNWVlNTNkOGJlNDExNGI4YTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/github.py#L792-L796",
+          "version": "repo-lines-v1:sha256:648db62a7661282973dbcf4bd9f9ec1a14ae1204631821f28e52d4f6402dfa45:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZmIxNjE0YTAwOWMzY2E0NzA5YWY1ZTI3NzAzYjNkZDk4ODBiZTUwNjM0OWQ4OTAyYzVlOWI4YzEwZWMzYWRkOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTA3NDk5ZDEyNDlhYTk2YjU4ZDE2Y2Y4Nzg4NTMzMWFhYzFkNTYyMzcwYzU4YmYwNTliNTE3ZjZkMTA1YWYwOSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTcwOGNlN2YxYzQ4ZTQ2OWFmMDQzMzNlYjgzODZjMjgwNjQ5OWEyYjA2YTgzZDRkNDIwODYyZDNlYmY3N2M3NCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTgyZWNmMGMyYjlmMWMyZjQ2NGQ1Mzc5ODdmNzc0YTY3MmFmNmVkZTI2MGI1ZDI5YmExYWZiZTkxMWVkY2VlZCJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/github_routes.py#L11-L26",
+          "version": "repo-lines-v1:sha256:0ef70cca9a42e65db6b0f9037e4fc7d875e531272b99f3b65dff830ea5b99bd0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkOGQxYjkwZTExOWQ1ZDVhMDEzMWFjMzhiOWQ4M2Y5ZWUzNmY2OTFkMmJmMGY0NzM5MjAwN2ZiOWVhOTI3ODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1NGNlZTU3ZmNiMWU5ZjBiMWZhY2VjNmUwMTUxNDhiMWRmZTVhYWIxODRiYTM5ZGU1MjViMjY0MzFlNzFlZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0OGY4ZTBmZjEyYWE3ZTAyNmIyYWJlZjllMzJmZmU2MmZlNTE4OThkMDlhNjRlODZmNzk5NDNiOTZhY2QyMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdjYTYwNDc1YWQxZjg0NzJjNDU4MmQ4ZjQ4MjdkM2FmNTk3YjI4MzM2NmIwNDI4M2Q5OTY5NjE0NjBkNTIwZjAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_258388f81d144c17a3f0b35a8d6132af",
+      "statement": "Both the webhook trigger and the cron trigger funnel into _evaluate_watch under a per-key short-lived lock thread, so at most one evaluation of a given watch runs at a time and concurrent triggers dispatch a failure only once.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L420-L427",
+          "version": "repo-lines-v1:sha256:6fa7dc51f4969fab8618383422328dd11f25949ce581a4c0df608f45bd5ea8ad:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWQ5OTU4MmZlNzQ2MmVhNmY0NWE4NGVkM2RlNTUzYjRhNzcxOTYxOGY5ZWE1YzZjOTI5NWVjNTk0YjYwN2JhZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzRkNTg4YmJhZTQ3ZDIxYmQ5YzQ2YTcxOGRiMDI3YzJiNjNmNTUyODg2NDM5YzQ4ZDBkYTRhMTMzYjIxZWZhZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGNjNGE3ZDFjYzc5NmFiYTNlNDY3MjMzMjdmNTE3ZTlmODExOTgyZDI1MGYwNzAyOTg2ZTRiNTc2NGFkOTU4OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjE1NWE0YWFkMmYzNWNjMTRkNDFiMmQ2MWU5NmE5MmZlOTdmYmE0NWVkODJmOWIxZTFjOTczNzY5MDc2NzA2YyJ9"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L47-L69",
+          "version": "repo-lines-v1:sha256:fc7128e576613fd6f03eb68154b8ee440d0a61afcd2c967e467f479932330385:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3Y2ZmM2YxNzg0MmRlYzZlN2U5MWMzZTNiOGZjZTBhODIyZmMzMTEyNzM4MWIwMGY0NGE5ZjEzMzMzMDNhMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMxYjI0Yzc4ZGE3YzNjZDVjMWU3OTU2ZjI0NGFlYjA1MzE3NTc0N2FhNDA2MTY4Y2YwZTQxN2U1ZDVkNTViZGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRlY2Q4NzMwNWQyZDgxZmJkODM0NWViMWNmNDU1ODFkYzc3ODc1MzQ5MTNlN2M4ZGI3ZGVkNzFmZTc5YzNmNjAifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L562-L579",
+          "version": "repo-lines-v1:sha256:70bf5991ce3a53958a8bfdbe4f86e0e4e0ada06a7d6319d0df58f3db0b1dd108:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExNTU5YWFjYmVjZjM5MDIyYmM5YjA0NDJkZDk0YzM3Y2ViNDM0YjgyYjNiZWM4ZWU5MGE1MTMyZTdmOTM2MTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4YmE5ZWUwZTE3NzAwOWNjOWI0ZGQ5NmQ2OTU5YTU3YzAyZWVmOTIxZWQ5Y2Q3ODk5MTJmZDg4OThlNmI4YjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwMjMyOWE3MGI2ZmQwNWM1OTkyODJmNjM1NDJlNmExZDlhN2YwMjA4NWY2YzQ5OWNhNDdmYTIzMTFkZjA5NzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyZjNjOGNlYWMzZTE4NmM5MjM1MGM3YTE5MThhZGM0YTVhZDI2OWUzNDYwMTliMGIyZDk3OGUwYjkxMWRmMTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_522038fb0ac34733a59561f595a9ab31",
+      "statement": "On a new head SHA _evaluate_watch resets retry_count, settle state, and dedupe key lists; on a genuinely new failing state it dispatches a /baby-sit --continue run to the originating agent thread whose prompt lists failing signals as untrusted data for confidence-gated diagnosis, skipping dispatch when the per-head failure fingerprint was already dispatched.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L129-L153",
+          "version": "repo-lines-v1:sha256:78630bb2e50b10a92be995ab43b66a506d7ef2081b52d245eea072b5d911259d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzNzJlM2MwN2EwM2FiMGRkMzgzOWNjNjViZjYzZDc0Mzg2MTM4OTRhZDFjMWExNmU5YTRhYTliZGVmNGRiYWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI0N2MzZWQ4NzZiOWM0OTIxY2Q4MTNmOTA4OGM0OWRlMzQxNDMyN2JkNWEwMjU5MTdjZDkxMzA1NzA4YTZiZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyYWZkYmRkMGIxMTYzZWRiYzViZjhmMmFjMWMwYjE5YzgyZmYyZjQwYzlkNzkxZTkzYTY4YzBkNzgwMDJhNWQifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L460-L528",
+          "version": "repo-lines-v1:sha256:adc527710fe1b5bc5416891046f0d3ba6c5081f96dd57d24f6ed0d5835b4e422:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ3ZThiOWUyYTYyYjNhOTQxMGI4ZmIzMTk2YzFmYmJlNmJkYjdlNjNmNjZmZDVjNDRjYjE2NmRhZGE5MDQ0MzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBmOTJlOWNjNGM2NjJlMmE5ODM0MTNkYmZlN2I3MWI5NjJkNmI3ZmYwNTQ0Y2MyNjIwYzRjMDM2M2ZmYTQyMjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY2NWU0ZWFjYThjNjhiMDI5NWMxOTMzMGJmZmU3N2UwZjdkZGJhODBlYmZjZTg4YTJkMmJlYTVkMjhlMDVhYmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyNTMxMGY4ZmU0ZjYwMTYyMzczMGNjM2UwNWE2NWUwYWE0Y2Q2ZmY3NmY5MWRjNGI1N2FkNjQyZGJiNDIxNTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f3a4b6b24ad4453e97aee723e2f027e6",
+      "statement": "Baby-sit signals success only after the exact check set has been stable for CHECK_SET_SETTLE_MINUTES (10 minutes), avoiding a premature green while checks are still being added.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L101-L115",
+          "version": "repo-lines-v1:sha256:7159b6396d3e5ba75544cc8e446b6030c12e292826543afad23852451284869a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4YTA1Y2JkZTliMWZhZTI0MDgxODdiNzhmZTMxZjhmYmJjMDhjMzUxMWU2NTc3NDA0MDYzZGU5ZmFkZjQ5MDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmOTI3MzEyM2JkMGQxYTRkZjE4OTJkY2M5MTY0YzUzZGM1MmI1OTQwZjE0MzgxNWEwNmY3ZGE2MTk5MzU1YmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJiMWViZGE5NmNkMjA4ZGNjZTU1MmNmNzA0YzA1Njc4NDI5NDAxNzViMzc1ZDk1MWVhNDM1MTQ4MzgwZDFhNTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjViZjkwZjI4MWQ5YjY3NmU1NmI1ZmE0N2JhYmE3NDU2MjYzNTIyY2VlYzU2YTJjZDA2M2M1ODI3OTMyY2NkMTIifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L43-L43",
+          "version": "repo-lines-v1:sha256:9a0998655c5a5f571ac1a416c5094f97d1f2ea1f1d2d9c32b1b41b17839c4efa:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWEwOTk4NjU1YzVhNWY1NzFhYzFhNDE2YzUwOTRmOTdkMWYyZWExZjFkMmQ5YzMyYjFiNDFiMTc4MzljNGVmYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOWEwOTk4NjU1YzVhNWY1NzFhYzFhNDE2YzUwOTRmOTdkMWYyZWExZjFkMmQ5YzMyYjFiNDFiMTc4MzljNGVmYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDliOTMxZTBhZDA3ZDcwOWRjN2YzMGM2ZDY5N2VmMGMwNjczMjViOWU1YWYwZDdjZDJiYTlmNDQxNjkxMmNlOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzFiMjRjNzhkYTdjM2NkNWMxZTc5NTZmMjQ0YWViMDUzMTc1NzQ3YWE0MDYxNjhjZjBlNDE3ZTVkNWQ1NWJkZSJ9"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L484-L491",
+          "version": "repo-lines-v1:sha256:d565cabc866bba3388f2c483ca98a66a5cef5c07f5ed8cf4a0d0868784f6b08a:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiN2RkMWRiNTIwZTIxNGYwYjA2MjhjMmY3NGNkZTlmYzMzNTM2OWIxNGVkNzk2ZDM3MzA2MDcwMzYyYWU4NTM0NCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTkwOWE1M2E2MThkMDI4ZTFkMzAwMGMwYTdhYmNlZWNiZTVmYjM3ZjRlNTExZWZlNDY2NDNmYWQ2ZTY2ODcyZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjMzNWJlNWFhYzhiMzliNGU4NzZhMjBjMjBjYjk2ZGVhZTIxMmRlNGVkM2MzN2Y1ZTY1NzdhY2FmMzViNjcyZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDA1ZmFiMTc0NzZmODgxY2JmMTFlMTRiZjI4MjdmMzg1YzYzNWIzMjYzZTNhOWQzYTQyMzkyZjkyNzRiMGQ2OSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_6c4674d0afec48a5831d8e58ac56a598",
+      "statement": "Flaky reruns are capped per head SHA at MAX_RETRIES_PER_HEAD (3), and record_retry increments the durable retry count (rejecting the call when the head changed or the cap is reached) while posting the flaky-CI Slack alert only on the first occurrence of a given check/URL for that head via alert_keys dedupe.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L38-L38",
+          "version": "repo-lines-v1:sha256:47036b8ea73c433f30ec40564e1bbd3337aab7ce1451a4132a2722778f190568:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDcwMzZiOGVhNzNjNDMzZjMwZWM0MDU2NGUxYmJkMzMzN2FhYjdjZTE0NTFhNDEzMmEyNzIyNzc4ZjE5MDU2OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDcwMzZiOGVhNzNjNDMzZjMwZWM0MDU2NGUxYmJkMzMzN2FhYjdjZTE0NTFhNDEzMmEyNzIyNzc4ZjE5MDU2OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTQ1NmU1NGJmNWRjOTI2NTI4Mjc5MDY5YjQ4MmE0NTQ0YzNmN2I0MjMyYTIwN2ExMWY2NGYyMTE4OWQ1YzU0OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjYyZWQxZTYwZTk5YzhlMjY5OWU5NmY5NjZjNTBkMjVjYzk1MmMwYjczNDU1OWEzOTg5Y2QxOTczNzM4ZWRmOCJ9"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L498-L503",
+          "version": "repo-lines-v1:sha256:65e2e859cea10ae5f7408b73eb9cb7ee2626f018c249cf594dd05ca54ac56fb2:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDIyYjdkNzQzNTIwZGJkZDc0YmFlNzhjNWZlZTUwNWUwZTkxMzcyNThmYWYxZDBlNmYyZmYzNDIxNzA0ODM3YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTkwOWE1M2E2MThkMDI4ZTFkMzAwMGMwYTdhYmNlZWNiZTVmYjM3ZjRlNTExZWZlNDY2NDNmYWQ2ZTY2ODcyZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTg0ZWVlMDcyYjY5OWMwMDNiMGI2ZDk1YzRmYTA3NWExZmY5YmU1YTFiNzBiNmExNjU0MWE3MTMzMTZhMDRmOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTczN2RhMjQ1NWM5MDA4ZDQ0MmJkYzUyNjhkYTU5YTE1MWNmMWMyM2VlMDJjMjZlNTJjMmI3MGMyYWQ2ODgzZiJ9"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L613-L658",
+          "version": "repo-lines-v1:sha256:fb433a256c17751e1fb94d64e050a2ebb2d54ff997938e60750b9ac80e3a2aba:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjNDQyNDI2ZmU1MGE3MzgxYzhmY2YzYmQ4NzI4ODJhM2QyMTA3MmMxYmM3NGM1MTk2OGVkOTFlZGZjMjRhMTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxYzQ4ZDg5MmY5YTVkZTVkZWYwZmExOGU4NzdiNTFmMzA2ZDNhNDcxNjdkZjUwMjVkMzE0MWY5ZWEwY2QxNTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_79cd87e5bca147b2b055c4f06f495707",
+      "statement": "Terminal watch outcomes (PR closed/merged, settled success, terminal non-rerunnable checks needing triage, flaky-rerun cap reached, or MAX_EVALUATION_ERRORS consecutive evaluation failures) are posted to the originating source thread by _finish_watch, preferring the SourceContext Slack/Linear/GitHub destination and falling back to a /baby-sit --terminal run on the originating agent thread, then the watch is stopped.",
+      "evidence": [
+        {
+          "resource": "repo://agent/baby_sit.py#L295-L337",
+          "version": "repo-lines-v1:sha256:01082ecf4432332a50aa58f00aa669d367ba205f6385ebe47a38d9ca4f8aa6ec:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJmODMxM2ZmYjViM2NhZDI2MzBmMTc1NTE1NjBiNzY4YjE4MzhhMmZlYTlhYWU3ZWZmZmViMzFjNDFhMjNiN2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyZjIxZWNhNjFlODkzNWJjN2FlYWVhMzAyZDg2ZWZlNjc0NTQ4MTQ5ZmI0NTVhN2Q2MDdkYzUzYjlhZTI5MDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE2MjU2ODMzNDI1N2IyMzBlNjJmYmJkZjBiNTZhMTI2ZGZkNjQzOTQ4MDk0YzY5NDQ3NGY3MzVhM2Y2ZGFiN2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEwN2JhYjBkNGYwNTQzYzY4YWQwNGNkN2I0Y2NhODFjYWVhNzgxNWRlMzUxNDcyN2JmNzZiZWYyM2EwOTU3MDcifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L407-L417",
+          "version": "repo-lines-v1:sha256:7769d6b97b2d0349f57cba7e004c46a07956b1438b18779db220ed78d1187605:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE3Y2RhYTU4NDZlZjIyNjlkZDc0ODg5ODIxMzA1N2MwMzRjZGFmNzBiMmQ2ZTBhYzk0YzJlMTZkMmI0ODhiYjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM5NGIzY2IyZGExMTkyMjJjZDI5MTNjZjVlZmE5MzlmMjY4NjdmZjM3MzQ1ZmE2ZjBlZDc1ZDU1OTdlNWU2MzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhhMWM1ZjcxNDgwOTRlZWQ2NGQxNTRkOWY1YTJkODRmMDRlNWY0YWE2YzBlNzE5Y2Y3NTA0NzBmYWZjZjdkNTIifQ"
+        },
+        {
+          "resource": "repo://agent/baby_sit.py#L444-L503",
+          "version": "repo-lines-v1:sha256:b459045ed623c95bb04ba136624e67a3e960e7313f50fea39b0b85af706c6145:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZiMzc1NGFiZDk2OGU5ZWQ2MzIwZmNjZTI1NzRiODAxOGZmNjY1M2E4MjcyMDVmM2RkYzNhZjBmZTJiMTc5NGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFmMDJmYjU1MDkwMTBjM2Q0MDU0NTMyYWEzYzZlOTUwMmI4NmYxYWVlMWNkNGNiZTUxOWUwNDUyYzZkODZjYzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU3MzdkYTI0NTVjOTAwOGQ0NDJiZGM1MjY4ZGE1OWExNTFjZjFjMjNlZTAyYzI2ZTUyYzJiNzBjMmFkNjg4M2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_db676b4fdf3f4cf5b02f5873a1352930",
+      "statement": "The manage_baby_sit tool is the agent-facing surface for durable watches, offering start / stop / record_retry actions, enforcing that the PR matches the thread's configured repo and that stop/record_retry operate only on a watch owned by the current thread.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/manage_baby_sit.py#L60-L142",
+          "version": "repo-lines-v1:sha256:049d47dc18c7fef672943662e7113fcaebea8aa48e4e1c26d427bd277421b552:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg2NTM1MmE3NTgzNDZjZmNlZGU1MzY0MWVjODE5MjE2ZWVmNGViYWEyY2FlNDhiZGQ5ZTgzNzAwNTgxMjgzYmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlYTgwN2MwNmFlNDYyNWJjMjliNmI0ZjJiMWVhZmQ3YTBkNjFiMzcyMjJkMGU0MThlYWNmNzkzOGQ0M2MxOTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA2OTliZGFjYTU4MGZiOTNjMGIwYjU5NjhlNmVjM2NmNWNlNTgyNzM2ZThiZGM3YmEyZjE0NzkyNTJhMzA1NDcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b335ccfb86c5453db4c8198f9b8cba67",
+      "statement": "background_tasks provides model-free monitoring: ensure_background_task_cron idempotently registers a kind=background_tasks cron on the every-minute (* * * * *) schedule bound to a thread, and monitor_background_tasks claims each terminal task atomically, dispatches a completion message to the originating thread, and deletes its own cron once no task is running or pending so monitoring self-terminates.",
+      "evidence": [
+        {
+          "resource": "repo://agent/background_tasks.py#L125-L183",
+          "version": "repo-lines-v1:sha256:3c1a6602a60af971df61d09ac8b68d3e1d793f6918c2ac813fbc20628ea91a1f:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0NWEwOTY2MWEzOTA2YjU5ZjEyNzAxM2IxODkzMWE5N2NkMDcwMzI3NDQxODRhMzMzZWY1MDMxZThkNGVjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhODAyZDQxMWRhOWI2YWZmYTAxNDA4NjE3NDk3ODY2MDdiNGNhMzNhNmZhNzkzZTE2NjI1NzRiN2ZhODIyNTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY4ZGIyNzJiMDE0NzQ5MjY5MjExMGZlODVmZDZhZmE0NzJlZmFjZGY4MmZjMGVhZGVlZDBiYzNkZGI3YzEwNzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/background_tasks.py#L18-L54",
+          "version": "repo-lines-v1:sha256:e68b30d4bd50994e3983b86756990c3a9b06b930aa3d6240735d931c15f9fccb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUxM2Y2YTczYzU2YjIwMzVkYWI3ZTU3NTRkN2RhYjMxZTQwMDIwMDEyYTg2N2M3NWQyNjE5NDBlODAzNTJjNzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0YmMxNTQ0NWEwZDM1NzFjZDljODgyNWY4ZWNjN2MxMjFkN2VmODBkZTQ5MjM5ZWFmNDc5Mjg4YjBkYTNiOTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVmYzM2MWI1NDYwMGI0NzZlZmQ4MDlkOTMyZTI1MjdmZjUxYzhkY2Y1MmZjYmExMDNjMDc5MjlhYTgxZGJmNWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b782232a63d740d2b12bd7c4b1f4ad01",
+      "statement": "schedule_thread_wakeup schedules a one-shot re-trigger of the current agent thread (1 minute to 24 hours) as a single-fire cron against the `agent` assistant carrying an end_time ~90s past the fire so it never re-fires, and passes through selected config keys with a default polling prompt.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L200-L250",
+          "version": "repo-lines-v1:sha256:46b5230eea68944556a41c8da81903e0cd7d5ba43cacb6a0ee02e2b588c90dc6:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlNGUxZDg3N2I2YWQwYmQ4NzZmOWNkN2M0ZjkzZDQwNjBmNDVlNGJlNzU4MzYzZjhlNGI3YjczZjZmODYwM2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZhYWQ0MmNmMjMwM2E4MDRlMmYyNTQ4NzUyNzM4YjAyZThjZWI3ODRiYjM2YTcxMWM1ZjljZjFkNDIxNmE1MDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExNDQxYzY3NGE1ZjEwMmI0MTEzZmRkYmQyNGM3MDFkOTI0ZjFmMmE1MDNjYzE3MjUyNjA4MWQxYzZlZmVkNmEifQ"
+        },
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L22-L60",
+          "version": "repo-lines-v1:sha256:612f910965914653b6728fc53234b46a971f7b2d80ff6bc46d3fe31c7b9bc62d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyMmFkZWRhZWIzYTY5MzMwZDFhZTY5OTVlYTlkMDQxYmE4ZmYyZjMwMjcxMWEwN2JhYWNkMDkxNjliZmQyMWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUwZGQ2YjkyYjJlMWZiZDBkOTlkZWQxMWQ1NDg2OTI0YmY0YjViYzU4YjQ2NDY2YzFiZTQxNjI4MGQyZTkyNmIifQ"
+        },
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L253-L313",
+          "version": "repo-lines-v1:sha256:8e2b50e80930691b8d77f0bd2ef6dea09b5867000810eb8a17b8360ae06c0ba5:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhNDEwMjNkZTQwZjcyZjAyYjhiNjU3YWFiNmU1MDg2ODBkMzJjMDcxNTJjNjk3MWU5OGU3MTM1MWY2ZGE5ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI0YzZiNWMwMjBkNTRmM2QzZGZmZDMwMWM2ODNlODllODhkZmFmY2Y5Zjc4OTAwNGE5YjMyY2Q4NzI2YmNlMWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxNzIzYTAxM2NmOWFlN2M5ODg4MDk2ZTdkOTEzYjFhNjU4NzhlYTJjMDM2NzNjYWY4NjJjNmUzNjY0M2M0N2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_05f435d1fbb94a6fa95bbb358dd546b0",
+      "statement": "Thread wakeups are budget-limited to at most _MAX_WAKEUPS_BETWEEN_USER_MESSAGES (10) between human messages, keyed to the latest human-message generation so the budget resets on a new human message but not on system-kind messages.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L29-L31",
+          "version": "repo-lines-v1:sha256:0141b505447d47cf98842870329d193bb19ae0cb58b72a14d6318cbd01651228:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMmM2MGI0NGQ4OWZhNjZkODk1NDZhOWIwMjhkZWI3ZDJlYWM4YjRiOGEwZTg3MTcwOWQzMDhhNGM0ZDE5NmUwOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDgzZTg3NDc3NDNjY2RiNDk5YWIzZDkxNjgxYWE0MDdhNzMzMWE2OWM5MDNiOTI2NTEzNTYwMjc4ZGQ4MDkwOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzhjYTQ5MWJiMjQ4NDA4NDkzODQ0YmE3MzNmN2Q5YmE2MTkyYzY1ZjQ3OTY5YTRhMTI2MmMyMDRjNGRlYWE3OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZmI3NmM2MWYxZmE2NGJlOWNjMjU0ZGRmMTBiNDlkMjA5MTVlMzVjYzE1YjkzNzc0MTZhMzY3MGU5NzIxZmJjMiJ9"
+        },
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L315-L334",
+          "version": "repo-lines-v1:sha256:3455bd08f86635ef4387c50be40d325979a7cd334c63cdac98b27b472a21b233:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM2YWQwZjgyY2I2ZjhkMGRjNmIyZjlhYjIzYzY4MzQzY2RmMTMxOWIxOTU5ODNjYWM4MzM1ODZhNzYzMDFhZDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkOTYyYTIwNDI2YzNjYTE5ZGQwODY0NjE3MjRmMjNhODZhNWJhYzVmZTM0YmRjZGIyY2Q4MmUwZTRiNDlhYjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OTU2Mzc4MGU1ZjZlYmE4YzZhZDg2ZDAzY2U5M2QzMmVjYjRkOWExODNmMDljZTk0ZTI2OTEyYzFhMWRlMzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA0MjUyNmQ4NzhlN2M1NzM0MjUwNTA5MWFjMGU0NWUwNzVjYzBhNGFjOWE3ZGYzNmQ1NWZmOWQ0M2Q3OGUzOTYifQ"
+        },
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L99-L131",
+          "version": "repo-lines-v1:sha256:c35cb06b286947b02b9c961ced9102cf0b3aebe0a563c7259e029a80f0f9f5c0:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiMmQ5ZGRhZWE5ZTgwNmE5MDUyY2Q0MjIzN2ZmZjJmZmU3ZWY5ZmFhMzg1MTg4YWNlNDZmZTU3YzViYzg3MzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1MDY0ZjAxMWNjOTI5ZmEzOTg2NDk5NWZiNWQ5ZGI2NGYyZGFlNGI2ZjVkODZhM2I4MTM3OGI3NGQ1OTY1N2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBlNmRjMTg2YjlhMDQzMjQ3OGJhZTU0YmI1OTVhMDA5MTFjZDhhMTI1MGNhOGVhNWVhOTczMjIxZTg4NDNlZjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_04bf4fbad17146ee815bd6c59042eba5",
+      "statement": "Because a fired wakeup cron's row is never deleted by firing, schedule_thread_wakeup opportunistically purges expired thread_wakeup crons (matched conservatively on kind plus a past end_time) before creating a new one.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L144-L197",
+          "version": "repo-lines-v1:sha256:0340008ddfb854cb75bacdcec57002ef6c5c0f2e8dae909058e3cf8b98cfb99c:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkMTkwMDhmMjBjYTczZGM4MWEyMjcxNDM2YTJlNzZjNDg3OGUyOTYzMmFiZDkwYTJhYWQ0MTViMWY0MWFhODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3ZjcyMTg5ZmJhZjg2MTkwMGExZWY4NTU5OTJkYmE0NGMyNjliODA1MTEwMTA5MzA4MzFlYmQxNjQwODdjOWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1NWQ3M2NmNDUyMmEwY2YzMjY5NmZlYWNiODYxNzFhNjBiODliMjExNWVkYjdiMTMwMjhiYTQyMzYzYWE4NDcifQ"
+        },
+        {
+          "resource": "repo://agent/tools/schedule_thread_wakeup.py#L313-L313",
+          "version": "repo-lines-v1:sha256:24c6b5c020d54f3d3dffd301c683e89e88dfafcf9f789004a9b32cd8726bce1a:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjRjNmI1YzAyMGQ1NGYzZDNkZmZkMzAxYzY4M2U4OWU4OGRmYWZjZjlmNzg5MDA0YTliMzJjZDg3MjZiY2UxYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjRjNmI1YzAyMGQ1NGYzZDNkZmZkMzAxYzY4M2U4OWU4OGRmYWZjZjlmNzg5MDA0YTliMzJjZDg3MjZiY2UxYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZDAzMWIzYzI0NDE3YmIyM2Y0YWZlYWVhYjA4OWU5NmZlN2UwZmNiYzE0ZGQ2M2YwYmU4OTBiNWEyNDk1Zjc3ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDE3MjNhMDEzY2Y5YWU3Yzk4ODgwOTZlN2Q5MTNiMWE2NTg3OGVhMmMwMzY3M2NhZjg2MmM2ZTM2NjQzYzQ3ZiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_85fb7163daab4288a8c4e9dc76e6cdad",
+      "statement": "The baby-sit skill instructs cloud runs to use the durable manage_baby_sit watch (webhook + 10-minute token-free fallback) while local/desktop runs instead use a bounded foreground `gh pr checks --watch` loop and never call manage_baby_sit or schedule_thread_wakeup.",
+      "evidence": [
+        {
+          "resource": "repo://agent/bundled_skills/baby-sit/SKILL.md#L19-L29",
+          "version": "repo-lines-v1:sha256:1c9dfe0e6c6d3d941cdb347f0c83823da25fb5928d41ba5ea7c60298782c92e4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhYjBjNzE3NWJiMzUzNjQ0Y2UyNWY0ODBkNWE0NGY4YTAxYjI2YzEwYTQyNzVmY2I0NWU3MGY3MTA5YTU4NDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjcxNzhiMWRjNzQ3ZTk2OGI1MmViODc2NTBkY2M3YzQwYjE4OTI5MjkzOTQ1MThmNTFlZjFiY2MyZDRhMjUxYmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc0NDUyM2ViMWNlMmNiNTliMjA2ZWE3ZjA5NGFmNWFmZDY5NTAwZTJlZmZmNTc0NGRjMTRhNGYwZGQ1MWI5ZDAifQ"
+        },
+        {
+          "resource": "repo://agent/bundled_skills/baby-sit/SKILL.md#L43-L55",
+          "version": "repo-lines-v1:sha256:f9415bc5e67d1add9825199f5fffcbc08004d5c3508aab8dc88365c88c6d4a83:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhOTkwMjdlNjYxYzM2NTE3MDQ3ODRhODFiZDU2NWM1YTYxZDZiYWRmNTFkMmFjOTQ1OWU0ZmI3MzNjNjAxOGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1NDcxODAxMWUxNTU2YmMwMjdlNDc4NWY5OGUwNWIzNWY1ODNmYzY0NDNjNTU5YTQ2ZTZhYWQ1OTAyZmY0YWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM4MWFkZjVmMTlkZTdiNDE4MGE3OWRjZjNkZjEyYTdkNTBjYjI1N2NhNjEzZTQ3NTAyNjg4ZGE2M2ZjNWI4YTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-27T06:27:22.313Z"
+  }
+}

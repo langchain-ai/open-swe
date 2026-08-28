@@ -1783,21 +1783,18 @@ async def api_agent_usage_leaderboard(
 
 @router.get("/schedules")
 async def api_list_schedules(
-    session: dict[str, Any] = _SESSION_DEP,
+    _session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_agent_schedules(session["sub"], email=session.get("email"))
+    return await list_agent_schedules()
 
 
 @router.post("/schedules")
 async def api_create_schedule(
     body: ScheduleCreateBody,
-    session: dict[str, Any] = _SESSION_DEP,
+    admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await create_agent_schedule(
-        session["sub"],
-        body,
-        email=session.get("email"),
-        allow_admin_thread=_session_is_admin(session),
+        admin["sub"], body, email=admin.get("email"), allow_admin_thread=True
     )
 
 
@@ -1805,31 +1802,31 @@ async def api_create_schedule(
 async def api_update_schedule(
     schedule_id: str,
     body: ScheduleUpdateBody,
-    session: dict[str, Any] = _SESSION_DEP,
+    admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await update_agent_schedule(
         schedule_id,
-        session["sub"],
+        admin["sub"],
         body,
-        email=session.get("email"),
-        allow_admin_thread=_session_is_admin(session),
+        email=admin.get("email"),
+        allow_admin_thread=True,
     )
 
 
 @router.post("/schedules/{schedule_id}/trigger")
 async def api_trigger_schedule(
     schedule_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
+    _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await trigger_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
+    return await trigger_agent_schedule(schedule_id)
 
 
 @router.delete("/schedules/{schedule_id}")
 async def api_delete_schedule(
     schedule_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
+    _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Response:
-    await delete_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
+    await delete_agent_schedule(schedule_id)
     return Response(status_code=204)
 
 
