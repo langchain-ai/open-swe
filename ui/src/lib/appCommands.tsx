@@ -26,6 +26,7 @@ export interface AppCommand {
   showInPalette?: boolean
   desktopId?: DesktopCommandId
   desktopShortcuts?: ReadonlyArray<string>
+  alwaysAvailable?: boolean
 }
 
 export function createNewThreadCommand(run: () => void): AppCommand {
@@ -67,6 +68,25 @@ export function resolveAppCommands(
   return [...resolved.values()].filter((command) => command.available !== false)
 }
 
+export function resolveKeyboardCommand(
+  commands: ReadonlyArray<AppCommand>,
+  event: KeyboardEvent,
+  desktop: boolean
+): AppCommand | undefined {
+  return commands.find(
+    (candidate) =>
+      candidate.run &&
+      (candidate.alwaysAvailable
+        ? !event.defaultPrevented && !event.isComposing && !event.repeat
+        : !shouldIgnoreHotkey(event)) &&
+      candidate.shortcuts?.some(
+        (shortcut) =>
+          !(desktop && candidate.desktopShortcuts?.includes(shortcut)) &&
+          eventMatchesShortcut(event, shortcut)
+      )
+  )
+}
+
 export function AppCommandProvider({
   children,
 }: {
@@ -100,6 +120,7 @@ export function AppCommandProvider({
         showInPalette: false,
         desktopId: "show-command-palette",
         desktopShortcuts: ["mod+k"],
+        alwaysAvailable: true,
       },
       createNewThreadCommand(() => void navigate({ to: "/agents" })),
       {
@@ -150,23 +171,18 @@ export function AppCommandProvider({
   useEffect(() => {
     if (!enabled || paletteOpen || shortcutReferenceOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (shouldIgnoreHotkey(event)) return
-      const desktop = Boolean(window.openSweDesktop)
-      const command = commandsRef.current.find(
-        (candidate) =>
-          candidate.run &&
-          candidate.shortcuts?.some(
-            (shortcut) =>
-              !(desktop && candidate.desktopShortcuts?.includes(shortcut)) &&
-              eventMatchesShortcut(event, shortcut)
-          )
+      const command = resolveKeyboardCommand(
+        commandsRef.current,
+        event,
+        Boolean(window.openSweDesktop)
       )
       if (!command?.run) return
       event.preventDefault()
+      event.stopPropagation()
       void command.run()
     }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [enabled, paletteOpen, shortcutReferenceOpen])
 
   useEffect(() => {

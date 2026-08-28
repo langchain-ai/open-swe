@@ -1,6 +1,12 @@
+/** @vitest-environment jsdom */
+
 import { describe, expect, it, vi } from "vitest"
 
-import { createNewThreadCommand, resolveAppCommands } from "./appCommands"
+import {
+  createNewThreadCommand,
+  resolveAppCommands,
+  resolveKeyboardCommand,
+} from "./appCommands"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "./appCommands"
@@ -17,6 +23,39 @@ describe("app commands", () => {
     expect(newThread.shortcuts).toEqual(["c"])
     expect(newThread.desktopShortcuts).toBeUndefined()
     expect(newThread.desktopId).toBe("new-thread")
+  })
+
+  it("allows opted-in shortcuts in form fields without enabling single-key commands", () => {
+    const input = document.createElement("input")
+    const palette = {
+      ...command("search-commands"),
+      shortcuts: ["mod+k"],
+      alwaysAvailable: true,
+    }
+    const newThread = createNewThreadCommand(vi.fn())
+    const paletteEvent = new KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+    })
+    Object.defineProperty(paletteEvent, "target", { value: input })
+    const newThreadEvent = new KeyboardEvent("keydown", { key: "c" })
+    Object.defineProperty(newThreadEvent, "target", { value: input })
+
+    expect(
+      resolveKeyboardCommand([palette, newThread], paletteEvent, false)
+    ).toBe(palette)
+    expect(
+      resolveKeyboardCommand([palette, newThread], newThreadEvent, false)
+    ).toBeUndefined()
+    const composingEvent = new KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      isComposing: true,
+    })
+    Object.defineProperty(composingEvent, "target", { value: input })
+    expect(
+      resolveKeyboardCommand([palette, newThread], composingEvent, false)
+    ).toBeUndefined()
   })
 
   it("lets the latest contextual registration replace a command", () => {
