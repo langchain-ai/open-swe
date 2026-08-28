@@ -49,8 +49,14 @@ export interface SidebarProjectGroup extends SidebarProjectOption {
   threads: Array<SidebarThreadItem>
 }
 
-export function projectKey(name?: string | null): string | null {
-  const normalized = name?.trim().toLowerCase()
+/**
+ * Identity, not display name: `owner/repo` for cloud and the checkout path for
+ * local. Keying on the short label instead would merge `acme/api` with
+ * `other/api`, and two local projects both called `api`, into one folder that
+ * cannot be told apart.
+ */
+export function projectKey(identity?: string | null): string | null {
+  const normalized = identity?.trim().toLowerCase()
   return normalized ? `project:${normalized}` : null
 }
 
@@ -74,7 +80,7 @@ export function cloudSidebarThread(
     id: thread.id,
     location: "cloud",
     title: thread.title,
-    projectKey: projectKey(projectLabel),
+    projectKey: projectKey(thread.repoFullName.trim() || projectLabel),
     projectLabel,
     model: thread.model,
     source: thread.source,
@@ -102,7 +108,7 @@ export function localSidebarThread(
     id: thread.id,
     location: "local",
     title: thread.title,
-    projectKey: projectKey(projectLabel),
+    projectKey: projectKey(project?.cwd ?? thread.cwd),
     projectLabel,
     model: thread.modelId ?? "Default",
     source: "dashboard",
@@ -134,12 +140,52 @@ export function sidebarProjectOptions(
     }
   }
   for (const project of localProjects) {
-    const key = projectKey(project.name)
+    const key = projectKey(project.cwd)
     if (key) projects.set(key, project.name)
   }
   return [...projects]
     .map(([key, label]) => ({ key, label }))
     .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+/**
+ * Label -> cloud project key, only where a label maps to exactly one cloud
+ * project. Ambiguous labels are omitted rather than guessed at.
+ */
+export function cloudProjectKeysByLabel(
+  items: ReadonlyArray<SidebarThreadItem>
+): Map<string, string> {
+  const keysByLabel = new Map<string, Set<string>>()
+  for (const item of items) {
+    if (item.location !== "cloud" || !item.projectKey || !item.projectLabel) {
+      continue
+    }
+    const label = item.projectLabel.trim().toLowerCase()
+    const keys = keysByLabel.get(label) ?? new Set<string>()
+    keys.add(item.projectKey)
+    keysByLabel.set(label, keys)
+  }
+  return new Map(
+    [...keysByLabel]
+      .filter(([, keys]) => keys.size === 1)
+      .map(([label, keys]) => [label, [...keys][0] as string])
+  )
+}
+
+/**
+ * Fold a local checkout into the cloud project of the same name, so a repo you
+ * have both in the cloud and on disk renders as one folder. Only applied when
+ * the name identifies exactly one cloud project.
+ */
+export function applyProjectKeyAliases(
+  items: ReadonlyArray<SidebarThreadItem>,
+  aliases: ReadonlyMap<string, string>
+): Array<SidebarThreadItem> {
+  return items.map((item) => {
+    if (item.location !== "local" || !item.projectLabel) return item
+    const alias = aliases.get(item.projectLabel.trim().toLowerCase())
+    return alias ? { ...item, projectKey: alias } : item
+  })
 }
 
 /**

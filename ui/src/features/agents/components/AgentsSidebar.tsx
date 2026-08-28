@@ -69,6 +69,8 @@ import {
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
+  applyProjectKeyAliases,
+  cloudProjectKeysByLabel,
   cloudSidebarThread,
   groupSidebarThreadsByProject,
   localSidebarThread,
@@ -201,6 +203,9 @@ export function AgentsSidebar({
   )
   const localPinnedIds = new Set(prefs.pinnedLocalIds)
   const localItems = localSessions
+    // Removing a project has to remove its threads too, otherwise they linger
+    // and re-derive the project from the cwd basename.
+    .filter((thread) => projectByPath.has(thread.cwd))
     .map((thread) =>
       localSidebarThread(
         thread,
@@ -211,14 +216,23 @@ export function AgentsSidebar({
     // Cloud threads are omitted server-side unless includeResolved; local
     // archiving is client-side, so it has to honour the same switch here.
     .filter((item) => prefs.filters.includeResolved || !item.resolved)
+  const cloudItems = [
+    ...pinnedThreads.map(cloudSidebarThread),
+    ...activeThreads.map(cloudSidebarThread),
+    ...resolvedThreads.map(cloudSidebarThread),
+  ]
+  // Fold a local checkout into the cloud project of the same name so the repo
+  // renders as one folder; project keys are otherwise full identities.
+  const aliases = cloudProjectKeysByLabel(cloudItems)
+  const alignedLocalItems = applyProjectKeyAliases(localItems, aliases)
   const pinnedItems = [
     ...pinnedThreads.map(cloudSidebarThread),
-    ...localItems.filter((item) => localPinnedIds.has(item.id)),
+    ...alignedLocalItems.filter((item) => localPinnedIds.has(item.id)),
   ]
   const threadItems: Array<SidebarThreadItem> = [
     ...activeThreads.map(cloudSidebarThread),
     ...resolvedThreads.map(cloudSidebarThread),
-    ...localItems.filter((item) => !localPinnedIds.has(item.id)),
+    ...alignedLocalItems.filter((item) => !localPinnedIds.has(item.id)),
   ]
   const allItems = [...pinnedItems, ...threadItems]
   const projects = sidebarProjectOptions(allItems, localProjects)

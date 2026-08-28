@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest"
 import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
 import type { AgentThread } from "./types"
 import {
+  applyProjectKeyAliases,
+  cloudProjectKeysByLabel,
   cloudSidebarThread,
   filterSidebarProject,
   groupSidebarThreadsByProject,
@@ -57,12 +59,12 @@ describe("sidebar thread adapters", () => {
 
     expect(cloud).toMatchObject({
       key: "cloud:same-id",
-      projectKey: "project:open-swe",
+      projectKey: "project:langchain-ai/open-swe",
       projectLabel: "open-swe",
     })
     expect(local).toMatchObject({
       key: "local:same-id",
-      projectKey: "project:open-swe",
+      projectKey: "project:/users/example/open-swe",
       projectLabel: "open-swe",
     })
   })
@@ -83,16 +85,44 @@ describe("sidebar thread adapters", () => {
     )
   })
 
-  it("merges cloud and local projects by repository name", () => {
+  it("merges a local checkout into the cloud project of the same name", () => {
+    const cloud = [cloudSidebarThread(cloudThread())]
     const threads = [
-      cloudSidebarThread(cloudThread()),
-      localSidebarThread(localThread(), project, undefined),
+      ...cloud,
+      ...applyProjectKeyAliases(
+        [localSidebarThread(localThread(), project, undefined)],
+        cloudProjectKeysByLabel(cloud)
+      ),
     ]
 
-    expect(sidebarProjectOptions(threads, [project])).toEqual([
-      { key: "project:open-swe", label: "open-swe" },
+    expect(sidebarProjectOptions(threads, [])).toEqual([
+      { key: "project:langchain-ai/open-swe", label: "open-swe" },
     ])
-    expect(filterSidebarProject(threads, "project:open-swe")).toHaveLength(2)
+    expect(
+      filterSidebarProject(threads, "project:langchain-ai/open-swe")
+    ).toHaveLength(2)
+  })
+
+  it("keeps same-named repositories from different owners apart", () => {
+    const acme = cloudSidebarThread(
+      cloudThread({ id: "a", repo: "api", repoFullName: "acme/api" })
+    )
+    const other = cloudSidebarThread(
+      cloudThread({ id: "b", repo: "api", repoFullName: "other/api" })
+    )
+
+    expect(acme.projectKey).not.toBe(other.projectKey)
+    expect(sidebarProjectOptions([acme, other], [])).toHaveLength(2)
+    // The label is ambiguous, so a local "api" must not be folded into either.
+    const local = localSidebarThread(
+      localThread({ cwd: "/Users/example/api" }),
+      { cwd: "/Users/example/api", name: "api", addedAt: 1 },
+      undefined
+    )
+    const aliases = cloudProjectKeysByLabel([acme, other])
+    expect(applyProjectKeyAliases([local], aliases)[0]?.projectKey).toBe(
+      local.projectKey
+    )
   })
 
   it("sorts the loaded cloud and local window by last update", () => {
@@ -112,13 +142,28 @@ describe("sidebar thread adapters", () => {
 describe("groupSidebarThreadsByProject", () => {
   it("buckets threads per project and ranks projects by their freshest thread", () => {
     const alphaOld = cloudSidebarThread(
-      cloudThread({ id: "alpha-old", repo: "alpha", updatedAt: 5 })
+      cloudThread({
+        id: "alpha-old",
+        repo: "alpha",
+        repoFullName: "acme/alpha",
+        updatedAt: 5,
+      })
     )
     const alphaNew = cloudSidebarThread(
-      cloudThread({ id: "alpha-new", repo: "alpha", updatedAt: 40 })
+      cloudThread({
+        id: "alpha-new",
+        repo: "alpha",
+        repoFullName: "acme/alpha",
+        updatedAt: 40,
+      })
     )
     const beta = cloudSidebarThread(
-      cloudThread({ id: "beta", repo: "beta", updatedAt: 50 })
+      cloudThread({
+        id: "beta",
+        repo: "beta",
+        repoFullName: "acme/beta",
+        updatedAt: 50,
+      })
     )
     const items = [alphaOld, alphaNew, beta]
 
@@ -139,8 +184,12 @@ describe("groupSidebarThreadsByProject", () => {
   })
 
   it("sends threads with no known project to Recents", () => {
-    const orphan = cloudSidebarThread(cloudThread({ id: "orphan", repo: "" }))
-    const known = cloudSidebarThread(cloudThread({ id: "known", repo: "alpha" }))
+    const orphan = cloudSidebarThread(
+      cloudThread({ id: "orphan", repo: "", repoFullName: "" })
+    )
+    const known = cloudSidebarThread(
+      cloudThread({ id: "known", repo: "alpha", repoFullName: "acme/alpha" })
+    )
 
     const grouped = groupSidebarThreadsByProject(
       [orphan, known],
