@@ -720,7 +720,7 @@ async def start_slack_stream(
     payload: dict[str, Any] = {
         "channel": channel_id,
         "chunks": chunks,
-        "task_display_mode": "timeline",
+        "task_display_mode": "plan",
     }
     if not is_code_channel_session(thread_ts):
         payload["thread_ts"] = thread_ts
