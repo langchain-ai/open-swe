@@ -112,8 +112,7 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
             value.pop(effort_field, None)
         elif isinstance(model, str):
             value[model_field], value[effort_field] = _normalize_stale_model_pair(
-                model,
-                effort if isinstance(effort, str) else None,
+                model, effort if isinstance(effort, str) else None
             )
     return value
 

@@ -14,7 +14,6 @@ import logging
 from collections.abc import Mapping
 from typing import Any, TypedDict, cast
 
-from ..dashboard.options import is_deprecated_model
 from . import ttl_cache
 
 logger = logging.getLogger(__name__)
@@ -46,12 +45,6 @@ def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettin
     changed = not removed.isdisjoint(value)
     for key in removed:
         value.pop(key, None)
-    if is_deprecated_model(value.get("model_id")) or is_deprecated_model(
-        value.get("subagent_model_id")
-    ):
-        for key in ("model_id", "effort", "subagent_model_id", "subagent_effort"):
-            value.pop(key, None)
-        changed = True
     return cast(ThreadSettings, value), changed
 
 

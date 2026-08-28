@@ -32,7 +32,12 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from .dashboard.options import gate_fable_model, normalize_model_choice
+from .dashboard.options import (
+    SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
+    gate_fable_model,
+    model_supports_effort,
+)
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model,
@@ -191,11 +196,18 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def _resolve_chat_model(configurable: dict[str, Any]) -> tuple[str, str]:
-    model_id, effort = normalize_model_choice(
-        configurable.get("chat_model_id"), configurable.get("chat_effort")
-    )
-    if model_id is not None and effort is not None:
+    model_id = configurable.get("chat_model_id")
+    effort = configurable.get("chat_effort")
+    if (
+        isinstance(model_id, str)
+        and model_id in SUPPORTED_MODEL_IDS
+        and isinstance(effort, str)
+        and model_supports_effort(model_id, effort)
+    ):
         return model_id, effort
+    canonical = canonical_model_pair(model_id, effort)
+    if canonical is not None:
+        return canonical
     # Team review-chat default, which itself inherits the Agent default if unset.
     return await _cached_team_chat_model()
 

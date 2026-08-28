@@ -22,10 +22,10 @@ from ..utils.slack import (
 from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 from .admin import is_admin
-from .options import gate_fable_model, is_deprecated_model, normalize_model_choice
+from .options import gate_fable_model, normalize_model_choice
 from .profiles import get_profile, get_valid_access_token
 from .repo_access import repo_config_for_user, require_repo_access_for_user
-from .team_settings import get_team_default_model, get_team_fable_enabled
+from .team_settings import get_team_fable_enabled
 from .thread_api import _agent_version_metadata, _resolve_run_email
 from .user_mappings import slack_id_for_login
 
@@ -541,10 +541,7 @@ async def _agent_run_config(
             "schedule_id": record["id"],
             "schedule_name": record.get("name"),
         }
-    stored_model = record.get("model")
-    model, effort = normalize_model_choice(stored_model, record.get("effort"))
-    if is_deprecated_model(stored_model):
-        model, effort = await get_team_default_model("agent")
+    model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
             model, effort, fable_enabled=await get_team_fable_enabled()

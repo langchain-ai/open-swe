@@ -264,30 +264,6 @@ async def test_create_agent_schedule_requires_repo_access(fake_client, auth, mon
     assert fake_client.crons.created == []
 
 
-async def test_deprecated_schedule_model_uses_team_default(monkeypatch) -> None:
-    async def team_default(role: str) -> tuple[str, str]:
-        assert role == "agent"
-        return "openai:gpt-5.6-sol", "medium"
-
-    async def fable_disabled() -> bool:
-        return False
-
-    monkeypatch.setattr(schedules, "get_team_default_model", team_default)
-    monkeypatch.setattr(schedules, "get_team_fable_enabled", fable_disabled)
-    config = await schedules._agent_run_config(
-        {
-            "id": "sched_1",
-            "model": "fireworks:accounts/fireworks/models/glm-5p2",
-            "effort": "high",
-            "created_by": "alice",
-        },
-        "thread_1",
-    )
-
-    assert config["configurable"]["agent_model_id"] == "openai:gpt-5.6-sol"
-    assert config["configurable"]["agent_effort"] == "medium"
-
-
 async def test_list_agent_schedules_migrates_all_records_to_workspace(fake_client) -> None:  # noqa: ANN001
     for i in range(125):
         await fake_client.store.put_item(

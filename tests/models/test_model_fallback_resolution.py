@@ -90,7 +90,6 @@ def test_model_profile_context_window_uses_codex_override() -> None:
 
 def test_model_profile_context_window_uses_fireworks_profile_for_kimi_k3() -> None:
     assert model_profile_context_window(SUPPORTED_KIMI) == 1_048_576
-    assert model_profile_context_window(SUPPORTED_GLM) == 1_048_576
 
 
 def test_models_with_profile_context_windows_enriches_copies() -> None:

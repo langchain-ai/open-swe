@@ -114,6 +114,8 @@ DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
     }
 )
 
+DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = dict.fromkeys(DEPRECATED_MODEL_IDS, "")
+
 ProfileLoader = Callable[[str], Mapping[str, object]]
 
 # LangChain partner packages expose ``_get_default_model_profile`` — the same
@@ -267,6 +269,10 @@ def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
 
 def is_deprecated_model(model_id: object) -> bool:
     return isinstance(model_id, str) and model_id in DEPRECATED_MODEL_IDS
+
+
+def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
+    return None
 
 
 def normalize_model_choice(model_id: object, effort: object) -> tuple[str | None, str | None]:

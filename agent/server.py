@@ -58,6 +58,7 @@ from .dashboard.environments import (
 )
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
@@ -1506,6 +1507,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # off its stored settings; the new choice is then stored in turn.
     per_thread_model = configurable.get("agent_model_id")
     per_thread_effort = configurable.get("agent_effort")
+    canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
+    if canonical_per_thread is not None:
+        per_thread_model, per_thread_effort = canonical_per_thread
     if (
         isinstance(per_thread_model, str)
         and per_thread_model in SUPPORTED_MODEL_IDS

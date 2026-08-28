@@ -59,10 +59,11 @@ from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import ENVIRONMENTS, slugify
 from .options import (
+    DEPRECATED_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     default_vision_model_pair,
     gate_fable_model,
-    is_deprecated_model,
     model_supports_images,
     normalize_model_choice,
 )
@@ -185,7 +186,7 @@ async def _resolve_agent_model_choice(
     effort: str | None,
 ) -> tuple[str, str]:
     resolved_model, resolved_effort = await get_team_default_model("agent")
-    if not is_deprecated_model(model_id):
+    if model_id not in DEPRECATED_MODEL_IDS:
         profile_model, profile_effort = normalize_profile_overrides(profile)
         if profile_model and profile_effort:
             resolved_model, resolved_effort = profile_model, profile_effort
@@ -288,6 +289,9 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
         model = metadata.get(key)
         if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
             return model
+        canonical = canonical_model_pair(model)
+        if canonical is not None:
+            return canonical[0]
     return None
 
 
