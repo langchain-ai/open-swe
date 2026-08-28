@@ -23,13 +23,23 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
 
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
+
+
+def _reject_bool(value: Any) -> Any:
+    """Bools are ints to pydantic, so ``pr_number=True`` would silently mean PR 1."""
+    if isinstance(value, bool):
+        raise ValueError("bool is not a valid integer here")
+    return value
+
+
+Int = Annotated[int, BeforeValidator(_reject_bool)]
 
 
 class Repo(BaseModel):
@@ -66,7 +76,7 @@ class GitHubPROrIssueRef(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    number: int | None = None
+    number: Int | None = None
     repo: Repo | None = None
 
 
@@ -109,7 +119,7 @@ class RunConfig(BaseModel):
     github_pr_or_issue: GitHubPROrIssueRef | None = None
 
     # Pull request under review
-    pr_number: int | None = None
+    pr_number: Int | None = None
     pr_url: str | None = None
     head_sha: str | None = None
     base_sha: str | None = None
@@ -145,7 +155,7 @@ class RunConfig(BaseModel):
     # Dashboard review chat
     chat_repo_owner: str | None = None
     chat_repo_name: str | None = None
-    chat_pr_number: int | None = None
+    chat_pr_number: Int | None = None
     chat_head_sha: str | None = None
     chat_model_id: str | None = None
     chat_effort: str | None = None
@@ -157,13 +167,13 @@ class RunConfig(BaseModel):
     review_style_github_token: str | None = None
     review_style_top_reviewers: list[str] | None = None
     review_style_samples_text: str | None = None
-    review_style_reviews_sampled: int | None = None
-    review_style_prs_sampled: int | None = None
+    review_style_reviews_sampled: Int | None = None
+    review_style_prs_sampled: Int | None = None
 
     # Eval harness
     eval: bool | None = None
     reviewer_eval: bool | None = None
-    reviewer_eval_cap: int | None = None
+    reviewer_eval_cap: Int | None = None
     reviewer_eval_severity_threshold: str | None = None
 
     # Background jobs

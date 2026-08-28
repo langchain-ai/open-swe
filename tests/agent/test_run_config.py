@@ -70,3 +70,18 @@ def test_is_eval_covers_both_flags():
     assert RunConfig.parse({"eval": True}).is_eval
     assert RunConfig.parse({"reviewer_eval": True}).is_eval
     assert not RunConfig.parse({}).is_eval
+
+
+def test_bools_are_not_accepted_as_integers():
+    """Pydantic treats bool as int, which would make ``pr_number=True`` mean PR 1."""
+    cfg = RunConfig.parse(
+        {"pr_number": True, "chat_pr_number": False, "reviewer_eval_cap": True, "thread_id": "t1"}
+    )
+    assert cfg.pr_number is None
+    assert cfg.chat_pr_number is None
+    assert cfg.reviewer_eval_cap is None
+    assert cfg.thread_id == "t1"
+
+
+def test_numeric_strings_still_coerce_to_int():
+    assert RunConfig.parse({"pr_number": "7"}).pr_number == 7
