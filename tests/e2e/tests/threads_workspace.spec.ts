@@ -413,8 +413,11 @@ function boardColumn(main: Locator, name: string): Locator {
   return main.locator(`section:has(h2:text-is("${name}"))`);
 }
 
-function sidebarGroup(sidebar: Locator, name: string): Locator {
-  return sidebar.locator(`div:has(> button > span:text-is("${name}"))`);
+function sidebarSection(sidebar: Locator, name: string): Locator {
+  return sidebar
+    .getByRole("button", { name, exact: true })
+    .locator("..")
+    .locator("..");
 }
 
 function sourceFilter(main: Locator): Locator {
@@ -463,22 +466,17 @@ test.describe("threads workspace", () => {
 
     const row = page.getByRole("link", { name: TITLES.shared }).first();
     await expect(row).toBeVisible();
-    await row.click({ button: "right" });
-    await page.getByText("Pin thread", { exact: true }).click();
+    await row.hover();
+    await row.getByRole("button", { name: "Pin thread" }).click();
 
-    const pinned = sidebarGroup(page.locator("aside"), "Pinned");
-    await expect(
-      pinned.getByRole("link", { name: TITLES.shared }),
-    ).toBeVisible();
+    const pinned = sidebarSection(page.locator("aside"), "Pinned");
+    const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });
+    await expect(pinnedRow).toBeVisible();
     await page.getByRole("link", { name: "Kanban" }).click();
-    await expect(
-      pinned.getByRole("link", { name: TITLES.shared }),
-    ).toBeVisible();
+    await expect(pinnedRow).toBeVisible();
 
-    await pinned
-      .getByRole("link", { name: TITLES.shared })
-      .click({ button: "right" });
-    await page.getByText("Unpin thread", { exact: true }).click();
+    await pinnedRow.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Unpin thread" }).click();
     await expect(pinned).toHaveCount(0);
   });
 
@@ -750,6 +748,10 @@ test.describe("threads workspace", () => {
         `/agents/${THREAD_IDS.ready}`,
       ]);
 
+    const alphaGroup = sidebar
+      .getByRole("button", { name: "alpha", exact: true })
+      .locator("..")
+      .locator("..");
     const betaGroup = sidebar.getByRole("button", {
       name: "beta",
       exact: true,
@@ -788,6 +790,9 @@ test.describe("threads workspace", () => {
       name: "Load more archived cloud threads",
     });
     await loadMore.click();
+    await alphaGroup
+      .getByRole("button", { name: "Show more", exact: true })
+      .click();
     await expect(sidebar).toContainText("E2E Workspace Resolved overflow 20");
     await loadMore.click();
     await expect(sidebar).toContainText("E2E Workspace Resolved overflow 21");

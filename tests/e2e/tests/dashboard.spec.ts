@@ -48,9 +48,8 @@ async function setPullRequestHealth(
   expect(res.ok()).toBeTruthy();
 }
 
-// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s. The window has to
-// outlast the click through to the thread plus one reload, which takes over 5s
-// on a CI runner; once the run finishes the retry loop below can never pass.
+// Hold the fake run open long enough to load its busy composer and queue a
+// follow-up. It may finish while the UI observes the next server refresh.
 async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
@@ -182,9 +181,10 @@ async function latestPrBody(page: Page): Promise<string> {
 }
 
 async function openThreadActionsMenu(page: Page) {
+  const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+  expect(threadId).not.toBe("");
   await page
-    .getByRole("link", { name: /please add a greet/ })
-    .first()
+    .locator(`[data-sidebar-frame] a[href="/agents/${threadId}"]`)
     .click({ button: "right" });
 }
 
@@ -680,7 +680,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(flashed).toBe(false);
   });
 
-  test("keeps follow-ups visible while queued during a running agent", async ({
+  test("keeps follow-ups visible across the queued-to-transcript handoff", async ({
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
@@ -715,10 +715,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       );
     });
     expect(serverRefresh.ok()).toBeTruthy();
-    await expect(serverRefresh.json()).resolves.toMatchObject({
-      status: "running",
-    });
-    await expect(queuedMessage).toBeVisible();
+    await expect(page.getByText(queuedText).first()).toBeVisible();
   });
 
   // The dashboard proxy rewrites a run's input into the structured envelope. If

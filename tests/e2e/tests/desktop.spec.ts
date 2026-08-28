@@ -154,10 +154,6 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       page.getByRole("button", { name: /This Mac threads, \d+/ }),
     ).toHaveCount(0);
     const sidebar = page.locator("[data-sidebar-frame]");
-    await expect(sidebar.getByText("Projects", { exact: true })).toBeVisible();
-    await expect(
-      sidebar.getByRole("button", { name: "demo", exact: true }),
-    ).toBeVisible();
     const composer = page.locator("main");
     await expect(
       composer.getByRole("button", { name: "This Mac", exact: true }),
@@ -184,6 +180,11 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
 
     await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
     await expect(page.getByText(/Done! I added/)).toBeVisible();
+    await expect(
+      sidebar.getByRole("link", {
+        name: /E2E_DESKTOP_LOCAL please add a greet\(\) helper and open a PR/,
+      }),
+    ).toBeVisible();
     const prLink = page.getByRole("link", {
       name: "Add greet() helper",
       exact: true,
