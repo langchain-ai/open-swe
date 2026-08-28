@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:af152c30b695898511113bedc13c5950b13671c5ec4dca9de6710a67a4f9a07e",
+  "pageVersion": "sha256:93978e925d25e69ab702ea60f49fd49eb8322250fb0180b95ffc3c685a01fd39",
   "claims": [
     {
       "id": "claim_7e68d8872dad4c0389a1bc0c65b87801",
@@ -161,10 +161,42 @@
           "version": "repo-lines-v1:sha256:4876fd3a33f82d1c8cc962acd1c71e3c94bb48acb124c5188107b2f0ddf475dd:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg3NmZkM2EzM2Y4MmQxYzhjYzk2MmFjZDFjNzFlM2M5NGJiNDhhY2IxMjRjNTE4ODEwN2IyZjBkZGY0NzVkZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg3NmZkM2EzM2Y4MmQxYzhjYzk2MmFjZDFjNzFlM2M5NGJiNDhhY2IxMjRjNTE4ODEwN2IyZjBkZGY0NzVkZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGUxMWVmYzc2ZmExOWQ3Zjg5ZjFkZTFlYmJjYjRiNGIwMjIwNjU1NTIwZGFjZjRiNzYwYTZmNzg1YmQzODJjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjZlMjI0MTJjYmJmYTE3NWYyZGU3MTg4MTEwNjc1ZjM4ZDJjODZkOTZmMzA2OWI5YTZhNDNjODM4YWRiZmJhNiJ9"
         }
       ]
+    },
+    {
+      "id": "claim_f3de1c6053724615a66fa67d75300756",
+      "statement": "Plan mode is entered only on an explicit user request; while active, it restricts the target repository to read-only planning and directs the agent to publish a self-contained HTML artifact from `/workspace/plans/` with `save_plan`.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/plan_mode.py#L1-L79",
+          "version": "repo-lines-v1:sha256:75bec36fff7f0ce8290e1afec065794649373be650c673945c45fffe378ecd78:eyJzZWxlY3RlZExpbmVDb3VudCI6NzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjNjVlZTJhMzFmNmE2ZmQzZTlkYTUxMDI4MGNjNWYxYTY0NDg1YjFlMDJlOWY4ZDNhMDEyYmYxNmM4NjVjN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/prompt.py#L218-L246",
+          "version": "repo-lines-v1:sha256:16a4eb6500f4c5701a53f0e3c4754149d87e4ba1efaaa1f4f0082f656418c3f9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiNGYxZWE1OGYyMGJkNWRiZTFjMjQ4NTM5YjA1YjQ3NjcxNGYyNjM5NDJmOTY2OTE3OGQ4OGRlOWE0NjJlNjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1NGUwYmQ3ZGMxM2ZlZTRmY2RmOGYwZGY4ZjUxY2Y2NjAzMTg2NTg2MDcyOTRkYTM4ODI5MWNlOTY4MjYzYjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZjN2RmYjM5ZDY2YzVlZDM4ZWE5ODk3NWMwZjExNzZjOTVjNmMxODQ0NDBjMzIzM2M1NzFlYmYxMDIxZWMwODMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjMTI1NDNiZWFlMmNiNDRjOGM1MmExOGUxYzNmNDczNjZjNTdkMjA0NTQwNTY0ZTc4MDJlNWI1NDkyNjc4MzUifQ"
+        },
+        {
+          "resource": "repo://agent/tools/save_plan.py#L25-L88",
+          "version": "repo-lines-v1:sha256:f8d40b05f030cf7d031b75eb20bf7435328266f00e661d169061c1daf7808964:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3NTQxMzgwNzQ4NzU5OTRmYTQyYTFjM2U4ZmIxNjYyYjhkYTljNWE3NjAwZWRiMmFhNjA0NmQ5NmI2YzYxZDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjllODdjZGE3YjUwYzRiNTI3NTcwMGRjY2MzM2M4MWZkZWIzMTM5MmFmNWU4YTYwZjViZDlhMTJlNDZlZGViMzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwZjdlODRiMjViNzVmYjk3MDQ4MWY2MzZjMTA2Y2RiNjM3NjY5NTk0ZjQ2ODkyZmVmMzY1N2UxYjM2N2RjMzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a3ac7843e8f74fedafc7a8fd07305f0e",
+      "statement": "A ready plan can be approved from the dashboard or Slack; approval records the plan as approved, clears plan mode, and dispatches an implementation follow-up on the same thread, while rejection retains plan mode and dispatches a revision follow-up.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L198-L303",
+          "version": "repo-lines-v1:sha256:a5b8b8565911e35df33497b155cb10246263b13f3f4908be0394287bf8be3f42:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3NDhjODMyNGVmOTA1ZjljYjI0NzQyYjA2ZTgzODM2YWM1Zjk5NTA0OGVhNGE0NTQxNjU2MzdmYmJjMDg2MWQ0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlNGIxZDQyNTc1MjIzYjYyYjM3NDk5YWViMGNkM2E0YWI1N2UxOWZhMGQxNmU4YTI4MzMzOTZlYmQ5NWZjNDY0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5Mjc4MDI5MWE5ZjI2MjViYWY0MDRmYjBhYjFkMTEyZmJiZDQyZDdkM2I3MGIxZjc3NTZkZjg5ZWQzMGQ0MWNlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJkNjZjMDM4ZTYxZDA3YTYxMjM3NDk1NGYwNzIxZjUxM2Y2ODgzZWUwNDlmZjQyOTY5ZTE1YTBjNGZiNjMxNzcxIn0"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack.py#L458-L477",
+          "version": "repo-lines-v1:sha256:137f275549f8ec76163ca67bf95c4ccc07ba73d287240de5699bb5b7f49ee4fd:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1MjA0NmYwYjAwMmU0ODc3MjQyMzJiZjI4ZWYwNjhlMDZkMzg5YWM2ZGVmYjY3MDM3MGQ1Y2YyMGM2OWIzOTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2NmQwMDBjNjFlMGU2YTlmM2ZhMTg1YmUxMTkxYzQ2YzY3Y2QzMDgyNGFjYjFmYWE1NjIwMjQ3Y2Y0ZTUxMGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxMGIzOTMxMTMzMjExMzdkNWEzMjY4OWM1N2VkNDE5YWUyOTA0NzBiMGFhZTAxOTU2YzAzNmUxNjk2M2EzY2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjExOTQ4NmZlZGZmMzcyZGZiZDMxY2RhMjg1NTEyMzg0YzM0OGMzNWQxMWZlMDM3NDJjNzdmYmRlYzlhY2Q5YmQifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-27T06:27:22.313Z"
+    "at": "2026-08-28T01:23:06.700Z"
   }
 }

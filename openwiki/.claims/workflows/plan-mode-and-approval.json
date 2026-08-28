@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:f570c1421e560cc09de7ebfdb4b0c7b751a41b679cb3e47ae466fdd5bfb723cf",
+  "claims": [
+    {
+      "id": "claim_531a6b64244f49418c2d45428f5cdc48",
+      "statement": "Plan mode is entered only on an explicit user request: the system prompt instructs the model to call `enter_plan_mode` only when expressly requested, rather than inferring it from task complexity, size, or ambiguity.",
+      "evidence": [
+        {
+          "resource": "repo://agent/prompt.py#L218-L246",
+          "version": "repo-lines-v1:sha256:16a4eb6500f4c5701a53f0e3c4754149d87e4ba1efaaa1f4f0082f656418c3f9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiNGYxZWE1OGYyMGJkNWRiZTFjMjQ4NTM5YjA1YjQ3NjcxNGYyNjM5NDJmOTY2OTE3OGQ4OGRlOWE0NjJlNjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1NGUwYmQ3ZGMxM2ZlZTRmY2RmOGYwZGY4ZjUxY2Y2NjAzMTg2NTg2MDcyOTRkYTM4ODI5MWNlOTY4MjYzYjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZjN2RmYjM5ZDY2YzVlZDM4ZWE5ODk3NWMwZjExNzZjOTVjNmMxODQ0NDBjMzIzM2M1NzFlYmYxMDIxZWMwODMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjMTI1NDNiZWFlMmNiNDRjOGM1MmExOGUxYzNmNDczNjZjNTdkMjA0NTQwNTY0ZTc4MDJlNWI1NDkyNjc4MzUifQ"
+        },
+        {
+          "resource": "repo://tests/agent/test_plan_mode.py#L18-L28",
+          "version": "repo-lines-v1:sha256:15bfa56e2caa6f99bc6936c201b7c578941c0dce40e9325da8467b32a290cbaf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmMzQ1ODNhNTk4NzY3YmY1NmFlZmViNjVlMjAzM2ExNjUxY2M0YzhkN2U2ZjBhZjNlNWNmZDMyOTNmOTMzYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI3MWQyYWM2Zjk0ZGI2MWJlOWIwN2YzMzU4ODYzOThjMjQ2OWExZWY4NjFlYTNjYTliMzhiM2M5MjFlNjg3MzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUyYTc3OWMzMzViMmUzMGJmOWJmOWY3YmU0YTA1MDY5ZTRhYTgyMGI5MTAxYmY1ZTY3YjdmMWYxNzk4Yjk2MGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRkNjUzYjQ2NDdhM2Y3MjRkZDNiNzI5ODk1MDkxM2JkODM1NmVhMmJlOWUzZmMzYzdjZWMzZWY1MDM0NzFhZTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_50f4e1588a4a447b8e4578ea6964325f",
+      "statement": "`enter_plan_mode` records planning status and plan mode for a thread when possible and returns a LangGraph Command that sets `plan_mode=True`, so the restriction takes effect within the run.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/plan_mode.py#L47-L79",
+          "version": "repo-lines-v1:sha256:b4d9131c354a6375cf9f66b6ff1daec499309be40c43a540d29e4fd529c11005:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjNjNjNjAwMWMwZDAxZDUwNmNiM2MzMzkzNjQzNGViODhjYmQ4Y2ExMmM3MzZiOTM0NTQ5NTk0ODcxM2ViYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZjY2RiN2E0NTcwNDcyZDQ0NzRmYWU4M2Y5MDliMmNmMjU2NGRlNTYxNTNlN2VkMDBkMDUyYTc4NGFhNDA0YjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/tools/enter_plan_mode.py#L24-L63",
+          "version": "repo-lines-v1:sha256:91f1bbeb6869fa5369f8153bfd123a999f74e5c1e0a16c51ff285c57cc00e133:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM4NDU5ZWNlZTA2Y2EyMjAxZjM3MjUwZTU2YzA3ZWExMzdhNDlmNzFkNDVmZGFmZDgwOWE4NTY5ZTJiMTExMmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwZWFjNGVkY2JiNmIzMDc4NTI1ZDc5ODdkOTBmN2Y0MTg5ZTEyZjUzODIzZmNiZDVlNTJmNTNkNTk1OTM2ZDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_84ef636e2d444121b5c7dacb476afc77",
+      "statement": "PlanModeMiddleware is installed for every agent run, resets the state channel to the current run's configured initial value, and filters model-visible tools on every model call based on active plan mode; this prevents stale state from restricting an approved later run while supporting mid-run activation.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/plan_mode.py#L38-L79",
+          "version": "repo-lines-v1:sha256:347f8d1e70218d62ecedb68b561bc68cadd995ea65443432bbf24fb5bf212205:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjNzgwYTZlYmFmYjkwMjliN2VhODA2Y2MzYzcwZWM4NjIyMTFkMjU5NzhiODQ0OTQ5MzUzZjQ3OWJkNGQ3YjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5YzEwZGEzMmY3NzY0ZDdkOTI0NjM4ZTZlNjJhNDhhOGEzNjBlMTc3OTNkY2EwOTAwNGMyODgzNGE0ZDJiN2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1583-L1594",
+          "version": "repo-lines-v1:sha256:4ea7c26198d03ad3a5964845a2359e148c3655b4c6e799e698baecc057fcf85f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxOWM1OTRkOWNkNGNkODE2N2Q1YmRjYjRjODY0NWJhZmE3OGIzNTgxODRjZmI5NzE3MmI5NmYzYjA2YjQxYjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjZTI1YjA4YTNhMzY3ZjI3ZDA3YjQyZTUyYThmYTc5Y2QwNGVjMGI1NmY0YmQwOGU2NzRiZTcwMDFjZDgwODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjYzIyNDgzMTRmODNlYjE0NjcxZGYwNDc1YmNjZjRmMDk0OThlYzRjY2Y4NDYzMGE2YjI1NWM0MTBiYjVlNDcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_83afe8c7e2e548258ebabc936ab4162c",
+      "statement": "Plan-mode tool gating hides named external mutation and bypass-capable tools while deliberately leaving plan-file editors and `execute` available; the prompt supplies the complementary restriction that repository edits and state-changing shell commands are forbidden during planning.",
+      "evidence": [
+        {
+          "resource": "repo://agent/prompt.py#L230-L246",
+          "version": "repo-lines-v1:sha256:877b0629e6a6cf6fe83ce56389f9d0456934ff878e692ed5e59729b4d45e60a2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2YjYyZDUyZDI0NzNhMDgyMmYxNmIwZDY0ZTkzZTNhZjdhMGRiNTY4MjQzYWY1MjViMzhlZmFhZTJmYWQxNzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1NGUwYmQ3ZGMxM2ZlZTRmY2RmOGYwZGY4ZjUxY2Y2NjAzMTg2NTg2MDcyOTRkYTM4ODI5MWNlOTY4MjYzYjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZhNzZkNjk2OTcwZWQ0NDYxM2Y5ZmVjYThiZDczOWZiODk3OGI4ODg3ZGIzN2MzNWRmNGFlOGU1YjhhMmQ1ZDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjMTI1NDNiZWFlMmNiNDRjOGM1MmExOGUxYzNmNDczNjZjNTdkMjA0NTQwNTY0ZTc4MDJlNWI1NDkyNjc4MzUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L773-L805",
+          "version": "repo-lines-v1:sha256:a784074263e10c46d4d9540a6fa8379d2383523aebc580ff5dd783e19b5d4bdb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhNDMwZjdlZTdiM2RhMGM3MDdjNzY4ODA2YWY4NjVjNzM1Mjg2NGEwOGVkNmI4MmJiOGQ3M2FkMGZjZTdmMGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0NjYzNmUxZTllNWZkZTU0MmE2ZDA2OTkyOTY1M2MyMDdmYmFmNDI3MjJmZTlmZmFiYWY0MTc3NTBlNzAxNTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b84e806ae01b4591afed1bcf66c3b31e",
+      "statement": "`save_plan` publishes only a nonempty UTF-8 HTML file directly under `/workspace/plans/`, reads it from the thread sandbox, wraps it as a complete HTML artifact, and stores it as `ready` in active plan mode or `shared` outside it.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/save_plan.py#L123-L135",
+          "version": "repo-lines-v1:sha256:a3aedf1ead6046675884ebadcfd67745509cddc7c4d8406eab031e2bcef20453:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg5YjYxMzMwMTY4ODlkNmQyNWJjYzVhMmY1NDhjNTgyZWI1OGI2MDM3M2JkMjMxZmVlNjQ4YWRmZDRiNWY3M2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkzZGQwNjI1YTNiNWQ5NGQxNjE2MTkyN2VmYzRmZjQwNDkyNmI4ODA5ZDVlOGNiZjA2YTFiMGU1ODNhMzYwYjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIwYjk2MWI2YmI2MmU2ZTQwZmY2MWFiZTYyMThkMGRkMmRjMGM5YTg0NWRlZWMzZDQ2OWVmY2VlNjU2ZWEyZDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/tools/save_plan.py#L25-L114",
+          "version": "repo-lines-v1:sha256:ec745c13f2e93838d8f22c3f06ef3902ef28f48ff9282f43073982487d311b29:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3NTQxMzgwNzQ4NzU5OTRmYTQyYTFjM2U4ZmIxNjYyYjhkYTljNWE3NjAwZWRiMmFhNjA0NmQ5NmI2YzYxZDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhOGE1ZTU5NzYzOGZiYzZlMGZkMDJlYTZhMTA1OWU4ZGVjNWJiY2FhNzI2ZDJiMzllM2UzMjg2YTcxN2EyYTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjllODdjZGE3YjUwYzRiNTI3NTcwMGRjY2MzM2M4MWZkZWIzMTM5MmFmNWU4YTYwZjViZDlhMTJlNDZlZGViMzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjExMTI0YWQ1ZDE5ZDg2NWNkNGZlZGI0NmRhNmEwNGUyNjQ1ZTU2ODYxMWJkNzdmOTJiMjkyNDlkMGYzZTVjNTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_042a1c7cad1c4ab39a05d644c5402076",
+      "statement": "Plan review persists an editable sandbox file separately from the published LangGraph Store snapshot; plan content is keyed by thread, records status and artifact data, and mirrors lifecycle fields into thread metadata.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L1-L9",
+          "version": "repo-lines-v1:sha256:c778fda5c9795d4d12d78c77c0288b462fcad74e6ddfc90e16c45c120cbb41cd:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjIyZWRhYzJlZjlhMTBlOWJlOTUxNTZiZTYyMGU0MWZhN2JkMzRlNmU0OTUwNDFmOWJmNjU3NmQ2MDk5MWRjMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOWZjZWJlY2RhMmY3YWViZThmYzUyMWQ2NGQzYWZiOTc2YzkzOTBhYmIwZDEzZTg2MzNjNDc3YmM4YjliMzk2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjJlZDcxNmFmZjQ2YmI2ZGUyNjlkYjEwMmJkYjQ0MmRjZGM5NzZmYTgxZjA4ODhhMDVmYTFjNDc0ZDhmMDU0YyJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L138-L174",
+          "version": "repo-lines-v1:sha256:8948193de6b6965d7f0a1e45c741258847186a00aeb17fe5b403571187484fae:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmZmI4M2M2ZjJiYTA2MTcwMDMyOWYwN2QyMDEwNWEyMjYwNDM3YTNhOTE4MDc5MWZhNDExMjQ5Y2VlNWY1N2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlMDM2MjgxMTU2M2QwZjM4NmQ5NWJmOTBhOTM1MjU3ZDIxYjE5MDUwNWVjNjhjYTAzMWM1MjIwNWIwNDY3MmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjczM2U4NDg3Yzg1ZGZkY2Y5ZmE3YjkzYzc0NmM5NDYyNWFlNDdlMTIwYzc5N2U3OTFlNzM3ZjllZDdmZmM3M2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYwZTAxMzM1Mzk0NjljNzJkMDFhMjIwYjM4YjY3OGRiZjQ0OGY2NTBiYzgwZmM0NTkxMTYxNmU2ZDYyZWUzYjUifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L63-L98",
+          "version": "repo-lines-v1:sha256:184f60b276906ddc0bf177c4318a080b90bb9ab7a1aab7faf1b7f332b308ff77:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5MDdjY2EyZDRmNjBjOTViMjcyYWY5OTY4MTUyYTk4NGI3ZDE1NDg5YWU2ZWZjY2QxNGMzMDQ1YjExZmVkZGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlMDM2MjgxMTU2M2QwZjM4NmQ5NWJmOTBhOTM1MjU3ZDIxYjE5MDUwNWVjNjhjYTAzMWM1MjIwNWIwNDY3MmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhZGYxNTFkZjcxMTE0NTVkOTRlYmMyZjg4NWJmZjQ1NDRmOGMxODViZDM5MmZlOGY2MWIzYWNmZDAzYWU2ZTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5MmQ4MzEzNWM3ZGQ3YWZlNDY4ZTQxZmIwZDZjZWRmNjE2OGQ3Njc1YjcxNjUzODRhMmEyMWFkNjM5NzViMTkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bbfec0ce9c20490d8144dc2495d31114",
+      "statement": "The dashboard exposes authenticated plan retrieval and lifecycle APIs under `/dashboard/api/plan`; the standalone `/agents/$threadId/plan` route fetches and renders the thread artifact, and its UI permits approval only for a `ready` plan while distinguishing `shared` content.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L38-L64",
+          "version": "repo-lines-v1:sha256:5c89840205d5e1ad6f74e52d173ea3eada05b30a1c76cf3151a9924efa558f36:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L42-L106",
+          "version": "repo-lines-v1:sha256:d983ae554556957bf4d7b5b994e5e083f604e6f71d655049062441b4bbc8edec:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMyMWI4YWI3MmNkZjJhMzlkMDMzOTA5NGM3OTg3MzMxM2NlMzQ4MTllNGI4MWNlYTFkZjNiNDZkMzU2ZGQyN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0ZWQ4ZTM0MWQ0ZWU0NDAzOGRlZWEyNjZmYzQyMmIwMGZlMzVhY2Y2ODMwODIzNGJlMjg5YzYwMjQ5YmE2ODEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU3YTVlMTgzNzVlNzI3ODEwYjYwNTVjZDJjOTU1YTVmNWQyZGViNDQzYzRmZjQ2YTU3ZTk4MjRlNWQ3YzE4OWQifQ"
+        },
+        {
+          "resource": "repo://ui/src/features/agents/components/PlanReview.tsx#L127-L145",
+          "version": "repo-lines-v1:sha256:861372e1578de59daae5744064ad89828cb07724c74a45f4433c962adf715c7f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwNTUyM2E4MmM0YWJhZTJlNmI1OTNiNmI2MWNhZDU1MzlhMzNkZGY1ZDAxODM2MmE4ZTczZDg0NTkxM2E3MmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0NDRhMzFkOGVjN2U4OGY4NTU3MTUyNmJmMjdjOTU4ODIwZGZmZDI5ZjY4NTIxZDBjMDViNzcwNWExZjE4YjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NzIxNWNiZDZiNjI3MDU3YjI3ZWMyZDBmYjM4YTgzZWNkMDI1ZGY1ZWNhNWMwZjMxYWZjZWMwNGE3OGY2OTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhhOTA0OTU2YWFiNDY5Zjk0NzBjOTUyZjcxN2Y1NDkyMmU2MzkzNzQyM2U2ZWZhMDkxMTgyMWJjMTNiZmI5NDgifQ"
+        },
+        {
+          "resource": "repo://ui/src/features/agents/components/PlanReview.tsx#L48-L51",
+          "version": "repo-lines-v1:sha256:e5a7f349ca70e6ab9d899fabe9433e3dc64aaade56cf4a7eb5c8cdf63734cdac:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWFjYzhmNzhjZTgwYzEwYjg2OTIzYzhjZjlhOGExMjEzYTQ1Yjc0ODQxMTY1ZjMxYjlkOWE2NjE3ZjFkYTY2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTU4MWU1ZDZmNjFhOGIxOTliZWIyZjY4NDdmOGJkMDU2ZTVlOGFlNmFjMmY1NGE0YWE4OTlkZmY5Y2U0NTYwZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGE1MjA4NmRjMzBkZmYzNjIzZTI1NjZkZjE5N2FhOGU5YTY3ZWE4NzYyZDU5ZWRkNDI4NTliM2Q5YTYxMDFkYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZmE4YWNiMDMyNmE5YmY4YWEzYmZjMDUxOTBkZDRjZWQxODAxYTdjMDVkNzkwMTVmYjgxZWU4ZjMxYTBhZWQ1ZiJ9"
+        },
+        {
+          "resource": "repo://ui/src/features/agents/components/PlanView.tsx#L58-L130",
+          "version": "repo-lines-v1:sha256:d0bc85de9e158af3ca62e833c38609b2ab76e04d82fee61c2e3423c13c1dee30:eyJzZWxlY3RlZExpbmVDb3VudCI6NzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM0MzFmZGY2MWM2NTkyNDA0ZGU0OGMyNmZhMjE5OTc2MDJkNDc5ZjA4OTNkMDI5MzYxNDE2NThhMjMzZjRmZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUwNTYzMDRiMGVlYWJkODhhZDRjYmRkNjBiZGY0NjY1MWFkODU3YWQxZTAxMDRlNDJhYmZmNmIwNDNhZThlYTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM0MGM1ZDNkYzNhNzczMDc5M2M4OTI3OTQ4YjU1OTY2NDIwN2Y3OWJhODc3NzNjMjE1MDA0NDMxOTYyZmQ0ODgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmMTMxNTBkMjFjNmM2NjU0Yjc5NWFkNjIwZmY3ZmRiZDQ1YTQ1OTVjMjI4NzMyYWY0Yjc3Y2YwMDU1NjQ2MGEifQ"
+        },
+        {
+          "resource": "repo://ui/src/routes/agents/%24threadId_.plan.tsx#L3-L12",
+          "version": "repo-lines-v1:sha256:02b27153b4df9b55ec26ad6d654ff3673db486165dcffb91cc5c289cd96ecb2d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFjYTlkYmVlMmZkMWI5MWQ3YjY4MzgwNTgwYWY0OTQyMmVlZGIyZmE1ZDNiOTc1NzJjNjBiOWIyNzM4ZmRjZmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ1ZWQ3OTcxYjZmZTM5MTUxNTg1YzM2ZGIzMTE4ZTIwYzAxMTY4ODQ4ZWI2Nzc1OThhNjgzODdmMGUyOTBkZjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ee78196e6bf14d85a6b5c831494ea9df",
+      "statement": "Plan comments are independent whole-document records keyed by thread and ordered oldest first; new agent-published revisions clear stale comments by default, whereas a dashboard manual edit preserves comments and mirrors the edit to the sandbox.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L109-L149",
+          "version": "repo-lines-v1:sha256:5e422dd29967221521d04153821d6c1e55e989374df27a627945f1cafa71632a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFjMTY1ODBkNTQ4M2I0NDk0ODVjZTEyYTVmMmI2YmU2OWFkN2M0YTAyZTYwN2FjYWI4OTYxYTQ5N2UxM2UyNzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3Y2IzMmY3MmFhNjRmMDFkZTk1NjYzZjg3ZmM1YjE2ZGUzMDUwMTUzNTVhOWVkNzc0YjFjMGYyNDM3OTJhNzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIwN2E2NjlmMzExOTZkNjlkZTFhOGEyZGNmNTUzNDI0Yjc5M2M3YmVjMDI4NWVmNzI2YzJlYzkyYmRjNmE5MjUifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L162-L195",
+          "version": "repo-lines-v1:sha256:b847963719850eaaf40321df468dc9787d60be3bdec38148f5a19a24b02c9ff5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2MzRhMDJlMDM4Y2IxN2MyYTU1ZjVmMTM3OGYzOWM1OTgzNjFjOGQ5NjE2MTIzMTY5NzRjNjg0MGZiMWM5MDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmNmNiOGJiZDk3MWI5OTFmODcyNmVkNTI4ZTJlOGQwMzQ4YzYwY2JjNDVkZDUxNWQ4YmE2OTlmZDI0MzY1Y2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjliOGMwYTUzNDU3NzIwYzViMmY1ODBkNmVkZDQ3YjQ0MmI0MmI3MjEwM2FmZTkwNzcxOGVhNDg4ZTQwNjgzOTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg3NzdjNmY5NzJkZjk0ZDUzNDdlNmM5OGYwYTBkNmQyOTIyODZlNDYyZjkzZDhiZGNjMDRlNTg5ZjE4NzIwZDUifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L177-L225",
+          "version": "repo-lines-v1:sha256:8d82ab79e475661092e314d3792a4225ebe4211d431a7036b067badef80c2f2c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyZDVkNTRlMjRhMmJkYzVlYjI5OWQ5OGRiMjc2MzdmOGFjOGYyOWViNWI4MTgwMTg0YTA3NTQ0NjQxNGNiNTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJlNzE1MTNjMGM4NTg4MWM0NjI3MjNmNjM1NzEwYzEyNDBmNWU3ZGMzNjk1YWY3NTVjN2U2OTM1MmQxNjI1NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJjZjlmMzA4YTU5OWZlNzQ1MmY4NGQzY2ZjOTdhMjYwODc0ZjhmZTIzZjcwN2JhOWFlMjIzOGYwYzc4MGIxMjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ2ZmM0MGY4ZmNlNWUwMjNlMWMyMWY5MmZhNGI0NjRhNjcwMmQxMmRhZWY5Zjg2MTM5MDJlZjljYzgxNDAxZDMifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L63-L98",
+          "version": "repo-lines-v1:sha256:184f60b276906ddc0bf177c4318a080b90bb9ab7a1aab7faf1b7f332b308ff77:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5MDdjY2EyZDRmNjBjOTViMjcyYWY5OTY4MTUyYTk4NGI3ZDE1NDg5YWU2ZWZjY2QxNGMzMDQ1YjExZmVkZGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlMDM2MjgxMTU2M2QwZjM4NmQ5NWJmOTBhOTM1MjU3ZDIxYjE5MDUwNWVjNjhjYTAzMWM1MjIwNWIwNDY3MmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhZGYxNTFkZjcxMTE0NTVkOTRlYmMyZjg4NWJmZjQ1NDRmOGMxODViZDM5MmZlOGY2MWIzYWNmZDAzYWU2ZTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5MmQ4MzEzNWM3ZGQ3YWZlNDY4ZTQxZmIwZDZjZWRmNjE2OGQ3Njc1YjcxNjUzODRhMmEyMWFkNjM5NzViMTkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_36212ef014504454ad9e8c273efb6ecd",
+      "statement": "Rejection accepts only a ready published plan, transitions it to `revising` with plan mode enabled, and normally re-dispatches the same thread with formatted review feedback; callers may request the transition without dispatch.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L274-L303",
+          "version": "repo-lines-v1:sha256:7b972bbfdad00f49b2e03c5acf62a03c332283b61a601d41f7fbdb2981817da6:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMjM2NjI3ZjRiYWRkYWYzMGJlYTg2MGZjOWMwZGYzN2UzNDFhZTQ1NzA5NzdhYjUyN2UxMWI1OGE4OWE0MjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU0YjFkNDI1NzUyMjNiNjJiMzc0OTlhZWIwY2QzYTRhYjU3ZTE5ZmEwZDE2ZThhMjgzMzM5NmViZDk1ZmM0NjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIxNzQ4YmFmYThmNjdhZTcwMWQxZDljMGZmNWJmMzA4ZjE3YTk5YzliMGRjZWQ1ZTVhMTdlNjM2NDdhODFkY2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ2NmMwMzhlNjFkMDdhNjEyMzc0OTU0ZjA3MjFmNTEzZjY4ODNlZTA0OWZmNDI5NjllMTVhMGM0ZmI2MzE3NzEifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L360-L400",
+          "version": "repo-lines-v1:sha256:61c9c0cd554c0d23924328ae06911e215a09159a3bc9ba7b50c296d6f7e67636:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxNWY1MzU0OTk3MDMwNWRmY2EzZGJhYzQ1NjU2ZWQ1NWUzMWEwMTkxOGFmZDMxMDA5MjM4MDdhMDMwMTg3NTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjI0MGE4YzNjNjIwNWE2MmFmZjI2MjU3MjhhMDA2ZTQ0NDUxNjRhNTEyYjhiYzY1ODIxNTAxZjMwMTRkYjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_41fd5f8de7424c918f3f0d0ba273d9e6",
+      "statement": "Dashboard and Slack approval share a serialized per-thread approval service that requires active plan mode and ready content/metadata, records approval attribution, then re-dispatches the original thread with the reviewed artifact and comments under `plan_mode=False`.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L198-L271",
+          "version": "repo-lines-v1:sha256:45be456265bf3dc366875843ab813cf6e3af5d21e369200dfd35e5ec73f6bc64:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc0OGM4MzI0ZWY5MDVmOWNiMjQ3NDJiMDZlODM4MzZhYzVmOTk1MDQ4ZWE0YTQ1NDE2NTYzN2ZiYmMwODYxZDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4MTExMzY4Y2NmNDUxZmExNmMyNjA1YTllNGFiZWZlNTgwMDMwZGY4Yzc1MWRkNWQ3M2I4MjdiMDliNTg4YzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkyNzgwMjkxYTlmMjYyNWJhZjQwNGZiMGFiMWQxMTJmYmJkNDJkN2QzYjcwYjFmNzc1NmRmODllZDMwZDQxY2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNjNjA0YjAyZTM5NTQ4MTQ0YTg1Njk5NzcwZmVhNzMyNDkzMDU0ODZjMzEyMmE1ZDliZDhjZmQzMjMwYjIwMWIifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L373-L400",
+          "version": "repo-lines-v1:sha256:07784860c4a01c3511725db430a925abf52528374f439c7402ed37abeecc96de:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU0MjI3NDI5Y2VhNmYwMzYxOTljNDllYjg0NTc2OGY2NTdkMzI3YmIzMWE2MDFlMmIyMDk1MzY2ZGRjMWZmN2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMxMWQ3YjQ3ODQ0NjA2YTI0OGYzOWE1Y2EwNzg4YTIzOTcyNmJhMzQ1ZTJlMWE1ZTUxYTBhYjllNWZmYjMyNDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack.py#L458-L477",
+          "version": "repo-lines-v1:sha256:137f275549f8ec76163ca67bf95c4ccc07ba73d287240de5699bb5b7f49ee4fd:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1MjA0NmYwYjAwMmU0ODc3MjQyMzJiZjI4ZWYwNjhlMDZkMzg5YWM2ZGVmYjY3MDM3MGQ1Y2YyMGM2OWIzOTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2NmQwMDBjNjFlMGU2YTlmM2ZhMTg1YmUxMTkxYzQ2YzY3Y2QzMDgyNGFjYjFmYWE1NjIwMjQ3Y2Y0ZTUxMGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxMGIzOTMxMTMzMjExMzdkNWEzMjY4OWM1N2VkNDE5YWUyOTA0NzBiMGFhZTAxOTU2YzAzNmUxNjk2M2EzY2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjExOTQ4NmZlZGZmMzcyZGZiZDMxY2RhMjg1NTEyMzg0YzM0OGMzNWQxMWZlMDM3NDJjNzdmYmRlYzlhY2Q5YmQifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L736-L792",
+          "version": "repo-lines-v1:sha256:b9e86167ed9c3e13644d97f0ac326bd45cc64ce85ee9711250fba9e9221fa7b8:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUwZTgxMjIxZDU1OTJhODIyY2Y3YjIzMzAyN2VhM2I2YWRhNjY2ZjU5ZTlhMGJhZTJkMDNjMzgzMThjYmRkNDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzZmU0NzI3ZDQzYzg4ZTg4YWQ0NmU1YTRmMTExNjMwZTRmZDg2NDI0MWRjMGI4ODAxMTVlMDI1Y2I1MTc4NTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdhZjA3ZDM5YThhMWQxOTYyMDZlMzM5ZGQ3MzQyMTk1Y2ZhOWM5ODllNjIwN2M2NTMxM2E4NWE2ZjNjYTk2NTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY4YjczZGU1NTYyOTQxOTk2MWNlNzk1MTBkMjUzOTFmOGM2YzgyZTUwODkyNDIyMTBiNzY5NzAyNTk2YzNkYzUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f4ee6557dad043c38e4dedfd1604f576",
+      "statement": "Approval avoids unsafe partial outcomes: it propagates content/comment Store failures, duplicate concurrent approvals do not dispatch twice, and a failed implementation follow-up restores the plan to ready with plan mode enabled for retry.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L220-L271",
+          "version": "repo-lines-v1:sha256:eb00b5d03f1e8d1c1ce34de2bee80c72e9429d9215d74ec4d368f831c05d0231:eyJzZWxlY3RlZExpbmVDb3VudCI6NTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4MzhiOTc0MTY2NjI3OGY3NDMzYTUxODU2YzJmZjAyMjk1NTNjZGVlODQ0MjQyNjFlMzcxZGQ3ZDQwMWZhODMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4MTExMzY4Y2NmNDUxZmExNmMyNjA1YTllNGFiZWZlNTgwMDMwZGY4Yzc1MWRkNWQ3M2I4MjdiMDliNTg4YzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ1NmMwMmViMWM4ZDYwN2UzNWYzYWJlNzI0NzFmMDBlOGNjMDMxMmYyMDE4YWExYTM0ZjhkOGE3MzBjMzBmNzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNjNjA0YjAyZTM5NTQ4MTQ0YTg1Njk5NzcwZmVhNzMyNDkzMDU0ODZjMzEyMmE1ZDliZDhjZmQzMjMwYjIwMWIifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L121-L135",
+          "version": "repo-lines-v1:sha256:234cd573e8c8bfd0f2b3ed6c1b50efb0f55f8c1e3d90dd886272287edf90b84d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRkMzk2YTNjN2ZlN2UyZDEzYWVlNTc0NTI5ZjQwOGRiZjNkZjRkYTJjNTA3ODc5NWJjNzViZjM4MjVkMmVlYWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlN2M5NTdiY2I0NGZiNjczYzk4YjAwNTBhNzVkMzgwODJkYjgxZDkxOGRlMzEzYTNmMDdjMTIzNTMwNmQ3ZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkOGFiOTFlMDMzZDk0Y2YyYTNmNjY3ZWM2YTIwMmI2YWMxMzU4M2ExYjFkNGFmMzk3ZTc5YTZlNDRlODVmY2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxMDkzMDJlODI2NDQwYTU0NDBmZGYwMTBiMTdjODdjN2M3MzA1NDVkYWJkODFjNmI4NWE4MmEyZGE5Mzg1MmUifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L181-L198",
+          "version": "repo-lines-v1:sha256:fdde58ce61affca7d73310ad9424ea804d292fe48ca34f9ff5903425968f7944:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxODlkYmU1MDA5ZjM4MDUyNTY1Y2E4NTQwNTJjYjMzYmI1NjM4N2I1MDM0MzY4ZDVjOGNkNWMwNDY1YjgyMWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5NmIzNjkxMGM5YmY2MzBkMzkyNWNhYTEyMzJjNmI0MzNiYzlkYjdlMzZhMTI0YjY3ZmVlYTQxM2ZkOGRlM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJjMzNjYjEyOGE1ZDg5NjBhZmU3YzY3ZGYwMjI5NjRjYTdkMDJlM2I4MTBjNjA1MThhODRmNzY2YjNlNGVhMDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMzOGU4ZDRkMTlhOTRiNjZjNTAzMDhhOGE3M2EyYmQ3MGUwNDIzMDZmNDQ2NGFlM2JlMmY2MmFhM2M0YWE5YjkifQ"
+        },
+        {
+          "resource": "repo://tests/agent/test_plan_review.py#L860-L967",
+          "version": "repo-lines-v1:sha256:8b52853417d9dd80bb7c7f0742c52e6687f0b4d3a26bbe63d88cf3f6287b44a2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiYWUwNWRlMDg1MDYzNjI5NmNkZDMxNGFiYTg0ODQyZTkzMDZiYTNmYzVmZTExYjcwOTE5NDFjNmNkMjQzMzE1IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJhYmM2MjQxMTg5ZTgxYzU0M2NmMmZkZGE3ZTRlYjM4N2YxMDAxM2FlZGUyOWU1ZDFhNTAxNzEwYWMyODVhOWUzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmYzE4NzkyYWExYzExMWNjOTNhYjg5YTEyZWRmMmQxMTBlNjJmY2JlM2ZmNGQ5ZWUyZGQ4N2E1YmRlYjcxYmFjIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5OGU1MzBkOTBiZDAwYWI3ZWM4N2MzZjRkZDQ5MjVhNDYyZTQ0ZTMyNDU2MTI0YTlhOGQ2MDYyZTAzYTk4YTBjIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_b41dd25b542048b682996702ce0e9386",
+      "statement": "`shared` artifacts are intentionally not implementation plans: plan mutation and decision routes reject them, and entering planning after shared content clears the prior artifact from the planning record.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L306-L308",
+          "version": "repo-lines-v1:sha256:a34c64eef4bec61ec2312566b39e36a813673ab93aed6c04f9ea0eab491836cb:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmZiMmM2NGE3NzUzYzk1NTBlNmIwODUzMjliMjYzYzk5ZGYyN2QzNDg2ZmQwNzc2MWU2MThkMDI4NzU4MGYyNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmU0NDYxNWJmYTZhYzAwZTg0NTU4MjAyZDM2NWM5NGYzYjkyNmI4NDVlZTkzNTI5ODkyMWI1OTM1Nzc5NWFlNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTg2NGFkOGMxMmY4NzAwZDRjNzQ1YzUzYmViNWNhNGMyM2M0YWZlZjJmYWJiZDRlZTE3NjZjODA3YmE3N2U3MiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTQzMWQxMThkMDhmZWRhNzExOTk3MmEyMTUzNmIyMjgxY2QzZDg1MTY4NTRiZDA2ZGI2ZTVmMzgyNGM5MWJhYiJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_store.py#L145-L160",
+          "version": "repo-lines-v1:sha256:9684e15b33643a6ee2a6b874d7f34b729f98627e48fcf9ff8278c1a5e176ce74:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzZDgyMDA2ODE0ZjYzNWM4NjFlNjZlY2RkMDM2MDZlZGVmYjcyY2JiYTVmNGE5ZjgzMTdiMGE3ZmY3ZWM3NDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4OWQ3MmQ4NTkzZjA3ZmQzMmFhODA0NDIwMTUxYmI5N2Y4MmI3MzZhYzYwYmQzZDk1MDRiYTRiYTczYzc5N2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI5ZTMzZjNkZjFiY2UzMTFmMmYyMjRhYjc1NGY5MTcwYzMzMDM2YjUxM2ViYjlkMzJiMGMyODY2NDI5MDk0YmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkNTRiYmMwZWFiMGQ2YjA4NTZiNjdhMmYwNWIxM2JiOTIzNWVkNzg0ZDhiMGQyN2E5ZjdjYjNhZThjMDg2YjIifQ"
+        },
+        {
+          "resource": "repo://agent/tools/save_plan.py#L81-L94",
+          "version": "repo-lines-v1:sha256:c5fd85a6aff2ad97c6da33d7918ac43308b76cdb7512b4e6526f9568c93a67fd:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiNDFkMDAxMjA5YmJmMWQzMWY4ZjlmZWJlZjllNWE1ZmE4M2RkOTkzYjFjMzcxMGZkNTUxMWFkNTg1NmJmZjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1YjIzZTg3ODZmYjVmMGZiNTQ2M2MwYTk0NDFmMDU3NzUxYTBlNThkYzdhNDMwMGM2ZGY1ZjM2YWViZmI0MDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgwMTA1ZjFiMjY1Mzk2MzEzNjc2YjRmZDZhNTA3MzgxYmQ0NWIzYjdlZmUyZTkxNmI3ZTgxYjk1OGFhZGZhZWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1NzRkOWFkZGQxMDc1OWFiOTcyYTljMTEzM2VkNTk0ZDRiZWI0NjBmNzNjNTAwNDAzMjFkOWYyZGRiZWVkNDYifQ"
+        },
+        {
+          "resource": "repo://tests/agent/test_plan_review.py#L579-L608",
+          "version": "repo-lines-v1:sha256:ac0265e17b93a2259f83a19d3a712db3ade141881d13c042fc6474b782036562:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzZDQxNWE3N2M2YjYxNTk5YzE4MWQ2Yjk0OTQ3YzNmMGYzZWRkMjk4ZGZiYTgwZDU5MDAwZTVjYzFhZDA2ZmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmYmZmMGUzYWVlMTdkYWMwYWVmNTc2Y2NjNTA4MzNlMDY0MmNiMjg2MDM4NjRlYzY4NmMyZDI1MDBhNzgxMzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVmM2UxNjVhNmU4NTExMjA4OTc5M2M2ODlkMjZjMzkzODJhYmZhNWRjYmNjYmY2OTRmOWYyYThmOGZkMGRmNTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_74bef0497af44e829f4a6bcad0148b43",
+      "statement": "Plan API mutations use same-origin protection and session authentication, and plan routes verify a readable thread before exposing or changing its review data.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L109-L117",
+          "version": "repo-lines-v1:sha256:3a3b7b88a90487de4ea1a0934775ff8f029715ca78db2363663ace4c28069471:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWMxNjU4MGQ1NDgzYjQ0OTQ4NWNlMTJhNWYyYjZiZTY5YWQ3YzRhMDJlNjA3YWNhYjg5NjFhNDk3ZTEzZTI3MCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzcwODFkMTU1NWQ0MTE3M2E2MzYzNjJlOGRiMmU5YWVkYmYzNTE4NTA5MDdhZDU2MjNhMThhNWJjM2ZlYTcwOSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGZiZDAwOTMxNGJjMjcwODQxNjczNGEwMmFlNWZmMzlhMWU0OGEwNTBiZTkxZjQzYjJmYWE5MjAwMmM2MmJmYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2Y4YzU4NmMxNGU2MzdkY2EyMzQ0MjkwMWVmM2I5NmJlNzlkMDMyNDlhYzZhZTk1NmU4MmQwYWI5ZjAxZjZiMyJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L198-L203",
+          "version": "repo-lines-v1:sha256:c441b863a95f6434a67569591e9a378e334c155c52a869dc67e445aedb7c1d47:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzQ4YzgzMjRlZjkwNWY5Y2IyNDc0MmIwNmU4MzgzNmFjNWY5OTUwNDhlYTRhNDU0MTY1NjM3ZmJiYzA4NjFkNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOGI2YWZmMjM4YzVjNTY3YmE4ZGIyNWIzMzEzZTlmNTkyZmQ0MjYyMjU3NmUxNmU2OWQ0OTQ1Nzc1MWNjOWNiZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTI3ODAyOTFhOWYyNjI1YmFmNDA0ZmIwYWIxZDExMmZiYmQ0MmQ3ZDNiNzBiMWY3NzU2ZGY4OWVkMzBkNDFjZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDJmZGI0ZjM3NjkyMjJiYjI0ODg2N2QzYWM3YTg0MWNkOGZjOWNhOTVkY2RmOWZkZTkyZTJhOTA0NzlmN2U5YiJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L42-L47",
+          "version": "repo-lines-v1:sha256:63a2a860d0b95796a96f9ca3e3485d151822c91fee41d9fb6092285e3011e471:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzIxYjhhYjcyY2RmMmEzOWQwMzM5MDk0Yzc5ODczMzEzY2UzNDgxOWU0YjgxY2VhMWRmM2I0NmQzNTZkZDI3YyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzdmOWI1YjJmZWVkMDg5YTAyNzU0ZWJkZTRiYTEwNDAzYzRkMTk4Yjg1NTg5MTc2NmU0MzM4YjRhYjczNzk5YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDRlZDhlMzQxZDRlZTQ0MDM4ZGVlYTI2NmZjNDIyYjAwZmUzNWFjZjY4MzA4MjM0YmUyODljNjAyNDliYTY4MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDY4MWUwOThlMDZkODU0ZjFhMzI1NmQxODI1NjZlNjg5M2ZhNjFlZjU0ZDExYjE5YmZmNzlhMjc4ZWM3NGE4ZCJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/plan_api.py#L75-L79",
+          "version": "repo-lines-v1:sha256:1e0cfb05ed26b65b67126b429bb92974234d1f056bdeb5c9759b1d16d7f617ab:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmJiYjYzNDEyYTIwNjNlNGI3ZDZmZTQ4MzU1OWM0YTVlMjExMzA1MzYyZjNlYTBiMWUyOTk2YTg1ZDJhNjUwYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmU3MzJjZGZkZjdhNWMwYmZhNDZhMzE4NWFhMmI2YWJlNGJiNDQ4Nzk4MzlmMmI5ZDMxYmQ5ZWViZDA3YWU3MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTJlNjJjMjI0ZGQxOGRkMmUwYTkyYzY5ZmZmZWYyZGVlODQyNDlhYTE1MTc4ODQzNDg2NDRlOWRmNWNhNDEwOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODllODFkNDY4ZmM4NGUzOWUxYmU5NWE5Y2IzNjcxNDJjOTNkNzdmMzAxNDMwMzM3NWIzMzcyZjUwOWY4YzJkZCJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-28T01:23:06.700Z"
+  }
+}
