@@ -17,7 +17,7 @@ from langgraph.graph.state import RunnableConfig
 
 from agent.server import _registered_tool_name, get_agent
 from agent.utils.read_only_backend import ReadOnlyBackend
-from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
+from agent.utils.sandbox_state import SandboxBackendProxy, unregister_sandbox_backend_proxy
 
 
 class _DummyAgent:
@@ -56,7 +56,7 @@ async def _capture_create_deep_agent_kwargs(
         make_model_calls.append((model_id, kwargs))
         return MagicMock()
 
-    clear_sandbox_backend(thread_id)
+    unregister_sandbox_backend_proxy(thread_id)
     with (
         patch(
             "agent.server.resolve_github_token",
@@ -92,7 +92,7 @@ async def _capture_create_deep_agent_kwargs(
     ):
         await get_agent(config)
 
-    clear_sandbox_backend(thread_id)
+    unregister_sandbox_backend_proxy(thread_id)
     captured["make_model_calls"] = make_model_calls
     return captured
 
@@ -132,7 +132,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         await started.wait()
         return (("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low"))
 
-    clear_sandbox_backend("thread-ctx")
+    unregister_sandbox_backend_proxy("thread-ctx")
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
         patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
@@ -153,7 +153,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         release.set()
         await agent_task
 
-    clear_sandbox_backend("thread-ctx")
+    unregister_sandbox_backend_proxy("thread-ctx")
 
 
 @pytest.mark.asyncio

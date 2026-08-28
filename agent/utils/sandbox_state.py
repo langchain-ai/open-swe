@@ -362,7 +362,13 @@ def get_or_create_sandbox_backend_proxy(
     return sandbox_backend
 
 
-def clear_sandbox_backend(thread_id: str) -> None:
+def unregister_sandbox_backend_proxy(thread_id: str) -> None:
+    """Drop the thread's registry entry so the next run rebuilds its proxy.
+
+    Does not detach the backend from the proxy this run already handed to the
+    tools: they hold that object directly, and the id it points at is the one a
+    reconnect would resolve to anyway.
+    """
     sandbox_backend = SANDBOX_BACKENDS.pop(thread_id, None)
     if sandbox_backend is not None:
         sandbox_backend.cancel_startup()
