@@ -362,12 +362,6 @@ def get_or_create_sandbox_backend_proxy(
     return sandbox_backend
 
 
-def clear_sandbox_backend(thread_id: str) -> None:
-    sandbox_backend = SANDBOX_BACKENDS.pop(thread_id, None)
-    if sandbox_backend is not None:
-        sandbox_backend.cancel_startup()
-
-
 async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
     """Fetch sandbox metadata from the run config or live thread."""
     try:

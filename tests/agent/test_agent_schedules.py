@@ -264,7 +264,7 @@ async def test_create_agent_schedule_requires_repo_access(fake_client, auth, mon
     assert fake_client.crons.created == []
 
 
-async def test_list_agent_schedules_uses_owner_filters_and_paginates(fake_client) -> None:  # noqa: ANN001
+async def test_list_agent_schedules_migrates_all_records_to_workspace(fake_client) -> None:  # noqa: ANN001
     for i in range(125):
         await fake_client.store.put_item(
             schedules.SCHEDULES_NAMESPACE,
@@ -311,14 +311,24 @@ async def test_list_agent_schedules_uses_owner_filters_and_paginates(fake_client
         },
     )
 
-    result = await schedules.list_agent_schedules("alice", email="alice@example.com")
+    result = await schedules.list_agent_schedules()
 
-    assert len(result) == 125
-    assert {item["id"] for item in result} == {f"alice_{i}" for i in range(125)}
+    assert len(result) == 126
+    assert {item["id"] for item in result} == {"bob_1", *(f"alice_{i}" for i in range(125))}
+    assert all(item["scope"] == "workspace" for item in result)
     assert all(item["slackNotificationMode"] == "always" for item in result)
     assert all(item["adminThread"] is False for item in result)
     alice_zero = next(item for item in result if item["id"] == "alice_0")
     assert alice_zero["lastTriggeredAt"] == "2026-01-02T00:00:00+00:00"
+    assert all(
+        value["scope"] == "workspace"
+        for (namespace, _), value in fake_client.store.items.items()
+        if namespace
+        in {
+            tuple(schedules.SCHEDULES_NAMESPACE),
+            tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE),
+        }
+    )
 
 
 async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, monkeypatch) -> None:  # noqa: ANN001, ARG001
@@ -340,6 +350,7 @@ async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, mon
     await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
 
     async def repo_config(login: str, full_name: str | None) -> dict[str, str] | None:
+        assert login == "alice"
         assert full_name == "langchain-ai/open-swe"
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -347,9 +358,9 @@ async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, mon
 
     result = await schedules.update_agent_schedule(
         "sched_1",
-        "alice",
+        "bob",
         ScheduleUpdateBody(repo="langchain-ai/open-swe"),
-        email="alice@example.com",
+        email="bob@example.com",
     )
 
     assert result["repo"] == "langchain-ai/open-swe"
@@ -539,7 +550,7 @@ async def test_trigger_agent_schedule_runs_paused_automation_as_test(
 
     monkeypatch.setattr(schedules, "create_durable_run", create_run)
 
-    result = await schedules.trigger_agent_schedule("sched_1", "alice", email="alice@example.com")
+    result = await schedules.trigger_agent_schedule("sched_1")
 
     assert result["status"] == "started"
     metadata = fake_client.threads.created[0]["metadata"]
@@ -552,7 +563,7 @@ async def test_trigger_agent_schedule_runs_paused_automation_as_test(
     assert stored["cron_id"] == "cron_new"
 
 
-async def test_trigger_agent_schedule_hides_unowned_automation(fake_client) -> None:  # noqa: ANN001
+async def test_trigger_agent_schedule_allows_workspace_automation(fake_client) -> None:  # noqa: ANN001
     record = {
         "id": "sched_1",
         "name": "Daily report",
@@ -566,11 +577,10 @@ async def test_trigger_agent_schedule_hides_unowned_automation(fake_client) -> N
     }
     await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
 
-    with pytest.raises(HTTPException) as exc:
-        await schedules.trigger_agent_schedule("sched_1", "bob", email="bob@example.com")
+    result = await schedules.trigger_agent_schedule("sched_1")
 
-    assert exc.value.status_code == 404
-    assert fake_client.runs.created == []
+    assert result["status"] == "started"
+    assert fake_client.runs.created
 
 
 async def test_trigger_agent_schedule_preserves_repo_auth_error(fake_client, monkeypatch) -> None:  # noqa: ANN001
@@ -593,7 +603,7 @@ async def test_trigger_agent_schedule_preserves_repo_auth_error(fake_client, mon
     monkeypatch.setattr(schedules, "require_repo_access_for_user", expired_token)
 
     with pytest.raises(HTTPException) as exc:
-        await schedules.trigger_agent_schedule("sched_1", "alice", email="alice@example.com")
+        await schedules.trigger_agent_schedule("sched_1")
 
     assert exc.value.status_code == 401
     assert exc.value.detail == "github token unavailable, re-login required"
@@ -694,6 +704,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
+    assert stored["scope"] == "workspace"
 
 
 async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(

@@ -20,6 +20,7 @@ import {
   useTriggerAgentSchedule,
   useUpdateAgentSchedule,
 } from "@/features/agents/lib/queries"
+import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 function formatDate(value?: string | null): string {
@@ -44,6 +45,7 @@ export function AutomationsList({
   onTabChange: (tab: AutomationsTab) => void
 }) {
   const schedulesQuery = useAgentSchedules()
+  const canManage = useSession().data?.is_admin === true
   const schedules = schedulesQuery.data ?? []
 
   const total = schedules.length
@@ -57,7 +59,7 @@ export function AutomationsList({
         <h1 className="text-base font-medium text-foreground">Automations</h1>
         <p className="mt-1 text-xs text-muted-foreground">
           Run Open SWE on a recurring schedule. Each run starts a fresh agent
-          thread.
+          thread. {!canManage && "Workspace admins manage automation setup."}
         </p>
         <div className="mt-4 flex w-fit rounded-md border border-border bg-card p-0.5">
           {(["overview", "runs"] as const).map((value) => (
@@ -98,10 +100,12 @@ export function AutomationsList({
               <span className="text-xs font-medium text-muted-foreground">
                 {total} {total === 1 ? "automation" : "automations"}
               </span>
-              <Link to="/agents/automations/new" className={buttonVariants()}>
-                <PlusIcon className="size-4" />
-                New Automation
-              </Link>
+              {canManage && (
+                <Link to="/agents/automations/new" className={buttonVariants()}>
+                  <PlusIcon className="size-4" />
+                  New Automation
+                </Link>
+              )}
             </div>
 
             <div className="mt-3">
@@ -111,17 +115,21 @@ export function AutomationsList({
                   <Skeleton className="h-16 w-full rounded-xl" />
                 </div>
               ) : total === 0 ? (
-                <EmptyState />
+                <EmptyState canManage={canManage} />
               ) : (
                 <div className="space-y-2">
                   {schedules.map((schedule) => (
-                    <AutomationRow key={schedule.id} schedule={schedule} />
+                    <AutomationRow
+                      key={schedule.id}
+                      schedule={schedule}
+                      canManage={canManage}
+                    />
                   ))}
                 </div>
               )}
             </div>
 
-            <AutomationTemplates />
+            {canManage && <AutomationTemplates />}
           </>
         )}
       </div>
@@ -153,7 +161,7 @@ function StatCard({
   )
 }
 
-function EmptyState() {
+function EmptyState({ canManage }: { canManage: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center">
       <div className="rounded-full bg-accent p-3 text-muted-foreground">
@@ -166,18 +174,26 @@ function EmptyState() {
         Schedule Open SWE to run on a recurring cadence — review code, triage
         issues, or keep docs up to date.
       </p>
-      <Link
-        to="/agents/automations/new"
-        className={cn(buttonVariants(), "mt-4")}
-      >
-        <PlusIcon className="size-4" />
-        New Automation
-      </Link>
+      {canManage && (
+        <Link
+          to="/agents/automations/new"
+          className={cn(buttonVariants(), "mt-4")}
+        >
+          <PlusIcon className="size-4" />
+          New Automation
+        </Link>
+      )}
     </div>
   )
 }
 
-function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
+function AutomationRow({
+  schedule,
+  canManage,
+}: {
+  schedule: AgentSchedule
+  canManage: boolean
+}) {
   const navigate = useNavigate()
   const updateSchedule = useUpdateAgentSchedule()
   const triggerSchedule = useTriggerAgentSchedule()
@@ -266,29 +282,35 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
           <ArrowSquareOutIcon className="size-4" />
         </Link>
       )}
-      <button
-        type="button"
-        onClick={onTest}
-        disabled={isTesting || isToggling}
-        aria-label="Test automation"
-        className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-      >
-        <LightningIcon className="size-3.5" />
-        {isTesting ? "Starting…" : "Test"}
-      </button>
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={isTesting || isToggling}
-        aria-label={schedule.enabled ? "Pause automation" : "Resume automation"}
-        className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-      >
-        {schedule.enabled ? (
-          <PauseIcon className="size-4" />
-        ) : (
-          <PlayIcon className="size-4" />
-        )}
-      </button>
+      {canManage && (
+        <>
+          <button
+            type="button"
+            onClick={onTest}
+            disabled={isTesting || isToggling}
+            aria-label="Test automation"
+            className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+          >
+            <LightningIcon className="size-3.5" />
+            {isTesting ? "Starting…" : "Test"}
+          </button>
+          <button
+            type="button"
+            onClick={onToggle}
+            disabled={isTesting || isToggling}
+            aria-label={
+              schedule.enabled ? "Pause automation" : "Resume automation"
+            }
+            className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+          >
+            {schedule.enabled ? (
+              <PauseIcon className="size-4" />
+            ) : (
+              <PlayIcon className="size-4" />
+            )}
+          </button>
+        </>
+      )}
     </div>
   )
 }
