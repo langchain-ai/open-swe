@@ -73,7 +73,7 @@ def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
     if name in {"web_search", "fetch_url"}:
         return "Searching external documentation", "External source lookup"
     if name in {"execute", "background_execute"}:
-        return "Running a development command", "Command details hidden"
+        return "Running a development command", _text_arg(tool_input, "command")
     if name == "task":
         agent = _text_arg(tool_input, "subagent_type").replace("-", " ")
         return f"Delegating to {agent or 'a specialist'}", "Specialized agent task"
