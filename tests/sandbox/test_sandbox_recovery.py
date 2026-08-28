@@ -15,7 +15,6 @@ from agent.middleware.tool_error_handler import ToolErrorMiddleware
 from agent.utils.sandbox_state import (
     SANDBOX_BACKENDS,
     set_sandbox_backend,
-    unregister_sandbox_backend_proxy,
 )
 
 
@@ -70,10 +69,8 @@ async def test_sandbox_client_error_notifies_then_ends_the_run() -> None:
 
         mock_create.assert_not_awaited()
         mock_notify.assert_awaited_once()
-        # The dead backend must not linger for the next tool call.
-        assert "thread-1" not in SANDBOX_BACKENDS
     finally:
-        unregister_sandbox_backend_proxy("thread-1")
+        SANDBOX_BACKENDS.pop("thread-1", None)
 
 
 def test_unreachable_message_names_the_sandbox_without_claiming_permanence() -> None:
@@ -155,4 +152,4 @@ async def test_transient_sandbox_error_keeps_the_sandbox_and_asks_for_a_retry() 
         assert "nothing ran and nothing changed" in payload["error"]
         assert "will not be replaced" not in payload["error"]
     finally:
-        unregister_sandbox_backend_proxy("thread-transient")
+        SANDBOX_BACKENDS.pop("thread-transient", None)

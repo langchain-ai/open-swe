@@ -23,7 +23,6 @@ from langsmith.sandbox import SandboxClientError
 
 from agent.utils.sandbox_retry import is_transient_sandbox_error
 
-from ..utils.sandbox_state import unregister_sandbox_backend_proxy
 from .sandbox_circuit_breaker import (
     extract_sandbox_id,
     post_sandbox_unreachable_notification,
@@ -164,8 +163,8 @@ class ToolErrorMiddleware(AgentMiddleware):
             return await handler(request)
         except SandboxClientError as e:
             # The command never started, so nothing is known to be wrong with the
-            # sandbox: unregistering it and ending the run would turn a gateway
-            # blip into an abandoned one.
+            # sandbox: ending the run here would turn a gateway blip into an
+            # abandoned one.
             if is_transient_sandbox_error(e):
                 logger.warning(
                     "Transient sandbox error during tool call; request=%r", request, exc_info=True
@@ -173,8 +172,6 @@ class ToolErrorMiddleware(AgentMiddleware):
                 return _transient_sandbox_tool_message(e, request)
             logger.exception("Sandbox error during tool call handling; request=%r", request)
             thread_id = _get_thread_id(request)
-            if thread_id:
-                unregister_sandbox_backend_proxy(thread_id)
             config = _get_run_config(request)
             if config is not None:
                 try:
