@@ -26,6 +26,16 @@ describe("streamMessagesToUi", () => {
         content:
           '<input-message sender="system:scheduler" surface="automation"><content>Check CI</content></input-message>',
       }),
+      new HumanMessage({
+        id: "sender-context-entity",
+        content:
+          '<dynamic-context kind="system" id="system:sender-context"><display_name>Sender context</display_name></dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "sender-context-message",
+        content:
+          '<input-message sender="system:sender-context" surface="automation" kind="system"><content>Private metadata</content></input-message>',
+      }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])
 
