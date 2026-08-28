@@ -91,7 +91,9 @@ export function AgentThreadView({
   const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
   const session = useSession()
-  const canPost = !thread.adminThread || session.data?.is_admin === true
+  const canPost =
+    (thread.threadCategory !== "automation" && !thread.adminThread) ||
+    session.data?.is_admin === true
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
