@@ -357,6 +357,10 @@ async def slack_webhook(
             or previous_thread_ts != thread_ts
         ):
             return {"status": "ignored", "reason": "Updated message identity changed"}
+        if text == previous_message.get("text") and attachments == previous_message.get(
+            "attachments", []
+        ):
+            return {"status": "ignored", "reason": "No user-visible message changes"}
 
     # A code channel is one session for the whole channel, so every message in it
     # routes to the same agent thread and is treated as directed at the agent.
