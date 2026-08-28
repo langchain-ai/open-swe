@@ -22,6 +22,9 @@ MAX_ACTIVE_TASKS = 4
 MAX_OUTPUT_BYTES = 1_048_576
 MAX_INLINE_OUTPUT_BYTES = 65_536
 TASK_TTL_SECONDS = 604_800
+WAIT_TIMEOUT_SECONDS = 120
+POLL_SUPPRESSION_THRESHOLD = 3
+_STATUS_POLL_STATE: dict[str, tuple[str, Any, Any, int]] = {}
 
 
 def _encoded(value: str) -> str:
@@ -162,7 +165,9 @@ def _launch_command(task_id: str, command: str, timeout: int) -> str:
     )
 
 
-def _control_script(action: str, task_id: str | None) -> str:
+def _control_script(
+    action: str, task_id: str | None, wait_timeout: int = WAIT_TIMEOUT_SECONDS
+) -> str:
     return textwrap.dedent(
         f"""
         import json, os, shutil, signal, sys, time
@@ -243,6 +248,13 @@ def _control_script(action: str, task_id: str | None) -> str:
         if not state:
             print(json.dumps({{"error": "task not found"}}))
             sys.exit(3)
+        timed_out = False
+        if action == "wait":
+            deadline = time.time() + {wait_timeout}
+            while state.get("status") == "running" and time.time() < deadline:
+                time.sleep(.1)
+                state = load(state_path) or state
+            timed_out = state.get("status") == "running"
         if action == "stop" and state.get("status") == "running":
             open(os.path.join(task_dir, "stop"), "a").close()
             try:
@@ -257,6 +269,8 @@ def _control_script(action: str, task_id: str | None) -> str:
                 state["status"] = "stop_requested"
         state.pop("pid", None)
         state.pop("runner_pid", None)
+        if action == "wait":
+            state["timed_out"] = timed_out
         print(json.dumps(output(state)))
         """
     ).strip()
@@ -336,21 +350,47 @@ async def background_execute(
 
 
 async def background_task(
-    action: Literal["status", "list", "stop"], task_id: str | None = None
+    action: Literal["status", "list", "stop", "wait"], task_id: str | None = None
 ) -> dict[str, Any]:
-    """Inspect or stop background sandbox commands.
-
-    `status` and `stop` require `task_id`; `list` does not. Status reads are for explicit user
-    requests or when completion needs inspection, not polling loops.
-    """
-    if action in {"status", "stop"} and not task_id:
+    """Inspect, wait for, or stop background commands; unchanged running polls suppress after 3 attempts."""
+    if action in {"status", "stop", "wait"} and not task_id:
         return {"success": False, "error": f"task_id is required for {action}"}
     try:
-        _, backend = _current_backend()
+        thread_id, backend = _current_backend()
         script = _control_script(action, task_id)
         result = await _execute(
             backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
         )
+        if action == "status" and task_id:
+            if result.get("status") != "running":
+                _STATUS_POLL_STATE.pop(thread_id, None)
+            else:
+                previous = _STATUS_POLL_STATE.get(thread_id)
+                if previous and previous[:3] == (
+                    task_id,
+                    result.get("exit_code"),
+                    result.get("finished_at"),
+                ):
+                    count = previous[3] + 1
+                else:
+                    count = 1
+                _STATUS_POLL_STATE[thread_id] = (
+                    task_id,
+                    result.get("exit_code"),
+                    result.get("finished_at"),
+                    count,
+                )
+                if count >= POLL_SUPPRESSION_THRESHOLD:
+                    return {
+                        "success": False,
+                        "error": "polling_suppressed",
+                        "task_id": task_id,
+                        "status": "running",
+                        "duration_seconds": result.get("duration_seconds"),
+                        "guidance": "Completion is delivered automatically by the background-task monitor cron; stop polling. Do other useful work now or end the turn - the thread will be re-entered when this task finishes.",
+                    }
+        elif action in {"stop", "wait"}:
+            _STATUS_POLL_STATE.pop(thread_id, None)
         return {"success": True, **result}
     except Exception as exc:
         return {"success": False, "error": str(exc)}

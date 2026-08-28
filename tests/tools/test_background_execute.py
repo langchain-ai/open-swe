@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -16,6 +17,7 @@ from agent.tools.background_execute import (
     _control_script,
     _launch_command,
     background_execute,
+    background_task,
 )
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
@@ -156,6 +158,119 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
         "status": "running",
         "error": "command started, but automatic completion monitoring could not be scheduled",
     }
+
+
+async def test_background_task_suppresses_unchanged_running_polls() -> None:
+    backend = AsyncMock()
+    state = {
+        "task_id": "task-1",
+        "status": "running",
+        "exit_code": None,
+        "finished_at": None,
+        "duration_seconds": 4.2,
+    }
+    with (
+        patch(
+            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
+        ),
+        patch("agent.tools.background_execute._execute", AsyncMock(return_value=state)),
+    ):
+        results = [await background_task("status", "task-1") for _ in range(3)]
+
+    assert all(result["status"] == "running" for result in results)
+    assert results[0]["success"] is True
+    assert results[1]["success"] is True
+    assert results[2] == {
+        "success": False,
+        "error": "polling_suppressed",
+        "task_id": "task-1",
+        "status": "running",
+        "duration_seconds": 4.2,
+        "guidance": "Completion is delivered automatically by the background-task monitor cron; stop polling. Do other useful work now or end the turn - the thread will be re-entered when this task finishes.",
+    }
+
+
+async def test_background_task_terminal_read_resets_poll_counter() -> None:
+    backend = AsyncMock()
+    running = {"task_id": "task-1", "status": "running", "exit_code": None, "finished_at": None}
+    completed = {
+        "task_id": "task-1",
+        "status": "completed",
+        "exit_code": 0,
+        "finished_at": 10,
+    }
+    with (
+        patch(
+            "agent.tools.background_execute._current_backend", return_value=("thread-2", backend)
+        ),
+        patch(
+            "agent.tools.background_execute._execute",
+            AsyncMock(side_effect=[running, running, completed, running]),
+        ),
+    ):
+        results = [await background_task("status", "task-1") for _ in range(4)]
+
+    assert results[2]["success"] is True
+    assert results[3]["success"] is True
+
+
+@requires_setsid
+def test_background_task_wait_returns_terminal_or_times_out() -> None:
+    terminal_id = f"test-{uuid.uuid4().hex}"
+    running_id = f"test-{uuid.uuid4().hex}"
+    terminal_dir = Path(TASK_ROOT, terminal_id)
+    running_dir = Path(TASK_ROOT, running_id)
+    try:
+        terminal_dir.mkdir(parents=True)
+        terminal_dir.joinpath("output.log").write_text("")
+        terminal_dir.joinpath("state.json").write_text(
+            json.dumps(
+                {
+                    "task_id": terminal_id,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "started_at": time.time(),
+                    "finished_at": time.time(),
+                    "output_path": str(terminal_dir / "output.log"),
+                }
+            )
+        )
+        started = time.monotonic()
+        terminal = _run_control("wait", terminal_id)
+        assert time.monotonic() - started < 1
+        assert terminal["status"] == "completed"
+        assert terminal["timed_out"] is False
+
+        running_dir.mkdir(parents=True)
+        running_dir.joinpath("output.log").write_text("")
+        running_dir.joinpath("state.json").write_text(
+            json.dumps(
+                {
+                    "task_id": running_id,
+                    "status": "running",
+                    "exit_code": None,
+                    "started_at": time.time(),
+                    "finished_at": None,
+                    "output_path": str(running_dir / "output.log"),
+                    "runner_pid": str(os.getpid()),
+                }
+            )
+        )
+        started = time.monotonic()
+        timed_out = json.loads(
+            subprocess.run(
+                ["python3", "-c", _control_script("wait", running_id, wait_timeout=0.2)],
+                capture_output=True,
+                check=True,
+                text=True,
+            ).stdout
+        )
+        assert time.monotonic() - started >= 0.1
+        assert timed_out["status"] == "running"
+        assert timed_out["timed_out"] is True
+    finally:
+        shutil.rmtree(terminal_dir, ignore_errors=True)
+        shutil.rmtree(running_dir, ignore_errors=True)
 
 
 async def test_monitor_enqueues_one_claimed_completion() -> None:
