@@ -16,7 +16,6 @@ from deepagents.backends.sandbox import BaseSandbox
 from agent.utils.sandbox_state import (
     SANDBOX_BACKENDS,
     SandboxBackendProxy,
-    clear_sandbox_backend,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_backend,
     get_sandbox_id_from_metadata,
@@ -121,7 +120,7 @@ async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
 @pytest.mark.asyncio
 async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.MonkeyPatch) -> None:
     thread_id = "thread-1"
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
     created: list[str] = []
 
     async def get_sandbox_id_from_metadata(requested_thread_id: str) -> str:
@@ -153,7 +152,7 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         "sandbox-1: cmd-4: None",
     ]
     assert proxy.current.id == "sandbox-1"
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
 
 
 @pytest.mark.asyncio
@@ -161,7 +160,7 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     thread_id = "thread-1"
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
     reconnected: list[str] = []
 
     async def reconnect():
@@ -188,7 +187,7 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
         "sandbox-1: cmd-3: None",
         "sandbox-1: cmd-4: None",
     ]
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
 
 
 @pytest.mark.asyncio
@@ -311,7 +310,7 @@ async def test_sandbox_proxy_delegates_delete_after_lazy_startup() -> None:
 @pytest.mark.asyncio
 async def test_get_sandbox_backend_awaits_registered_startup() -> None:
     thread_id = "thread-1"
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
     release = asyncio.Event()
 
     async def reconnect():
@@ -329,7 +328,7 @@ async def test_get_sandbox_backend_awaits_registered_startup() -> None:
 
     release.set()
     assert await waiter is proxy
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
 
 
 @pytest.mark.asyncio
