@@ -1713,11 +1713,11 @@ def test_slack_trigger_resolves_from_the_triggering_user_not_the_event_ts() -> N
     assert "<github_login>alice-gh</github_login>" in trigger
 
 
-def test_slack_trigger_is_never_attributed_to_open_swe() -> None:
-    """The approve-button path passes the ts of Open SWE's own button message.
+def test_slack_trigger_falls_back_past_open_swes_own_message() -> None:
+    """`event_ts` can name Open SWE's own message, as the approve-button path does.
 
-    Matching that ts against thread history attributes the run to the bot as a
-    person, so the prompt claims a human asked for the retry.
+    Covers the fallback with no explicit trigger user, so the self/bot checks
+    decide: without them the bot is attributed as a `kind="human"` person.
     """
     contents = _trigger_identities(
         [
@@ -1725,13 +1725,12 @@ def test_slack_trigger_is_never_attributed_to_open_swe() -> None:
             {"ts": "9.0", "text": "Approve workflow push", "user": "UBOT", "bot_id": "B1"},
         ],
         event_ts="9.0",
-        trigger_user_id="U123",
+        trigger_user_id="",
         user_names_by_id={"U123": "Alice", "UBOT": "Open SWE"},
     )
 
     assert not any('id="slack:UBOT"' in text for text in contents)
     assert not any('sender="slack:UBOT"' in text for text in contents)
-    assert any('id="slack:U123"' in text for text in contents)
 
 
 def test_process_slack_mention_queues_a_message_edit_instead_of_running(
