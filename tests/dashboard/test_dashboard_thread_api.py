@@ -1202,7 +1202,7 @@ async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> 
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch) -> None:
@@ -1459,7 +1459,7 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
@@ -1469,6 +1469,19 @@ def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
         {"source": "dashboard", "admin_thread": True},
         "workspace-admin",
     )
+
+
+def test_assert_thread_postable_restricts_workspace_automation(monkeypatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+
+    with pytest.raises(HTTPException) as exc_info:
+        thread_api._assert_thread_postable(
+            {"source": "schedule", "thread_category": "automation"},
+            "teammate",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
