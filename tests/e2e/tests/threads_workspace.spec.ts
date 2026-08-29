@@ -522,7 +522,7 @@ test.describe("threads workspace", () => {
 
     await page.goto("/agents");
     await expect(
-      page.getByText("Ask Open SWE to build, fix bugs, explore"),
+      page.getByRole("heading", { name: "What should we build?" }),
     ).toBeVisible();
     await profileStarted.promise;
 
@@ -795,6 +795,9 @@ test.describe("threads workspace", () => {
 
     const main = page.getByRole("main").last();
     await main.getByRole("button", { name: "List" }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("layout"))
+      .toBe("list");
     await main.getByLabel("Group by").selectOption("source");
     await expect
       .poll(() => {
