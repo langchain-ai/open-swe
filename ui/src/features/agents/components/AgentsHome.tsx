@@ -48,6 +48,10 @@ import {
 
 const LAST_LOCAL_PROJECT_KEY = "open-swe.desktop.last-project"
 const NEW_AGENT_PANEL_ID = "new-agent"
+const NEW_AGENT_PANEL_REF = {
+  scope: "cloud" as const,
+  threadId: NEW_AGENT_PANEL_ID,
+}
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -94,15 +98,10 @@ export function AgentsHome() {
     (environments.some((env) => env.slug === defaultEnvironmentSlug)
       ? defaultEnvironmentSlug
       : null)
-  const [submitting, setSubmitting] = useState(false)
   const [submittedDraft, setSubmittedDraft] =
     useState<CreateAgentThreadVariables | null>(null)
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(NEW_AGENT_PANEL_ID)
-  )
-  const newAgentPanelRef = useMemo(
-    () => ({ scope: "cloud" as const, threadId: NEW_AGENT_PANEL_ID }),
-    []
   )
   const newAgentTerminals = useTerminalGroups(
     { kind: "cloud", threadId: NEW_AGENT_PANEL_ID },
@@ -200,11 +199,6 @@ export function AgentsHome() {
     setLocalError(null)
   }
 
-  const handlePanelCollapsedChange = (next: boolean) => {
-    setPanelCollapsed(next)
-    writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
-  }
-
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
@@ -242,7 +236,6 @@ export function AgentsHome() {
   const resetPendingSubmit = () => {
     draftRef.current = null
     setSubmittedDraft(null)
-    setSubmitting(false)
   }
 
   const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
@@ -263,7 +256,6 @@ export function AgentsHome() {
         effort: activeSelection?.effort ?? null,
       }
       setSubmittedDraft(draft)
-      setSubmitting(true)
       setLocalError(null)
       window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
       void (async () => {
@@ -330,7 +322,6 @@ export function AgentsHome() {
     }
     draftRef.current = draft
     setSubmittedDraft(draft)
-    setSubmitting(true)
 
     const configurable: Record<string, unknown> = {}
     if (activeSelection?.modelId && activeSelection.effort) {
@@ -391,139 +382,131 @@ export function AgentsHome() {
           />
         ) : (
           <div className="flex min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 items-center justify-center">
-              <div className="flex flex-col items-center gap-6">
-                <img
-                  src="/logo-mark.png"
-                  alt=""
-                  className="size-14 opacity-30 grayscale dark:opacity-20"
-                />
-                <div
-                  role="heading"
-                  aria-level={1}
-                  className="flex flex-wrap items-baseline justify-center gap-x-1 text-center text-2xl tracking-tight sm:text-3xl"
-                >
-                  {hasProjects ? (
-                    <>
-                      <span>What should we build in</span>
-                      {runTarget === "local" ? (
-                        <LocalProjectSelector
-                          onAddProject={() => void handleAddLocalProject()}
-                          onRemoveProject={(cwd) =>
-                            void handleRemoveLocalProject(cwd)
-                          }
-                          onSelectProject={handleSelectLocalProject}
-                          placeholder="a project"
-                          projects={localProjects}
-                          selectedProjectPath={localProjectPath}
-                          triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                        />
-                      ) : (
-                        <RepoSelector
-                          className="inline-flex"
-                          emptySelectionLabel="Don't work in a project"
-                          noMatchesLabel="No matching projects"
-                          onRepoChange={setRepoOverride}
-                          placeholder="a project"
-                          repos={reposQuery.data?.repositories}
-                          searchPlaceholder="Search projects…"
-                          selectedLabel={repo?.split("/").at(-1)}
-                          selectedRepo={repo}
-                          triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                        />
-                      )}
-                      <span>?</span>
-                    </>
-                  ) : (
-                    <span>What should we build?</span>
-                  )}
-                </div>
-              </div>
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-6">
+              <img
+                src="/logo-mark.png"
+                alt=""
+                className="size-14 opacity-30 grayscale dark:opacity-20"
+              />
+              <h1 className="flex flex-wrap items-baseline justify-center gap-x-1 text-center text-2xl tracking-tight sm:text-3xl">
+                {hasProjects ? (
+                  <>
+                    <span>What should we build in</span>
+                    {runTarget === "local" ? (
+                      <LocalProjectSelector
+                        onAddProject={() => void handleAddLocalProject()}
+                        onRemoveProject={(cwd) =>
+                          void handleRemoveLocalProject(cwd)
+                        }
+                        onSelectProject={handleSelectLocalProject}
+                        placeholder="a project"
+                        projects={localProjects}
+                        selectedProjectPath={localProjectPath}
+                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
+                      />
+                    ) : (
+                      <RepoSelector
+                        className="inline-flex"
+                        emptySelectionLabel="Don't work in a project"
+                        noMatchesLabel="No matching projects"
+                        onRepoChange={setRepoOverride}
+                        placeholder="a project"
+                        repos={reposQuery.data?.repositories}
+                        searchPlaceholder="Search projects…"
+                        selectedLabel={repo?.split("/").at(-1)}
+                        selectedRepo={repo}
+                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
+                      />
+                    )}
+                    <span>?</span>
+                  </>
+                ) : (
+                  <span>What should we build?</span>
+                )}
+              </h1>
             </div>
           </div>
         )}
         <AgentComposerDock>
-          <div className="flex flex-col gap-3">
-            {localError && (
-              <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                {localError}
-              </div>
-            )}
-            <AgentPromptBar
-              activeRun={
-                optimisticDraftThread && runTarget === "cloud"
-                  ? { threadId: stream.threadId ?? "", running: true }
-                  : undefined
-              }
-              autoFocus
-              compact
-              placeholder="Do anything"
-              onSubmit={handleSubmit}
-              onStop={
-                optimisticDraftThread && runTarget === "cloud"
-                  ? () => stream.stop().then(resetPendingSubmit)
-                  : undefined
-              }
-              showSubmitSpinner={false}
-              disabled={submitting}
-              busy={Boolean(optimisticDraftThread)}
-              models={models}
-              selection={activeSelection}
-              onSelectionChange={handleSelectionChange}
-              repos={reposQuery.data?.repositories}
-              selectedRepo={repo}
-              onRepoChange={optimisticDraftThread ? undefined : setRepoOverride}
-              runTarget={isDesktop ? runTarget : undefined}
-              onRunTargetChange={
-                !optimisticDraftThread && isDesktop && cloudEnabled
-                  ? handleRunTargetChange
-                  : undefined
-              }
-              localProjects={localProjects}
-              selectedLocalProjectPath={localProjectPath}
-              selectedLocalProjectBranch={localProjectBranch}
-              localProjectBranches={localProjectBranches}
-              onSelectLocalProject={handleSelectLocalProject}
-              onAddLocalProject={() => void handleAddLocalProject()}
-              onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
-              onRefreshLocalProjectBranch={() =>
-                void refreshLocalProjectBranch()
-              }
-              onSelectLocalProjectBranch={(branch) =>
-                void checkoutLocalProjectBranch(branch)
-              }
-              onCreateLocalProjectBranch={(branch) =>
-                void checkoutLocalProjectBranch(branch, true)
-              }
-              planMode={planMode}
-              onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
-              environments={environments}
-              selectedEnvironment={selectedEnvironment}
-              onEnvironmentChange={
-                !optimisticDraftThread && runTarget === "cloud"
-                  ? setEnvironmentOverride
-                  : undefined
-              }
-              adminThread={adminThread}
-              onAdminThreadChange={
-                runTarget === "cloud" && session.data?.is_admin
-                  ? setAdminThread
-                  : undefined
-              }
-              skills={skills.data}
-            />
-          </div>
+          {localError && (
+            <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {localError}
+            </div>
+          )}
+          <AgentPromptBar
+            activeRun={
+              optimisticDraftThread && runTarget === "cloud"
+                ? { threadId: stream.threadId ?? "", running: true }
+                : undefined
+            }
+            autoFocus
+            compact
+            placeholder="Do anything"
+            onSubmit={handleSubmit}
+            onStop={
+              optimisticDraftThread && runTarget === "cloud"
+                ? () => stream.stop().then(resetPendingSubmit)
+                : undefined
+            }
+            disabled={Boolean(submittedDraft)}
+            busy={Boolean(optimisticDraftThread)}
+            models={models}
+            selection={activeSelection}
+            onSelectionChange={handleSelectionChange}
+            repos={reposQuery.data?.repositories}
+            selectedRepo={repo}
+            onRepoChange={optimisticDraftThread ? undefined : setRepoOverride}
+            runTarget={isDesktop ? runTarget : undefined}
+            onRunTargetChange={
+              !optimisticDraftThread && isDesktop && cloudEnabled
+                ? handleRunTargetChange
+                : undefined
+            }
+            localProjects={localProjects}
+            selectedLocalProjectPath={localProjectPath}
+            selectedLocalProjectBranch={localProjectBranch}
+            localProjectBranches={localProjectBranches}
+            onSelectLocalProject={handleSelectLocalProject}
+            onAddLocalProject={() => void handleAddLocalProject()}
+            onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
+            onRefreshLocalProjectBranch={() => void refreshLocalProjectBranch()}
+            onSelectLocalProjectBranch={(branch) =>
+              void checkoutLocalProjectBranch(branch)
+            }
+            onCreateLocalProjectBranch={(branch) =>
+              void checkoutLocalProjectBranch(branch, true)
+            }
+            planMode={planMode}
+            onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
+            environments={environments}
+            selectedEnvironment={selectedEnvironment}
+            onEnvironmentChange={
+              !optimisticDraftThread && runTarget === "cloud"
+                ? setEnvironmentOverride
+                : undefined
+            }
+            adminThread={adminThread}
+            onAdminThreadChange={
+              runTarget === "cloud" && session.data?.is_admin
+                ? setAdminThread
+                : undefined
+            }
+            skills={skills.data}
+          />
         </AgentComposerDock>
       </div>
       <AgentRightPanel
-        threadRef={newAgentPanelRef}
+        threadRef={NEW_AGENT_PANEL_REF}
         terminals={newAgentTerminals}
         terminalTarget={{ kind: "cloud", threadId: NEW_AGENT_PANEL_ID }}
         cwd=""
         terminalAvailable={false}
         diffAvailable={false}
         collapsed={panelCollapsed}
-        onCollapsedChange={handlePanelCollapsedChange}
+        onCollapsedChange={(next) => {
+          setPanelCollapsed(next)
+          writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
+        }}
         renderDiff={() => null}
       />
     </>

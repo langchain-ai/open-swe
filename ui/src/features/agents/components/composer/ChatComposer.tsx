@@ -90,7 +90,6 @@ export interface ChatComposerProps {
   placeholder?: string
   autoFocus?: boolean
   compact?: boolean
-  showSubmitSpinner?: boolean
   disabled?: boolean
   busy?: boolean
   /** Enables the stop button for the thread's live run. */
@@ -217,7 +216,6 @@ export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
   compact = false,
-  showSubmitSpinner = true,
   disabled = false,
   busy = false,
   activeRun,
@@ -955,7 +953,7 @@ export const ChatComposer = memo(function ChatComposer({
             onSubmit={() => void handleSubmit()}
             onStop={onStop}
             stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
-            submitting={showSubmitSpinner && isSubmitting}
+            submitting={isSubmitting}
           />
         </div>
       </div>

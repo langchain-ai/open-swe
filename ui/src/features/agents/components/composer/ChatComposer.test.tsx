@@ -143,14 +143,8 @@ describe("ChatComposer stop button", () => {
   })
 
   it("shows stop immediately while a run submission is dispatching", () => {
-    const client = new QueryClient({
-      defaultOptions: {
-        mutations: { retry: false },
-        queries: { retry: false },
-      },
-    })
     render(
-      <QueryClientProvider client={client}>
+      <QueryClientProvider client={new QueryClient()}>
         <AgentThreadStreamBoundary>
           <ComposerPrimaryActions
             canSubmit={false}
@@ -162,7 +156,6 @@ describe("ChatComposer stop button", () => {
     )
 
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull()
   })
 
   it("stops a direct run on Escape while steer is shown", () => {

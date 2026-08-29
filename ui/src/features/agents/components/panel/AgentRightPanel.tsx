@@ -76,29 +76,6 @@ function PanelControl(props: {
   )
 }
 
-export function AgentRightPanelTrigger({
-  onClick,
-  disabled = false,
-  label = "Show panel",
-}: {
-  onClick?: () => void
-  disabled?: boolean
-  label?: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none"
-    >
-      <SidebarSimpleIcon className="size-4" />
-    </button>
-  )
-}
-
 /**
  * The right-hand column shared by cloud threads and local desktop sessions.
  * Surfaces (changes, terminals) live in the right-panel store so
@@ -247,7 +224,17 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
   )
 
   if (collapsed) {
-    return <AgentRightPanelTrigger onClick={() => onCollapsedChange(false)} />
+    return (
+      <button
+        type="button"
+        onClick={() => onCollapsedChange(false)}
+        aria-label="Show panel"
+        title="Show panel"
+        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <SidebarSimpleIcon className="size-4" />
+      </button>
+    )
   }
 
   const layoutControls = (
