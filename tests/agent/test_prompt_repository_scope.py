@@ -21,6 +21,7 @@ def test_prompt_omits_repository_scope_without_allowed_orgs(
     prompt = construct_system_prompt(working_dir="/workspace")
 
     assert "### Repository Modification Scope" not in prompt
+    assert "full GitHub repository URL requirement" not in prompt
 
 
 @pytest.mark.parametrize("source", ["github", "linear"])
@@ -33,3 +34,4 @@ def test_prompt_omits_repository_scope_for_filtered_webhook_sources(
     prompt = construct_system_prompt(working_dir="/workspace", source=source)
 
     assert "### Repository Modification Scope" not in prompt
+    assert "full GitHub repository URL requirement" not in prompt

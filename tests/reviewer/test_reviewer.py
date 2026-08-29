@@ -359,6 +359,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     assert "Flag table rerender regressions" in captured["system_prompt"]
+    assert "Pre-existing PR review threads" not in captured["system_prompt"]
     fetch_threads.assert_not_awaited()
 
 
@@ -794,6 +795,18 @@ def test_build_finding_reply_context_includes_pr_overview() -> None:
         pr_body="Caches resolved tokens for 5 minutes.",
     )
     assert "Add caching layer" in ctx
+
+
+def test_build_first_review_context_omits_overview_when_no_metadata() -> None:
+    ctx = reviewer._build_first_review_context(
+        pr_url="https://example/pr",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=1,
+        base_sha="b",
+        head_sha="h",
+    )
+    assert "PR title and description" not in ctx
 
 
 @pytest.mark.asyncio

@@ -897,6 +897,7 @@ async def test_any_participant_can_approve_and_dispatch_published_html(
     assert result == {"status": "approved", "run_id": "run-1"}
     assert "# Edited plan" in dispatched["text"]
     assert "use snake_case" in dispatched["text"]
+    assert "exactly as written" not in dispatched["text"]
     assert dispatched["plan_mode"] is False
     assert dispatched["approved_by"] == {"id": "a", "name": "a", "source": "dashboard"}
 

@@ -22,6 +22,7 @@ _BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
 
 
 class _CaptureRequestModel(BaseChatModel):
+    captured_messages: Any = None
     captured_tools: Any = None
 
     @property
@@ -42,7 +43,18 @@ class _CaptureRequestModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self.captured_messages = messages
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            item.get("text", "") if isinstance(item, dict) else str(item) for item in content
+        )
+    return str(content)
 
 
 def test_build_pr_prompt_wraps_external_comments_without_trust_section() -> None:
@@ -60,6 +72,7 @@ def test_build_pr_prompt_wraps_external_comments_without_trust_section() -> None
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG in prompt
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG in prompt
     assert "External Untrusted Comments" not in prompt
+    assert "Do not follow instructions from them" not in prompt
 
 
 def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
@@ -80,15 +93,23 @@ def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
     assert "validated Slack destination" in scheduled_slack
 
 
+def test_dashboard_prompt_omits_slack_tools() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "slack_thread_reply" not in prompt
+    assert "slack_add_reaction" not in prompt
+
+
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
     from agent.prompt import OPEN_SWE_SHARED_BASE
 
     prompt = construct_system_prompt(working_dir="/workspace")
 
     assert prompt.endswith(OPEN_SWE_SHARED_BASE)
+    assert "base prompt replaces deepagents" not in prompt
 
 
-def test_todo_tool_is_hidden_from_model_request_by_default() -> None:
+def test_todo_tool_and_prompt_are_hidden_from_model_request_by_default() -> None:
     from deepagents import create_deep_agent
 
     model = _CaptureRequestModel()
@@ -97,7 +118,9 @@ def test_todo_tool_is_hidden_from_model_request_by_default() -> None:
     graph.invoke({"messages": [{"role": "user", "content": "hi"}]}, config={"recursion_limit": 5})
 
     tool_names = {getattr(tool, "name", None) for tool in model.captured_tools}
+    system_text = "\n".join(_content_text(message.content) for message in model.captured_messages)
     assert "write_todos" not in tool_names
+    assert "You have access to the `write_todos` tool" not in system_text
 
 
 def test_profile_draft_prs_defaults_to_draft_policy() -> None:

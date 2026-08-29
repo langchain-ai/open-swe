@@ -15,6 +15,25 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
 
 
+@pytest.mark.parametrize(
+    "source", ["dashboard", "slack", "linear", "github", "schedule", "desktop", "generic"]
+)
+def test_plan_mode_omits_superseded_inference_guidance(source: str) -> None:
+    prompt = construct_system_prompt(
+        working_dir="/work", source=source, slack_context=source == "slack"
+    )
+
+    assert "If a task would genuinely benefit from a structured plan" not in prompt
+
+
+def test_plan_mode_prompt_omits_superseded_slack_approval_guidance() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/work", plan_mode=True, source="slack", slack_context=True
+    )
+
+    assert "do not send approval buttons" not in prompt
+
+
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     excluded = server.PLAN_MODE_EXCLUDED_TOOLS
     for tool in (
@@ -276,6 +295,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert messages[0].tool_call_id == "call-1"
     assert "<title>Plan</title>" in messages[0].content
     assert "add tests" in messages[0].content
+    assert "source of truth" not in messages[0].content
 
 
 async def test_approve_plan_tool_ignores_stale_state_approver(
