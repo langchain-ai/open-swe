@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
-import { CircleAlert, FolderOpen, X } from "lucide-react"
+import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type {
@@ -11,8 +11,9 @@ import type {
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
+import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
@@ -44,7 +45,6 @@ import {
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { cn } from "@/lib/utils"
 import { useSession } from "@/lib/session"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
@@ -110,7 +110,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
-  const sidebarCollapsed = useSidebarCollapsed()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
@@ -342,28 +341,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <header
-          data-desktop-drag-region=""
-          className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
-        >
-          <div
-            className={cn(
-              "flex h-full w-full items-center gap-3 px-4",
-              sidebarCollapsed && "pl-32",
-              panelCollapsed && "pr-14"
-            )}
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-              <FolderOpen className="size-3.5 shrink-0" />
-              <span className="truncate" title={thread.cwd}>
-                {thread.cwd}
-              </span>
-            </span>
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              This Mac
-            </span>
-          </div>
-        </header>
+        <AgentThreadHeader
+          project={thread.cwd}
+          target="This Mac"
+          panelCollapsed={panelCollapsed}
+        />
         {(error || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
@@ -383,65 +365,61 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             onOpenFile={handleOpenFile}
             streamIsLoading={stream.isLoading}
           />
-          <div className="shrink-0 px-4 pb-4">
-            <div className="mx-auto w-full max-w-3xl min-w-0">
-              {terminalContexts.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {terminalContexts.map((text, index) => (
-                    <span
-                      key={`${text.slice(0, 24)}:${index}`}
-                      className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
-                      title={text}
-                    >
-                      <span className="max-w-64 truncate">
-                        Terminal selection
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Remove terminal selection"
-                        onClick={() =>
-                          setTerminalContexts((current) =>
-                            current.filter(
-                              (_, itemIndex) => itemIndex !== index
-                            )
-                          )
-                        }
-                      >
-                        <X className="size-3" />
-                      </button>
+          <AgentComposerDock>
+            {terminalContexts.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {terminalContexts.map((text, index) => (
+                  <span
+                    key={`${text.slice(0, 24)}:${index}`}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
+                    title={text}
+                  >
+                    <span className="max-w-64 truncate">
+                      Terminal selection
                     </span>
-                  ))}
-                </div>
-              )}
-              <AgentPromptBar
-                activeRun={{ threadId: thread.id, running: isRunning }}
-                busy={isRunning}
-                compact
-                models={models}
-                selection={activeSelection}
-                onSelectionChange={setSelection}
-                onStop={async () => {
-                  try {
-                    await stream.stop()
-                  } catch (cause) {
-                    setError(errorMessage(cause))
-                  }
-                }}
-                onSubmit={async (prompt, images) => {
-                  const terminalContext = terminalContexts.join("\n\n")
-                  setTerminalContexts([])
-                  await submit(
-                    terminalContext
-                      ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
-                      : prompt,
-                    images
-                  )
-                }}
-                placeholder="Add a follow up"
-                skills={skills.data}
-              />
-            </div>
-          </div>
+                    <button
+                      type="button"
+                      aria-label="Remove terminal selection"
+                      onClick={() =>
+                        setTerminalContexts((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index)
+                        )
+                      }
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <AgentPromptBar
+              activeRun={{ threadId: thread.id, running: isRunning }}
+              busy={isRunning}
+              compact
+              models={models}
+              selection={activeSelection}
+              onSelectionChange={setSelection}
+              onStop={async () => {
+                try {
+                  await stream.stop()
+                } catch (cause) {
+                  setError(errorMessage(cause))
+                }
+              }}
+              onSubmit={async (prompt, images) => {
+                const terminalContext = terminalContexts.join("\n\n")
+                setTerminalContexts([])
+                await submit(
+                  terminalContext
+                    ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
+                    : prompt,
+                  images
+                )
+              }}
+              placeholder="Add a follow up"
+              skills={skills.data}
+            />
+          </AgentComposerDock>
         </div>
       </div>
       <AgentRightPanel

@@ -170,7 +170,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
     await localSource.click();
     await expect(localSource).toHaveAttribute("aria-pressed", "true");
     await expect(
-      page.getByRole("button", { name: "demo", exact: true }),
+      page.getByRole("button", { name: "demo", exact: true }).first(),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "main", exact: true }),

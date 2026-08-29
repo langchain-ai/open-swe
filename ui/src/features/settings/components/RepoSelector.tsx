@@ -13,6 +13,7 @@ type RepoOption = { full_name: string }
 interface RepoSelectorProps {
   repos?: Array<RepoOption>
   selectedRepo?: string | null
+  selectedLabel?: string
   onRepoChange: (repo: string | null) => void
   placeholder?: string
   emptySelectionLabel?: string
@@ -27,6 +28,7 @@ interface RepoSelectorProps {
 export function RepoSelector({
   repos,
   selectedRepo = null,
+  selectedLabel,
   onRepoChange,
   placeholder = "Select repository",
   emptySelectionLabel = "No repository",
@@ -73,7 +75,7 @@ export function RepoSelector({
       >
         <FolderIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
-          {selectedRepo || placeholder}
+          {selectedRepo ? (selectedLabel ?? selectedRepo) : placeholder}
         </span>
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>
