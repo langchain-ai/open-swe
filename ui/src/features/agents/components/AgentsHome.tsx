@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
@@ -352,10 +352,9 @@ export function AgentsHome() {
     runTarget === "local"
       ? localProjects.length > 0
       : Boolean(repo || reposQuery.data?.repositories.length)
-  const optimisticDraftThread = useMemo(
-    () => (submittedDraft ? optimisticThread("pending", submittedDraft) : null),
-    [submittedDraft]
-  )
+  const optimisticDraftThread = submittedDraft
+    ? optimisticThread("pending", submittedDraft)
+    : null
 
   return (
     <>
@@ -376,8 +375,6 @@ export function AgentsHome() {
           <Messages
             messages={optimisticDraftThread.messages}
             isStreaming
-            streamIsLoading={stream.isLoading}
-            isThinking
             contentWidthClass="max-w-3xl"
           />
         ) : (

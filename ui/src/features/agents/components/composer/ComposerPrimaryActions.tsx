@@ -157,10 +157,6 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
     if (stopping) return
     setStopping(true)
     try {
-      if (!threadId && props.onStop) {
-        await props.onStop()
-        return
-      }
       // `stream.stop()` only cancels server-side when this client dispatched the
       // run, so cancel by thread first: a run started from Slack/Linear/GitHub
       // (or joined after a reload) has no client-side run id to cancel.
