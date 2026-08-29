@@ -1,3 +1,3 @@
 # Files
 
-- [Testing Guide](overview.md) - How Open SWE's test suites are laid out, the pytest and Playwright conventions that govern them, and the commands to run the narrowest validation that proves a change.
+- [Testing Guide](overview.md) - A map of Open SWE's Python, dashboard, desktop, and browser end-to-end test layers, including shared test isolation and the focused validation commands for each boundary.

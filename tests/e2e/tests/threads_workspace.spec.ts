@@ -10,6 +10,7 @@ const USER = {
   login: "threads-workspace-e2e",
   email: "threads-workspace-e2e@example.com",
 };
+const ADMIN_USER = { login: "alice", email: "alice@example.com" };
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
 const WORKSPACE_QUERY = "E2E Workspace";
@@ -958,7 +959,10 @@ test.describe("automation run history", () => {
     await deleteScheduleThreads(request, SCHEDULE_IDS.weekly);
     await seedThreads(request, [...workspaceThreads(), ...automationThreads()]);
     await seedSchedules(request);
-    await loginAs(page);
+    const loginResponse = await page.request.post("/control/login", {
+      data: ADMIN_USER,
+    });
+    expect(loginResponse.ok()).toBeTruthy();
 
     const triggerResponse = await page.request.post(
       `/dashboard/api/schedules/${SCHEDULE_IDS.daily}/trigger`,

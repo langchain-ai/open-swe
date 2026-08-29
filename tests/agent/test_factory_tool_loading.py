@@ -13,7 +13,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
-from agent.utils.sandbox_state import clear_sandbox_backend
+from agent.utils.sandbox_state import SANDBOX_BACKENDS
 
 _START_TIMEOUT_SECONDS = 2.0
 
@@ -48,7 +48,7 @@ async def test_tool_loaders_run_concurrently() -> None:
         return loader
 
     thread_id = "thread-parallel-tools"
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
     with (
         patch(
             "agent.server.resolve_github_token",
@@ -82,4 +82,4 @@ async def test_tool_loaders_run_concurrently() -> None:
     ):
         await get_agent(_config())
 
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)

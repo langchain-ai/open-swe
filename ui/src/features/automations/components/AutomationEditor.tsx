@@ -62,6 +62,7 @@ export function AutomationEditor({
 }: AutomationEditorProps) {
   const navigate = useNavigate()
   const session = useSession()
+  const canManage = session.data?.is_admin === true
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
 
@@ -96,16 +97,17 @@ export function AutomationEditor({
   const activeSelection =
     selectionOverride !== undefined ? selectionOverride : initialSelection
   const isDirty =
-    name !== (schedule?.name ?? template?.name ?? "") ||
-    prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
-    cron !== initialCron ||
-    repo !== (schedule?.repo ?? null) ||
-    slackChannelId !== (schedule?.slackChannelId ?? "") ||
-    slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
-    enabled !== (schedule?.enabled ?? true) ||
-    adminThread !== (schedule?.adminThread ?? false) ||
-    activeSelection?.modelId !== initialSelection?.modelId ||
-    activeSelection?.effort !== initialSelection?.effort
+    canManage &&
+    (name !== (schedule?.name ?? template?.name ?? "") ||
+      prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
+      cron !== initialCron ||
+      repo !== (schedule?.repo ?? null) ||
+      slackChannelId !== (schedule?.slackChannelId ?? "") ||
+      slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
+      enabled !== (schedule?.enabled ?? true) ||
+      adminThread !== (schedule?.adminThread ?? false) ||
+      activeSelection?.modelId !== initialSelection?.modelId ||
+      activeSelection?.effort !== initialSelection?.effort)
   const allowNavigation = useUnsavedChangesWarning(isDirty)
 
   const error =
@@ -205,40 +207,53 @@ export function AutomationEditor({
             {name.trim() || "New automation"}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {mode === "edit" && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleDelete}
-              disabled={deleteSchedule.isPending}
-              aria-label="Delete automation"
-              className="text-muted-foreground/70 hover:text-destructive"
-            >
-              <TrashIcon className="size-4" />
+        {canManage && (
+          <div className="flex shrink-0 items-center gap-2">
+            {mode === "edit" && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleDelete}
+                disabled={deleteSchedule.isPending}
+                aria-label="Delete automation"
+                className="text-muted-foreground/70 hover:text-destructive"
+              >
+                <TrashIcon className="size-4" />
+              </Button>
+            )}
+            <Button onClick={handleSave} disabled={!canSave || isSaving}>
+              {isSaving
+                ? "Saving…"
+                : mode === "create"
+                  ? "Create"
+                  : "Save changes"}
             </Button>
-          )}
-          <Button onClick={handleSave} disabled={!canSave || isSaving}>
-            {isSaving
-              ? "Saving…"
-              : mode === "create"
-                ? "Create"
-                : "Save changes"}
-          </Button>
-        </div>
+          </div>
+        )}
       </header>
 
       <div className="mx-auto w-full max-w-3xl px-6 pt-2 pb-16">
+        {!canManage && (
+          <p className="mb-4 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+            This workspace automation is read-only. Ask a workspace admin to
+            change it.
+          </p>
+        )}
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
+          disabled={!canManage}
           placeholder="Untitled automation"
           className="w-full bg-transparent text-base font-medium text-foreground outline-none placeholder:text-muted-foreground/70"
         />
 
         <div className="mt-3 flex items-center gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
+            <Switch
+              checked={enabled}
+              onCheckedChange={setEnabled}
+              disabled={!canManage}
+            />
             <span className="text-muted-foreground">
               {enabled ? "Active" : "Paused"}
             </span>
@@ -250,6 +265,7 @@ export function AutomationEditor({
             onRepoChange={setRepo}
             placeholder="No repository"
             triggerClassName="text-muted-foreground"
+            disabled={!canManage}
           />
         </div>
 
@@ -262,6 +278,7 @@ export function AutomationEditor({
                 <input
                   value={cron}
                   onChange={(e) => setCron(e.target.value)}
+                  disabled={!canManage}
                   placeholder="0 9 * * 1-5"
                   className="flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
                 />
@@ -277,6 +294,7 @@ export function AutomationEditor({
                   setCustomMode(false)
                 }}
                 aria-label="Remove trigger"
+                disabled={!canManage}
                 className="shrink-0 rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
               >
                 <TrashIcon className="size-3.5" />
@@ -284,10 +302,12 @@ export function AutomationEditor({
             </div>
           )}
           {cron && <div className="mx-3 h-px bg-border/60" />}
-          <ScheduleTriggerPicker
-            onSelect={onPickTrigger}
-            triggerLabel={cron ? "Change trigger" : "Add Trigger"}
-          />
+          {canManage && (
+            <ScheduleTriggerPicker
+              onSelect={onPickTrigger}
+              triggerLabel={cron ? "Change trigger" : "Add Trigger"}
+            />
+          )}
         </div>
 
         <SectionLabel>Slack destination</SectionLabel>
@@ -295,6 +315,7 @@ export function AutomationEditor({
           <input
             value={slackChannelId}
             onChange={(e) => setSlackChannelId(e.target.value)}
+            disabled={!canManage}
             placeholder="C0123456789"
             spellCheck={false}
             className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
@@ -308,7 +329,7 @@ export function AutomationEditor({
               onValueChange={(value) =>
                 value && setSlackNotificationMode(value)
               }
-              disabled={!slackChannelId.trim()}
+              disabled={!canManage || !slackChannelId.trim()}
             >
               <SelectTrigger className="w-48">
                 <SelectValue />
@@ -334,6 +355,7 @@ export function AutomationEditor({
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            disabled={!canManage}
             placeholder="What should Open SWE do each time this runs?"
             rows={5}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70"
@@ -343,6 +365,7 @@ export function AutomationEditor({
               models={models}
               selection={activeSelection}
               onSelectionChange={setSelectionOverride}
+              disabled={!canManage}
             />
           </div>
           {session.data?.is_admin === true && (
@@ -351,6 +374,7 @@ export function AutomationEditor({
                 type="checkbox"
                 checked={adminThread}
                 onChange={(event) => setAdminThread(event.target.checked)}
+                disabled={!canManage}
                 className="mt-0.5 size-4 accent-destructive"
               />
               <span>
