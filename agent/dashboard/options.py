@@ -92,7 +92,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "label": "GLM-5.3 Flash",
         "efforts": ["low", "high", "max"],
         "default_effort": "high",
-        "supports_images": False,
+        "supports_images": True,
     },
 ]
 

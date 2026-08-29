@@ -34,10 +34,8 @@ def _image() -> thread_api.DashboardImageBody:
     )
 
 
-def test_model_supports_images_marks_text_only_models() -> None:
+def test_model_supports_images_marks_text_only_fireworks_models() -> None:
     assert not model_supports_images(_TEXT_ONLY_MODEL)
-    assert not model_supports_images("fireworks:accounts/fireworks/models/glm-5p3")
-    assert not model_supports_images("baseten:zai-org/GLM-5.3-Flash")
     assert model_supports_images(_VISION_MODEL)
 
 
