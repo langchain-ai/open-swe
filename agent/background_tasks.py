@@ -6,6 +6,7 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.input_messages import build_system_run_input
 from agent.source_context import SourceContext
 
 from .dispatch import dispatch_agent_run
@@ -147,9 +148,13 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             configurable = _dispatch_config(metadata, thread_id)
             await dispatch_agent_run(
                 thread_id,
-                message,
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                input=build_system_run_input(
+                    message,
+                    sender_id="system:background-task-monitor",
+                    display_name="Background task monitor",
+                ),
                 metadata={},
                 multitask_strategy="enqueue",
             )

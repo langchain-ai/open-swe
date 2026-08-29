@@ -340,7 +340,6 @@ async def trigger_pr_review_from_ref(
     )
     run = await common.dispatch_agent_run(
         thread_id,
-        None,
         configurable,
         source=source,
         input=review_input,
@@ -465,7 +464,6 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     )
     run = await common.dispatch_agent_run(
         thread_id,
-        None,
         configurable,
         source=source,
         input=run_input,
@@ -772,7 +770,6 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     common.logger.info("Dispatching push re-review run for thread %s", thread_id)
     run = await common.dispatch_agent_run(
         thread_id,
-        None,
         configurable,
         source="github_push",
         input=_github_webhook_run_input(
@@ -1054,7 +1051,6 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     run = await common.dispatch_agent_run(
         thread_id,
-        None,
         configurable,
         source="github_review_reply",
         input=_github_human_run_input(
@@ -1249,7 +1245,6 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         )
     await common.dispatch_agent_run(
         thread_id,
-        None,
         configurable,
         source="github_issue",
         input=run_input,

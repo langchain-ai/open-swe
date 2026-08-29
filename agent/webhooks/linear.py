@@ -323,7 +323,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     run_input: RunInput = {"messages": run_messages}
     run = await common.dispatch_agent_run(
         thread_id,
-        None,
         configurable,
         source="linear",
         input=run_input,

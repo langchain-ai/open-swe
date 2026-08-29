@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import HTTPException
 from langgraph.config import get_config
 
+from agent.input_messages import build_system_run_input
 from agent.source_context import SourceContext
 
 from ..dashboard.repo_access import require_repo_access_for_user
@@ -328,9 +329,15 @@ async def slack_start_new_thread(
 
     run = await dispatch_agent_run(
         thread_id,
-        await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
         new_configurable,
         source="slack",
+        input=build_system_run_input(
+            await _run_prompt(
+                clean_title, clean_instructions, repo, current_slack_thread, thread_id
+            ),
+            sender_id="system:slack-breakout",
+            display_name="Slack breakout",
+        ),
         client=client,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None

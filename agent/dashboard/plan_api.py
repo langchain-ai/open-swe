@@ -9,6 +9,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel, Field, model_validator
 
+from agent.input_messages import build_system_run_input
 from agent.source_context import SourceContext
 
 from ..dispatch import dispatch_agent_run
@@ -403,7 +404,11 @@ async def _dispatch_followup(
 
     return await dispatch_agent_run(
         thread_id,
-        text,
         configurable,
         source=configurable["source"],
+        input=build_system_run_input(
+            text,
+            sender_id="system:plan-review",
+            display_name="Plan review",
+        ),
     )

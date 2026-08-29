@@ -11,6 +11,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.input_messages import build_system_run_input
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
 from agent.thread_ids import baby_sit_lock_thread_id
@@ -325,9 +326,13 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
             configurable = watch.dispatch_config()
             await dispatch_agent_run(
                 watch.thread_id,
-                f"/baby-sit --terminal {watch.pr_url}\n\n{message}",
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                input=build_system_run_input(
+                    f"/baby-sit --terminal {watch.pr_url}\n\n{message}",
+                    sender_id="system:baby-sit",
+                    display_name="PR babysitter",
+                ),
                 metadata={},
                 multitask_strategy="enqueue",
             )
@@ -513,9 +518,13 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            watch.failure_prompt(failures),
             configurable,
             source=str(configurable.get("source") or "github"),
+            input=build_system_run_input(
+                watch.failure_prompt(failures),
+                sender_id="system:baby-sit",
+                display_name="PR babysitter",
+            ),
             metadata={},
             multitask_strategy="enqueue",
         )
