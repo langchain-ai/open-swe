@@ -96,19 +96,19 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
     assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
 
 
-async def test_resolve_agent_model_choice_migrates_deprecated_request_model(monkeypatch) -> None:
+async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(monkeypatch) -> None:
     async def fake_team_default(role: str) -> tuple[str, str]:
         return _VISION_MODEL, "medium"
 
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
 
     model_id, effort = await thread_api._resolve_agent_model_choice(
-        {},
-        "openai:gpt-5.5",
+        {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
+        "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
     )
 
-    assert (model_id, effort) == ("openai:gpt-5.6-sol", "high")
+    assert (model_id, effort) == (_VISION_MODEL, "medium")
 
 
 async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
@@ -148,15 +148,17 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
     assert model_id == "anthropic:claude-opus-5"
 
 
-async def test_resolve_agent_model_id_migrates_deprecated_per_thread_override(monkeypatch) -> None:
+async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monkeypatch) -> None:
     async def fake_team_default(role: str) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
-    model_id = await resolve_agent_model_id(None, per_thread_model_id="openai:gpt-5.5")
-    assert model_id == "openai:gpt-5.6-sol"
+    model_id = await resolve_agent_model_id(
+        None, per_thread_model_id="fireworks:accounts/fireworks/models/glm-5p2"
+    )
+    assert model_id == _TEXT_ONLY_MODEL
 
 
 def _new_thread_client(created: dict[str, object]) -> object:
@@ -1202,7 +1204,7 @@ async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> 
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch) -> None:
@@ -1459,7 +1461,7 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
@@ -1469,6 +1471,19 @@ def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
         {"source": "dashboard", "admin_thread": True},
         "workspace-admin",
     )
+
+
+def test_assert_thread_postable_restricts_workspace_automation(monkeypatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+
+    with pytest.raises(HTTPException) as exc_info:
+        thread_api._assert_thread_postable(
+            {"source": "schedule", "thread_category": "automation"},
+            "teammate",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
@@ -2454,23 +2469,19 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_get_my_profile_migrates_deprecated_models() -> None:
+async def test_get_my_profile_drops_deprecated_models() -> None:
     with patch(
         "agent.dashboard.routes.get_profile",
         new_callable=AsyncMock,
         return_value={
-            "default_model": "openai:gpt-5.5",
-            "reasoning_effort": "medium",
-            "default_subagent_model": "anthropic:claude-opus-4-8",
-            "subagent_reasoning_effort": "low",
+            "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
+            "reasoning_effort": "high",
         },
     ):
         payload = await routes.get_my_profile({"sub": "octocat"})
 
-    assert payload["default_model"] == "openai:gpt-5.6-sol"
-    assert payload["reasoning_effort"] == "medium"
-    assert payload["default_subagent_model"] == "anthropic:claude-opus-5"
-    assert payload["subagent_reasoning_effort"] == "low"
+    assert "default_model" not in payload
+    assert "reasoning_effort" not in payload
 
 
 @pytest.mark.asyncio

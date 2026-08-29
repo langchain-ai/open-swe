@@ -59,6 +59,7 @@ from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import ENVIRONMENTS, slugify
 from .options import (
+    DEPRECATED_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     default_vision_model_pair,
@@ -185,12 +186,13 @@ async def _resolve_agent_model_choice(
     effort: str | None,
 ) -> tuple[str, str]:
     resolved_model, resolved_effort = await get_team_default_model("agent")
-    profile_model, profile_effort = normalize_profile_overrides(profile)
-    if profile_model and profile_effort:
-        resolved_model, resolved_effort = profile_model, profile_effort
-    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
-    if chosen_model and chosen_effort:
-        resolved_model, resolved_effort = chosen_model, chosen_effort
+    if model_id not in DEPRECATED_MODEL_IDS:
+        profile_model, profile_effort = normalize_profile_overrides(profile)
+        if profile_model and profile_effort:
+            resolved_model, resolved_effort = profile_model, profile_effort
+        chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
+        if chosen_model and chosen_effort:
+            resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
         resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
     )
@@ -313,8 +315,10 @@ def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
     _assert_thread_readable(metadata)
-    if metadata.get("admin_thread") is True and not is_admin(email, login=login):
-        raise HTTPException(403, "only admins can send messages in admin threads")
+    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
+        email, login=login
+    ):
+        raise HTTPException(403, "only admins can send messages in this thread")
 
 
 def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -1134,8 +1138,10 @@ async def list_dashboard_threads_page(
     client = langgraph_client()
     search_login = filter_participant_login or login
     search_email = email if search_login == login else None
-    searches = _participant_search_filters(
-        search_login, email=search_email, include_all=include_all
+    searches = (
+        [{"thread_category": "automation"}, {"source": "schedule"}]
+        if scope == "automation" and filter_participant_login is None
+        else _participant_search_filters(search_login, email=search_email, include_all=include_all)
     )
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)
@@ -1884,7 +1890,7 @@ async def cancel_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    _assert_thread_postable(metadata, login, email)
 
     try:
         await _cancel_active_thread_runs(client, thread_id)
@@ -1951,7 +1957,7 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    _assert_thread_postable(metadata, login, email)
 
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:

@@ -265,12 +265,12 @@ def test_environment_instructions_render_in_system_prompt() -> None:
     )
     assert "### Environment Instructions (Base)" in prompt
     assert "Checkouts live in /workspace/repos." in prompt
-    assert "### Admin Thread: Environment Setup" not in prompt
+    assert "### Admin Thread: Workspace Setup" not in prompt
 
 
 def test_admin_section_only_for_admin_threads() -> None:
     prompt = construct_system_prompt(working_dir="/workspace", admin_environments=True)
-    assert "### Admin Thread: Environment Setup" in prompt
+    assert "### Admin Thread: Workspace Setup" in prompt
     assert "optional VM sizing" in prompt
     assert "Every environment must include `rg` and `gh`" in prompt
     assert "direct them to an admin thread" not in prompt

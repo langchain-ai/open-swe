@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
+import { useSession } from "@/lib/session"
 import { automationTemplateById } from "@/features/automations/lib/automation-templates"
 
 interface NewAutomationSearch {
@@ -16,6 +17,10 @@ export const Route = createFileRoute("/agents/automations/new")({
 
 function NewAutomationPage() {
   const { template } = Route.useSearch()
+  const session = useSession()
+  if (!session.isLoading && session.data?.is_admin !== true) {
+    return <Navigate to="/agents/automations" />
+  }
   return (
     <AutomationEditor
       mode="create"

@@ -314,7 +314,7 @@ test.describe("Environments", () => {
     expect(systemPrompt).toContain("### Environment Instructions (default)");
     expect(systemPrompt).toContain(ENVIRONMENT_PROMPT);
     // Admin threads also carry the environment-management instructions.
-    expect(systemPrompt).toContain("### Admin Thread: Environment Setup");
+    expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
     await page.goto("/my-settings");
     await expect(page.getByText("Default environment")).toBeVisible();

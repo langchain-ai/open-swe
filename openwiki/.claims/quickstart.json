@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:af152c30b695898511113bedc13c5950b13671c5ec4dca9de6710a67a4f9a07e",
+  "pageVersion": "sha256:f60ff5332327ac80c5a38dd561f25da937309b90fbd53e6b317ed2c78d3e4081",
   "claims": [
     {
       "id": "claim_7e68d8872dad4c0389a1bc0c65b87801",
@@ -161,10 +161,72 @@
           "version": "repo-lines-v1:sha256:4876fd3a33f82d1c8cc962acd1c71e3c94bb48acb124c5188107b2f0ddf475dd:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg3NmZkM2EzM2Y4MmQxYzhjYzk2MmFjZDFjNzFlM2M5NGJiNDhhY2IxMjRjNTE4ODEwN2IyZjBkZGY0NzVkZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg3NmZkM2EzM2Y4MmQxYzhjYzk2MmFjZDFjNzFlM2M5NGJiNDhhY2IxMjRjNTE4ODEwN2IyZjBkZGY0NzVkZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGUxMWVmYzc2ZmExOWQ3Zjg5ZjFkZTFlYmJjYjRiNGIwMjIwNjU1NTIwZGFjZjRiNzYwYTZmNzg1YmQzODJjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjZlMjI0MTJjYmJmYTE3NWYyZGU3MTg4MTEwNjc1ZjM4ZDJjODZkOTZmMzA2OWI5YTZhNDNjODM4YWRiZmJhNiJ9"
         }
       ]
+    },
+    {
+      "id": "claim_e02267cc18034c609eb07b2c1a3a1fcb",
+      "statement": "The FastAPI lifespan pins a single event loop, validates sandbox and local-development LLM configuration before serving, and closes cached models at shutdown; credentialed CORS is installed only for configured dashboard origins and rejects a wildcard origin.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L19-L35",
+          "version": "repo-lines-v1:sha256:1663ed6beed19e5d22fa8807bc3110baeac02b06058292d32c044316291b60b0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmZDA2MWRjOTFiNDQyMzJjY2RhMjI4YzBiZDQzZWEyYTRjMmNhZjhjZjRlNWY0NjhjYzc1MDNkZTU1OGM2NjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzZTIwNWU5ODg2OGI2YzkyMTlmNWJmOTQ5MzhiYWNkZTM2ODk2MjgxYjQzZjZjOTYyMGM3NWNjZWYzY2UxYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJlNjEzMDMyZWUyNWEzNWI1NmFjYmUxYmFkYWIzMDE1OTMxMzk2YjA0YzBkZWUzY2Q5YmE1ODk3MDc5NzZkNDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU3MDYzZDc5YWEzZTVhN2MzMzdmNThjZDc4YzE2NTc1M2JjNzRiMDEyNDM4M2M2YWEyYTg2NmY0OGFmMGEzOGEifQ"
+        },
+        {
+          "resource": "repo://agent/api/app.py#L38-L64",
+          "version": "repo-lines-v1:sha256:5c89840205d5e1ad6f74e52d173ea3eada05b30a1c76cf3151a9924efa558f36:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b184e87b43cd4f56a75606fa9ee2df9d",
+      "statement": "All Slack, Linear, GitHub, and dashboard triggers share dispatch_agent_run, which creates a durable LangGraph run for the selected agent or reviewer graph using a configurable thread id and defaults to an interrupt multitask strategy.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L233-L275",
+          "version": "repo-lines-v1:sha256:56575550a72d35c06537dec5660b85729bc6eb0eac8ed5ccd0931e2cb6499546:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1Y2FiY2JkOGFkOTJhYTM0MGYyNjcyM2I2Yjk2YjlhNzEzOWIzYTMzNWU3MDM4ZTdhMDAwYTE0OTJkMmRjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhOTc0YWU0ZjQyYzhkYzRmYzhjOGQyNWMxOTYwZDM1YmJiMzQ3MGRiZmVkZmVkMzE5ZWY4NGRjYTcxYzAzMGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0Y2Q4ZjY1MWJkZGMyNDJkMzhjYWQyZjc2YjJjZTlmNmI2OWQ1ZTU0NWMyNzEyZWIwOWNkNWFiMWNlYTY5M2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMwNWUzMmI3YTA2Mzg3OWMyMmM5YTJiYzMyZjdhMWY4MDUwOTkwOTNlMjJlZWU0ZGVkYmE5M2M5NTM3MmRhNDQifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L278-L327",
+          "version": "repo-lines-v1:sha256:c435a1e830c1e2792545f4c82f88e89c6a9a02ae98de7f1d13deaba10d6f9404:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MGNlNzc2OGIwZmMzMDA2ZmQ0MWYzZjUxOTU2M2FhZWFjYjc3OGQ3NDEwODM3YjM2NDcxYzJlNDgwZjJiM2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3NGRlNjBlNmIxYzBkNjA1OTlmMWI3NTU5YzA0M2ZiODBlOTFkYTdlZGNlODdjZjM1Y2JmM2U1NzNkY2FlYzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c6c02955e2c24f73bf9f69b77796dc30",
+      "statement": "The reviewer is a non-mutating PR-review graph with finding tools, whereas the dashboard PR chat graph is sandbox-less and answers from seeded PR virtual files plus read-only GitHub-backed repository access.",
+      "evidence": [
+        {
+          "resource": "repo://agent/chat.py#L3-L13",
+          "version": "repo-lines-v1:sha256:e979cd6f41fe87310b9da978795c61b1807ab75b99fd080afebb76a5016b72d3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM4Zjk0ODY4ZDcxNjUwYjk1OWRhNDE3MmU2MzRhZjg5MzQ3NDY3NWU1YmIwNjkxZGI3MGI1MGU1NzBhYTBhMWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzZWMyM2I5MjYwMmIzMmQ4NDg4YjgyYmMxYzFhZTlmN2RhYjAzNDEzZjkyN2Q0YTQxM2MwNGVkOGU1NTk3ZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwNzk1NGJmOGI2ZjEyZTM1NDdjN2VhNDM1YzIyYWE0NWZhOGNmMTE1NWE2NDk5M2NlOTZjNWIyOGU3Njc3NTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjZWRhY2RkNjFmNzQ0ZWY2ZWUyMmQ0OTRhNDMwYjY2NjMyZTczOTc5ZDQzZjQyNDVkYjVkMjZkMzFmZWM0YmIifQ"
+        },
+        {
+          "resource": "repo://agent/reviewer.py#L3-L14",
+          "version": "repo-lines-v1:sha256:8ab4351bcfbf8f8d25b6358289292090903989967a7bd7fba4240f7dae715fb9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1MWEyNzZmMmY1ZmZlMWI2NzExMDBkYjc0YjQ5MjA3MjgwOTE0OGZiMWNhNzAwYWI5ZDAyZTgwYjM3NzYxZTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY4OTY3M2MxYTM2YzZjNWRkZThjYWU3N2NmMWJkMTFkYjVhYmFjZmI3MzlmMDRjMjQwYWUzN2ZjZmExYTRjZjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAzOTBlOWIwNjk0ODVkNDhlY2E3MGIwMmY3OGExYTFhNWEyZGViYjEyZTU3YTViNTA3NWEwMzZkMzZlM2YyZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjZWRhY2RkNjFmNzQ0ZWY2ZWUyMmQ0OTRhNDMwYjY2NjMyZTczOTc5ZDQzZjQyNDVkYjVkMjZkMzFmZWM0YmIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_20e1690afd5b4dafba2bc02f581603c7",
+      "statement": "The scheduler graph has one launch node that routes cron state to reconciliation, baby-sit watch evaluation, background-task monitoring, session-cost refresh, or a scheduled agent run, and reports missing required identifiers as result statuses.",
+      "evidence": [
+        {
+          "resource": "repo://agent/scheduler.py#L19-L62",
+          "version": "repo-lines-v1:sha256:1a45f20d0792238b0eb0106b31b68e88eb1b954de27acd1b0329033940152266:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViYzk3ODQzNDlhMmE0NDMyMTdjYmM1ZTgzMTBlMGRiYjQwOWM3ODhiMTUwODk1YzUzYmIxZWFhMGQ5OTMzN2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwMGM2YjYzMzk1NDBjOGFhN2M2ZTZmMjkyNDIwNzVmYjRkYjY4ZWIzN2VmYTBiZDE1MWVkZGRlMDdhOTIyYjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7228596a429e4420b2547aac6ac6b19d",
+      "statement": "A pre-existing unreachable main-agent sandbox is not automatically replaced because replacement could discard uncommitted work; only the reviewer opts into replacement because its checkout is recreated each run.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L50-L60",
+          "version": "repo-lines-v1:sha256:6e0e0cc79659b594ced04721f05d7d092402d35f304f058f67b9d5185ef05c1c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxODAwYWE1NWQxM2E4MTMzN2QzOTk3NTQxNjJkN2M1MzNkZWYyYjA5MjZiZDkxNDMwYzE3MWFmMDczZjhjN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyY2RjNDY5MzMyODhkNDUxMWJhZWY1OGRjYTViOWM3ZDNlYmQzM2M3OGI4NzQwNDMxZmUzYWEyMTg2NmQxNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE4YWNmMWZjNjQxZjQzYjNhZTdkNGI4ZjFiM2ZlZTc1MDdkMTY2ZGYzZTUwMzNmYmU1YWZkNDMyYjM5NzJlMjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwN2RjOGJhNDYzNmRmMjA2ZjI3NzY4YWFiOTBiMmM2YmVmMTQ3ZTEwNmY0YTkxOTdjODUyOGMwYTg5NDBjMzYifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-27T06:27:22.313Z"
+    "at": "2026-08-28T11:53:01.759Z"
   }
 }
