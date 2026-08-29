@@ -88,8 +88,8 @@ function SendButton({
     <button
       aria-label={label}
       className={cn(
-        "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/90 text-primary-foreground shadow-xs shadow-primary/25 transition-all duration-150",
-        "hover:scale-105 hover:bg-primary active:shadow-none enabled:cursor-pointer",
+        "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-foreground text-background shadow-xs shadow-foreground/20 transition-all duration-150",
+        "hover:scale-105 hover:bg-foreground/85 active:shadow-none enabled:cursor-pointer",
         "disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none"
       )}
       disabled={!canSubmit}
@@ -120,8 +120,8 @@ function StopButton({
     <button
       aria-label="Stop run"
       className={cn(
-        "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/25 transition-all duration-150",
-        "hover:scale-105 hover:bg-destructive active:shadow-none",
+        "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background shadow-xs shadow-foreground/20 transition-all duration-150",
+        "hover:scale-105 hover:bg-foreground/85 active:shadow-none",
         "disabled:pointer-events-none disabled:opacity-40"
       )}
       disabled={disabled}
