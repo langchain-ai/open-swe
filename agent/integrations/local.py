@@ -29,7 +29,9 @@ def _scoped_git_config_env(root_dir: str) -> dict[str, str]:
     scoped = Path(root_dir) / SANDBOX_GITCONFIG
     if not scoped.exists():
         host = Path.home() / ".gitconfig"
-        scoped.write_text(f"[include]\n\tpath = {host}\n" if host.exists() else "")
+        scoped.write_text(
+            f"[include]\n\tpath = {host}\n" if host.exists() else "", encoding="utf-8"
+        )
     return {"GIT_CONFIG_GLOBAL": str(scoped)}
 
 

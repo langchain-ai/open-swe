@@ -162,7 +162,7 @@ def seed_bare_remotes() -> None:
         seed_work.mkdir(parents=True)
         ident = ["-c", "user.email=seed@example.com", "-c", "user.name=Seed"]
         _git("init", "-b", BASE_BRANCH, str(seed_work))
-        (seed_work / "README.md").write_text(f"# {repo}\n\nA tiny demo repo.\n")
+        (seed_work / "README.md").write_text(f"# {repo}\n\nA tiny demo repo.\n", encoding="utf-8")
         _git("add", "-A", cwd=seed_work)
         _git(*ident, "commit", "-m", "Initial commit", cwd=seed_work)
         _git("init", "--bare", "-b", BASE_BRANCH, str(remote))

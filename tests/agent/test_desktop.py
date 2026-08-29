@@ -30,9 +30,9 @@ def test_desktop_backend_allows_registered_project_without_provider_secrets(
     project = tmp_path / "project"
     project.mkdir()
     marker = project / "marker.txt"
-    marker.write_text("marker")
+    marker.write_text("marker", encoding="utf-8")
     allowlist = tmp_path / "projects.json"
-    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
+    allowlist.write_text(json.dumps([{"cwd": str(project)}]), encoding="utf-8")
     monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
     monkeypatch.setenv("PATH", "/bin")
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
@@ -50,7 +50,7 @@ def test_desktop_backend_rejects_unregistered_project(
     project = tmp_path / "project"
     project.mkdir()
     allowlist = tmp_path / "projects.json"
-    allowlist.write_text("[]")
+    allowlist.write_text("[]", encoding="utf-8")
     monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
 
     with pytest.raises(ValueError, match="not an allowed project"):
