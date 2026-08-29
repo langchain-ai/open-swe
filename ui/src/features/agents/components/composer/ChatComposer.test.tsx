@@ -142,6 +142,19 @@ describe("ChatComposer stop button", () => {
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 
+  it("shows stop while a run submission is dispatching", () => {
+    render(
+      <ComposerPrimaryActions
+        canSubmit={false}
+        onStop={vi.fn()}
+        onSubmit={vi.fn()}
+        submitting
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+  })
+
   it("stops a direct run on Escape while steer is shown", () => {
     const onStop = vi.fn()
     render(
