@@ -445,7 +445,7 @@ export function AgentsHome() {
             onSubmit={handleSubmit}
             onStop={
               optimisticDraftThread && runTarget === "cloud"
-                ? () => stream.stop().then(resetPendingSubmit)
+                ? () => stream.stop().finally(resetPendingSubmit)
                 : undefined
             }
             disabled={Boolean(submittedDraft)}

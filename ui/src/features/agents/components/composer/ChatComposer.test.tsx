@@ -142,12 +142,15 @@ describe("ChatComposer stop button", () => {
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 
-  it("shows stop immediately while a run submission is dispatching", () => {
+  it("shows and handles stop before a run submission has a thread id", async () => {
+    const onStop = vi.fn()
     render(
       <QueryClientProvider client={new QueryClient()}>
         <AgentThreadStreamBoundary>
           <ComposerPrimaryActions
+            activeRun={{ threadId: "", running: true }}
             canSubmit={false}
+            onStop={onStop}
             onSubmit={vi.fn()}
             submitting
           />
@@ -155,7 +158,12 @@ describe("ChatComposer stop button", () => {
       </QueryClientProvider>
     )
 
-    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+    const stop = screen.getByRole("button", { name: "Stop run" })
+    fireEvent.click(stop)
+
+    await waitFor(() => expect(onStop).toHaveBeenCalledOnce())
+    expect(cancelThread).not.toHaveBeenCalled()
+    expect(stream.disconnect).not.toHaveBeenCalled()
   })
 
   it("stops a direct run on Escape while steer is shown", () => {

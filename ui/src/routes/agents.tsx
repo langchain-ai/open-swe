@@ -73,13 +73,8 @@ function AgentsLayout() {
       <AgentThreadStreamProvider
         threadId={activeThreadId ?? null}
         onThreadId={(id) => {
-          if (activeThreadId) return
-          const navigateToThread = () =>
-            navigate({ to: "/agents/$threadId", params: { threadId: id } })
-          if (document.startViewTransition) {
-            document.startViewTransition(navigateToThread)
-          } else {
-            void navigateToThread()
+          if (!activeThreadId) {
+            void navigate({ to: "/agents/$threadId", params: { threadId: id } })
           }
         }}
       >
