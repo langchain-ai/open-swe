@@ -176,11 +176,8 @@ def verify_slack_signature(
     if abs(int(time.time()) - request_timestamp) > max_age_seconds:
         return False
 
-    base_string = f"v0:{timestamp}:{body.decode('utf-8', errors='replace')}"
-    expected = (
-        "v0="
-        + hmac.new(secret.encode("utf-8"), base_string.encode("utf-8"), hashlib.sha256).hexdigest()
-    )
+    base_string = b"v0:" + timestamp.encode("utf-8") + b":" + body
+    expected = "v0=" + hmac.new(secret.encode("utf-8"), base_string, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
 
 
