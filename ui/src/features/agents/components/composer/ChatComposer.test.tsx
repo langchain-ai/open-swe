@@ -142,6 +142,29 @@ describe("ChatComposer stop button", () => {
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 
+  it("shows stop immediately while a run submission is dispatching", () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <AgentThreadStreamBoundary>
+          <ComposerPrimaryActions
+            canSubmit={false}
+            onSubmit={vi.fn()}
+            submitting
+          />
+        </AgentThreadStreamBoundary>
+      </QueryClientProvider>
+    )
+
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull()
+  })
+
   it("stops a direct run on Escape while steer is shown", () => {
     const onStop = vi.fn()
     render(

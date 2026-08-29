@@ -183,7 +183,8 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
     }
   }
 
-  const running = stream.isLoading || props.activeRun?.running
+  const running =
+    props.submitting || stream.isLoading || props.activeRun?.running
   useEscapeToStop(
     Boolean(running && props.canSubmit && props.stopOnEscape !== false),
     () => void handleStop()
@@ -207,7 +208,9 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
 
 function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   const [stopping, setStopping] = useState(false)
-  const running = Boolean(props.activeRun?.running && props.onStop)
+  const running = Boolean(
+    (props.submitting || props.activeRun?.running) && props.onStop
+  )
   const stop = async () => {
     if (stopping) return
     setStopping(true)
