@@ -273,7 +273,7 @@ def test_admin_section_only_for_admin_threads() -> None:
     assert "### Admin Thread: Workspace Setup" in prompt
     assert "optional VM sizing" in prompt
     assert "Every environment must include `rg` and `gh`" in prompt
-    assert "direct them to an admin thread" not in prompt
+    assert "start an admin thread in the Web UI" not in prompt
 
 
 def test_blank_environment_prompt_renders_nothing() -> None:

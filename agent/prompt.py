@@ -596,8 +596,9 @@ def construct_system_prompt(
         environment_section=_render_environment_section(environment_name, environment_instructions),
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",
         shared_base_section=(
-            "- If a user asks to change the managed workspace environment, direct them to an "
-            "admin thread and require them to be a workspace admin.\n\n"
+            "- If a user asks to change the managed workspace environment, direct them to start "
+            "an admin thread in the Web UI and require them to be a workspace admin. Admin threads "
+            "cannot be started from Slack or with agent thread tools.\n\n"
             if not admin_environments
             else ""
         )
