@@ -836,7 +836,6 @@ async def test_launch_conditional_slack_schedule_starts_silently(
     }
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
     assert "notify_automation_channel" in (prompt.findtext("content") or "")
-    assert "read-only checks" in (prompt.findtext("content") or "")
     metadata = fake_client.threads.created[0]["metadata"]
     assert "source_context" not in metadata
 

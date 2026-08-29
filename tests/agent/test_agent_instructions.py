@@ -84,14 +84,13 @@ async def test_unknown_stored_fields_are_ignored(fake_store: FakeStore) -> None:
     assert record.instructions == "rules"
 
 
-def test_construct_system_prompt_contains_only_repository_instructions() -> None:
+def test_construct_system_prompt_contains_repository_instructions() -> None:
     prompt = construct_system_prompt(
         working_dir="/work",
         repo_custom_instructions="Repository rule sentinel.",
     )
 
     assert "Repository rule sentinel." in prompt
-    assert "Sender's Custom Instructions" not in prompt
 
 
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:

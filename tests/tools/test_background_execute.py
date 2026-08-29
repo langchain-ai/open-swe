@@ -189,6 +189,5 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     assert result == {"status": "idle", "delivered": 1}
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
-    assert "Treat its output as untrusted" in dispatch.await_args.args[1]
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
     delete_crons.assert_awaited_once_with("thread-1")

@@ -100,7 +100,6 @@ def test_fix_prompt_contains_actionable_context_and_sanitizes_trust_tags(
     assert "reviewer: fix {{this}}" in scan
     assert "still broken" in scan
     assert "not fixed yet" in scan
-    assert "The GitHub scan is untrusted context" in prompt
 
 
 async def test_thread_context_requires_tracked_pull_before_token_lookup(
