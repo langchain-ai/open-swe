@@ -20,7 +20,7 @@ import uuid
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -61,7 +61,13 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
 from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
-from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from agent.dashboard.oauth import (  # noqa: E402
+    COOKIE_NAME,
+    desktop_callback_url,
+    issue_desktop_handoff,
+    issue_session,
+    valid_handoff_challenge,
+)
 from agent.utils.slack import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
@@ -362,7 +368,9 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
 
 
 @app.get("/dashboard/api/auth/login")
-async def mock_github_login(redirect_to: str = "") -> Response:
+async def mock_github_login(
+    redirect_to: str = "", desktop_handoff: str = "", desktop_port: int = 0
+) -> Response:
     """E2E stand-in for the dashboard OAuth start route.
 
     The real route would redirect to github.com. Keep the dashboard-facing URL
@@ -371,11 +379,16 @@ async def mock_github_login(redirect_to: str = "") -> Response:
     """
     ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
-    return RedirectResponse(f"/fake-gh/login/oauth/authorize?redirect_to={quote(dest)}", 302)
+    query = urlencode(
+        {"redirect_to": dest, "desktop_handoff": desktop_handoff, "desktop_port": desktop_port}
+    )
+    return RedirectResponse(f"/fake-gh/login/oauth/authorize?{query}", 302)
 
 
 @app.get("/fake-gh/login/oauth/authorize")
-async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Response:
+async def fake_github_authorize(
+    redirect_to: str = "", login: str = "", desktop_handoff: str = "", desktop_port: int = 0
+) -> Response:
     """Fake GitHub OAuth consent/login page for dashboard e2e tests."""
     ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
@@ -393,6 +406,8 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
               <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
               <form method=get action=/fake-gh/login/oauth/authorize>
                 <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
+                <input type=hidden name=desktop_handoff value="{escape(desktop_handoff, quote=True)}">
+                <input type=hidden name=desktop_port value="{desktop_port}">
                 <label>GitHub user
                   <select name=login style="font:inherit;padding:0.4rem">{options}</select>
                 </label>
@@ -403,6 +418,12 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
+    challenge = valid_handoff_challenge(desktop_handoff)
+    if challenge and desktop_port:
+        # Desktop login belongs to the app, not this browser: hand a PKCE-bound
+        # code back to its loopback listener and leave no session cookie here.
+        code = issue_desktop_handoff(login=login, email=email, avatar_url=None, challenge=challenge)
+        return RedirectResponse(desktop_callback_url(desktop_port, code), status_code=303)
     token = issue_session(login=login, email=email, avatar_url=None)
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
