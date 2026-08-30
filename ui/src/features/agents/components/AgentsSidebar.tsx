@@ -104,7 +104,7 @@ const NAV = [
 ] as const
 
 /** Threads shown per project before the group needs a "Show more". */
-const PROJECT_PREVIEW_COUNT = 12
+const PROJECT_PREVIEW_COUNT = 5
 
 /**
  * Tracks whether the scroll container has content hidden above or below, so
