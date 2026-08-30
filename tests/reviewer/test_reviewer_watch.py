@@ -487,6 +487,17 @@ async def test_finding_reply_then_push_full_review_advances_head_and_settles_che
 
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            AsyncMock(
+                return_value={
+                    **shared_metadata,
+                    "head_sha": "newsha",
+                    "review_check_run_id": 99,
+                    "current_reviewer_run_id": "run-2",
+                }
+            ),
+        ),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
             "agent.tools.publish_review.resolve_review_head_sha",
@@ -518,6 +529,7 @@ async def test_finding_reply_then_push_full_review_advances_head_and_settles_che
             is_re_review=True,
             is_finding_reply=checkpointed_config["reviewer_event"] == "finding_reply",
             review_check_run_id=checkpointed_config["review_check_run_id"],
+            langgraph_run_id="run-2",
         )
 
     assert result["skipped_empty_re_review"] is True
