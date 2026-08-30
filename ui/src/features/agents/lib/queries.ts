@@ -540,19 +540,19 @@ export function useSidebarThreads({
         ? 2000
         : false,
   })
-  const loadedThreadIds = new Set(
-    sidebarThreads(query.data).map((thread) => thread.id)
+  const activeThreadLoaded = sidebarThreads(query.data).some(
+    (thread) => thread.id === activeThreadId
   )
   const activeThreadQuery = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
-    queryFn: () =>
-      agentsApi.getThread(activeThreadId as string, { markViewed: false }),
+    queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
     enabled:
       enabled &&
       Boolean(activeThreadId) &&
       query.isSuccess &&
-      !loadedThreadIds.has(activeThreadId as string),
-    staleTime: 30_000,
+      !activeThreadLoaded,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
       current.state.data?.status === "running" ? 2000 : false,
     retry: false,
@@ -562,27 +562,18 @@ export function useSidebarThreads({
     resolved: { items: [], limit: resolvedLimit, hasMore: false },
     pinned: [],
   }
-  const activeThread = loadedThreadIds.has(activeThreadId as string)
-    ? undefined
-    : activeThreadQuery.data
-  const data = activeThread
-    ? {
-        ...baseData,
-        active: {
-          ...baseData.active,
-          items: activeThread.resolved
-            ? baseData.active.items
-            : [activeThread, ...baseData.active.items],
-        },
-        resolved: {
-          ...baseData.resolved,
-          items:
-            activeThread.resolved && includeResolved
-              ? [activeThread, ...baseData.resolved.items]
-              : baseData.resolved.items,
-        },
-      }
-    : baseData
+  const activeThread = activeThreadLoaded ? undefined : activeThreadQuery.data
+  const group = activeThread?.resolved ? "resolved" : "active"
+  const data =
+    activeThread && (!activeThread.resolved || includeResolved)
+      ? {
+          ...baseData,
+          [group]: {
+            ...baseData[group],
+            items: [activeThread, ...baseData[group].items],
+          },
+        }
+      : baseData
 
   return {
     data,
