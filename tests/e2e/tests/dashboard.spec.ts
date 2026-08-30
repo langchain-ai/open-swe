@@ -847,10 +847,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const dismissOnboarding = page.getByRole("button", {
       name: "Maybe later",
     });
-    await dismissOnboarding.waitFor({ state: "visible", timeout: 5_000 }).then(
-      () => dismissOnboarding.click(),
-      () => undefined,
-    );
+    if (await dismissOnboarding.isVisible()) await dismissOnboarding.click();
 
     const prompt = "Reproduce the new chat send experience";
     const editor = page.getByTestId("composer-editor");

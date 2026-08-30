@@ -662,12 +662,10 @@ export function AgentsSidebar({
                           sidebar.resolvedQuery.isFetchingNextPage
                         }
                         onClick={() => {
-                          if (hasMoreActive) {
+                          if (hasMoreActive)
                             void sidebar.activeQuery.fetchNextPage()
-                          }
-                          if (hasMoreArchived) {
+                          if (hasMoreArchived)
                             void sidebar.resolvedQuery.fetchNextPage()
-                          }
                         }}
                       />
                     )}
@@ -733,13 +731,10 @@ function ProjectGroup({
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
   const preview = group.threads.slice(0, PROJECT_PREVIEW_COUNT)
-  const active =
-    activeKey && !preview.some((thread) => thread.key === activeKey)
-      ? group.threads.find((thread) => thread.key === activeKey)
-      : undefined
+  const active = group.threads.find((thread) => thread.key === activeKey)
   const shown = expanded
     ? group.threads
-    : active
+    : active && !preview.includes(active)
       ? [...preview.slice(0, -1), active]
       : preview
 

@@ -154,7 +154,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       page.getByRole("button", { name: /This Mac threads, \d+/ }),
     ).toHaveCount(0);
     const sidebar = page.locator("[data-sidebar-frame]");
-    const composer = page.getByTestId("composer-editor").locator("../../..");
+    const composer = page.locator("main");
     await expect(
       composer.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
