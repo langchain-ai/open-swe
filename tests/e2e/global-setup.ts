@@ -15,6 +15,18 @@ export default async function globalSetup() {
   const uiPort = process.env.E2E_UI_PORT ?? "3100";
   const harness = `http://127.0.0.1:${port}`;
 
+  // A hard-killed run leaves this server bound, and the replacement would exit
+  // with EADDRINUSE. Test-only port, so reclaim it.
+  try {
+    execFileSync(
+      "bash",
+      ["-c", `pids=$(lsof -ti tcp:${uiPort}) && kill -9 $pids`],
+      { stdio: "ignore" },
+    );
+  } catch {
+    // nothing listening
+  }
+
   if (!existsSync(server) || process.env.E2E_FORCE_UI_BUILD) {
     if (!existsSync(resolve(ui, "node_modules"))) {
       execFileSync(

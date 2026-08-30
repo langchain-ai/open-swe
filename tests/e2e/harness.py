@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 from html import escape
@@ -83,6 +84,19 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
 
 fakes.seed_bare_remotes()
+
+if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
+    # Playwright pipes this process's stdin, so the pipe hits EOF the moment the
+    # runner dies. A hard-killed runner never tears its webServer down, and the
+    # orphan keeps the harness port — which then shadows `make dev`.
+    def _exit_when_orphaned() -> None:
+        try:
+            sys.stdin.buffer.read()
+        except Exception:
+            return
+        os._exit(0)
+
+    threading.Thread(target=_exit_when_orphaned, daemon=True).start()
 
 
 # --- control + Slack compose (the test driver) -----------------------------
