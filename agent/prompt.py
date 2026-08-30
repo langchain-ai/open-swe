@@ -305,6 +305,17 @@ Call `request_pr_review` only when the user explicitly asks to review a GitHub p
 **For information-only requests:** First identify any relevant git repositories, then clone them or safely update existing workspace checkouts before inspecting them so your response is grounded in current upstream state. Gather what you need and answer fully through the response path in Source Context. Never leave a question unanswered. Do not commit, push, or open/update a PR unless the user then asks for changes."""
 
 
+EDITING_FILES_SECTION = """---
+
+### Editing Files
+
+- Read the exact target region with `read_file` immediately before `edit_file`, and strip its leading line-number prefixes before constructing `old_string`.
+- Copy leading whitespace verbatim; do not reconstruct or re-indent it.
+- Never resend an `old_string` after `Error: String not found in file`; re-read the region or re-anchor it.
+- If `Error: String '...' appears multiple times. Use replace_all=True`, extend the anchor with unique context or intentionally set `replace_all=True`.
+- Anchors from before an earlier successful edit to the same file are stale; re-derive them."""
+
+
 CORRIDOR_PROMPT = """---
 
 <corridor>
@@ -535,6 +546,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + "{repository_scope_section}"
     + REPO_SETUP_SECTION
     + TASK_EXECUTION_SECTION
+    + EDITING_FILES_SECTION
     + "{corridor_prompt_section}"
     + DEPENDENCY_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION

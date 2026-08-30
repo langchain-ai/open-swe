@@ -5,7 +5,17 @@ integer field in read_file (e.g. offset='1, 80'), causing a Pydantic
 ValidationError and an unnecessary retry.
 """
 
-from agent.middleware.sanitize_tool_inputs import _coerce_int, _sanitize_read_file_args
+from unittest.mock import MagicMock
+
+import pytest
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+
+from agent.middleware.sanitize_tool_inputs import (
+    SanitizeToolInputsMiddleware,
+    _coerce_int,
+    _sanitize_read_file_args,
+)
 
 
 class TestCoerceInt:
@@ -72,3 +82,85 @@ class TestSanitizeReadFileArgs:
         args = {"file_path": "foo.ts", "offset": "1, 80"}
         _ = _sanitize_read_file_args(args)
         assert args["offset"] == "1, 80"
+
+
+class FakeReadFileTool:
+    name = "read_file"
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+    async def ainvoke(self, args: dict[str, str], config: object) -> ToolMessage:
+        return ToolMessage(
+            content=self.content, name=self.name, tool_call_id="read", status="success"
+        )
+
+
+def _edit_request(old_string: str, content: str) -> ToolCallRequest:
+    runtime = MagicMock()
+    runtime.config = {}
+    runtime.tools = [FakeReadFileTool(content)]
+    return ToolCallRequest(
+        tool_call={
+            "name": "edit_file",
+            "args": {
+                "file_path": "/tmp/example.py",
+                "old_string": old_string,
+                "new_string": "updated",
+            },
+            "id": "edit",
+        },
+        tool=MagicMock(),
+        state={},
+        runtime=runtime,
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_file_strips_line_number_prefixes() -> None:
+    request = _edit_request("1  first line\n2      second line\n", "first line\n    second line\n")
+    captured: list[ToolCallRequest] = []
+
+    async def handler(modified: ToolCallRequest) -> ToolMessage:
+        captured.append(modified)
+        return ToolMessage(content="ok", name="edit_file", tool_call_id="edit", status="success")
+
+    await SanitizeToolInputsMiddleware().awrap_tool_call(request, handler)
+
+    assert captured[0].tool_call["args"]["old_string"] == "first line\n    second line\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_repairs_unique_indentation_drift() -> None:
+    request = _edit_request("first line\nsecond line\n", "  first line\n    second line\n")
+    captured: list[ToolCallRequest] = []
+
+    async def handler(modified: ToolCallRequest) -> ToolMessage:
+        captured.append(modified)
+        return ToolMessage(content="ok", name="edit_file", tool_call_id="edit", status="success")
+
+    await SanitizeToolInputsMiddleware().awrap_tool_call(request, handler)
+
+    assert captured[0].tool_call["args"]["old_string"] == "  first line\n    second line\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_does_not_rewrite_ambiguous_indentation_match() -> None:
+    old_string = "first line\nsecond line\n"
+    request = _edit_request(
+        old_string, "  first line\n    second line\n\nfirst line\nsecond line\n"
+    )
+    captured: list[ToolCallRequest] = []
+
+    async def handler(modified: ToolCallRequest) -> ToolMessage:
+        captured.append(modified)
+        return ToolMessage(
+            content="Error: String '...' appears multiple times. Use replace_all=True",
+            name="edit_file",
+            tool_call_id="edit",
+            status="error",
+        )
+
+    await SanitizeToolInputsMiddleware().awrap_tool_call(request, handler)
+
+    assert captured[0].tool_call["args"]["old_string"] == old_string
