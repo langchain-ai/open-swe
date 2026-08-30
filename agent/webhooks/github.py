@@ -8,6 +8,7 @@ import asyncio
 import re
 import uuid
 import weakref
+from datetime import UTC, datetime
 from typing import Any, cast, get_args
 
 from ..dashboard.autofix_state import set_pr_autofix_disabled
@@ -20,6 +21,11 @@ from ..utils.slack import GitHubPrRef
 from . import common
 
 _REVIEW_START_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+_REVIEW_START_CLAIM_TTL_SECONDS = 60
+
+
+def _review_start_now() -> float:
+    return datetime.now(UTC).timestamp()
 
 
 def _review_start_lock(thread_id: str) -> asyncio.Lock:
@@ -598,14 +604,20 @@ def _existing_synchronize_review_start(
     if isinstance(record, dict) and record.get("head_sha") == head_sha:
         status = record.get("status")
         if status == "claimed":
-            return {
-                "status": "accepted",
-                "message": "Open SWE review start already owns this head",
-                "ownership": "existing",
-                "state": "claimed",
-                "head_sha": head_sha,
-                "thread_id": thread_id,
-            }
+            claimed_at = record.get("claimed_at")
+            if (
+                isinstance(claimed_at, int | float)
+                and _review_start_now() - claimed_at < _REVIEW_START_CLAIM_TTL_SECONDS
+            ):
+                return {
+                    "status": "error",
+                    "code": "review_start_in_progress",
+                    "message": "The synchronized head has a review start claim without an accepted run.",
+                    "head_sha": head_sha,
+                    "thread_id": thread_id,
+                    "retryable": True,
+                }
+            return None
         if status == "started":
             check_run_id = record.get("check_run_id")
             reviewer_run_id = record.get("reviewer_run_id")
@@ -627,7 +639,7 @@ def _existing_synchronize_review_start(
                 "head_sha": head_sha,
                 "thread_id": thread_id,
             }
-            for key in ("check_run_id", "check_settled"):
+            for key in ("check_run_id", "check_settled", "reviewer_run_id", "run_cancelled"):
                 if key in record:
                     response[key] = record[key]
             return response
@@ -660,6 +672,8 @@ async def _record_synchronize_review_error(
     message: str,
     check_run_id: int | None = None,
     check_settled: bool | None = None,
+    reviewer_run_id: str | None = None,
+    run_cancelled: bool | None = None,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "head_sha": head_sha,
@@ -671,6 +685,10 @@ async def _record_synchronize_review_error(
         record["check_run_id"] = check_run_id
     if check_settled is not None:
         record["check_settled"] = check_settled
+    if reviewer_run_id is not None:
+        record["reviewer_run_id"] = reviewer_run_id
+    if run_cancelled is not None:
+        record["run_cancelled"] = run_cancelled
     error_persisted = True
     try:
         await common.set_reviewer_thread_metadata(thread_id, extra={"review_start": record})
@@ -695,6 +713,10 @@ async def _record_synchronize_review_error(
         response["check_run_id"] = check_run_id
     if check_settled is not None:
         response["check_settled"] = check_settled
+    if reviewer_run_id is not None:
+        response["reviewer_run_id"] = reviewer_run_id
+    if run_cancelled is not None:
+        response["run_cancelled"] = run_cancelled
     if not error_persisted:
         response["error_persisted"] = False
     return response
@@ -816,7 +838,11 @@ async def process_github_pr_synchronize(payload: dict[str, Any]) -> dict[str, An
             "base_ref": base_ref,
             "author": (pull_request.get("user") or {}).get("login", ""),
         }
-        claim = {"head_sha": head_sha, "status": "claimed"}
+        claim = {
+            "head_sha": head_sha,
+            "status": "claimed",
+            "claimed_at": _review_start_now(),
+        }
         try:
             await common.set_reviewer_thread_metadata(
                 thread_id, pr=pr_meta, watch=True, extra={"review_start": claim}
@@ -941,7 +967,6 @@ async def process_github_pr_synchronize(payload: dict[str, Any]) -> dict[str, An
             "check_run_id": check_run_id,
             "reviewer_run_id": reviewer_run_id,
         }
-        ownership_persisted = True
         try:
             await common.set_reviewer_thread_metadata(
                 thread_id,
@@ -953,13 +978,49 @@ async def process_github_pr_synchronize(payload: dict[str, Any]) -> dict[str, An
                 },
             )
         except Exception:
-            ownership_persisted = False
             common.logger.exception(
                 "Synchronize review ownership could not be finalized for thread %s head=%s",
                 thread_id,
                 head_sha,
             )
-        response = {
+            try:
+                await langgraph_client.runs.cancel(thread_id, reviewer_run_id, wait=True)
+                run_cancelled = True
+            except Exception:
+                run_cancelled = False
+                common.logger.exception(
+                    "Could not cancel unowned synchronize reviewer run %s", reviewer_run_id
+                )
+            try:
+                check_settled = await settle_review_check_run(
+                    thread_id=thread_id,
+                    owner=owner,
+                    repo=name,
+                    token=app_token,
+                    conclusion="failure",
+                    title="Review ownership failed",
+                    summary=(
+                        "Open SWE started the reviewer but could not persist exact-head ownership. "
+                        "The run was cancelled and the synchronize delivery ended with an error."
+                    ),
+                    expected_check_run_id=check_run_id,
+                )
+            except Exception:
+                check_settled = False
+                common.logger.exception(
+                    "Could not settle unowned synchronize check %s", check_run_id
+                )
+            return await _record_synchronize_review_error(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                code="review_ownership_persist_failed",
+                message="The Open SWE reviewer ownership could not be persisted.",
+                check_run_id=check_run_id,
+                check_settled=check_settled,
+                reviewer_run_id=reviewer_run_id,
+                run_cancelled=run_cancelled,
+            )
+        return {
             "status": "accepted",
             "message": "Open SWE review started",
             "ownership": "created",
@@ -968,9 +1029,6 @@ async def process_github_pr_synchronize(payload: dict[str, Any]) -> dict[str, An
             "check_run_id": check_run_id,
             "reviewer_run_id": reviewer_run_id,
         }
-        if not ownership_persisted:
-            response["ownership_persisted"] = False
-        return response
 
 
 async def process_github_pr_close(payload: dict[str, Any]) -> None:

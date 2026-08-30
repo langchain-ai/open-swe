@@ -94,11 +94,10 @@ async def github_webhook(
         }
 
     if event_type == "push":
-        if not await common._is_repo_auto_review_enabled(webhook_repo_config):
-            return {"status": "ignored", "reason": "Automatic review disabled for repository"}
-        common.logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
-        background_tasks.add_task(service.process_github_push_event, payload)
-        return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
+        return {
+            "status": "ignored",
+            "reason": "Pull request synchronize owns review starts for new heads",
+        }
 
     if not common._is_repo_allowed(webhook_repo_config):
         common.logger.debug(
