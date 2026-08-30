@@ -560,7 +560,7 @@ async def _publish_review_async(
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
-    if review_check_run_id is not None and not is_finding_reply:
+    if review_check_run_id is not None:
         ownership = await get_thread_metadata(thread_id)
         current_run_id = ownership.get("current_reviewer_run_id")
         current_head_sha = ownership.get("head_sha")
