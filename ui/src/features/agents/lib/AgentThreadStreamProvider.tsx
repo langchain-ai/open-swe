@@ -4,6 +4,7 @@ import { Client, overrideFetchImplementation } from "@langchain/langgraph-sdk"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "./api"
+import { DashboardThreadAdapter } from "./dashboardThreadAdapter"
 import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
 import type { ReactNode } from "react"
 
@@ -73,6 +74,10 @@ export function AgentThreadStreamProvider({
       }),
     [apiUrl, transport]
   )
+  const dashboardAdapter = useMemo(
+    () => new DashboardThreadAdapter(apiUrl, dashboardFetch),
+    [apiUrl]
+  )
 
   // The SDK captures the lifecycle callbacks once at controller creation, so
   // they must be stable. Read the live thread id from a ref instead of
@@ -103,17 +108,22 @@ export function AgentThreadStreamProvider({
     invalidateAgentThreadLists(queryClient)
   }, [queryClient, transport])
 
-  return (
+  const common = {
+    threadId: threadId ?? undefined,
+    onThreadId: handleThreadId,
+    onCreated,
+    onCompleted,
+    children,
+  }
+
+  return transport === "cloud" ? (
+    <StreamProvider {...common} transport={dashboardAdapter} />
+  ) : (
     <StreamProvider
-      apiUrl={apiUrl}
+      {...common}
       assistantId={assistantId}
+      apiUrl={apiUrl}
       client={client}
-      threadId={threadId ?? undefined}
-      onThreadId={handleThreadId}
-      onCreated={onCreated}
-      onCompleted={onCompleted}
-    >
-      {children}
-    </StreamProvider>
+    />
   )
 }

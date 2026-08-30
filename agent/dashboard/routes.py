@@ -217,6 +217,7 @@ from .thread_api import (
     proxy_dashboard_thread_stream_events,
     resolve_dashboard_thread,
     send_dashboard_message,
+    snapshot_dashboard_thread_stream,
     stream_dashboard_thread,
     unpin_dashboard_thread,
 )
@@ -2274,6 +2275,21 @@ async def api_get_thread_state(
     header = server_timing_header(timings)
     logger.info("thread state timings thread_id=%s %s", thread_id, header)
     return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.get("/threads/{thread_id}/snapshot-stream")
+async def api_thread_snapshot_stream(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> StreamingResponse:
+    stream = await snapshot_dashboard_thread_stream(
+        thread_id, session["sub"], email=session.get("email")
+    )
+    return StreamingResponse(
+        stream,
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/threads/{thread_id}/stream/events")
