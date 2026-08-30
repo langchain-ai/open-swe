@@ -118,16 +118,18 @@ async def snapshot_live_events(
                     if event.get("method") != "values" or not _root(event):
                         continue
                     boundary_id, boundary_step = _checkpoint(pending_checkpoint)
-                    covered = boundary_id == checkpoint_id or (
-                        snapshot_step is not None
-                        and boundary_step is not None
-                        and boundary_step <= snapshot_step
+                    matches_checkpoint = boundary_id == checkpoint_id
+                    comparable_steps = snapshot_step is not None and boundary_step is not None
+                    covered = matches_checkpoint or (
+                        comparable_steps and boundary_step <= snapshot_step
                     )
                     if not covered:
                         yield _frame({"type": "event", "event": pending_checkpoint})
                         yield _frame({"type": "event", "event": event})
                     pending_checkpoint = None
-                    live = True
+                    live = matches_checkpoint or (
+                        comparable_steps and boundary_step >= snapshot_step
+                    )
                     continue
 
                 event_checkpoint_id, event_step = _checkpoint(event)

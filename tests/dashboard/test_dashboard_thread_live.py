@@ -8,18 +8,22 @@ def _sse(event: dict[str, object]) -> str:
 
 
 async def test_snapshot_stream_skips_checkpoint_history_and_forwards_live(monkeypatch) -> None:
-    old_checkpoint = {
-        "type": "event",
-        "event_id": "old-checkpoint",
-        "method": "checkpoints",
-        "params": {"namespace": [], "data": {"id": "cp-9", "step": 9}},
-    }
-    old_values = {
-        "type": "event",
-        "event_id": "old-values",
-        "method": "values",
-        "params": {"namespace": [], "data": {"messages": [{"id": "old-user"}]}},
-    }
+    def checkpoint(step: int) -> dict[str, object]:
+        return {
+            "type": "event",
+            "event_id": f"checkpoint-{step}",
+            "method": "checkpoints",
+            "params": {"namespace": [], "data": {"id": f"cp-{step}", "step": step}},
+        }
+
+    def values(step: int) -> dict[str, object]:
+        return {
+            "type": "event",
+            "event_id": f"values-{step}",
+            "method": "values",
+            "params": {"namespace": [], "data": {"messages": [{"id": f"message-{step}"}]}},
+        }
+
     live_message = {
         "type": "event",
         "event_id": "live-message",
@@ -32,7 +36,8 @@ async def test_snapshot_stream_skips_checkpoint_history_and_forwards_live(monkey
         reason_phrase = "OK"
 
         async def aiter_lines(self):
-            for line in (_sse(old_checkpoint) + _sse(old_values) + _sse(live_message)).splitlines():
+            history = "".join(_sse(checkpoint(step)) + _sse(values(step)) for step in (1, 5, 9))
+            for line in (history + _sse(live_message)).splitlines():
                 yield line
 
     class FakeContext:
