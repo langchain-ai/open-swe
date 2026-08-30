@@ -686,6 +686,7 @@ export const ChatComposer = memo(function ChatComposer({
               repos={repos}
               searchPlaceholder="Search projects…"
               selectedRepo={selectedRepo}
+              side="top"
             />
           )}
           {runTarget === "local" &&
@@ -698,6 +699,7 @@ export const ChatComposer = memo(function ChatComposer({
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
+                side="top"
               />
             )}
           {runTarget && onRunTargetChange && (
