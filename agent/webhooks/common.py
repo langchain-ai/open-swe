@@ -949,6 +949,7 @@ _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
         "opened",
         "ready_for_review",
+        "synchronize",
         "converted_to_draft",
         "closed",
         "reopened",

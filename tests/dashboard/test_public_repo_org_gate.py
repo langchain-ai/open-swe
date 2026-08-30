@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -298,45 +299,75 @@ def test_review_requested_is_unsupported_before_public_repo_gate(monkeypatch) ->
     assert seen["calls"] == []
 
 
-def test_mergify_push_is_accepted_without_org_membership_lookup(monkeypatch) -> None:
+def test_public_automation_synchronize_uses_existing_reviewer_watch(monkeypatch) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
-    called: dict[str, object] = {}
-
-    async def fake_auto_review_enabled(repo_config: dict[str, str]) -> bool:
-        called["repo_config"] = repo_config
-        return True
-
-    async def fake_process_github_push_event(payload: dict[str, Any]) -> None:
-        called["payload"] = payload
-
-    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
-    monkeypatch.setattr(
-        github_webhooks, "process_github_push_event", fake_process_github_push_event
+    process = AsyncMock(
+        return_value={
+            "status": "accepted",
+            "ownership": "created",
+            "head_sha": "new-head-sha",
+            "check_run_id": 1,
+            "reviewer_run_id": "run-1",
+        }
     )
 
-    client = TestClient(app)
-    payload = {
-        "ref": "refs/heads/feature-branch",
-        "after": "new-head-sha",
-        "repository": {
-            "id": 123,
-            "owner": {"login": "ericlitman"},
-            "name": "open-swe",
-            "private": False,
+    async def fake_auto_review_enabled(_repo_config: dict[str, str]) -> bool:
+        return True
+
+    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(github_webhooks, "process_github_pr_synchronize", process)
+
+    response = _post_github_webhook(
+        TestClient(app),
+        "pull_request",
+        {
+            "action": "synchronize",
+            "repository": {
+                "id": 123,
+                "owner": {"login": "langchain-ai"},
+                "name": "open-swe",
+                "private": False,
+            },
+            "pull_request": {
+                "number": 7,
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "new-head-sha"},
+            },
+            "sender": {"login": "dependabot[bot]", "type": "Bot"},
         },
-        "sender": {"login": "mergify[bot]", "type": "Bot"},
-    }
-    response = _post_github_webhook(client, "push", payload)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ownership"] == "created"
+    process.assert_awaited_once()
+    assert seen["calls"] == []
+
+
+def test_push_stands_down_for_pull_request_synchronize(monkeypatch) -> None:
+    _common_setup(monkeypatch)
+    seen = _install_membership_stub(monkeypatch, members=set())
+
+    response = _post_github_webhook(
+        TestClient(app),
+        "push",
+        {
+            "ref": "refs/heads/feature-branch",
+            "after": "new-head-sha",
+            "repository": {
+                "id": 123,
+                "owner": {"login": "ericlitman"},
+                "name": "open-swe",
+                "private": False,
+            },
+            "sender": {"login": "mergify[bot]", "type": "Bot"},
+        },
+    )
 
     assert response.status_code == 200
     assert response.json() == {
-        "status": "accepted",
-        "message": "Processing GitHub push for reviewer watch",
-    }
-    assert called == {
-        "repo_config": {"owner": "ericlitman", "name": "open-swe"},
-        "payload": payload,
+        "status": "ignored",
+        "reason": "Pull request synchronize owns review starts for new heads",
     }
     assert seen["calls"] == []
 

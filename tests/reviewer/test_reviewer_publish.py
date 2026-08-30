@@ -26,6 +26,7 @@ from agent.review.publish import (
     review_summary_marker,
     status_comment_marker,
 )
+from agent.webhooks import github as github_webhooks
 
 
 def _f(**overrides: Any) -> Finding:
@@ -493,6 +494,94 @@ async def test_publish_review_eval_mode_uses_configured_cap() -> None:
     publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
     assert publication["cap"] == 1
     assert publication["finding_ids"] == ["f_first"]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_rejects_run_after_double_ownership_write_failure() -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    metadata: dict[str, Any] = {"kind": "reviewer", "watch": True}
+    metadata_writes = 0
+
+    async def set_metadata(_thread_id: str, **kwargs: Any) -> None:
+        nonlocal metadata_writes
+        metadata_writes += 1
+        if metadata_writes in {3, 4}:
+            raise RuntimeError("metadata unavailable")
+        extra = kwargs.pop("extra", None)
+        metadata.update({key: value for key, value in kwargs.items() if value is not None})
+        if isinstance(extra, dict):
+            metadata.update(extra)
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=MagicMock()),
+        patch(
+            "agent.webhooks.common._ensure_thread_exists_for_metadata",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "agent.webhooks.common._get_thread_metadata_safe",
+            AsyncMock(side_effect=lambda *_args, **_kwargs: metadata),
+        ),
+        patch(
+            "agent.webhooks.common._reviewer_token_for_repo",
+            AsyncMock(return_value=("token", None)),
+        ),
+        patch("agent.webhooks.common.set_reviewer_thread_metadata", set_metadata),
+        patch("agent.webhooks.common.fetch_pr_review_threads", AsyncMock(return_value=[])),
+        patch("agent.webhooks.common.reconcile_findings_with_review_threads", AsyncMock()),
+        patch("agent.webhooks.common.create_review_check_run", AsyncMock(return_value=77)),
+        patch(
+            "agent.webhooks.common.reviewer_assistant_for_dispatch",
+            AsyncMock(return_value="reviewer"),
+        ),
+        patch(
+            "agent.webhooks.common.dispatch_agent_run",
+            AsyncMock(return_value={"run_id": "run-77"}),
+        ),
+        patch("agent.webhooks.github.settle_review_check_run", AsyncMock(return_value=True)),
+    ):
+        start_result = await github_webhooks.process_github_pr_synchronize(
+            {
+                "action": "synchronize",
+                "repository": {"id": 1, "private": True, "owner": {"login": "o"}, "name": "r"},
+                "pull_request": {
+                    "number": 7,
+                    "html_url": "https://github.com/o/r/pull/7",
+                    "base": {"sha": "base", "ref": "main"},
+                    "head": {"sha": "new-head", "ref": "feature"},
+                },
+            }
+        )
+
+    assert start_result["code"] == "review_ownership_persist_failed"
+    assert start_result["error_persisted"] is False
+    post_review = AsyncMock()
+    publish_metadata = AsyncMock()
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.get_thread_metadata", AsyncMock(return_value=metadata)),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", publish_metadata),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="new-head",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+            review_check_run_id=77,
+            langgraph_run_id="run-77",
+        )
+
+    assert result["success"] is False
+    assert result["error_code"] == "review_publication_ownership_mismatch"
+    assert result["terminal"] is True
+    post_review.assert_not_awaited()
+    assert all("last_reviewed_sha" not in call.kwargs for call in publish_metadata.await_args_list)
 
 
 @pytest.mark.asyncio
@@ -1153,6 +1242,11 @@ async def test_finding_reply_publish_preserves_review_without_advancing_reviewed
 async def _publish_finding_reply_with_inherited_check(metadata: dict, settle: AsyncMock) -> dict:
     from agent.tools.publish_review import _publish_review_async
 
+    metadata = {
+        "current_reviewer_run_id": "run-x",
+        "head_sha": "newsha",
+        **metadata,
+    }
     finding = _f(id="f_new", file="b.py", start_line=2, end_line=2, first_seen_sha="newsha")
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),

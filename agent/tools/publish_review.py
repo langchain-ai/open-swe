@@ -560,6 +560,33 @@ async def _publish_review_async(
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
+    if review_check_run_id is not None:
+        ownership = await get_thread_metadata(thread_id)
+        current_run_id = ownership.get("current_reviewer_run_id")
+        current_head_sha = ownership.get("head_sha")
+        current_check_run_id = ownership.get("review_check_run_id")
+        if (
+            not isinstance(langgraph_run_id, str)
+            or current_run_id != langgraph_run_id
+            or current_head_sha != head_sha
+            or current_check_run_id != review_check_run_id
+        ):
+            return {
+                "success": False,
+                "error": "Review publication ownership does not match this reviewer run.",
+                "error_code": "review_publication_ownership_mismatch",
+                "terminal": True,
+                "expected": {
+                    "reviewer_run_id": langgraph_run_id,
+                    "head_sha": head_sha,
+                    "review_check_run_id": review_check_run_id,
+                },
+                "actual": {
+                    "reviewer_run_id": current_run_id,
+                    "head_sha": current_head_sha,
+                    "review_check_run_id": current_check_run_id,
+                },
+            }
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually

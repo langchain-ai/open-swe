@@ -4,18 +4,30 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
+import asyncio
 import re
 import uuid
+import weakref
 from typing import Any, cast, get_args
 
 from ..dashboard.autofix_state import set_pr_autofix_disabled
 from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from ..review.publish import settle_review_check_run
-from ..utils.github_checks import CheckConclusion
+from ..utils.github_checks import CheckConclusion, fetch_review_check_run_status
 from ..utils.github_comments import GitHubAuthError
 from ..utils.github_org_membership import is_internal_bot_login
 from ..utils.slack import GitHubPrRef
 from . import common
+
+_REVIEW_START_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _review_start_lock(thread_id: str) -> asyncio.Lock:
+    lock = _REVIEW_START_LOCKS.get(thread_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _REVIEW_START_LOCKS[thread_id] = lock
+    return lock
 
 
 def _review_run_metadata(check_run_id: int | None) -> dict[str, Any]:
@@ -579,6 +591,509 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     await _dispatch_first_review_from_pr_payload(payload, source="github")
 
 
+def _existing_synchronize_review_start(
+    metadata: dict[str, Any], *, head_sha: str, thread_id: str
+) -> dict[str, Any] | None:
+    record = metadata.get("review_start")
+    if isinstance(record, dict) and record.get("head_sha") == head_sha:
+        status = record.get("status")
+        if status == "claimed":
+            return None
+        if status == "started":
+            check_run_id = record.get("check_run_id")
+            reviewer_run_id = record.get("reviewer_run_id")
+            if isinstance(check_run_id, int) and isinstance(reviewer_run_id, str):
+                return {
+                    "status": "accepted",
+                    "message": "Open SWE review already owns this head",
+                    "ownership": "existing",
+                    "head_sha": head_sha,
+                    "thread_id": thread_id,
+                    "check_run_id": check_run_id,
+                    "reviewer_run_id": reviewer_run_id,
+                }
+        if status == "error":
+            response = {
+                "status": "error",
+                "code": str(record.get("code") or "review_start_failed"),
+                "message": str(record.get("message") or "Open SWE review start failed."),
+                "head_sha": head_sha,
+                "thread_id": thread_id,
+            }
+            for key in ("check_run_id", "check_settled", "reviewer_run_id"):
+                if key in record:
+                    response[key] = record[key]
+            return response
+
+    check_run_id = metadata.get("review_check_run_id")
+    reviewer_run_id = metadata.get("current_reviewer_run_id")
+    if (
+        metadata.get("head_sha") == head_sha
+        and isinstance(check_run_id, int)
+        and isinstance(reviewer_run_id, str)
+        and reviewer_run_id
+    ):
+        return {
+            "status": "accepted",
+            "message": "Open SWE review already owns this head",
+            "ownership": "existing",
+            "head_sha": head_sha,
+            "thread_id": thread_id,
+            "check_run_id": check_run_id,
+            "reviewer_run_id": reviewer_run_id,
+        }
+    return None
+
+
+async def _record_synchronize_review_error(
+    *,
+    thread_id: str,
+    head_sha: str,
+    code: str,
+    message: str,
+    check_run_id: int | None = None,
+    check_settled: bool | None = None,
+    reviewer_run_id: str | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "head_sha": head_sha,
+        "status": "error",
+        "code": code,
+        "message": message,
+    }
+    if check_run_id is not None:
+        record["check_run_id"] = check_run_id
+    if check_settled is not None:
+        record["check_settled"] = check_settled
+    if reviewer_run_id is not None:
+        record["reviewer_run_id"] = reviewer_run_id
+    error_persisted = True
+    try:
+        await common.set_reviewer_thread_metadata(
+            thread_id,
+            head_sha=head_sha if reviewer_run_id is not None else None,
+            extra={
+                "review_start": record,
+                **(
+                    {"current_reviewer_run_id": reviewer_run_id}
+                    if reviewer_run_id is not None
+                    else {}
+                ),
+            },
+        )
+    except Exception:
+        error_persisted = False
+        common.logger.exception(
+            "Could not persist synchronize review error for thread %s head=%s",
+            thread_id,
+            head_sha,
+        )
+    common.logger.error(
+        "Synchronize review start failed for thread %s head=%s code=%s", thread_id, head_sha, code
+    )
+    response: dict[str, Any] = {
+        "status": "error",
+        "code": code,
+        "message": message,
+        "head_sha": head_sha,
+        "thread_id": thread_id,
+    }
+    if check_run_id is not None:
+        response["check_run_id"] = check_run_id
+    if check_settled is not None:
+        response["check_settled"] = check_settled
+    if reviewer_run_id is not None:
+        response["reviewer_run_id"] = reviewer_run_id
+    if not error_persisted:
+        response["error_persisted"] = False
+    return response
+
+
+async def process_github_pr_synchronize(payload: dict[str, Any]) -> dict[str, Any]:
+    """Start or return review ownership for a synchronized PR head."""
+    repo = payload.get("repository", {})
+    pull_request = payload.get("pull_request", {})
+    owner = repo.get("owner", {}).get("login", "")
+    name = repo.get("name", "")
+    pr_number = pull_request.get("number")
+    pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
+    base_sha = pull_request.get("base", {}).get("sha", "")
+    base_ref = pull_request.get("base", {}).get("ref", "")
+    head_sha = pull_request.get("head", {}).get("sha", "")
+    head_ref = pull_request.get("head", {}).get("ref", "")
+    if not owner or not name or not isinstance(pr_number, int) or not base_sha or not head_sha:
+        return {
+            "status": "error",
+            "code": "invalid_pull_request_context",
+            "message": "The synchronize payload is missing repository, pull request, or head data.",
+            "head_sha": head_sha,
+        }
+
+    thread_id = common.generate_reviewer_thread_id(owner, name, pr_number)
+    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    if not await common._ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+        return {
+            "status": "error",
+            "code": "reviewer_thread_unavailable",
+            "message": "The Open SWE reviewer thread could not be prepared.",
+            "head_sha": head_sha,
+            "thread_id": thread_id,
+        }
+    try:
+        metadata = await common._get_thread_metadata_safe(thread_id, raise_on_error=True)
+    except Exception:
+        common.logger.exception(
+            "Synchronize review start could not read thread %s for head=%s", thread_id, head_sha
+        )
+        return {
+            "status": "error",
+            "code": "reviewer_metadata_unavailable",
+            "message": "The Open SWE reviewer state could not be read.",
+            "head_sha": head_sha,
+            "thread_id": thread_id,
+        }
+    if (
+        metadata is None
+        or metadata.get("kind") != common.REVIEWER_THREAD_KIND
+        or metadata.get("watch") is not True
+    ):
+        return {
+            "status": "ignored",
+            "reason": "Pull request is not watched by Open SWE Review",
+            "head_sha": head_sha,
+            "thread_id": thread_id,
+        }
+
+    existing = _existing_synchronize_review_start(metadata, head_sha=head_sha, thread_id=thread_id)
+    if existing is not None:
+        return existing
+
+    repo_config = {"owner": owner, "name": name}
+    repo_private = common._repo_private_from_payload(payload)
+    repo_id = common._repo_id_from_payload(payload)
+    app_token, _ = await common._reviewer_token_for_repo(
+        repo_config, repo_private=repo_private, repo_id=repo_id
+    )
+    if not app_token:
+        return await _record_synchronize_review_error(
+            thread_id=thread_id,
+            head_sha=head_sha,
+            code="github_app_token_unavailable",
+            message="A GitHub App token could not be resolved for the synchronized head.",
+        )
+
+    async with _review_start_lock(thread_id):
+        try:
+            metadata = await common._get_thread_metadata_safe(thread_id, raise_on_error=True)
+        except Exception:
+            common.logger.exception(
+                "Synchronize review claim could not read thread %s for head=%s",
+                thread_id,
+                head_sha,
+            )
+            return {
+                "status": "error",
+                "code": "reviewer_metadata_unavailable",
+                "message": "The Open SWE reviewer state could not be read.",
+                "head_sha": head_sha,
+                "thread_id": thread_id,
+            }
+        if (
+            metadata is None
+            or metadata.get("kind") != common.REVIEWER_THREAD_KIND
+            or metadata.get("watch") is not True
+        ):
+            return {
+                "status": "ignored",
+                "reason": "Pull request is not watched by Open SWE Review",
+                "head_sha": head_sha,
+                "thread_id": thread_id,
+            }
+        existing = _existing_synchronize_review_start(
+            metadata, head_sha=head_sha, thread_id=thread_id
+        )
+        if existing is not None:
+            return existing
+
+        prior_claim = metadata.get("review_start")
+        prior_check_run_id = (
+            prior_claim.get("check_run_id") if isinstance(prior_claim, dict) else None
+        )
+        if (
+            isinstance(prior_claim, dict)
+            and prior_claim.get("head_sha") == head_sha
+            and prior_claim.get("status") == "claimed"
+            and isinstance(prior_check_run_id, int)
+        ):
+            check_status = await fetch_review_check_run_status(
+                owner=owner,
+                repo=name,
+                check_run_id=prior_check_run_id,
+                token=app_token,
+            )
+            check_settled = check_status == "completed"
+            if not check_settled:
+                try:
+                    check_settled = await settle_review_check_run(
+                        thread_id=thread_id,
+                        owner=owner,
+                        repo=name,
+                        token=app_token,
+                        conclusion="failure",
+                        title="Review start interrupted",
+                        summary=(
+                            "Open SWE created the review check but did not persist an accepted "
+                            "reviewer run for this head."
+                        ),
+                        expected_check_run_id=prior_check_run_id,
+                    )
+                except Exception:
+                    check_settled = False
+                    common.logger.exception(
+                        "Could not settle interrupted synchronize check %s", prior_check_run_id
+                    )
+            return await _record_synchronize_review_error(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                code="review_start_incomplete",
+                message="The synchronized head had a check without persisted reviewer ownership.",
+                check_run_id=prior_check_run_id,
+                check_settled=check_settled,
+            )
+
+        pr_meta: ReviewerPRMeta = {
+            "owner": owner,
+            "name": name,
+            "number": pr_number,
+            "url": pr_url,
+            "title": pull_request.get("title", ""),
+            "head_ref": head_ref,
+            "base_ref": base_ref,
+            "author": (pull_request.get("user") or {}).get("login", ""),
+        }
+        claim = {"head_sha": head_sha, "status": "claimed"}
+        try:
+            await common.set_reviewer_thread_metadata(
+                thread_id, pr=pr_meta, watch=True, extra={"review_start": claim}
+            )
+        except Exception:
+            common.logger.exception(
+                "Synchronize review claim failed for thread %s head=%s", thread_id, head_sha
+            )
+            return {
+                "status": "error",
+                "code": "review_start_claim_failed",
+                "message": "The synchronized head could not claim Open SWE review ownership.",
+                "head_sha": head_sha,
+                "thread_id": thread_id,
+                "retryable": True,
+            }
+
+        try:
+            threads = await common.fetch_pr_review_threads(
+                owner=owner, repo=name, pr_number=pr_number, token=app_token
+            )
+            await common.reconcile_findings_with_review_threads(thread_id, threads)
+        except Exception:
+            common.logger.warning(
+                "Could not sync review threads before synchronize review for %s",
+                thread_id,
+                exc_info=True,
+            )
+
+        check_run_id = await common.create_review_check_run(
+            owner=owner,
+            repo=name,
+            head_sha=head_sha,
+            token=app_token,
+            details_url=common.dashboard_thread_url(thread_id),
+        )
+        if check_run_id is None:
+            return await _record_synchronize_review_error(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                code="review_check_create_failed",
+                message="The Open SWE Review check could not be created on the synchronized head.",
+            )
+        tracked_claim = {**claim, "check_run_id": check_run_id}
+        try:
+            await common.set_reviewer_thread_metadata(
+                thread_id,
+                head_sha=head_sha,
+                extra={
+                    "review_check_run_id": check_run_id,
+                    "review_start": tracked_claim,
+                },
+            )
+        except Exception:
+            common.logger.exception(
+                "Synchronize check ownership could not be persisted for thread %s head=%s",
+                thread_id,
+                head_sha,
+            )
+            try:
+                check_settled = await settle_review_check_run(
+                    thread_id=thread_id,
+                    owner=owner,
+                    repo=name,
+                    token=app_token,
+                    conclusion="failure",
+                    title="Review ownership failed",
+                    summary=(
+                        "Open SWE created the review check but could not persist ownership before "
+                        "reviewer dispatch."
+                    ),
+                    expected_check_run_id=check_run_id,
+                )
+            except Exception:
+                check_settled = False
+                common.logger.exception(
+                    "Could not settle unowned synchronize check %s", check_run_id
+                )
+            return await _record_synchronize_review_error(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                code="review_check_ownership_failed",
+                message="The Open SWE Review check ownership could not be persisted.",
+                check_run_id=check_run_id,
+                check_settled=check_settled,
+            )
+
+        last_reviewed_sha = metadata.get("last_reviewed_sha")
+        last_reviewed_sha = last_reviewed_sha if isinstance(last_reviewed_sha, str) else ""
+        prompt = (
+            f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
+            f"{head_sha}. Reconcile existing findings against the new diff, add any "
+            f"net-new findings, and call `publish_review` once you're done."
+        )
+        configurable = common._build_reviewer_configurable(
+            source="github_synchronize",
+            github_login=payload.get("sender", {}).get("login", "") or "",
+            github_user_id=payload.get("sender", {}).get("id"),
+            repo_config=repo_config,
+            pr_number=pr_number,
+            pr_url=pr_url,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            branch_name=head_ref,
+            repo_private=repo_private,
+            re_review=True,
+            last_reviewed_sha=last_reviewed_sha,
+        )
+        configurable["review_check_run_id"] = check_run_id
+        try:
+            assistant_id = await common.reviewer_assistant_for_dispatch(
+                re_review=True,
+                finding_reply=False,
+                explicit_request=False,
+            )
+            run = await common.dispatch_agent_run(
+                thread_id,
+                prompt,
+                configurable,
+                source="github_synchronize",
+                assistant_id=assistant_id,
+                metadata=_review_run_metadata(check_run_id),
+                client=langgraph_client,
+            )
+            reviewer_run_id = run.get("run_id") if isinstance(run, dict) else None
+            if not isinstance(reviewer_run_id, str) or not reviewer_run_id:
+                raise RuntimeError("Reviewer dispatch returned no run id")
+        except Exception:
+            common.logger.exception(
+                "Synchronize reviewer dispatch failed for thread %s head=%s", thread_id, head_sha
+            )
+            try:
+                check_settled = await settle_review_check_run(
+                    thread_id=thread_id,
+                    owner=owner,
+                    repo=name,
+                    token=app_token,
+                    conclusion="failure",
+                    title="Review dispatch failed",
+                    summary=(
+                        "Open SWE created the review check but could not start the reviewer run. "
+                        "The synchronize delivery ended with a terminal dispatch error."
+                    ),
+                    expected_check_run_id=check_run_id,
+                )
+            except Exception:
+                common.logger.exception(
+                    "Could not settle failed synchronize check %s for thread %s",
+                    check_run_id,
+                    thread_id,
+                )
+                check_settled = False
+            return await _record_synchronize_review_error(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                code="review_dispatch_failed",
+                message="The Open SWE reviewer run could not be started.",
+                check_run_id=check_run_id,
+                check_settled=check_settled,
+            )
+
+        review_start = {
+            "head_sha": head_sha,
+            "status": "started",
+            "check_run_id": check_run_id,
+            "reviewer_run_id": reviewer_run_id,
+        }
+        try:
+            await common.set_reviewer_thread_metadata(
+                thread_id,
+                head_sha=head_sha,
+                extra={
+                    "review_check_run_id": check_run_id,
+                    "current_reviewer_run_id": reviewer_run_id,
+                    "review_start": review_start,
+                },
+            )
+        except Exception:
+            common.logger.exception(
+                "Synchronize review ownership could not be finalized for thread %s head=%s",
+                thread_id,
+                head_sha,
+            )
+            try:
+                check_settled = await settle_review_check_run(
+                    thread_id=thread_id,
+                    owner=owner,
+                    repo=name,
+                    token=app_token,
+                    conclusion="failure",
+                    title="Review ownership failed",
+                    summary=(
+                        "Open SWE started the reviewer but could not persist exact-head ownership. "
+                        "The synchronize delivery ended with a terminal ownership error."
+                    ),
+                    expected_check_run_id=check_run_id,
+                )
+            except Exception:
+                check_settled = False
+                common.logger.exception(
+                    "Could not settle unowned synchronize check %s", check_run_id
+                )
+            return await _record_synchronize_review_error(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                code="review_ownership_persist_failed",
+                message="The Open SWE reviewer ownership could not be persisted.",
+                check_run_id=check_run_id,
+                check_settled=check_settled,
+                reviewer_run_id=reviewer_run_id,
+            )
+        return {
+            "status": "accepted",
+            "message": "Open SWE review started",
+            "ownership": "created",
+            "head_sha": head_sha,
+            "thread_id": thread_id,
+            "check_run_id": check_run_id,
+            "reviewer_run_id": reviewer_run_id,
+        }
+
+
 async def process_github_pr_close(payload: dict[str, Any]) -> None:
     """Toggle watch on the canonical reviewer thread on close/reopen/draft transitions.
 
@@ -632,286 +1147,6 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     common.logger.info(
         "Set watch=%s on reviewer thread %s after PR %s", desired_watch, thread_id, action
     )
-
-
-async def process_github_push_event(payload: dict[str, Any]) -> None:
-    """Re-trigger the reviewer for a watched PR when its head branch is pushed to."""
-    repo = payload.get("repository", {})
-    repo_config = {
-        "owner": repo.get("owner", {}).get("login", "") or repo.get("owner", {}).get("name", ""),
-        "name": repo.get("name", ""),
-    }
-    repo_full_name = f"{repo_config['owner']}/{repo_config['name']}"
-    ref = payload.get("ref", "")
-    after_sha = payload.get("after", "")
-    if not ref.startswith("refs/heads/"):
-        common.logger.info(
-            "Push ignored: repo=%s ref=%s reason=ref is not a branch", repo_full_name, ref
-        )
-        return
-    if not isinstance(after_sha, str) or not after_sha or set(after_sha) == {"0"}:
-        common.logger.info(
-            "Push ignored: repo=%s ref=%s reason=branch deletion or missing SHA",
-            repo_full_name,
-            ref,
-        )
-        return
-    head_ref = ref[len("refs/heads/") :]
-
-    repo_private = common._repo_private_from_payload(payload)
-    repo_id = common._repo_id_from_payload(payload)
-    if not repo_config["owner"] or not repo_config["name"]:
-        common.logger.warning(
-            "Push to %s ignored: repository owner/name missing from payload", head_ref
-        )
-        return
-    if not await common._is_repo_auto_review_enabled(repo_config):
-        common.logger.info(
-            "Push to %s/%s head=%s ignored: automatic review disabled",
-            repo_config["owner"],
-            repo_config["name"],
-            head_ref,
-        )
-        return
-
-    app_token, app_token_expires_at = await common._reviewer_token_for_repo(
-        repo_config,
-        repo_private=repo_private,
-        repo_id=repo_id,
-    )
-    if not app_token:
-        common.logger.warning("No GitHub App token for push re-review on %s", head_ref)
-        return
-
-    pr = await common._fetch_open_pr_for_branch(repo_config, head_ref, token=app_token)
-    if not pr:
-        common.logger.info(
-            "Push ignored: repo=%s ref=%s reason=no open PR found for branch",
-            repo_full_name,
-            ref,
-        )
-        return
-
-    # Push payloads normally carry repo privacy/id; fall back to PR metadata.
-    # If the repo turns out public, re-scope the token so reviewer.py doesn't
-    # proxy a full-installation token for a public PR.
-    if repo_private is None:
-        repo_private = common._repo_private_from_pr_metadata(pr)
-        repo_id = repo_id or common._repo_id_from_pr_metadata(pr)
-        if repo_private is False:
-            app_token, app_token_expires_at = await common._reviewer_token_for_repo(
-                repo_config,
-                repo_private=repo_private,
-                repo_id=repo_id,
-            )
-            if not app_token:
-                common.logger.warning("No GitHub App token for push re-review on %s", head_ref)
-                return
-    pr_number = pr.get("number")
-    pr_url = pr.get("html_url") or pr.get("url") or ""
-    base_sha = pr.get("base", {}).get("sha", "")
-    base_ref = pr.get("base", {}).get("ref", "")
-    head_sha = after_sha
-    pr_title = pr.get("title", "")
-    if not isinstance(pr_number, int) or not base_sha:
-        common.logger.warning(
-            "Push to %s/%s head=%s ignored: PR metadata missing number/base SHA",
-            repo_config["owner"],
-            repo_config["name"],
-            head_ref,
-        )
-        return
-
-    thread_id = common.generate_reviewer_thread_id(
-        repo_config["owner"], repo_config["name"], pr_number
-    )
-    try:
-        metadata = await common._get_thread_metadata_safe(thread_id, raise_on_error=True)
-    except Exception:
-        common.logger.warning(
-            "Push to %s/%s#%s head=%s dropped: could not read reviewer thread metadata",
-            repo_config["owner"],
-            repo_config["name"],
-            pr_number,
-            head_sha,
-            exc_info=True,
-        )
-        return
-    if metadata is None:
-        common.logger.info(
-            "Push to %s/%s#%s ignored: no reviewer thread for this PR. "
-            "Trigger a first review (Slack `@open-swe review <url>` or request "
-            "open-swe[bot] as a GitHub reviewer) to start watching.",
-            repo_config["owner"],
-            repo_config["name"],
-            pr_number,
-        )
-        return
-    if metadata.get("kind") != common.REVIEWER_THREAD_KIND:
-        if metadata.get("watch") is True:
-            common.logger.warning(
-                "Push to %s/%s#%s head=%s dropped: reviewer thread kind metadata is invalid",
-                repo_config["owner"],
-                repo_config["name"],
-                pr_number,
-                head_sha,
-            )
-        else:
-            common.logger.info(
-                "Push to %s/%s#%s ignored: no reviewer thread for this PR",
-                repo_config["owner"],
-                repo_config["name"],
-                pr_number,
-            )
-        return
-    watch = metadata.get("watch")
-    if watch is False:
-        common.logger.info(
-            "Push to %s ignored: reviewer thread %s is not watching", head_ref, thread_id
-        )
-        return
-    if watch is not True:
-        common.logger.warning(
-            "Push to %s/%s#%s head=%s dropped: reviewer thread watch metadata is invalid",
-            repo_config["owner"],
-            repo_config["name"],
-            pr_number,
-            head_sha,
-        )
-        return
-
-    last_reviewed_sha = metadata.get("last_reviewed_sha")
-    if isinstance(last_reviewed_sha, str) and last_reviewed_sha == head_sha:
-        common.logger.info(
-            "Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref
-        )
-        return
-    if (
-        isinstance(last_reviewed_sha, str)
-        and last_reviewed_sha
-        and await common._is_pr_diff_unchanged_since_last_review(
-            repo_config,
-            base_ref=base_ref,
-            last_reviewed_sha=last_reviewed_sha,
-            head_sha=head_sha,
-            token=app_token,
-        )
-    ):
-        await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
-        # The old head's check disappears once the head moves (GitHub only
-        # shows checks on the current head), so even though no re-review runs,
-        # surface a settled check on the new head.
-        unchanged_check_id = await common.create_review_check_run(
-            owner=repo_config["owner"],
-            repo=repo_config["name"],
-            head_sha=head_sha,
-            token=app_token,
-            details_url=common.dashboard_thread_url(thread_id),
-        )
-        if unchanged_check_id is not None:
-            await common.complete_review_check_run(
-                owner=repo_config["owner"],
-                repo=repo_config["name"],
-                check_run_id=unchanged_check_id,
-                token=app_token,
-                conclusion="success",
-                title="No new changes to review",
-                summary=(
-                    "The pull request diff is unchanged since the last reviewed "
-                    f"commit {last_reviewed_sha}."
-                ),
-            )
-        common.logger.info(
-            "Push to %s ignored: PR diff unchanged since last reviewed SHA %s",
-            head_ref,
-            last_reviewed_sha,
-        )
-        return
-
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common._ensure_thread_exists_for_metadata(thread_id, langgraph_client):
-        return
-    try:
-        threads = await common.fetch_pr_review_threads(
-            owner=repo_config["owner"],
-            repo=repo_config["name"],
-            pr_number=pr_number,
-            token=app_token,
-        )
-        await common.reconcile_findings_with_review_threads(thread_id, threads)
-    except Exception:
-        common.logger.warning(
-            "Could not sync review threads before push re-review for %s",
-            thread_id,
-            exc_info=True,
-        )
-
-    pr_meta: ReviewerPRMeta = {
-        "owner": repo_config["owner"],
-        "name": repo_config["name"],
-        "number": pr_number,
-        "url": pr_url,
-        "title": pr_title,
-        "head_ref": head_ref,
-        "base_ref": base_ref,
-        "author": (pr.get("user") or {}).get("login", ""),
-    }
-    await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
-
-    # GitHub only shows check runs on a PR's current head commit, so the check
-    # created on the previous head disappears after a follow-up push. Create a
-    # fresh in-progress check on the new head SHA so the review stays visible;
-    # publish (or the after-agent hook) settles this id.
-    check_run_id = await common.create_review_check_run(
-        owner=repo_config["owner"],
-        repo=repo_config["name"],
-        head_sha=head_sha,
-        token=app_token,
-        details_url=common.dashboard_thread_url(thread_id),
-    )
-    if check_run_id is not None:
-        await common.set_reviewer_thread_metadata(
-            thread_id, extra={"review_check_run_id": check_run_id}
-        )
-
-    re_review_prompt = (
-        f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
-        f"{head_sha}. Reconcile existing findings against the new diff, add any "
-        f"net-new findings, and call `publish_review` once you're done."
-    )
-    configurable = common._build_reviewer_configurable(
-        source="github_push",
-        github_login=payload.get("sender", {}).get("login", "") or "",
-        github_user_id=payload.get("sender", {}).get("id"),
-        repo_config=repo_config,
-        pr_number=pr_number,
-        pr_url=pr_url,
-        base_sha=base_sha,
-        head_sha=head_sha,
-        branch_name=head_ref,
-        repo_private=repo_private,
-        re_review=True,
-        last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
-    )
-    if check_run_id is not None:
-        configurable["review_check_run_id"] = check_run_id
-    assistant_id = await common.reviewer_assistant_for_dispatch(
-        re_review=True,
-        finding_reply=False,
-        explicit_request=False,
-    )
-
-    common.logger.info("Dispatching push re-review run for thread %s", thread_id)
-    run = await common.dispatch_agent_run(
-        thread_id,
-        re_review_prompt,
-        configurable,
-        source="github_push",
-        assistant_id=assistant_id,
-        metadata=_review_run_metadata(check_run_id),
-        client=langgraph_client,
-    )
-    await common._store_current_reviewer_run_id(thread_id, run)
 
 
 _AUTOFIX_COMMAND_RE = re.compile(r"^[ \t]+autofix[ \t]+(on|off)\b", re.IGNORECASE)

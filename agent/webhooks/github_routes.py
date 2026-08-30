@@ -1,5 +1,7 @@
 """Github webhook HTTP routes."""
 
+from typing import Any
+
 from fastapi import APIRouter
 
 from . import common
@@ -21,7 +23,7 @@ def _github_mention_ignore_reason(disposition: str, *, subject: str) -> str:
 @router.post("/webhooks/github")
 async def github_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
     body = await request.body()
 
@@ -69,6 +71,10 @@ async def github_webhook(
             )
             background_tasks.add_task(service.process_github_pr_close, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
+        if action == "synchronize":
+            if not await common._is_repo_auto_review_enabled(webhook_repo_config):
+                return {"status": "ignored", "reason": "Automatic review disabled for repository"}
+            return await service.process_github_pr_synchronize(payload)
         if action in common._GH_PR_FIRST_REVIEW_ACTIONS:
             if not await common._is_repo_auto_review_enabled(webhook_repo_config):
                 return {"status": "ignored", "reason": "Automatic review disabled for repository"}
@@ -85,11 +91,10 @@ async def github_webhook(
         }
 
     if event_type == "push":
-        if not await common._is_repo_auto_review_enabled(webhook_repo_config):
-            return {"status": "ignored", "reason": "Automatic review disabled for repository"}
-        common.logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
-        background_tasks.add_task(service.process_github_push_event, payload)
-        return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
+        return {
+            "status": "ignored",
+            "reason": "Pull request synchronize owns review starts for new heads",
+        }
 
     if not common._is_repo_allowed(webhook_repo_config):
         common.logger.debug(
