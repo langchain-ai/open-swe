@@ -669,7 +669,18 @@ async def _record_synchronize_review_error(
         record["reviewer_run_id"] = reviewer_run_id
     error_persisted = True
     try:
-        await common.set_reviewer_thread_metadata(thread_id, extra={"review_start": record})
+        await common.set_reviewer_thread_metadata(
+            thread_id,
+            head_sha=head_sha if reviewer_run_id is not None else None,
+            extra={
+                "review_start": record,
+                **(
+                    {"current_reviewer_run_id": reviewer_run_id}
+                    if reviewer_run_id is not None
+                    else {}
+                ),
+            },
+        )
     except Exception:
         error_persisted = False
         common.logger.exception(
@@ -908,6 +919,7 @@ async def process_github_pr_synchronize(payload: dict[str, Any]) -> dict[str, An
         try:
             await common.set_reviewer_thread_metadata(
                 thread_id,
+                head_sha=head_sha,
                 extra={
                     "review_check_run_id": check_run_id,
                     "review_start": tracked_claim,

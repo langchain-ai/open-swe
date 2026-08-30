@@ -1791,6 +1791,8 @@ async def test_synchronize_final_persistence_failure_is_terminal(monkeypatch) ->
     assert failed["code"] == "review_ownership_persist_failed"
     assert failed["reviewer_run_id"] == "started-run"
     assert failed["check_settled"] is True
+    assert metadata["head_sha"] == "9bd0436c"
+    assert metadata["current_reviewer_run_id"] == "started-run"
     create_check.assert_awaited_once()
     dispatch_run.assert_awaited_once()
     settle_check.assert_awaited_once()
