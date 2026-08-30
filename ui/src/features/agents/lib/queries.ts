@@ -30,7 +30,6 @@ export const agentThreadKeys = {
   sidebar: (params: {
     activeLimit: number
     resolvedLimit: number
-    activeThreadId?: string
     includeAutomations: boolean
   }) => ["agent-threads", "lists", "sidebar", params] as const,
   sidebarActive: (threadId: string) =>
@@ -525,7 +524,6 @@ export function useSidebarThreads({
   const params = {
     activeLimit,
     resolvedLimit: includeResolved ? resolvedLimit : 0,
-    activeThreadId,
     includeAutomations,
   }
   const query = useQuery({
@@ -542,11 +540,49 @@ export function useSidebarThreads({
         ? 2000
         : false,
   })
-  const data = query.data ?? {
+  const loadedThreadIds = new Set(
+    sidebarThreads(query.data).map((thread) => thread.id)
+  )
+  const activeThreadQuery = useQuery({
+    queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
+    queryFn: () =>
+      agentsApi.getThread(activeThreadId as string, { markViewed: false }),
+    enabled:
+      enabled &&
+      Boolean(activeThreadId) &&
+      query.isSuccess &&
+      !loadedThreadIds.has(activeThreadId as string),
+    staleTime: 30_000,
+    refetchInterval: (current) =>
+      current.state.data?.status === "running" ? 2000 : false,
+    retry: false,
+  })
+  const baseData = query.data ?? {
     active: { items: [], limit: activeLimit, hasMore: false },
     resolved: { items: [], limit: resolvedLimit, hasMore: false },
     pinned: [],
   }
+  const activeThread = loadedThreadIds.has(activeThreadId as string)
+    ? undefined
+    : activeThreadQuery.data
+  const data = activeThread
+    ? {
+        ...baseData,
+        active: {
+          ...baseData.active,
+          items: activeThread.resolved
+            ? baseData.active.items
+            : [activeThread, ...baseData.active.items],
+        },
+        resolved: {
+          ...baseData.resolved,
+          items:
+            activeThread.resolved && includeResolved
+              ? [activeThread, ...baseData.resolved.items]
+              : baseData.resolved.items,
+        },
+      }
+    : baseData
 
   return {
     data,

@@ -300,7 +300,6 @@ describe("useSidebarThreads", () => {
     expect(listThreads).toHaveBeenLastCalledWith({
       activeLimit: SIDEBAR_PAGE_SIZE,
       resolvedLimit: 0,
-      activeThreadId: undefined,
       includeAutomations: false,
     })
 
@@ -314,9 +313,85 @@ describe("useSidebarThreads", () => {
     expect(listThreads).toHaveBeenLastCalledWith({
       activeLimit: SIDEBAR_PAGE_SIZE,
       resolvedLimit: SIDEBAR_PAGE_SIZE,
-      activeThreadId: undefined,
       includeAutomations: false,
     })
+  })
+
+  it("shares sidebar data across selected threads", async () => {
+    const first = { id: "first-thread", resolved: false } as AgentThread
+    const second = { id: "second-thread", resolved: false } as AgentThread
+    const listThreads = vi
+      .spyOn(agentsApi, "listSidebarThreads")
+      .mockResolvedValue({
+        active: {
+          items: [first, second],
+          limit: SIDEBAR_PAGE_SIZE,
+          hasMore: false,
+        },
+        resolved: { items: [], limit: 0, hasMore: false },
+      })
+    const client = testClient()
+    let sidebar: ReturnType<typeof useSidebarThreads> | undefined
+
+    function Probe({ activeThreadId }: { activeThreadId?: string }) {
+      sidebar = useSidebarThreads({ activeThreadId })
+      return null
+    }
+
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Probe activeThreadId={first.id} />
+      </QueryClientProvider>
+    )
+
+    await waitFor(() =>
+      expect(sidebar?.data.active.items).toEqual([first, second])
+    )
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Probe activeThreadId={second.id} />
+      </QueryClientProvider>
+    )
+
+    expect(sidebar?.data.active.items).toEqual([first, second])
+    expect(listThreads).toHaveBeenCalledTimes(1)
+    expect(
+      client.getQueriesData({
+        queryKey: ["agent-threads", "lists", "sidebar"],
+      })
+    ).toHaveLength(1)
+  })
+
+  it("adds a selected thread outside the shared sidebar window", async () => {
+    const listed = { id: "listed-thread", resolved: false } as AgentThread
+    const opened = { id: "opened-thread", resolved: false } as AgentThread
+    vi.spyOn(agentsApi, "listSidebarThreads").mockResolvedValue({
+      active: {
+        items: [listed],
+        limit: SIDEBAR_PAGE_SIZE,
+        hasMore: false,
+      },
+      resolved: { items: [], limit: 0, hasMore: false },
+    })
+    const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(opened)
+    const client = testClient()
+    let sidebar: ReturnType<typeof useSidebarThreads> | undefined
+
+    function Probe() {
+      sidebar = useSidebarThreads({ activeThreadId: opened.id })
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+
+    await waitFor(() =>
+      expect(sidebar?.data.active.items).toEqual([opened, listed])
+    )
+    expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
   })
 
   it("refreshes the sidebar whenever it mounts", async () => {
@@ -336,7 +411,6 @@ describe("useSidebarThreads", () => {
       agentThreadKeys.sidebar({
         activeLimit: SIDEBAR_PAGE_SIZE,
         resolvedLimit: 0,
-        activeThreadId: undefined,
         includeAutomations: false,
       }),
       cached
