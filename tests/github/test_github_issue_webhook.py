@@ -1619,12 +1619,23 @@ def _synchronize_payload(head_sha: str = "9bd0436c") -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_synchronize_creates_one_check_and_run_idempotently(monkeypatch) -> None:
+async def test_concurrent_synchronize_creates_one_check_and_run(monkeypatch) -> None:
     metadata: dict[str, Any] = {
         "kind": webhook_common.REVIEWER_THREAD_KIND,
         "watch": True,
         "last_reviewed_sha": "4592b3d9",
     }
+    initial_reads = 0
+    both_initial_reads = asyncio.Event()
+
+    async def get_metadata(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal initial_reads
+        if "review_start" not in metadata and initial_reads < 2:
+            initial_reads += 1
+            if initial_reads == 2:
+                both_initial_reads.set()
+            await both_initial_reads.wait()
+        return metadata
 
     async def set_metadata(_thread_id: str, **kwargs: Any) -> None:
         extra = kwargs.pop("extra", None)
@@ -1634,6 +1645,70 @@ async def test_synchronize_creates_one_check_and_run_idempotently(monkeypatch) -
 
     create_check = AsyncMock(return_value=123)
     dispatch_run = AsyncMock(return_value={"run_id": "reviewer-run"})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url=None: object())
+    monkeypatch.setattr(
+        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", get_metadata)
+    monkeypatch.setattr(
+        webhook_common, "_reviewer_token_for_repo", AsyncMock(return_value=("token", None))
+    )
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", set_metadata)
+    monkeypatch.setattr(webhook_common, "fetch_pr_review_threads", AsyncMock(return_value=[]))
+    monkeypatch.setattr(webhook_common, "reconcile_findings_with_review_threads", AsyncMock())
+    monkeypatch.setattr(webhook_common, "create_review_check_run", create_check)
+    monkeypatch.setattr(
+        webhook_common, "reviewer_assistant_for_dispatch", AsyncMock(return_value="reviewer")
+    )
+    monkeypatch.setattr(webhook_common, "dispatch_agent_run", dispatch_run)
+
+    results = await asyncio.gather(
+        github_webhooks.process_github_pr_synchronize(_synchronize_payload()),
+        github_webhooks.process_github_pr_synchronize(_synchronize_payload()),
+    )
+
+    assert {result["ownership"] for result in results} == {"created", "existing"}
+    created = next(result for result in results if result["ownership"] == "created")
+    existing = next(result for result in results if result["ownership"] == "existing")
+    assert existing == {
+        **created,
+        "message": "Open SWE review already owns this head",
+        "ownership": "existing",
+    }
+    create_check.assert_awaited_once()
+    assert create_check.await_args is not None
+    assert create_check.await_args.kwargs["head_sha"] == "9bd0436c"
+    dispatch_run.assert_awaited_once()
+    assert dispatch_run.await_args is not None
+    dispatch_config = dispatch_run.await_args.args[2]
+    assert dispatch_config["head_sha"] == "9bd0436c"
+    assert dispatch_config["review_check_run_id"] == 123
+    assert dispatch_run.await_args.kwargs["metadata"]["review_check_run_id"] == 123
+    assert metadata["review_start"] == {
+        "head_sha": "9bd0436c",
+        "status": "started",
+        "check_run_id": 123,
+        "reviewer_run_id": "reviewer-run",
+    }
+
+
+@pytest.mark.asyncio
+async def test_synchronize_failed_claim_has_no_effect_and_can_retry(monkeypatch) -> None:
+    metadata: dict[str, Any] = {"kind": webhook_common.REVIEWER_THREAD_KIND, "watch": True}
+    set_calls = 0
+
+    async def set_metadata(_thread_id: str, **kwargs: Any) -> None:
+        nonlocal set_calls
+        set_calls += 1
+        if set_calls == 1:
+            raise RuntimeError("metadata unavailable")
+        extra = kwargs.pop("extra", None)
+        metadata.update({key: value for key, value in kwargs.items() if value is not None})
+        if isinstance(extra, dict):
+            metadata.update(extra)
+
+    create_check = AsyncMock(return_value=321)
+    dispatch_run = AsyncMock(return_value={"run_id": "retry-run"})
     monkeypatch.setattr(webhook_common, "get_client", lambda url=None: object())
     monkeypatch.setattr(
         webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
@@ -1655,40 +1730,74 @@ async def test_synchronize_creates_one_check_and_run_idempotently(monkeypatch) -
     )
     monkeypatch.setattr(webhook_common, "dispatch_agent_run", dispatch_run)
 
-    created = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
-    existing = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+    failed = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+    assert failed["code"] == "review_start_claim_failed"
+    assert failed["retryable"] is True
+    create_check.assert_not_awaited()
+    dispatch_run.assert_not_awaited()
 
-    assert created == {
+    retried = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+
+    assert retried["ownership"] == "created"
+    create_check.assert_awaited_once()
+    dispatch_run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_synchronize_final_persistence_failure_keeps_claim_owned(monkeypatch) -> None:
+    metadata: dict[str, Any] = {"kind": webhook_common.REVIEWER_THREAD_KIND, "watch": True}
+    set_calls = 0
+
+    async def set_metadata(_thread_id: str, **kwargs: Any) -> None:
+        nonlocal set_calls
+        set_calls += 1
+        if set_calls == 2:
+            raise RuntimeError("metadata unavailable")
+        extra = kwargs.pop("extra", None)
+        metadata.update({key: value for key, value in kwargs.items() if value is not None})
+        if isinstance(extra, dict):
+            metadata.update(extra)
+
+    create_check = AsyncMock(return_value=654)
+    dispatch_run = AsyncMock(return_value={"run_id": "started-run"})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url=None: object())
+    monkeypatch.setattr(
+        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        webhook_common,
+        "_get_thread_metadata_safe",
+        AsyncMock(side_effect=lambda *_a, **_k: metadata),
+    )
+    monkeypatch.setattr(
+        webhook_common, "_reviewer_token_for_repo", AsyncMock(return_value=("token", None))
+    )
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", set_metadata)
+    monkeypatch.setattr(webhook_common, "fetch_pr_review_threads", AsyncMock(return_value=[]))
+    monkeypatch.setattr(webhook_common, "reconcile_findings_with_review_threads", AsyncMock())
+    monkeypatch.setattr(webhook_common, "create_review_check_run", create_check)
+    monkeypatch.setattr(
+        webhook_common, "reviewer_assistant_for_dispatch", AsyncMock(return_value="reviewer")
+    )
+    monkeypatch.setattr(webhook_common, "dispatch_agent_run", dispatch_run)
+
+    started = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+    duplicate = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+
+    assert started["ownership"] == "created"
+    assert started["ownership_persisted"] is False
+    assert duplicate == {
         "status": "accepted",
-        "message": "Open SWE review started",
-        "ownership": "created",
+        "message": "Open SWE review start already owns this head",
+        "ownership": "existing",
+        "state": "claimed",
         "head_sha": "9bd0436c",
         "thread_id": webhook_common.generate_reviewer_thread_id(
             "mobilyze-llc", "mastra-pilot", 231
         ),
-        "check_run_id": 123,
-        "reviewer_run_id": "reviewer-run",
-    }
-    assert existing == {
-        **created,
-        "message": "Open SWE review already owns this head",
-        "ownership": "existing",
     }
     create_check.assert_awaited_once()
-    assert create_check.await_args is not None
-    assert create_check.await_args.kwargs["head_sha"] == "9bd0436c"
     dispatch_run.assert_awaited_once()
-    assert dispatch_run.await_args is not None
-    dispatch_config = dispatch_run.await_args.args[2]
-    assert dispatch_config["head_sha"] == "9bd0436c"
-    assert dispatch_config["review_check_run_id"] == 123
-    assert dispatch_run.await_args.kwargs["metadata"]["review_check_run_id"] == 123
-    assert metadata["review_start"] == {
-        "head_sha": "9bd0436c",
-        "status": "started",
-        "check_run_id": 123,
-        "reviewer_run_id": "reviewer-run",
-    }
 
 
 @pytest.mark.asyncio
