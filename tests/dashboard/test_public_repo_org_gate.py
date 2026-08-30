@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -295,6 +296,51 @@ def test_review_requested_is_unsupported_before_public_repo_gate(monkeypatch) ->
         "status": "ignored",
         "reason": "Unsupported GitHub pull_request action: review_requested",
     }
+    assert seen["calls"] == []
+
+
+def test_public_automation_synchronize_uses_existing_reviewer_watch(monkeypatch) -> None:
+    _common_setup(monkeypatch)
+    seen = _install_membership_stub(monkeypatch, members=set())
+    process = AsyncMock(
+        return_value={
+            "status": "accepted",
+            "ownership": "created",
+            "head_sha": "new-head-sha",
+            "check_run_id": 1,
+            "reviewer_run_id": "run-1",
+        }
+    )
+
+    async def fake_auto_review_enabled(_repo_config: dict[str, str]) -> bool:
+        return True
+
+    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(github_webhooks, "process_github_pr_synchronize", process)
+
+    response = _post_github_webhook(
+        TestClient(app),
+        "pull_request",
+        {
+            "action": "synchronize",
+            "repository": {
+                "id": 123,
+                "owner": {"login": "langchain-ai"},
+                "name": "open-swe",
+                "private": False,
+            },
+            "pull_request": {
+                "number": 7,
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "new-head-sha"},
+            },
+            "sender": {"login": "dependabot[bot]", "type": "Bot"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ownership"] == "created"
+    process.assert_awaited_once()
     assert seen["calls"] == []
 
 

@@ -74,9 +74,6 @@ async def github_webhook(
         if action == "synchronize":
             if not await common._is_repo_auto_review_enabled(webhook_repo_config):
                 return {"status": "ignored", "reason": "Automatic review disabled for repository"}
-            gate_rejection = await common._enforce_public_repo_org_gate(payload, "pull_request")
-            if gate_rejection is not None:
-                return gate_rejection
             return await service.process_github_pr_synchronize(payload)
         if action in common._GH_PR_FIRST_REVIEW_ACTIONS:
             if not await common._is_repo_auto_review_enabled(webhook_repo_config):

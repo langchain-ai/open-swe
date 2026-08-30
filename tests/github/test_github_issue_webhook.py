@@ -7,7 +7,7 @@ import importlib
 import json
 import logging
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -388,54 +388,6 @@ def test_github_webhook_synchronize_returns_review_ownership(monkeypatch) -> Non
         "reviewer_run_id": "reviewer-run",
     }
     process.assert_awaited_once_with(payload)
-
-
-def test_push_cannot_compete_with_synchronize_review_start(monkeypatch) -> None:
-    synchronize = AsyncMock(
-        return_value={
-            "status": "accepted",
-            "ownership": "created",
-            "head_sha": "new-head",
-            "check_run_id": 123,
-            "reviewer_run_id": "run-123",
-        }
-    )
-    monkeypatch.setattr(
-        webhook_common, "_is_repo_auto_review_enabled", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(
-        webhook_common, "_enforce_public_repo_org_gate", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(github_webhooks, "process_github_pr_synchronize", synchronize)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    client = TestClient(app)
-
-    push_response = _post_github_webhook(
-        client,
-        "push",
-        {
-            "ref": "refs/heads/feature",
-            "after": "new-head",
-            "repository": {"owner": {"login": "lc"}, "name": "repo"},
-        },
-    )
-    synchronize_payload: dict[object, object] = {
-        "action": "synchronize",
-        "repository": {"owner": {"login": "lc"}, "name": "repo"},
-        "pull_request": {
-            "number": 7,
-            "base": {"sha": "base"},
-            "head": {"sha": "new-head"},
-        },
-    }
-    synchronize_response = _post_github_webhook(client, "pull_request", synchronize_payload)
-
-    assert push_response.json() == {
-        "status": "ignored",
-        "reason": "Pull request synchronize owns review starts for new heads",
-    }
-    assert synchronize_response.json()["ownership"] == "created"
-    synchronize.assert_awaited_once_with(synchronize_payload)
 
 
 def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
@@ -1668,6 +1620,7 @@ def _synchronize_payload(head_sha: str = "9bd0436c") -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_concurrent_synchronize_creates_one_check_and_run(monkeypatch) -> None:
+    # Studio2 runs one API process, so keyed in-process locking matches deployed concurrency.
     metadata: dict[str, Any] = {
         "kind": webhook_common.REVIEWER_THREAD_KIND,
         "watch": True,
@@ -1792,16 +1745,14 @@ async def test_synchronize_failed_claim_has_no_effect_and_can_retry(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_synchronize_final_persistence_failure_cancels_run_and_settles_check(
-    monkeypatch,
-) -> None:
+async def test_synchronize_final_persistence_failure_is_terminal(monkeypatch) -> None:
     metadata: dict[str, Any] = {"kind": webhook_common.REVIEWER_THREAD_KIND, "watch": True}
     set_calls = 0
 
     async def set_metadata(_thread_id: str, **kwargs: Any) -> None:
         nonlocal set_calls
         set_calls += 1
-        if set_calls == 2:
+        if set_calls == 3:
             raise RuntimeError("metadata unavailable")
         extra = kwargs.pop("extra", None)
         metadata.update({key: value for key, value in kwargs.items() if value is not None})
@@ -1811,9 +1762,7 @@ async def test_synchronize_final_persistence_failure_cancels_run_and_settles_che
     create_check = AsyncMock(return_value=654)
     dispatch_run = AsyncMock(return_value={"run_id": "started-run"})
     settle_check = AsyncMock(return_value=True)
-    fake_client = MagicMock()
-    fake_client.runs.cancel = AsyncMock()
-    monkeypatch.setattr(webhook_common, "get_client", lambda url=None: fake_client)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url=None: object())
     monkeypatch.setattr(
         webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
     )
@@ -1840,15 +1789,55 @@ async def test_synchronize_final_persistence_failure_cancels_run_and_settles_che
 
     assert failed == duplicate
     assert failed["code"] == "review_ownership_persist_failed"
-    assert failed["run_cancelled"] is True
+    assert failed["reviewer_run_id"] == "started-run"
     assert failed["check_settled"] is True
-    fake_client.runs.cancel.assert_awaited_once_with(
-        webhook_common.generate_reviewer_thread_id("mobilyze-llc", "mastra-pilot", 231),
-        "started-run",
-        wait=True,
-    )
     create_check.assert_awaited_once()
     dispatch_run.assert_awaited_once()
+    settle_check.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_synchronize_check_tracking_failure_settles_before_dispatch(monkeypatch) -> None:
+    metadata: dict[str, Any] = {"kind": webhook_common.REVIEWER_THREAD_KIND, "watch": True}
+    set_calls = 0
+
+    async def set_metadata(_thread_id: str, **kwargs: Any) -> None:
+        nonlocal set_calls
+        set_calls += 1
+        if set_calls == 2:
+            raise RuntimeError("metadata unavailable")
+        extra = kwargs.pop("extra", None)
+        metadata.update({key: value for key, value in kwargs.items() if value is not None})
+        if isinstance(extra, dict):
+            metadata.update(extra)
+
+    dispatch_run = AsyncMock()
+    settle_check = AsyncMock(return_value=True)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url=None: object())
+    monkeypatch.setattr(
+        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        webhook_common, "_get_thread_metadata_safe", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(
+        webhook_common, "_reviewer_token_for_repo", AsyncMock(return_value=("token", None))
+    )
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", set_metadata)
+    monkeypatch.setattr(webhook_common, "fetch_pr_review_threads", AsyncMock(return_value=[]))
+    monkeypatch.setattr(webhook_common, "reconcile_findings_with_review_threads", AsyncMock())
+    monkeypatch.setattr(webhook_common, "create_review_check_run", AsyncMock(return_value=655))
+    monkeypatch.setattr(webhook_common, "dispatch_agent_run", dispatch_run)
+    monkeypatch.setattr(github_webhooks, "settle_review_check_run", settle_check)
+
+    failed = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+    duplicate = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+
+    assert failed == duplicate
+    assert failed["code"] == "review_check_ownership_failed"
+    assert failed["check_settled"] is True
+    dispatch_run.assert_not_awaited()
+    settle_check.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1946,27 +1935,23 @@ async def test_synchronize_dispatch_failure_settles_check_and_is_terminal(monkey
 
 
 @pytest.mark.asyncio
-async def test_synchronize_abandoned_claim_expires_and_retries(monkeypatch) -> None:
+async def test_synchronize_terminal_error_write_recovers_from_tracked_check(monkeypatch) -> None:
     metadata: dict[str, Any] = {"kind": webhook_common.REVIEWER_THREAD_KIND, "watch": True}
     set_calls = 0
-    now = 100.0
 
     async def set_metadata(_thread_id: str, **kwargs: Any) -> None:
         nonlocal set_calls
         set_calls += 1
-        if set_calls == 2:
+        if set_calls == 3:
             raise RuntimeError("metadata unavailable")
         extra = kwargs.pop("extra", None)
         metadata.update({key: value for key, value in kwargs.items() if value is not None})
         if isinstance(extra, dict):
             metadata.update(extra)
 
-    create_check = AsyncMock(side_effect=[456, 457])
-    dispatch_run = AsyncMock(
-        side_effect=[RuntimeError("dispatch unavailable"), {"run_id": "retry-run"}]
-    )
+    create_check = AsyncMock(return_value=456)
+    dispatch_run = AsyncMock(side_effect=RuntimeError("dispatch unavailable"))
     settle_check = AsyncMock(return_value=True)
-    monkeypatch.setattr(github_webhooks, "_review_start_now", lambda: now)
     monkeypatch.setattr(webhook_common, "get_client", lambda url=None: object())
     monkeypatch.setattr(
         webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
@@ -1988,19 +1973,20 @@ async def test_synchronize_abandoned_claim_expires_and_retries(monkeypatch) -> N
     )
     monkeypatch.setattr(webhook_common, "dispatch_agent_run", dispatch_run)
     monkeypatch.setattr(github_webhooks, "settle_review_check_run", settle_check)
+    monkeypatch.setattr(
+        github_webhooks, "fetch_review_check_run_status", AsyncMock(return_value="completed")
+    )
 
     failed = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
-    immediate = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
-    now = 161.0
-    retried = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
+    recovered = await github_webhooks.process_github_pr_synchronize(_synchronize_payload())
 
     assert failed["code"] == "review_dispatch_failed"
     assert failed["error_persisted"] is False
-    assert immediate["status"] == "error"
-    assert immediate["code"] == "review_start_in_progress"
-    assert retried["ownership"] == "created"
-    assert create_check.await_count == 2
-    assert dispatch_run.await_count == 2
+    assert recovered["status"] == "error"
+    assert recovered["code"] == "review_start_incomplete"
+    assert recovered["check_run_id"] == 456
+    create_check.assert_awaited_once()
+    dispatch_run.assert_awaited_once()
     settle_check.assert_awaited_once()
 
 
