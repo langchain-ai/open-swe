@@ -319,6 +319,43 @@ describe("useSidebarThreads", () => {
     })
   })
 
+  it("refreshes the sidebar whenever it mounts", async () => {
+    const listThreads = vi
+      .spyOn(agentsApi, "listSidebarThreads")
+      .mockResolvedValue(emptySidebar(SIDEBAR_PAGE_SIZE, 0))
+    const client = testClient()
+    const cached = {
+      active: {
+        items: [{ id: "stale-thread" } as AgentThread],
+        limit: SIDEBAR_PAGE_SIZE,
+        hasMore: false,
+      },
+      resolved: { items: [], limit: 0, hasMore: false },
+    }
+    client.setQueryData(
+      agentThreadKeys.sidebar({
+        activeLimit: SIDEBAR_PAGE_SIZE,
+        resolvedLimit: 0,
+        activeThreadId: undefined,
+        includeAutomations: false,
+      }),
+      cached
+    )
+
+    function Probe() {
+      useSidebarThreads({})
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+
+    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(1))
+  })
+
   it("increases the activity window when loading more", async () => {
     const listThreads = vi
       .spyOn(agentsApi, "listSidebarThreads")
@@ -346,15 +383,17 @@ describe("useSidebarThreads", () => {
 
     await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(1))
     act(() => sidebar?.activeQuery.fetchNextPage())
-    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(2))
-    expect(listThreads).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeLimit: SIDEBAR_PAGE_SIZE * 2 })
+    await waitFor(() =>
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({ activeLimit: SIDEBAR_PAGE_SIZE * 2 })
+      )
     )
 
     act(() => sidebar?.resolvedQuery.fetchNextPage())
-    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(3))
-    expect(listThreads).toHaveBeenLastCalledWith(
-      expect.objectContaining({ resolvedLimit: SIDEBAR_PAGE_SIZE * 2 })
+    await waitFor(() =>
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({ resolvedLimit: SIDEBAR_PAGE_SIZE * 2 })
+      )
     )
   })
 

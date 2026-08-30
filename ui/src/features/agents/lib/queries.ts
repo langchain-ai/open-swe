@@ -533,6 +533,8 @@ export function useSidebarThreads({
     queryFn: () => agentsApi.listSidebarThreads(params),
     enabled,
     placeholderData: (previous) => previous,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
       sidebarThreads(current.state.data).some(
         (thread) => thread.status === "running"
