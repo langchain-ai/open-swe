@@ -653,20 +653,21 @@ export function AgentsSidebar({
                     {grouped.recents.map((item) => (
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
-                    {hasMoreActive && (
+                    {(hasMoreActive || hasMoreArchived) && (
                       <LoadMoreThreadsButton
-                        label="Load more cloud threads"
-                        loading={sidebar.activeQuery.isFetchingNextPage}
-                        onClick={() => void sidebar.activeQuery.fetchNextPage()}
-                      />
-                    )}
-                    {hasMoreArchived && (
-                      <LoadMoreThreadsButton
-                        label="Load more archived cloud threads"
-                        loading={sidebar.resolvedQuery.isFetchingNextPage}
-                        onClick={() =>
-                          void sidebar.resolvedQuery.fetchNextPage()
+                        label="Load more threads"
+                        loading={
+                          sidebar.activeQuery.isFetchingNextPage ||
+                          sidebar.resolvedQuery.isFetchingNextPage
                         }
+                        onClick={() => {
+                          if (hasMoreActive) {
+                            void sidebar.activeQuery.fetchNextPage()
+                          }
+                          if (hasMoreArchived) {
+                            void sidebar.resolvedQuery.fetchNextPage()
+                          }
+                        }}
                       />
                     )}
                     {resolvedLoading && (
