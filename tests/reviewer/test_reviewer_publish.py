@@ -496,6 +496,51 @@ async def test_publish_review_eval_mode_uses_configured_cap() -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_review_rejects_unowned_run_before_publication() -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    post_review = AsyncMock()
+    set_metadata = AsyncMock()
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            AsyncMock(
+                return_value={
+                    "head_sha": "new-head",
+                    "review_check_run_id": 77,
+                    "review_start": {
+                        "status": "claimed",
+                        "head_sha": "new-head",
+                        "check_run_id": 77,
+                    },
+                }
+            ),
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="new-head",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+            review_check_run_id=77,
+            langgraph_run_id="run-77",
+        )
+
+    assert result["success"] is False
+    assert result["error_code"] == "review_publication_ownership_mismatch"
+    assert result["terminal"] is True
+    post_review.assert_not_awaited()
+    set_metadata.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_publish_review_surfaces_additional_findings_count_in_body() -> None:
     """When all surfaced findings are above threshold but sub-threshold findings
     exist, the review body must mention how many additional findings are in the
