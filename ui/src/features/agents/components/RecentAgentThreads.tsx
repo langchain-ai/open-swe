@@ -30,19 +30,26 @@ export function RecentAgentThreads({
 
   return visibleThreadIds.map((threadId) => {
     const active = threadId === activeThreadId
+    const page = (
+      <AgentThreadPage
+        threadId={threadId}
+        active={active}
+        autoFocusComposer={active && autoFocusComposer}
+      />
+    )
     return (
       <div
         key={threadId}
         className={cn(active ? "contents" : "hidden")}
         aria-hidden={!active}
       >
-        <AgentThreadStreamProvider threadId={threadId}>
-          <AgentThreadPage
-            threadId={threadId}
-            active={active}
-            autoFocusComposer={active && autoFocusComposer}
-          />
-        </AgentThreadStreamProvider>
+        {active ? (
+          page
+        ) : (
+          <AgentThreadStreamProvider threadId={threadId}>
+            {page}
+          </AgentThreadStreamProvider>
+        )}
       </div>
     )
   })
