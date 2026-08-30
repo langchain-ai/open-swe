@@ -411,6 +411,7 @@ export function AgentsSidebar({
     <ProjectGroup
       key={group.key}
       group={group}
+      activeKey={activeKey}
       collapsed={prefs.collapsedProjectKeys.includes(group.key)}
       expanded={prefs.expandedProjectKeys.includes(group.key)}
       pinned={pinnedProjectKeys.has(group.key)}
@@ -711,6 +712,7 @@ export function AgentsSidebar({
 
 function ProjectGroup({
   group,
+  activeKey,
   collapsed,
   expanded,
   pinned,
@@ -720,6 +722,7 @@ function ProjectGroup({
   renderRow,
 }: {
   group: SidebarProjectGroup
+  activeKey?: string
   collapsed: boolean
   expanded: boolean
   pinned: boolean
@@ -729,9 +732,16 @@ function ProjectGroup({
   renderRow: (item: SidebarThreadItem) => React.ReactNode
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
+  const preview = group.threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const active =
+    activeKey && !preview.some((thread) => thread.key === activeKey)
+      ? group.threads.find((thread) => thread.key === activeKey)
+      : undefined
   const shown = expanded
     ? group.threads
-    : group.threads.slice(0, PROJECT_PREVIEW_COUNT)
+    : active
+      ? [...preview.slice(0, -1), active]
+      : preview
 
   return (
     <div className="mb-1">
