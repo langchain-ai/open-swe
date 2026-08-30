@@ -20,6 +20,7 @@ export interface DesktopLocalThreadSummary {
   cwd: string
   title: string
   viewed: boolean
+  archived?: boolean
   createdAt: number
   updatedAt: number
   modelId: string | null
@@ -181,10 +182,14 @@ declare global {
         threadId: string
       ) => Promise<DesktopLocalThreadSummary | null>
       listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
+      setAppearance: (
+        appearance: "light" | "dark" | "system"
+      ) => Promise<boolean>
       localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
         viewed?: boolean
+        archived?: boolean
         modelId?: string
         effort?: string
       }) => Promise<DesktopLocalThreadSummary | null>

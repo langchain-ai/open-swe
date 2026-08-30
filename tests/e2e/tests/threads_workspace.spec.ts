@@ -413,8 +413,11 @@ function boardColumn(main: Locator, name: string): Locator {
   return main.locator(`section:has(h2:text-is("${name}"))`);
 }
 
-function sidebarGroup(sidebar: Locator, name: string): Locator {
-  return sidebar.locator(`div:has(> button > span:text-is("${name}"))`);
+function sidebarSection(sidebar: Locator, name: string): Locator {
+  return sidebar
+    .getByRole("button", { name, exact: true })
+    .locator("..")
+    .locator("..");
 }
 
 function sourceFilter(main: Locator): Locator {
@@ -463,22 +466,17 @@ test.describe("threads workspace", () => {
 
     const row = page.getByRole("link", { name: TITLES.shared }).first();
     await expect(row).toBeVisible();
-    await row.click({ button: "right" });
-    await page.getByText("Pin thread", { exact: true }).click();
+    await row.hover();
+    await row.getByRole("button", { name: "Pin thread" }).click();
 
-    const pinned = sidebarGroup(page.locator("aside"), "Pinned");
-    await expect(
-      pinned.getByRole("link", { name: TITLES.shared }),
-    ).toBeVisible();
+    const pinned = sidebarSection(page.locator("aside"), "Pinned");
+    const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });
+    await expect(pinnedRow).toBeVisible();
     await page.getByRole("link", { name: "Kanban" }).click();
-    await expect(
-      pinned.getByRole("link", { name: TITLES.shared }),
-    ).toBeVisible();
+    await expect(pinnedRow).toBeVisible();
 
-    await pinned
-      .getByRole("link", { name: TITLES.shared })
-      .click({ button: "right" });
-    await page.getByText("Unpin thread", { exact: true }).click();
+    await pinnedRow.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Unpin thread" }).click();
     await expect(pinned).toHaveCount(0);
   });
 
@@ -719,7 +717,7 @@ test.describe("threads workspace", () => {
     await expect(main).not.toContainText(TITLES.running);
   });
 
-  test("shows the board focus groups in the sidebar", async ({
+  test("shows a recency-sorted project list in the sidebar", async ({
     page,
     request,
   }, testInfo) => {
@@ -732,46 +730,78 @@ test.describe("threads workspace", () => {
     await page.goto("/agents/threads");
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    await sidebar
-      .getByRole("button", { name: "Group and filter threads" })
-      .click();
+    const workspaceLinks = sidebar.locator(
+      `a[href^="/agents/"]:has-text("${WORKSPACE_QUERY}")`,
+    );
+
+    await expect
+      .poll(() =>
+        workspaceLinks.evaluateAll((links) =>
+          links.map((link) => link.getAttribute("href")),
+        ),
+      )
+      .toEqual([
+        `/agents/${THREAD_IDS.attention}`,
+        `/agents/${THREAD_IDS.error}`,
+        `/agents/${THREAD_IDS.interrupted}`,
+        `/agents/${THREAD_IDS.running}`,
+        `/agents/${THREAD_IDS.ready}`,
+      ]);
+
+    const alphaGroup = sidebar
+      .getByRole("button", { name: "alpha", exact: true })
+      .locator("..")
+      .locator("..");
+    const betaGroup = sidebar.getByRole("button", {
+      name: "beta",
+      exact: true,
+    });
+    await expect(
+      sidebar.getByRole("button", { name: "alpha", exact: true }),
+    ).toBeVisible();
+    await expect(betaGroup).toBeVisible();
+    await expect(sidebar.getByText("acme/alpha", { exact: true })).toHaveCount(
+      0,
+    );
+
+    // Collapsing a project hides only that project's threads.
+    await betaGroup.click();
+    await expect(betaGroup).toHaveAttribute("aria-expanded", "false");
+    await expect(workspaceLinks).toHaveCount(4);
+    await expect(
+      workspaceLinks.filter({ hasText: TITLES.running }),
+    ).toHaveCount(0);
+    await betaGroup.click();
+    await expect(workspaceLinks).toHaveCount(5);
+
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
     await page
-      .getByRole("menuitemradio", { name: "Focus", exact: true })
-      .click();
-    await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-    await page
-      .getByRole("menuitemcheckbox", { name: "Include resolved", exact: true })
+      .getByRole("menuitemcheckbox", { name: "Show archived", exact: true })
       .click();
     await page.keyboard.press("Escape");
-    await page.keyboard.press("Escape");
 
-    const attention = sidebarGroup(sidebar, "Needs attention");
-    const progress = sidebarGroup(sidebar, "In progress");
-    const ready = sidebarGroup(sidebar, "Ready");
-    const done = sidebarGroup(sidebar, "Done");
-
-    await expect(attention).toContainText(TITLES.attention);
-    await expect(attention).toContainText(TITLES.error);
-    await expect(attention).toContainText(TITLES.interrupted);
-    await expect(attention.locator("> button > span").last()).toHaveText("3");
-    await expect(progress).toContainText(TITLES.running);
-    await expect(progress.locator("> button > span").last()).toHaveText("1");
-    await expect(ready).toContainText(TITLES.ready);
-    await expect(ready.locator("> button > span").last()).toHaveText("1");
-    await expect(done).toContainText("E2E Workspace Resolved overflow 01");
-    await expect(done.locator("> button > span").last()).toHaveText("10+");
+    for (const group of ["Needs attention", "In progress", "Ready", "Done"]) {
+      await expect(
+        sidebar.getByRole("button", { name: group, exact: true }),
+      ).toHaveCount(0);
+    }
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
     const loadMore = sidebar.getByRole("button", {
-      name: "Load more resolved threads",
+      name: "Load more archived cloud threads",
     });
     await loadMore.click();
-    await expect(done.locator("> button > span").last()).toHaveText("20+");
+    await alphaGroup
+      .getByRole("button", { name: "Show more", exact: true })
+      .click();
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 20");
     await loadMore.click();
-    await expect(done.locator("> button > span").last()).toHaveText("22");
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 21");
+    await expect(sidebar).toContainText(TITLES.done);
     await expect(loadMore).toHaveCount(0);
 
-    const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
+    const screenshotPath = testInfo.outputPath("unified-thread-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });
-    await testInfo.attach("focus-grouping-sidebar", {
+    await testInfo.attach("unified-thread-sidebar", {
       path: screenshotPath,
       contentType: "image/png",
     });
@@ -827,6 +857,7 @@ test.describe("threads workspace", () => {
     await expect
       .poll(() => new URL(page.url()).searchParams.get("layout"))
       .toBe("board");
+    await expect(main.locator("article").first()).toBeVisible();
     await main.getByLabel("Group by").selectOption("focus");
     await expect
       .poll(() => new URL(page.url()).searchParams.get("group"))

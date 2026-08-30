@@ -147,38 +147,29 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       await maybeLater.click();
     }
 
-    const cloudSource = page.getByRole("button", {
-      name: /Cloud threads, \d+/,
-    });
-    const localSource = page.getByRole("button", {
-      name: /This Mac threads, \d+/,
-    });
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
-
-    await cloudSource.click();
-    await expect(cloudSource).toHaveAttribute("aria-pressed", "true");
     await expect(
-      page.getByRole("button", { name: "Cloud", exact: true }),
-    ).toBeVisible();
-    const cloudScreenshot = testInfo.outputPath("desktop-cloud-threads.png");
-    await page.screenshot({ path: cloudScreenshot, fullPage: true });
-    await testInfo.attach("desktop-cloud-threads", {
-      path: cloudScreenshot,
-      contentType: "image/png",
-    });
-
-    await localSource.click();
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
+      page.getByRole("button", { name: /Cloud threads, \d+/ }),
+    ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "demo", exact: true }).first(),
+      page.getByRole("button", { name: /This Mac threads, \d+/ }),
+    ).toHaveCount(0);
+    const sidebar = page.locator("[data-sidebar-frame]");
+    const composer = page.locator("main");
+    await expect(
+      composer.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "main", exact: true }),
+      composer.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
-    const localScreenshot = testInfo.outputPath("desktop-local-threads.png");
-    await page.screenshot({ path: localScreenshot, fullPage: true });
-    await testInfo.attach("desktop-local-threads", {
-      path: localScreenshot,
+    await expect(
+      composer.getByRole("button", { name: "main", exact: true }),
+    ).toBeVisible();
+    const unifiedScreenshot = testInfo.outputPath(
+      "desktop-unified-threads.png",
+    );
+    await page.screenshot({ path: unifiedScreenshot, fullPage: true });
+    await testInfo.attach("desktop-unified-threads", {
+      path: unifiedScreenshot,
       contentType: "image/png",
     });
 
@@ -189,6 +180,11 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
 
     await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
     await expect(page.getByText(/Done! I added/)).toBeVisible();
+    await expect(
+      sidebar.getByRole("link", {
+        name: /E2E_DESKTOP_LOCAL please add a greet\(\) helper and open a PR/,
+      }),
+    ).toBeVisible();
     const prLink = page.getByRole("link", {
       name: "Add greet() helper",
       exact: true,

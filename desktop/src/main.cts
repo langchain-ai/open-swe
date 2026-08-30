@@ -7,6 +7,7 @@ const {
   ipcMain,
   Menu,
   dialog,
+  nativeTheme,
   net,
   protocol,
   safeStorage,
@@ -276,6 +277,18 @@ function configureDesktopIpc() {
     return true;
   });
 
+  // macOS draws the traffic lights for the window's appearance, which follows
+  // the OS unless told otherwise. Without this, running the app light on a dark
+  // system (or vice versa) renders them for the wrong appearance and the
+  // inactive dots all but disappear.
+  ipcMain.handle("desktop:set-appearance", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    if (value !== "light" && value !== "dark" && value !== "system")
+      return false;
+    nativeTheme.themeSource = value;
+    return true;
+  });
+
   ipcMain.handle("desktop:resolve-local-project-path", (event, input) => {
     requireTrustedDesktopIpc(event);
     return resolveLocalProjectPath(input?.localSessionId, input?.path);
@@ -342,12 +355,18 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
-    const updated = localThreadStore.update(input?.threadId, {
+    // Metadata only — never sync the branch here. Sessions share one worktree,
+    // so recording the current checkout against an inactive thread would
+    // overwrite the branch its checkpoint belongs to. Only a running thread
+    // owns the checkout (see diffThread).
+    return localThreadStore.update(input?.threadId, {
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
+      ...(typeof input?.archived === "boolean"
+        ? { archived: input.archived }
+        : {}),
       ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
       ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
     });
-    return syncThreadBranch(updated);
   });
   ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
