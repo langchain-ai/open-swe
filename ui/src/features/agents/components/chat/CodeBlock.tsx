@@ -51,7 +51,9 @@ function languageLabel(language: string): string {
 }
 
 export function CodeBlock({ text, language, title }: CodeBlockProps) {
-  const code = useMemo(() => text.replace(/\s+$/, ""), [text])
+  // Only the parser-added terminal newline: trailing spaces and blank lines are
+  // part of the fence, and this value is what Copy writes to the clipboard.
+  const code = useMemo(() => text.replace(/\n$/, ""), [text])
   const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null)
   const [copied, setCopied] = useState(false)
   const [wrapped, setWrapped] = useState(false)
