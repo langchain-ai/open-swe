@@ -233,12 +233,12 @@ function toolStatus(
   assembled: AssembledToolCall | undefined,
   toolMessage: ToolMessage | undefined
 ): ToolExecutionChunk["status"] {
+  if (toolMessage) return toolMessage.status === "error" ? "error" : "completed"
   if (assembled) {
     if (assembled.status === "finished") return "completed"
     if (assembled.status === "error") return "error"
     return "in_progress"
   }
-  if (toolMessage) return toolMessage.status === "error" ? "error" : "completed"
   return "in_progress"
 }
 

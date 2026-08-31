@@ -74,7 +74,6 @@ from .pull_request_context import get_pull_request_context
 from .pull_request_status import get_pull_request_statuses
 from .slack_oauth import SLACK_TEAM_ID
 from .team_settings import get_team_default_model, get_team_fable_enabled
-from .thread_live import snapshot_live_events
 from .thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
@@ -2487,21 +2486,6 @@ async def get_dashboard_thread_branch_diff(
         "truncated": diff["truncated"],
         "files": diff["files"],
     }
-
-
-async def snapshot_dashboard_thread_stream(
-    thread_id: str,
-    login: str,
-    *,
-    email: str | None = None,
-) -> AsyncIterator[bytes]:
-    await _readable_thread_metadata(thread_id, login=login, email=email)
-    return await snapshot_live_events(
-        thread_id,
-        lambda: get_dashboard_thread_state(thread_id, login, email=email),
-        upstream_url=langgraph_url(),
-        headers=_langgraph_proxy_headers(accept="text/event-stream"),
-    )
 
 
 async def proxy_dashboard_thread_stream_events(

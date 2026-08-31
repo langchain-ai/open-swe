@@ -123,6 +123,40 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("keeps persisted tool results completed during replay", () => {
+    const messages = streamMessagesToUi(
+      [
+        new AIMessage({
+          id: "ai-1",
+          content: "",
+          tool_calls: [
+            {
+              id: "call-1",
+              name: "read_file",
+              args: { path: "README.md" },
+              type: "tool_call",
+            },
+          ],
+        }),
+        new ToolMessage({ tool_call_id: "call-1", content: "done" }),
+      ],
+      [
+        {
+          id: "call-1",
+          callId: "call-1",
+          name: "read_file",
+          args: { path: "README.md" },
+          status: "streaming",
+        } as never,
+      ]
+    )
+
+    const tool = messages[0]?.chunks[0]
+    expect(tool?.kind === "tool-execution" ? tool.status : undefined).toBe(
+      "completed"
+    )
+  })
+
   it("attaches validated output iframe artifacts to their tool call", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "draw a chart" }),
