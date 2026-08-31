@@ -39,10 +39,15 @@ export function OnboardingDialog() {
   const options = useOptions()
   const save = useSaveProfile()
   const [dismissed, setDismissed] = useState(false)
-  const [slackDismissed, setSlackDismissed] = useState(
-    () => window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) === "true"
-  )
+  const [slackDismissed, setSlackDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setSlackDismissed(
+      window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) === "true"
+    )
+  }, [])
 
   const firstModel: ModelOption | undefined = options.data?.models[0]
   const defaultModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
