@@ -174,7 +174,10 @@ async def test_monitor_coalesces_new_completions_and_reconciles_delivered_tasks(
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     client = AsyncMock()
     client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
-    client.runs.list.return_value = [{"metadata": {"background_task_ids": ["task-1"]}}]
+    client.runs.list.side_effect = [
+        [{"metadata": {}}] * 100,
+        [{"metadata": {"background_task_ids": ["task-1"]}}],
+    ]
 
     with (
         patch("agent.background_tasks._client", return_value=client),

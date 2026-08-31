@@ -84,17 +84,24 @@ def _notification(tasks: Sequence[dict[str, Any]]) -> str:
     )
 
 
-async def _delivered_task_ids(client: Any, thread_id: str) -> set[str]:
-    runs = await client.runs.list(thread_id, limit=100, select=["metadata"])
-    return {
-        task_id
-        for run in runs
-        if isinstance(run, dict)
-        and isinstance(metadata := run.get("metadata"), dict)
-        and isinstance(task_ids := metadata.get("background_task_ids"), list)
-        for task_id in task_ids
-        if isinstance(task_id, str)
-    }
+async def _delivered_task_ids(client: Any, thread_id: str, wanted: set[str]) -> set[str]:
+    delivered: set[str] = set()
+    offset = 0
+    while wanted - delivered:
+        runs = await client.runs.list(thread_id, limit=100, offset=offset, select=["metadata"])
+        delivered.update(
+            task_id
+            for run in runs
+            if isinstance(run, dict)
+            and isinstance(metadata := run.get("metadata"), dict)
+            and isinstance(task_ids := metadata.get("background_task_ids"), list)
+            for task_id in task_ids
+            if isinstance(task_id, str) and task_id in wanted
+        )
+        if len(runs) < 100:
+            break
+        offset += 100
+    return delivered
 
 
 def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]:
@@ -165,7 +172,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     if claimed:
         task_ids = sorted(task_id for task_id, _ in claimed)
         try:
-            delivered_ids = await _delivered_task_ids(client, thread_id)
+            delivered_ids = await _delivered_task_ids(client, thread_id, set(task_ids))
             pending = [(task_id, task) for task_id, task in claimed if task_id not in delivered_ids]
             if pending:
                 pending_ids = [task_id for task_id, _ in pending]
