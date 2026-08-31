@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
@@ -46,6 +45,7 @@ import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -76,7 +76,7 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()

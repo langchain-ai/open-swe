@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { LoaderCircle } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import {
@@ -10,6 +9,7 @@ import {
   useCancelAgentThread,
 } from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 export interface ActiveRun {
   threadId: string
@@ -147,7 +147,7 @@ function StopButton({
 }
 
 function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const queryClient = useQueryClient()
   const [stopping, setStopping] = useState(false)
   const threadId = props.activeRun?.threadId ?? stream.threadId ?? ""

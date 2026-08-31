@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
@@ -34,6 +33,7 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -65,11 +65,7 @@ function promptContent(text: string, images: Array<ImageChunk>) {
 }
 
 export function AgentsHome() {
-  // Submit straight through the layout's persistent stream. The SDK mints the
-  // thread id (no client-minted id, no `getState` 404), fires the first
-  // `run.start` — which lazily creates + stamps + owns the thread server-side
-  // — and keeps streaming after we navigate to the minted thread below.
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -165,7 +161,7 @@ export function AgentsHome() {
   }, [panelCollapsed, stream.threadId])
 
   useEffect(() => {
-    if (!isDesktop || localProjects.length === 0) return
+    if (!isDesktop) return
     const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
@@ -244,11 +240,14 @@ export function AgentsHome() {
     })
     if (runTarget === "local") {
       const desktop = window.openSweDesktop
-      const cwd = localProjectPath
-      if (!desktop || !cwd) {
+      const project = localProjects.find(
+        (candidate) => candidate.cwd === localProjectPath
+      )
+      if (!desktop || !project) {
         setLocalError("Choose or add a project from This Mac before sending.")
         return
       }
+      const cwd = project.cwd
       const draft = {
         prompt,
         images,
@@ -322,6 +321,7 @@ export function AgentsHome() {
     }
     draftRef.current = draft
     setSubmittedDraft(draft)
+    setLocalError(null)
 
     const configurable: Record<string, unknown> = {}
     if (activeSelection?.modelId && activeSelection.effort) {
@@ -334,18 +334,25 @@ export function AgentsHome() {
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
 
+    const handleCloudSubmitError = (error: unknown) => {
+      resetPendingSubmit()
+      setLocalError(
+        error instanceof Error
+          ? error.message
+          : "Could not start the cloud Open SWE agent"
+      )
+    }
     void stream
       .submit(
         {
           messages: [{ type: "human", content: promptContent(prompt, images) }],
         },
-        { config: { configurable } }
+        {
+          config: { configurable },
+          onError: handleCloudSubmitError,
+        }
       )
-      .catch(() => {
-        // Submit failed before the SDK minted a thread id — re-enable the
-        // prompt instead of leaving it disabled until a reload.
-        resetPendingSubmit()
-      })
+      .catch(handleCloudSubmitError)
   }
 
   const hasProjects =
