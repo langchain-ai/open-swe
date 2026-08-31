@@ -365,7 +365,7 @@ Steps, in order:
 - If `git push`, `open_pull_request`, or `gh pr edit` fails with an infrastructure/permission/access error — including "403", "404"/"Not Found" from `open_pull_request`, "GitHub App not installed/access denied", or "Permission denied" — do not retry via `gh pr create`, `gh api repos/.../pulls`, direct REST `POST /repos/.../pulls`, or any other substitute PR creation mechanism. Report the failure to the user and end the task. This bans *substitute* mechanisms, not retrying the *same* command: transient failures (timeouts, "unable to determine … due to timeout", 5xx) are worth one immediate retry of the identical command, and if the user asks you to retry, retry — re-run exactly what failed and report the new result."""
 
 
-DESKTOP_PR_SECTION = "\n\nFor desktop runs, open new PRs with `gh pr create`; `open_pull_request` is unavailable, and `gh` uses the local developer's GitHub identity. This overrides the hosted-only PR creation and fallback rules above."
+DESKTOP_PR_SECTION = "\n\nFor desktop runs, each new thread should use its own task branch and open a new PR with `gh pr create`; `open_pull_request` is unavailable, and `gh` uses the local developer's GitHub identity. Do not search for or append work to a similar or related PR from another thread. Update an existing PR only when the user explicitly identifies it as the target or it already belongs to the current thread's branch. This overrides the hosted-only PR creation and fallback rules above."
 
 
 COLLABORATION_TEMPLATE = """---
