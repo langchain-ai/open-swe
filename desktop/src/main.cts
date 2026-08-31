@@ -345,7 +345,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:local-activity", async (event) => {
     requireTrustedDesktopIpc(event);
     const activity = await backendSupervisor.threadActivity();
-    if (!activity) throw new Error("Could not read local agent activity");
+    if (!activity) return lastActivity;
     for (const [threadId, status] of Object.entries(lastActivity)) {
       if (status === "running" && activity[threadId] !== "running")
         localThreadStore.update(threadId, { viewed: false });

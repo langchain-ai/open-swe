@@ -165,7 +165,7 @@ export function AgentsHome() {
   }, [panelCollapsed, stream.threadId])
 
   useEffect(() => {
-    if (!isDesktop || localProjects.length === 0) return
+    if (!isDesktop) return
     const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
@@ -244,11 +244,14 @@ export function AgentsHome() {
     })
     if (runTarget === "local") {
       const desktop = window.openSweDesktop
-      const cwd = localProjectPath
-      if (!desktop || !cwd) {
+      const project = localProjects.find(
+        (candidate) => candidate.cwd === localProjectPath
+      )
+      if (!desktop || !project) {
         setLocalError("Choose or add a project from This Mac before sending.")
         return
       }
+      const cwd = project.cwd
       const draft = {
         prompt,
         images,
