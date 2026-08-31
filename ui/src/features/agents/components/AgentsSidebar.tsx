@@ -462,19 +462,19 @@ export function AgentsSidebar({
     !sidebar.isPending &&
     prefs.filters.includeResolved &&
     sidebar.data.resolved.hasMore
-  // The global window is what discovers projects, so in project mode its
-  // "Show more" belongs to the Projects section — under Recents it looked like
-  // it was paging Recents while the threads landed in folders.
+  // The global window feeds every section, so it grows on scroll at the bottom
+  // of the list rather than from a button inside one section.
   const loadMoreThreads = (hasMoreActive || hasMoreArchived) && (
-    <LoadMoreThreadsButton
+    <LoadMoreThreadsOnScroll
       label="Load more threads"
+      root={scrollViewport}
       loading={
         sidebar.activeQuery.isFetchingNextPage ||
         sidebar.resolvedQuery.isFetchingNextPage
       }
-      onClick={() => {
-        if (hasMoreActive) void sidebar.activeQuery.fetchNextPage()
-        if (hasMoreArchived) void sidebar.resolvedQuery.fetchNextPage()
+      onLoadMore={() => {
+        if (hasMoreActive) sidebar.activeQuery.fetchNextPage()
+        if (hasMoreArchived) sidebar.resolvedQuery.fetchNextPage()
       }}
     />
   )
@@ -639,41 +639,34 @@ export function AgentsSidebar({
               </section>
             )}
 
-            {byProject &&
-              (unpinnedGroups.length > 0 || isDesktop || loadMoreThreads) && (
-                <section className="mb-3">
-                  <SidebarSectionHeader
-                    label="Projects"
-                    collapsed={sectionCollapsed("projects")}
-                    onToggleCollapsed={() => toggleSectionCollapsed("projects")}
-                    menu={
-                      <SidebarSectionMenu label="Projects options">
-                        {viewMenuItems}
-                        {removeProjectItems}
-                      </SidebarSectionMenu>
-                    }
-                    action={
-                      isDesktop ? (
-                        <SidebarSectionAction
-                          label="Add project"
-                          icon={<PlusIcon className="size-4" />}
-                          onClick={() => void addLocalProject()}
-                        />
-                      ) : undefined
-                    }
-                  />
-                  {!sectionCollapsed("projects") && (
-                    <>
-                      {unpinnedGroups.map(renderProjectGroup)}
-                      {loadMoreThreads}
-                    </>
-                  )}
-                </section>
-              )}
+            {byProject && (unpinnedGroups.length > 0 || isDesktop) && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Projects"
+                  collapsed={sectionCollapsed("projects")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                  menu={
+                    <SidebarSectionMenu label="Projects options">
+                      {viewMenuItems}
+                      {removeProjectItems}
+                    </SidebarSectionMenu>
+                  }
+                  action={
+                    isDesktop ? (
+                      <SidebarSectionAction
+                        label="Add project"
+                        icon={<PlusIcon className="size-4" />}
+                        onClick={() => void addLocalProject()}
+                      />
+                    ) : undefined
+                  }
+                />
+                {!sectionCollapsed("projects") &&
+                  unpinnedGroups.map(renderProjectGroup)}
+              </section>
+            )}
 
-            {(grouped.recents.length > 0 ||
-              (!byProject && loadMoreThreads) ||
-              resolvedLoading) && (
+            {(grouped.recents.length > 0 || resolvedLoading) && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Recents"
@@ -700,7 +693,6 @@ export function AgentsSidebar({
                     {grouped.recents.map((item) => (
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
-                    {!byProject && loadMoreThreads}
                     {resolvedLoading && (
                       <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
                         <CircleNotchIcon className="size-3.5 animate-spin" />
@@ -711,6 +703,7 @@ export function AgentsSidebar({
                 )}
               </section>
             )}
+            {loadMoreThreads}
             {isEmpty && !sidebar.isError && !localThreads.isError && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
                 {hasActiveFilters(prefs.filters)
@@ -910,26 +903,59 @@ function ThreadSourceError({
   )
 }
 
-function LoadMoreThreadsButton({
+/**
+ * Grows the shared thread window as the user reaches the end of the list. The
+ * button stays for keyboard users and for environments without an
+ * IntersectionObserver, but scrolling is the path everyone else takes.
+ */
+function LoadMoreThreadsOnScroll({
   label,
+  root,
   loading,
-  onClick,
+  onLoadMore,
 }: {
-  /** Screen-reader label; the button itself just reads "Show more". */
+  /** Screen-reader label; the row itself only shows a spinner. */
   label: string
+  root: React.RefObject<HTMLDivElement | null>
   loading: boolean
-  onClick: () => void
+  onLoadMore: () => void
 }) {
+  const sentinel = useRef<HTMLButtonElement>(null)
+  const load = useRef(onLoadMore)
+  useEffect(() => {
+    load.current = onLoadMore
+  })
+  useEffect(() => {
+    const node = sentinel.current
+    if (!node || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!loading && entries.some((entry) => entry.isIntersecting)) {
+          load.current()
+        }
+      },
+      { root: root.current, rootMargin: "200px" }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+    // Re-observing once a page settles re-fires for a sentinel that never left
+    // the viewport, so a short list keeps filling until it scrolls.
+  }, [loading, root])
+
   return (
     <button
+      ref={sentinel}
       type="button"
-      onClick={onClick}
+      onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="mt-0.5 flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-2.5 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] text-muted-foreground/70"
     >
-      {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
-      {loading ? "Loading…" : "Show more"}
+      {loading ? (
+        <CircleNotchIcon className="size-3.5 animate-spin" />
+      ) : (
+        <span className="sr-only">{label}</span>
+      )}
     </button>
   )
 }
