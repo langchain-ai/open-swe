@@ -15,18 +15,29 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 90_000,
-  expect: { timeout: 60_000 },
+  // Nearly every assertion here settles in under two seconds; the handful that
+  // wait on a real agent run pass their own longer timeout. A low default is
+  // what keeps a genuine failure from burning 60s per assertion before the run
+  // goes red.
+  expect: { timeout: 20_000 },
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL,
-    // Locally, always capture the replayable artifacts: a trace (DOM snapshots,
-    // network, console, source — open with `pnpm exec playwright show-trace`) and a
-    // screen recording. Recording costs real time per spec, so CI records
-    // nothing on the first attempt and captures both on the retry a failure
-    // gets. `retain-on-failure` would not do: it still records everything and
-    // only discards the files afterwards.
-    trace: process.env.CI ? "on-first-retry" : "on",
-    video: process.env.CI ? "on-first-retry" : "on",
+    // Recording a trace (DOM snapshots, network, console, source — open with
+    // `pnpm exec playwright show-trace`) and a video costs real time on every
+    // spec, pass or fail. Default to keeping them only for failures; set
+    // E2E_ARTIFACTS=1 to capture everything, which is what you want when
+    // debugging a spec that passes but does the wrong thing.
+    trace: process.env.E2E_ARTIFACTS
+      ? "on"
+      : process.env.CI
+        ? "on-first-retry"
+        : "retain-on-failure",
+    video: process.env.E2E_ARTIFACTS
+      ? "on"
+      : process.env.CI
+        ? "on-first-retry"
+        : "retain-on-failure",
     screenshot: "only-on-failure",
     // SLOW_MO=700 pnpm exec playwright test --headed  → watch it run in human time.
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
@@ -42,13 +53,15 @@ export default defineConfig({
     url: `${baseURL}/mock/github/data`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
-    // Deterministic busy window for the interrupt-debounce spec: the fake LLM
-    // holds the first run open this long so follow-ups reliably land mid-run.
+    // Busy window for the specs that hold a run open so follow-ups land
+    // mid-run. `E2E_BUSY_HOLD:<n>` overrides it per message; this is the
+    // fallback for the specs that just say `E2E_BUSY_HOLD` and then cancel the
+    // run, so it only has to outlast the assertions they make while it is busy.
     // E2E_UI_SERVER is where the harness proxies page requests for rendering;
     // global-setup starts that server on the same port.
     env: {
       ...process.env,
-      E2E_BUSY_HOLD_SECONDS: "20",
+      E2E_BUSY_HOLD_SECONDS: "8",
       E2E_UI_SERVER: `http://127.0.0.1:${UI_PORT}`,
       E2E_EXIT_WHEN_ORPHANED: "1",
     },

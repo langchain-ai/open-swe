@@ -176,6 +176,21 @@ jobs:
       - name: Install Python deps (langgraph dev runtime)
         run: uv sync --locked
       - run: corepack enable
+      # Chromium and the dashboard build are identical across the three shards
+      # and change only with their own inputs, so all three restore them rather
+      # than each spending ~50s redoing the work. Both keys are computed before
+      # `pnpm install` writes ui/node_modules, which would otherwise dominate
+      # the ui/** hash and never hit.
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/e2e/package.json', 'pnpm-lock.yaml') }}
+      - name: Cache dashboard build
+        uses: actions/cache@v4
+        with:
+          path: ui/.output
+          key: ui-output-${{ runner.os }}-${{ hashFiles('ui/**', 'pnpm-lock.yaml') }}
       - name: Install workspace dependencies
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
