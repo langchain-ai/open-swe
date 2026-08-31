@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { ArrowUpRight, CircleAlert as CircleAlertIcon } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 
@@ -39,11 +38,14 @@ import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 interface AgentThreadViewProps {
   thread: AgentThread
   autoFocusComposer?: boolean
 }
+
+const EMPTY_MESSAGES: Array<Message> = []
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
 function editedPaths(messages: Array<Message>): Array<string> {
@@ -81,7 +83,7 @@ export function AgentThreadView({
   autoFocusComposer = false,
 }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -173,14 +175,16 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
+  const snapshotMessages =
+    thread.messages.length > 0 ? thread.messages : EMPTY_MESSAGES
   const baseMessages = useMemo<Array<Message>>(() => {
-    if (thread.messages.length > 0) return thread.messages
+    if (snapshotMessages.length > 0) return snapshotMessages
     return streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
-  }, [stream.messages, stream.toolCalls, thread.messages])
+  }, [snapshotMessages, stream.messages, stream.toolCalls])
 
   const isStreaming =
     thread.status === "running" ||

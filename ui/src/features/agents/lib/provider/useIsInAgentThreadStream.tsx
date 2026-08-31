@@ -7,7 +7,7 @@ import type { ReactNode } from "react"
  * under the shared `/agents` stream provider (e.g. `AgentsHome`, automations).
  *
  * The `AgentThreadStreamProvider` now spans the whole `/agents` layout, so
- * `useStreamContext()` is callable everywhere underneath it — but shared UI
+ * `useAgentThreadRuntime()` is callable everywhere underneath it — but shared UI
  * such as `CloudPromptBar` must still distinguish "in a live thread" (show the
  * stop button, mount nested subagent activity) from the home prompt. The
  * boundary is wrapped only around the thread view, so this stays `false` on

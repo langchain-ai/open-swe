@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
@@ -34,6 +33,7 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -69,7 +69,7 @@ export function AgentsHome() {
   // thread id (no client-minted id, no `getState` 404), fires the first
   // `run.start` — which lazily creates + stamps + owns the thread server-side
   // — and keeps streaming after we navigate to the minted thread below.
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
