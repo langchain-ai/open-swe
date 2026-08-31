@@ -690,6 +690,7 @@ def _search_metadata_filter(
     resolved: bool | None = None,
     source: str | None = None,
     automation_id: str | None = None,
+    repo: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(search_filter)
     if resolved is True:
@@ -698,6 +699,10 @@ def _search_metadata_filter(
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
+    if repo:
+        owner, _, name = repo.partition("/")
+        metadata["repo_owner"] = owner
+        metadata["repo_name"] = name
     return metadata
 
 
@@ -747,8 +752,11 @@ def _metadata_matches_filters(
     query: str | None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    if repo and _metadata_repo(metadata)[2].lower() != repo.lower():
+        return False
     is_automation = _is_automation_thread(metadata)
     if scope == "interactive" and is_automation:
         return False
@@ -852,6 +860,7 @@ async def _collect_thread_candidates(
     query: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
@@ -865,6 +874,7 @@ async def _collect_thread_candidates(
             resolved=resolved,
             source=source,
             automation_id=automation_id,
+            repo=repo,
         )
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
@@ -887,6 +897,7 @@ async def _collect_thread_candidates(
                     query=query,
                     scope=scope,
                     automation_id=automation_id,
+                    repo=repo,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -1132,6 +1143,7 @@ async def list_dashboard_threads_page(
     query: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
     filter_participant_login: str | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
@@ -1157,6 +1169,7 @@ async def list_dashboard_threads_page(
         query=query,
         scope=scope,
         automation_id=automation_id,
+        repo=repo,
         target_per_search=target,
         surfaced_only=surfaced_only,
         sort_by=sort_by,

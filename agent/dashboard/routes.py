@@ -1903,11 +1903,14 @@ async def api_list_threads_page(
     q: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
+    if repo is not None and repo.count("/") != 1:
+        raise HTTPException(400, "repo must be owner/name")
     return await list_dashboard_threads_page(
         session["sub"],
         email=session.get("email"),
@@ -1921,6 +1924,7 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        repo=repo,
         sort_by=sort_by,
     )
 

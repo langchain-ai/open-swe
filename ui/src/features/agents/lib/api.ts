@@ -125,6 +125,8 @@ export interface ThreadsPageParams {
   q?: string
   scope?: ThreadScope
   automationId?: string
+  /** `owner/name`; scopes the page to one project. */
+  repo?: string
   sortBy?: ThreadSortBy
 }
 
@@ -229,6 +231,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.q) search.set("q", params.q)
   if (params.scope) search.set("scope", params.scope)
   if (params.automationId) search.set("automation_id", params.automationId)
+  if (params.repo) search.set("repo", params.repo)
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""

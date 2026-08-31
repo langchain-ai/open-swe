@@ -585,7 +585,11 @@ export function useSidebarThreads({
     resolvedQuery: {
       isLoading: includeResolved && query.isPending,
       isFetchingNextPage:
-        query.isFetching && (query.data?.resolved.limit ?? 0) < resolvedLimit,
+        // Compare against the limit actually requested: with archived hidden
+        // the request sends 0, so comparing to local state left every 2s poll
+        // flickering the button into "Loading…".
+        query.isFetching &&
+        (query.data?.resolved.limit ?? 0) < params.resolvedLimit,
       fetchNextPage: () =>
         setResolvedLimit((limit) => limit + SIDEBAR_PAGE_SIZE),
     },
@@ -1028,6 +1032,42 @@ export function useInfiniteThreadsPages(
     refetchInterval: 2000,
   })
   return pagesQuery
+}
+
+export const SIDEBAR_PROJECT_PAGE_SIZE = 20
+
+/**
+ * A project folder pages its own repo instead of riding on the sidebar's
+ * global window — expanding one project must not pull unrelated threads into
+ * the other sections.
+ */
+export function useSidebarProjectThreads({
+  repoFullName,
+  includeResolved = false,
+  includeAutomations = false,
+  enabled = true,
+}: {
+  repoFullName: string | null
+  includeResolved?: boolean
+  includeAutomations?: boolean
+  enabled?: boolean
+}) {
+  const query = useInfiniteThreadsPages(
+    {
+      repo: repoFullName ?? undefined,
+      limit: SIDEBAR_PROJECT_PAGE_SIZE,
+      ...(includeResolved ? {} : { resolved: false }),
+      scope: includeAutomations ? "all" : "interactive",
+    },
+    { enabled: enabled && Boolean(repoFullName), pollWhileRunning: true }
+  )
+  return {
+    items: query.data?.pages.flatMap((page) => page.items) ?? [],
+    hasMore: query.hasNextPage,
+    isPending: query.isPending,
+    isFetchingNextPage: query.isFetchingNextPage,
+    fetchNextPage: () => void query.fetchNextPage(),
+  }
 }
 
 export function useThreadsPage(

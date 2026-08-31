@@ -17,6 +17,7 @@ import { Kanban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { SessionUser } from "@/lib/api"
+import type { AgentThread } from "@/features/agents/lib/types"
 import type {
   SidebarProjectGroup,
   SidebarThreadItem,
@@ -61,6 +62,7 @@ import {
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
+  useSidebarProjectThreads,
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
@@ -407,6 +409,23 @@ export function AgentsSidebar({
     </>
   )
 
+  // Each folder pages its own repo, so a project's "Show more" cannot spill
+  // threads into the other sections.
+  const repoByProjectKey = new Map(
+    cloudItems.flatMap((item) =>
+      item.projectKey && item.thread.repoFullName
+        ? [[item.projectKey, item.thread.repoFullName] as const]
+        : []
+    )
+  )
+  const hydrateProjectThreads = (threads: Array<AgentThread>) =>
+    filterThreads(
+      threads
+        .filter((thread) => !cloudPinnedIds.has(thread.id))
+        .map(cloudSidebarThread),
+      prefs.filters
+    )
+
   const renderProjectGroup = (group: SidebarProjectGroup) => (
     <ProjectGroup
       key={group.key}
@@ -415,6 +434,13 @@ export function AgentsSidebar({
       collapsed={prefs.collapsedProjectKeys.includes(group.key)}
       expanded={prefs.expandedProjectKeys.includes(group.key)}
       pinned={pinnedProjectKeys.has(group.key)}
+      repoFullName={
+        localOnly ? null : (repoByProjectKey.get(group.key) ?? null)
+      }
+      includeResolved={prefs.filters.includeResolved}
+      includeAutomations={prefs.filters.includeAutomations}
+      sort={prefs.sortChats}
+      hydrate={hydrateProjectThreads}
       onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
       onExpand={() => expandProject(group.key)}
       onTogglePin={() => toggleProjectPin(group.key)}
@@ -436,6 +462,23 @@ export function AgentsSidebar({
     !sidebar.isPending &&
     prefs.filters.includeResolved &&
     sidebar.data.resolved.hasMore
+  // The global window is what discovers projects, so in project mode its
+  // "Show more" belongs to the Projects section — under Recents it looked like
+  // it was paging Recents while the threads landed in folders.
+  const loadMoreThreads = (hasMoreActive || hasMoreArchived) && (
+    <LoadMoreThreadsButton
+      label="Load more threads"
+      loading={
+        sidebar.activeQuery.isFetchingNextPage ||
+        sidebar.resolvedQuery.isFetchingNextPage
+      }
+      onClick={() => {
+        if (hasMoreActive) void sidebar.activeQuery.fetchNextPage()
+        if (hasMoreArchived) void sidebar.resolvedQuery.fetchNextPage()
+      }}
+    />
+  )
+  const byProject = prefs.organize === "project"
   const isEmpty =
     !cloudPending &&
     (!isDesktop || !localThreads.isPending) &&
@@ -596,8 +639,8 @@ export function AgentsSidebar({
               </section>
             )}
 
-            {prefs.organize === "project" &&
-              (unpinnedGroups.length > 0 || isDesktop) && (
+            {byProject &&
+              (unpinnedGroups.length > 0 || isDesktop || loadMoreThreads) && (
                 <section className="mb-3">
                   <SidebarSectionHeader
                     label="Projects"
@@ -619,14 +662,17 @@ export function AgentsSidebar({
                       ) : undefined
                     }
                   />
-                  {!sectionCollapsed("projects") &&
-                    unpinnedGroups.map(renderProjectGroup)}
+                  {!sectionCollapsed("projects") && (
+                    <>
+                      {unpinnedGroups.map(renderProjectGroup)}
+                      {loadMoreThreads}
+                    </>
+                  )}
                 </section>
               )}
 
             {(grouped.recents.length > 0 ||
-              hasMoreActive ||
-              hasMoreArchived ||
+              (!byProject && loadMoreThreads) ||
               resolvedLoading) && (
               <section className="mb-3">
                 <SidebarSectionHeader
@@ -654,21 +700,7 @@ export function AgentsSidebar({
                     {grouped.recents.map((item) => (
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
-                    {(hasMoreActive || hasMoreArchived) && (
-                      <LoadMoreThreadsButton
-                        label="Load more threads"
-                        loading={
-                          sidebar.activeQuery.isFetchingNextPage ||
-                          sidebar.resolvedQuery.isFetchingNextPage
-                        }
-                        onClick={() => {
-                          if (hasMoreActive)
-                            void sidebar.activeQuery.fetchNextPage()
-                          if (hasMoreArchived)
-                            void sidebar.resolvedQuery.fetchNextPage()
-                        }}
-                      />
-                    )}
+                    {!byProject && loadMoreThreads}
                     {resolvedLoading && (
                       <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
                         <CircleNotchIcon className="size-3.5 animate-spin" />
@@ -714,6 +746,11 @@ function ProjectGroup({
   collapsed,
   expanded,
   pinned,
+  repoFullName,
+  includeResolved,
+  includeAutomations,
+  sort,
+  hydrate,
   onToggleCollapsed,
   onExpand,
   onTogglePin,
@@ -724,19 +761,49 @@ function ProjectGroup({
   collapsed: boolean
   expanded: boolean
   pinned: boolean
+  repoFullName: string | null
+  includeResolved: boolean
+  includeAutomations: boolean
+  sort: ChatSort
+  hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
   onTogglePin: () => void
   renderRow: (item: SidebarThreadItem) => React.ReactNode
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
-  const preview = group.threads.slice(0, PROJECT_PREVIEW_COUNT)
-  const active = group.threads.find((thread) => thread.key === activeKey)
+  const project = useSidebarProjectThreads({
+    repoFullName,
+    includeResolved,
+    includeAutomations,
+    enabled: expanded && !collapsed,
+  })
+  const seeded = new Set(group.threads.map((thread) => thread.key))
+  const threads = expanded
+    ? sortSidebarThreads(
+        [
+          ...group.threads,
+          ...hydrate(project.items).filter((item) => !seeded.has(item.key)),
+        ],
+        sort
+      )
+    : group.threads
+  const preview = threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const active = threads.find((thread) => thread.key === activeKey)
   const shown = expanded
-    ? group.threads
+    ? threads
     : active && !preview.includes(active)
       ? [...preview.slice(0, -1), active]
       : preview
+  const loading =
+    project.isFetchingNextPage ||
+    (expanded && Boolean(repoFullName) && project.isPending)
+  // Before expanding, a full preview is the only hint that the repo has more
+  // threads than the sidebar's global window happened to include.
+  const hasMore = expanded
+    ? project.hasMore || loading
+    : shown.length < threads.length ||
+      (Boolean(repoFullName) && threads.length >= PROJECT_PREVIEW_COUNT)
 
   return (
     <div className="mb-1">
@@ -767,13 +834,15 @@ function ProjectGroup({
       {!collapsed && (
         <>
           {shown.map(renderRow)}
-          {shown.length < group.threads.length && (
+          {hasMore && (
             <button
               type="button"
-              onClick={onExpand}
-              className="flex w-full items-center rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground"
+              onClick={() => (expanded ? project.fetchNextPage() : onExpand())}
+              disabled={loading}
+              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
             >
-              Show more
+              {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
+              {loading ? "Loading…" : "Show more"}
             </button>
           )}
         </>
