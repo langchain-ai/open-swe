@@ -104,7 +104,7 @@ const NAV = [
 ] as const
 
 /** Threads shown per project before the group needs a "Show more". */
-const PROJECT_PREVIEW_COUNT = 12
+const PROJECT_PREVIEW_COUNT = 5
 
 /**
  * Tracks whether the scroll container has content hidden above or below, so
@@ -411,6 +411,7 @@ export function AgentsSidebar({
     <ProjectGroup
       key={group.key}
       group={group}
+      activeKey={activeKey}
       collapsed={prefs.collapsedProjectKeys.includes(group.key)}
       expanded={prefs.expandedProjectKeys.includes(group.key)}
       pinned={pinnedProjectKeys.has(group.key)}
@@ -653,20 +654,19 @@ export function AgentsSidebar({
                     {grouped.recents.map((item) => (
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
-                    {hasMoreActive && (
+                    {(hasMoreActive || hasMoreArchived) && (
                       <LoadMoreThreadsButton
-                        label="Load more cloud threads"
-                        loading={sidebar.activeQuery.isFetchingNextPage}
-                        onClick={() => void sidebar.activeQuery.fetchNextPage()}
-                      />
-                    )}
-                    {hasMoreArchived && (
-                      <LoadMoreThreadsButton
-                        label="Load more archived cloud threads"
-                        loading={sidebar.resolvedQuery.isFetchingNextPage}
-                        onClick={() =>
-                          void sidebar.resolvedQuery.fetchNextPage()
+                        label="Load more threads"
+                        loading={
+                          sidebar.activeQuery.isFetchingNextPage ||
+                          sidebar.resolvedQuery.isFetchingNextPage
                         }
+                        onClick={() => {
+                          if (hasMoreActive)
+                            void sidebar.activeQuery.fetchNextPage()
+                          if (hasMoreArchived)
+                            void sidebar.resolvedQuery.fetchNextPage()
+                        }}
                       />
                     )}
                     {resolvedLoading && (
@@ -710,6 +710,7 @@ export function AgentsSidebar({
 
 function ProjectGroup({
   group,
+  activeKey,
   collapsed,
   expanded,
   pinned,
@@ -719,6 +720,7 @@ function ProjectGroup({
   renderRow,
 }: {
   group: SidebarProjectGroup
+  activeKey?: string
   collapsed: boolean
   expanded: boolean
   pinned: boolean
@@ -728,9 +730,13 @@ function ProjectGroup({
   renderRow: (item: SidebarThreadItem) => React.ReactNode
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
+  const preview = group.threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const active = group.threads.find((thread) => thread.key === activeKey)
   const shown = expanded
     ? group.threads
-    : group.threads.slice(0, PROJECT_PREVIEW_COUNT)
+    : active && !preview.includes(active)
+      ? [...preview.slice(0, -1), active]
+      : preview
 
   return (
     <div className="mb-1">
