@@ -22,7 +22,7 @@ function readProjects(filePath) {
       }
       let cwd;
       try {
-        cwd = fs.realpathSync(path.normalize(item.cwd));
+        cwd = fs.realpathSync(item.cwd);
         if (!fs.statSync(cwd).isDirectory()) continue;
       } catch {
         continue;

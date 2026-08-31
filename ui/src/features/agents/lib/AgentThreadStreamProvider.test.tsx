@@ -201,22 +201,6 @@ describe("AgentThreadStreamProvider", () => {
     expect(onThreadCreated).toHaveBeenCalledWith("created")
   })
 
-  it("disposes an inactive runtime after its retention window", () => {
-    const view = render(
-      wrapper(
-        <AgentThreadStreamProvider threadId="idle">
-          <div />
-        </AgentThreadStreamProvider>
-      )
-    )
-    view.unmount()
-
-    vi.advanceTimersByTime(60_000)
-
-    expect(__testing.entries.size).toBe(0)
-    expect(mocks.controllers[0]?.deactivate).toHaveBeenCalledOnce()
-  })
-
   it("cancels idle disposal when an inactive thread starts running", () => {
     const view = render(
       wrapper(

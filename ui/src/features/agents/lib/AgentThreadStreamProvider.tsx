@@ -18,7 +18,7 @@ import { agentsApi } from "./api"
 import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
 import type { ReactNode } from "react"
 
-export type AgentThreadTransport = "cloud" | "local"
+type AgentThreadTransport = "cloud" | "local"
 
 interface RuntimeEntry {
   key: string
@@ -70,14 +70,13 @@ function disposeRuntime(entry: RuntimeEntry): void {
 }
 
 function scheduleRuntimeDisposal(entry: RuntimeEntry): void {
+  if (entry.disposeTimer) {
+    clearTimeout(entry.disposeTimer)
+    entry.disposeTimer = undefined
+  }
   if (entry.mounts > 0 || entry.controller.rootStore.getSnapshot().isLoading) {
-    if (entry.disposeTimer) {
-      clearTimeout(entry.disposeTimer)
-      entry.disposeTimer = undefined
-    }
     return
   }
-  if (entry.disposeTimer) clearTimeout(entry.disposeTimer)
   entry.disposeTimer = setTimeout(
     () => disposeRuntime(entry),
     IDLE_RUNTIME_TTL_MS
@@ -170,26 +169,12 @@ function createRuntime(
   return entry
 }
 
-function getRuntime(
-  transport: AgentThreadTransport,
-  threadId: string | null,
-  queryClient: QueryClient
-): RuntimeEntry {
-  return (
-    runtimeEntries.get(runtimeKey(transport, threadId)) ??
-    createRuntime(transport, threadId, queryClient)
-  )
-}
-
 function retainRuntime(entry: RuntimeEntry): () => void {
   entry.mounts += 1
   entry.lastUsedAt = Date.now()
-  if (entry.disposeTimer) {
-    clearTimeout(entry.disposeTimer)
-    entry.disposeTimer = undefined
-  }
+  scheduleRuntimeDisposal(entry)
   return () => {
-    entry.mounts = Math.max(0, entry.mounts - 1)
+    entry.mounts -= 1
     entry.lastUsedAt = Date.now()
     scheduleRuntimeDisposal(entry)
   }
@@ -269,7 +254,9 @@ export function AgentThreadStreamProvider({
 }) {
   const queryClient = useQueryClient()
   const entry = useMemo(
-    () => getRuntime(transport, threadId, queryClient),
+    () =>
+      runtimeEntries.get(runtimeKey(transport, threadId)) ??
+      createRuntime(transport, threadId, queryClient),
     [queryClient, threadId, transport]
   )
   const stream = useRuntimeStream(entry)

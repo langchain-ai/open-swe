@@ -65,10 +65,6 @@ function promptContent(text: string, images: Array<ImageChunk>) {
 }
 
 export function AgentsHome() {
-  // Submit straight through the layout's persistent stream. The SDK mints the
-  // thread id (no client-minted id, no `getState` 404), fires the first
-  // `run.start` — which lazily creates + stamps + owns the thread server-side
-  // — and keeps streaming after we navigate to the minted thread below.
   const stream = useAgentThreadRuntime()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
