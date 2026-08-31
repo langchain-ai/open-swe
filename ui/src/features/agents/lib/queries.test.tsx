@@ -8,6 +8,7 @@ import { agentsApi } from "./api"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
+  markAgentThreadPending,
   markAgentThreadViewed,
   setAgentThreadStatus,
   useAgentThreadWorkingTreeDiff,
@@ -315,6 +316,68 @@ describe("useSidebarThreads", () => {
       resolvedLimit: SIDEBAR_PAGE_SIZE,
       includeAutomations: false,
     })
+  })
+
+  it("keeps a just-created thread listed after navigating away from it", async () => {
+    // The server list lags the run's own metadata write, so it comes back
+    // without the thread the user just started.
+    vi.spyOn(agentsApi, "listSidebarThreads").mockResolvedValue(
+      emptySidebar(SIDEBAR_PAGE_SIZE, 0)
+    )
+    const client = testClient()
+    const created = {
+      id: "brand-new",
+      resolved: false,
+      status: "running",
+      createdAt: Date.now(),
+    } as AgentThread
+
+    // No activeThreadId: the user has navigated back to start another thread.
+    const { result } = renderHook(() => useSidebarThreads({}), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+
+    await waitFor(() => expect(result.current.isPending).toBe(false))
+    act(() => markAgentThreadPending(client, created))
+
+    await waitFor(() =>
+      expect(result.current.data.active.items.map((t) => t.id)).toEqual([
+        "brand-new",
+      ])
+    )
+  })
+
+  it("drops a pending thread once the server list carries it", async () => {
+    const created = {
+      id: "brand-new",
+      resolved: false,
+      status: "running",
+      createdAt: Date.now(),
+    } as AgentThread
+    vi.spyOn(agentsApi, "listSidebarThreads").mockResolvedValue({
+      active: { items: [created], limit: SIDEBAR_PAGE_SIZE, hasMore: false },
+      resolved: { items: [], limit: 0, hasMore: false },
+    })
+    const client = testClient()
+
+    const { result } = renderHook(() => useSidebarThreads({}), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+
+    await waitFor(() => expect(result.current.isPending).toBe(false))
+    act(() => markAgentThreadPending(client, created))
+
+    // Listed exactly once — the held copy must not double up the server row.
+    await waitFor(() =>
+      expect(result.current.data.active.items.map((t) => t.id)).toEqual([
+        "brand-new",
+      ])
+    )
+    expect(client.getQueryData(["agent-threads", "pending"])).toEqual([])
   })
 
   it("adds a selected thread outside the shared sidebar window", async () => {

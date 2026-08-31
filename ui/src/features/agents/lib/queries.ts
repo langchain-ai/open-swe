@@ -341,6 +341,40 @@ export function seedAgentThreadLists(
   queryClient.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
 }
 
+/**
+ * Threads created in this session that the server's list has not caught up to.
+ *
+ * A new thread exists in LangGraph the moment the SDK mints its id, but the
+ * sidebar is built from a metadata search that the run's own metadata write
+ * lands in a beat later. Without somewhere to hold it, the row a user just
+ * created shows up, gets replaced by the next list response that predates it,
+ * and vanishes until something else refetches.
+ */
+const pendingThreadsKey = ["agent-threads", "pending"] as const
+
+/** How long an unconfirmed thread stays pinned before we stop waiting for it. */
+const PENDING_THREAD_TTL_MS = 2 * 60_000
+
+export function markAgentThreadPending(
+  queryClient: QueryClient,
+  thread: AgentThread
+): void {
+  queryClient.setQueryData<Array<AgentThread>>(pendingThreadsKey, (prev) => [
+    thread,
+    ...(prev ?? []).filter((item) => item.id !== thread.id),
+  ])
+}
+
+function usePendingThreads(): Array<AgentThread> {
+  const { data } = useQuery({
+    queryKey: pendingThreadsKey,
+    queryFn: () => [] as Array<AgentThread>,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  })
+  return data ?? []
+}
+
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
 }
@@ -588,6 +622,7 @@ export function useSidebarThreads({
   includeResolved?: boolean
   enabled?: boolean
 }) {
+  const queryClient = useQueryClient()
   const [activeLimit, setActiveLimit] = useState(SIDEBAR_PAGE_SIZE)
   const [resolvedLimit, setResolvedLimit] = useState(SIDEBAR_PAGE_SIZE)
   const params = {
@@ -602,13 +637,40 @@ export function useSidebarThreads({
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    // Deliberately no interval. Re-fetching the whole list to watch one thread
-    // replaced every row's identity twice a second, so the list re-rendered
-    // (and re-sorted) continuously while an agent worked. `useRunningThreadStatuses`
-    // polls just the running rows and patches them in place instead.
+    // No interval for watching a run: re-fetching the whole list to learn one
+    // thread is still going replaced every row's identity twice a second, and
+    // `useRunningThreadStatuses` patches those rows in place instead. The list
+    // is still refetched while a just-created thread is missing from it, which
+    // is the one case a status patch cannot express.
+    // Read from the cache at call time rather than from a render value: the
+    // pending list is only known after this query's own response.
+    refetchInterval: () =>
+      (queryClient.getQueryData<Array<AgentThread>>(pendingThreadsKey)
+        ?.length ?? 0) > 0
+        ? 2000
+        : false,
   })
   useRunningThreadStatuses(query.data, enabled)
-  const activeThreadLoaded = sidebarThreads(query.data).some(
+  const listed = sidebarThreads(query.data)
+  const listedIds = new Set(listed.map((thread) => thread.id))
+  const pendingThreads = usePendingThreads()
+  const unconfirmed = pendingThreads.filter(
+    (thread) => !listedIds.has(thread.id)
+  )
+  // Stop holding a thread as soon as the list carries it, or once it has waited
+  // long enough that it is never arriving, so the held copy never outlives the
+  // server's own row. Ageing happens here rather than in the filter above
+  // because the clock has no place in render.
+  useEffect(() => {
+    if (pendingThreads.length === 0) return
+    const now = Date.now()
+    const keep = unconfirmed.filter(
+      (thread) => now - thread.createdAt < PENDING_THREAD_TTL_MS
+    )
+    if (keep.length === pendingThreads.length) return
+    queryClient.setQueryData<Array<AgentThread>>(pendingThreadsKey, keep)
+  }, [pendingThreads.length, queryClient, unconfirmed])
+  const activeThreadLoaded = listed.some(
     (thread) => thread.id === activeThreadId
   )
   const activeThreadQuery = useQuery({
@@ -630,7 +692,7 @@ export function useSidebarThreads({
   }
   const activeThread = activeThreadLoaded ? undefined : activeThreadQuery.data
   const group = activeThread?.resolved ? "resolved" : "active"
-  const data =
+  const withActive =
     activeThread && (!activeThread.resolved || includeResolved)
       ? {
           ...baseData,
@@ -640,6 +702,21 @@ export function useSidebarThreads({
           },
         }
       : baseData
+  // A just-created thread stays visible wherever the user navigates, not only
+  // while it happens to be the open one.
+  const stillMissing = unconfirmed.filter(
+    (thread) => thread.id !== activeThread?.id
+  )
+  const data =
+    stillMissing.length > 0
+      ? {
+          ...withActive,
+          active: {
+            ...withActive.active,
+            items: [...stillMissing, ...withActive.active.items],
+          },
+        }
+      : withActive
 
   return {
     data,

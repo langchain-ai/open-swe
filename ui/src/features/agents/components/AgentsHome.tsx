@@ -19,6 +19,7 @@ import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPa
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
+  markAgentThreadPending,
   optimisticThread,
   seedAgentThreadLists,
   useAgentSkills,
@@ -155,6 +156,10 @@ export function AgentsHome() {
     const thread = optimisticThread(id, draft)
     queryClient.setQueryData(agentThreadKeys.detail(id), thread)
     seedAgentThreadLists(queryClient, thread)
+    // Hold the row until a list response actually carries it. The invalidate
+    // below races the run's own metadata write, so without this the seeded row
+    // is dropped by the very refetch it triggers.
+    markAgentThreadPending(queryClient, thread)
     invalidateAgentThreadLists(queryClient)
   }, [stream.threadId, queryClient])
 
