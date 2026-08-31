@@ -50,6 +50,7 @@ export default defineConfig({
       ...process.env,
       E2E_BUSY_HOLD_SECONDS: "20",
       E2E_UI_SERVER: `http://127.0.0.1:${UI_PORT}`,
+      E2E_EXIT_WHEN_ORPHANED: "1",
     },
   },
 });

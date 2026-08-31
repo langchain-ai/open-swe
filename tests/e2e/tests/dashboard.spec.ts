@@ -843,11 +843,33 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    const [sessionResponse, profileResponse, mappingResponse] =
+      await Promise.all([
+        page.request.get("/dashboard/api/me"),
+        page.request.get("/dashboard/api/profile"),
+        page.request.get("/dashboard/api/my-mapping"),
+      ]);
+    const session = (await sessionResponse.json()) as {
+      slack_oauth_enabled?: boolean;
+    };
+    const profile = (await profileResponse.json()) as {
+      default_model?: string;
+    };
+    const mapping = (await mappingResponse.json()) as {
+      slack_user_id?: string;
+    };
+    const needsOnboarding =
+      !profile.default_model ||
+      (session.slack_oauth_enabled && !mapping.slack_user_id);
     await page.goto("/agents");
     const dismissOnboarding = page.getByRole("button", {
       name: "Maybe later",
     });
-    if (await dismissOnboarding.isVisible()) await dismissOnboarding.click();
+    if (needsOnboarding) {
+      await expect(dismissOnboarding).toBeVisible();
+      await dismissOnboarding.click();
+      await expect(dismissOnboarding).toBeHidden();
+    }
 
     const prompt = "Reproduce the new chat send experience";
     const editor = page.getByTestId("composer-editor");
