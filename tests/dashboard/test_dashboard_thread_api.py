@@ -1964,6 +1964,42 @@ def _fake_client(threads: list[dict[str, object]], monkeypatch) -> None:
     )
 
 
+async def test_list_dashboard_threads_page_finds_legacy_repo_metadata(monkeypatch) -> None:
+    """Threads predating `repo_owner` keep the repo nested under `metadata.repo`."""
+    legacy = {
+        "thread_id": "legacy",
+        "metadata": {
+            "source": "slack",
+            "github_login": "octocat",
+            "title": "Legacy thread",
+            "updated_at_ms": 1,
+            "latest_run_status": "success",
+            "repo": {"owner": "acme", "name": "api"},
+        },
+    }
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return [legacy] if metadata.get("repo") else []
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
+    )
+
+    result = await thread_api.list_dashboard_threads_page("octocat", repo="acme/api")
+
+    assert [item["id"] for item in result["items"]] == ["legacy"]
+
+
 async def test_list_dashboard_threads_sidebar_pages_recents(monkeypatch) -> None:
     threads = _make_threads(12, resolved_before=0)
     for thread in threads:

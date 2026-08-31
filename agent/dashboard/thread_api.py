@@ -695,14 +695,20 @@ def _participant_search_filters(
     return filters
 
 
-def _search_metadata_filter(
+def _search_metadata_filters(
     search_filter: dict[str, Any],
     *,
     resolved: bool | None = None,
     source: str | None = None,
     automation_id: str | None = None,
     repo: str | None = None,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
+    """Search filters for one participant filter — one per repo representation.
+
+    Threads predating `repo_owner`/`repo_name` carry the repo as a nested
+    `repo` object, and a search for the flat keys never returns them, so a
+    repo-scoped search has to ask for both.
+    """
     metadata = dict(search_filter)
     if resolved is True:
         metadata["resolved"] = True
@@ -710,11 +716,13 @@ def _search_metadata_filter(
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
-    if repo:
-        owner, _, name = repo.partition("/")
-        metadata["repo_owner"] = owner
-        metadata["repo_name"] = name
-    return metadata
+    if not repo:
+        return [metadata]
+    owner, _, name = repo.partition("/")
+    return [
+        {**metadata, "repo_owner": owner, "repo_name": name},
+        {**metadata, "repo": {"owner": owner, "name": name}},
+    ]
 
 
 async def _search_threads_batch(
@@ -877,16 +885,20 @@ async def _collect_thread_candidates(
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
-    for search_filter in searches:
-        matched_for_search = 0
-        offset = 0
-        metadata_filter = _search_metadata_filter(
+    metadata_filters = [
+        metadata_filter
+        for search_filter in searches
+        for metadata_filter in _search_metadata_filters(
             search_filter,
             resolved=resolved,
             source=source,
             automation_id=automation_id,
             repo=repo,
         )
+    ]
+    for metadata_filter in metadata_filters:
+        matched_for_search = 0
+        offset = 0
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
@@ -1044,6 +1056,33 @@ async def _scan_recent_threads(
     return sorted(kept.values(), key=_thread_updated_ms, reverse=True), repos, truncated
 
 
+async def _register_projects(
+    login: str,
+    repos: set[str],
+    *,
+    known: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Create a project for every repo the user has threads in, minus deleted ones."""
+    records = dict(known) if known is not None else await list_project_records(login)
+    created = await ensure_projects(
+        login, sorted(repo for repo in repos if project_key(repo) not in records)
+    )
+    for repo in created:
+        records[project_key(repo)] = {"repo_full_name": repo, "deleted_at_ms": None}
+    return records
+
+
+async def _discover_project_repos(client: Any, searches: list[dict[str, Any]]) -> set[str]:
+    """Repos on the user's most recent page of threads — metadata only, no summaries."""
+    repos: set[str] = set()
+    for search_filter in searches:
+        batch = await _search_threads_batch(
+            client, search_filter, limit=_THREADS_SEARCH_PAGE, offset=0
+        )
+        repos.update(repo for thread in batch if (repo := _thread_repo(thread)))
+    return repos
+
+
 async def list_dashboard_threads_sidebar(
     login: str,
     *,
@@ -1093,11 +1132,8 @@ async def list_dashboard_threads_sidebar(
             target=safe_offset + safe_limit,
         )
 
-    # Any repo the user has threads in is a project, unless they deleted it.
     with phase(record, "projects"):
-        await ensure_projects(
-            login, sorted(repo for repo in repos if project_key(repo) not in projects)
-        )
+        await _register_projects(login, repos, known=projects)
 
     window = candidates[safe_offset : safe_offset + safe_limit]
     visible_ids = {thread_id for thread in window if (thread_id := _thread_id(thread))}
@@ -1146,6 +1182,10 @@ async def list_dashboard_projects(
 
     Deleted projects come back too, with no threads: the sidebar needs them to
     offer a way back after a delete, and listing them costs nothing.
+
+    Discovery happens here as well as in the sidebar: the two requests race on a
+    first load, and a caller that waited for the other one to register the
+    projects would render an empty sidebar until the next refetch.
     """
     safe_preview = min(max(preview, 1), 25)
     # One search per project, so a user with dozens of them does not open
@@ -1177,7 +1217,13 @@ async def list_dashboard_projects(
             "deleted": False,
         }
 
-    records = await list_project_records(login)
+    records = await _register_projects(
+        login,
+        await _discover_project_repos(
+            langgraph_client(),
+            _participant_search_filters(login, email=email, include_all=include_all),
+        ),
+    )
     active = [
         record["repo_full_name"]
         for record in records.values()
