@@ -109,6 +109,10 @@ _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 _SANDBOX_CREATING_SENTINEL = "__creating__"
+# Turns of transcript the detail endpoint returns so the UI can paint the
+# thread before the streaming SDK has hydrated it. Sized to cover the tail a
+# user actually looks at on open; the SDK's own hydrate fills in the rest.
+_TRANSCRIPT_TURN_LIMIT = 10
 
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
@@ -472,6 +476,55 @@ def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any]
     }
 
 
+def _message_type(message: object) -> str | None:
+    """Role of a state message, over both the HTTP (dict) and in-process shapes."""
+    if isinstance(message, Mapping):
+        raw = message.get("type")
+        return raw if isinstance(raw, str) else None
+    raw = getattr(message, "type", None)
+    return raw if isinstance(raw, str) else None
+
+
+def _transcript_window(messages: Sequence[Any], *, turn_limit: int) -> tuple[list[Any], bool]:
+    """Trim a transcript to its last ``turn_limit`` human-anchored turns.
+
+    A turn starts at a human message and runs through the agent and tool
+    messages that answer it, so cutting on human anchors never leaves a tool
+    result whose call was trimmed away.
+    """
+    anchors = [index for index, message in enumerate(messages) if _message_type(message) == "human"]
+    if len(anchors) <= turn_limit:
+        return list(messages), False
+    return list(messages[anchors[-turn_limit] :]), True
+
+
+async def _thread_transcript(client: Any, thread_id: str) -> dict[str, Any]:
+    """The tail of a thread's transcript, for the UI's first paint.
+
+    The streaming SDK hydrates the authoritative transcript client-side, but it
+    cannot start until the view mounts. Returning the tail here lets an opened
+    thread render immediately instead of holding a blank pane through a
+    ``getState`` round trip. Failure is not fatal: the SDK still hydrates, so a
+    miss costs the fast paint and nothing else.
+    """
+    try:
+        state = await client.threads.get_state(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not read transcript for %s", thread_id, exc_info=True)
+        return {"messages": [], "hasMore": False, "available": False}
+    values = state.get("values") if isinstance(state, Mapping) else None
+    messages = values.get("messages") if isinstance(values, Mapping) else None
+    if not isinstance(messages, list):
+        return {"messages": [], "hasMore": False, "available": False}
+    window, has_more = _transcript_window(messages, turn_limit=_TRANSCRIPT_TURN_LIMIT)
+    return {"messages": window, "hasMore": has_more, "available": True}
+
+
+async def _no_transcript() -> None:
+    """Stand-in for the transcript read when the caller opted out."""
+    return None
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -552,6 +605,10 @@ async def _thread_summary(
         ),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
+        # What the sidebar orders on. Kept separate from `updatedAt` so the
+        # list holds still while a run writes state; see
+        # `_thread_sidebar_anchor_ms`.
+        "sortAnchorAt": _thread_sidebar_anchor_ms(thread),
         "traceUrl": trace_url,
         "sourceUrl": _thread_source_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
@@ -737,6 +794,23 @@ def _thread_timestamp_ms(thread: ThreadLike, field: _ThreadSortBy) -> int:
 
 def _thread_updated_ms(thread: ThreadLike) -> int:
     return _thread_timestamp_ms(thread, "updated_at")
+
+
+def _thread_sidebar_anchor_ms(thread: ThreadLike) -> int:
+    """Sort position for a sidebar row, stable while the agent works.
+
+    Ordering by ``updated_at`` makes a running thread climb the list on every
+    state write, so rows shuffle under the pointer for as long as the agent is
+    busy. Anchoring on the thread's creation, re-anchored when the user last
+    said something, moves a row only on the events a user causes — the list
+    holds still between them.
+    """
+    metadata = _thread_metadata(thread)
+    last_user_ms = metadata.get("last_user_message_at_ms")
+    return max(
+        _thread_timestamp_ms(thread, "created_at"),
+        int(last_user_ms) if isinstance(last_user_ms, (int, float)) else 0,
+    )
 
 
 def _metadata_matches_filters(
@@ -1031,8 +1105,10 @@ async def list_dashboard_threads_sidebar(
                     break
                 offset += _THREADS_SEARCH_PAGE
 
-    active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
-    resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
+    active_candidates = sorted(active.values(), key=_thread_sidebar_anchor_ms, reverse=True)
+    resolved_candidates = sorted(
+        resolved_threads.values(), key=_thread_sidebar_anchor_ms, reverse=True
+    )
     active_window = active_candidates[:safe_active_limit]
     resolved_window = resolved_candidates[:safe_resolved_limit]
     active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}
@@ -1238,7 +1314,12 @@ async def get_dashboard_terminal_sandbox(
 
 
 async def get_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    mark_viewed: bool = True,
+    include_transcript: bool = True,
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -1250,10 +1331,17 @@ async def get_dashboard_thread(
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata)
 
-    # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
-    # `GET …/state` → `stream.messages`), so the detail endpoint returns
-    # metadata only — no server-side message conversion.
-    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    # Read the transcript tail alongside the run refresh so the detail response
+    # carries enough to paint the thread. The SDK still hydrates the full,
+    # authoritative transcript once the view mounts.
+    #
+    # The client asks for it once per open and opts out on the polls that follow,
+    # since this endpoint doubles as the run-status heartbeat while a run is live
+    # and a snapshot on every beat would be a `get_state` every few seconds.
+    (thread, latest_run_status, latest_run_id), transcript = await asyncio.gather(
+        _refresh_latest_run_metadata(client, thread),
+        _thread_transcript(client, thread_id) if include_transcript else _no_transcript(),
+    )
     metadata = thread_metadata(thread)
     status = _run_status_to_agent_status(
         thread.get("status") if isinstance(thread.get("status"), str) else "idle",
@@ -1273,11 +1361,14 @@ async def get_dashboard_thread(
         )
         thread = {**as_thread_dict(thread), "metadata": metadata}
 
-    return await _thread_summary(
+    summary = await _thread_summary(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
     )
+    if transcript is not None:
+        summary["transcript"] = transcript
+    return summary
 
 
 async def _resolve_requested_environment(requested: Any) -> str | None:
@@ -1719,6 +1810,9 @@ async def _enrich_run_start_command(
         metadata_update["resolved"] = False
         metadata_update["resolved_at_ms"] = None
     metadata_update["updated_at_ms"] = _now_ms()
+    # Re-anchors the thread's sidebar position: the list moves for what the
+    # user did, not for every write the run makes afterwards.
+    metadata_update["last_user_message_at_ms"] = metadata_update["updated_at_ms"]
     metadata = {**metadata, **metadata_update}
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
@@ -1804,6 +1898,7 @@ async def send_dashboard_message(
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
+        "last_user_message_at_ms": now_ms,
         "plan_mode": body.plan_mode,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
@@ -2013,6 +2108,53 @@ def _tracked_pull_requests(metadata: Mapping[str, Any]) -> list[object]:
             "number": pr_ref.number,
         }
     ]
+
+
+async def get_dashboard_thread_statuses(thread_ids: Sequence[str]) -> dict[str, Any]:
+    """Live status for named threads, so the sidebar can poll without refetching.
+
+    Refetching the whole sidebar to learn that one thread is still running
+    replaces every row's identity and re-renders the list; this returns only
+    the fields that move while a run is in flight.
+
+    The ids come from the caller, so each thread's readability is checked
+    individually — a thread the caller cannot read is omitted rather than
+    refused, since one stale id should not fail the whole poll.
+    """
+    client = langgraph_client()
+
+    async def load(thread_id: str) -> dict[str, Any] | None:
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("Status lookup failed for %s", thread_id, exc_info=True)
+            return None
+        metadata = thread_metadata(thread)
+        if not _thread_is_readable(metadata):
+            return None
+        thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
+            client, thread
+        )
+        metadata = thread_metadata(thread)
+        return {
+            "id": thread_id,
+            "status": _run_status_to_agent_status(
+                thread.get("status") if isinstance(thread.get("status"), str) else "idle",
+                latest_run_status
+                or (
+                    metadata.get("latest_run_status")
+                    if isinstance(metadata.get("latest_run_status"), str)
+                    else None
+                ),
+            ),
+            "updatedAt": _thread_updated_ms(thread),
+            "viewed": _is_thread_viewed(metadata, latest_run_id),
+            "resolved": _is_thread_resolved(metadata),
+            "planStatus": metadata.get("plan_status"),
+        }
+
+    results = await asyncio.gather(*(load(thread_id) for thread_id in thread_ids))
+    return {"threads": [result for result in results if result is not None]}
 
 
 async def get_dashboard_thread_pull_request_status(

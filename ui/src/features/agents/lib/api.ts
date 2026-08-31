@@ -2,6 +2,7 @@ import type {
   AgentPullRequestContextResponse,
   AgentPullRequestStatusResponse,
   AgentSchedule,
+  AgentStatus,
   AgentThread,
   ImageChunk,
   Message,
@@ -148,6 +149,16 @@ export interface SidebarThreads {
   pinned?: Array<AgentThread>
 }
 
+/** The fields of a thread that move while a run is in flight. */
+export interface ThreadStatusUpdate {
+  id: string
+  status: AgentStatus
+  updatedAt: number
+  viewed: boolean
+  resolved: boolean
+  planStatus?: string | null
+}
+
 const API_BASE = dashboardApiBase()
 
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
@@ -282,6 +293,11 @@ export const agentsApi = {
     agentsRequest<SidebarThreads>(
       `/threads/sidebar${buildSidebarThreadsQuery(params)}`
     ),
+  listThreadStatuses: (threadIds: Array<string>) =>
+    agentsRequest<{ threads: Array<ThreadStatusUpdate> }>("/threads/statuses", {
+      method: "POST",
+      body: JSON.stringify({ threadIds }),
+    }),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   resolveThread: (threadId: string, resolved: boolean) =>
@@ -319,12 +335,20 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
-  getThread: (threadId: string, options?: { markViewed?: boolean }) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}${
-        options?.markViewed === false ? "?mark_viewed=false" : ""
-      }`
-    ),
+  getThread: (
+    threadId: string,
+    options?: { markViewed?: boolean; includeTranscript?: boolean }
+  ) => {
+    const query = new URLSearchParams()
+    if (options?.markViewed === false) query.set("mark_viewed", "false")
+    if (options?.includeTranscript === false) {
+      query.set("include_transcript", "false")
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : ""
+    return agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}${suffix}`
+    )
+  },
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>
   ) =>

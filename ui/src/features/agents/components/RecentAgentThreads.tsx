@@ -1,19 +1,22 @@
-import { useEffect, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
-import { cn } from "@/lib/utils"
 
-const MAX_MOUNTED_THREADS = 3
-
-function addRecentThread(recentThreadIds: Array<string>, threadId: string) {
-  return [threadId, ...recentThreadIds.filter((id) => id !== threadId)].slice(
-    0,
-    MAX_MOUNTED_THREADS
-  )
-}
-
+/**
+ * The opened thread, in its own stream.
+ *
+ * Each thread gets a provider of its own rather than re-pointing a shared one:
+ * the SDK's thread switch clears the transcript and cancels whatever runs the
+ * user had queued on the thread being left, so a follow-up typed during a run
+ * would vanish on navigation. A provider per thread never switches.
+ *
+ * Only the active thread is mounted. Keeping recently-viewed threads mounted
+ * used to be what made switching back feel instant, at the cost of a live SSE
+ * connection and a hidden DOM tree per retained thread; the cached detail and
+ * the server's transcript snapshot now cover that first paint without holding
+ * streams open.
+ */
 export function RecentAgentThreads({
   activeThreadId,
   autoFocusComposer = false,
@@ -22,37 +25,19 @@ export function RecentAgentThreads({
   autoFocusComposer?: boolean
 }) {
   const inheritedThreadId = useAgentThreadStream().threadId
-  const [recentThreadIds, setRecentThreadIds] = useState(() => [activeThreadId])
-  const visibleThreadIds = addRecentThread(recentThreadIds, activeThreadId)
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setRecentThreadIds((current) => addRecentThread(current, activeThreadId))
-  }, [activeThreadId])
-
-  return visibleThreadIds.map((threadId) => {
-    const active = threadId === activeThreadId
-    const page = (
-      <AgentThreadPage
-        threadId={threadId}
-        active={active}
-        autoFocusComposer={active && autoFocusComposer}
-      />
-    )
-    return (
-      <div
-        key={threadId}
-        className={cn(active ? "contents" : "hidden")}
-        aria-hidden={!active}
-      >
-        {threadId === inheritedThreadId ? (
-          page
-        ) : (
-          <AgentThreadStreamProvider threadId={threadId}>
-            {page}
-          </AgentThreadStreamProvider>
-        )}
-      </div>
-    )
-  })
+  const page = (
+    <AgentThreadPage
+      threadId={activeThreadId}
+      autoFocusComposer={autoFocusComposer}
+    />
+  )
+  // A thread the layout's provider already owns — the one it just minted for a
+  // brand new thread — is rendered against that provider, so the run it started
+  // keeps streaming instead of being re-joined by a second one.
+  if (activeThreadId === inheritedThreadId) return page
+  return (
+    <AgentThreadStreamProvider key={activeThreadId} threadId={activeThreadId}>
+      {page}
+    </AgentThreadStreamProvider>
+  )
 }

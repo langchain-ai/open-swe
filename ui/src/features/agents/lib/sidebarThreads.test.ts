@@ -9,6 +9,7 @@ import {
   groupSidebarThreadsByProject,
   localSidebarThread,
   sidebarProjectOptions,
+  sortSidebarThreads,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -121,6 +122,48 @@ describe("sidebar thread adapters", () => {
   })
 })
 
+describe("sortSidebarThreads", () => {
+  it("holds its order while a running thread's updatedAt climbs", () => {
+    const older = cloudSidebarThread(
+      cloudThread({ id: "older", createdAt: 10, sortAnchorAt: 10 })
+    )
+    const newer = cloudSidebarThread(
+      cloudThread({ id: "newer", createdAt: 20, sortAnchorAt: 20 })
+    )
+    const before = sortSidebarThreads([older, newer], "updated")
+    expect(before.map((thread) => thread.id)).toEqual(["newer", "older"])
+
+    // A run writing state bumps updatedAt on the older thread; the sidebar
+    // must not lift it above the newer one.
+    const busy = cloudSidebarThread(
+      cloudThread({
+        id: "older",
+        createdAt: 10,
+        sortAnchorAt: 10,
+        updatedAt: 9999,
+      })
+    )
+    const after = sortSidebarThreads([busy, newer], "updated")
+    expect(after.map((thread) => thread.id)).toEqual(["newer", "older"])
+  })
+
+  it("re-anchors a thread when the user sends a message", () => {
+    const older = cloudSidebarThread(
+      cloudThread({ id: "older", createdAt: 10, sortAnchorAt: 10 })
+    )
+    const newer = cloudSidebarThread(
+      cloudThread({ id: "newer", createdAt: 20, sortAnchorAt: 20 })
+    )
+    const replied = cloudSidebarThread(
+      cloudThread({ id: "older", createdAt: 10, sortAnchorAt: 30 })
+    )
+    expect(
+      sortSidebarThreads([replied, newer], "updated").map((t) => t.id)
+    ).toEqual(["older", "newer"])
+    expect(older.sortAnchorAt).toBe(10)
+  })
+})
+
 describe("groupSidebarThreadsByProject", () => {
   it("buckets threads per project and ranks projects by their freshest thread", () => {
     const alphaOld = cloudSidebarThread(
@@ -128,7 +171,7 @@ describe("groupSidebarThreadsByProject", () => {
         id: "alpha-old",
         repo: "alpha",
         repoFullName: "acme/alpha",
-        updatedAt: 5,
+        sortAnchorAt: 5,
       })
     )
     const alphaNew = cloudSidebarThread(
@@ -136,7 +179,7 @@ describe("groupSidebarThreadsByProject", () => {
         id: "alpha-new",
         repo: "alpha",
         repoFullName: "acme/alpha",
-        updatedAt: 40,
+        sortAnchorAt: 40,
       })
     )
     const beta = cloudSidebarThread(
@@ -144,7 +187,7 @@ describe("groupSidebarThreadsByProject", () => {
         id: "beta",
         repo: "beta",
         repoFullName: "acme/beta",
-        updatedAt: 50,
+        sortAnchorAt: 50,
       })
     )
     const items = [alphaOld, alphaNew, beta]

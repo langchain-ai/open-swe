@@ -26,6 +26,7 @@ import { Messages } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { transcriptToUiMessages } from "@/features/agents/lib/threadTranscript"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
@@ -173,14 +174,23 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
+  // The server's transcript tail, kept apart from the live stream so it can
+  // paint on the first frame and be dropped the moment the SDK hydrates.
+  const snapshotMessages = useMemo(
+    () => transcriptToUiMessages(thread.transcript),
+    [thread.transcript]
+  )
   const baseMessages = useMemo<Array<Message>>(() => {
     if (thread.messages.length > 0) return thread.messages
-    return streamMessagesToUi(
-      stream.messages,
-      stream.toolCalls,
-      messageArrivalTimestamp
-    )
-  }, [stream.messages, stream.toolCalls, thread.messages])
+    if (stream.messages.length > 0) {
+      return streamMessagesToUi(
+        stream.messages,
+        stream.toolCalls,
+        messageArrivalTimestamp
+      )
+    }
+    return snapshotMessages
+  }, [snapshotMessages, stream.messages, stream.toolCalls, thread.messages])
 
   const isStreaming =
     thread.status === "running" ||
@@ -202,7 +212,8 @@ export function AgentThreadView({
   const isThinking = stream.isLoading
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
-  // Show a loading state during that one-time fetch instead of the empty state.
+  // Show a loading state during that one-time fetch only when there is nothing
+  // to show yet — with a snapshot the thread is already on screen.
   const isHydrating = stream.isThreadLoading && !hasMessages
   // A failed hydrate is indistinguishable from an empty thread in the snapshot,
   // so say so rather than claiming the thread has no messages. `stream.error`

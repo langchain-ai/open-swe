@@ -4,6 +4,7 @@ import { Client, overrideFetchImplementation } from "@langchain/langgraph-sdk"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "./api"
+import { withStreamResume } from "./streamResume"
 import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
 import type { ReactNode } from "react"
 
@@ -66,11 +67,13 @@ export function AgentThreadStreamProvider({
     transport === "local" ? LOCAL_AGENT_ASSISTANT_ID : AGENT_ASSISTANT_ID
   const client = useMemo(
     () =>
-      new Client({
-        apiUrl,
-        apiKey: null,
-        ...(transport === "cloud" ? { onRequest: dashboardRequest } : {}),
-      }),
+      withStreamResume(
+        new Client({
+          apiUrl,
+          apiKey: null,
+          ...(transport === "cloud" ? { onRequest: dashboardRequest } : {}),
+        })
+      ),
     [apiUrl, transport]
   )
 

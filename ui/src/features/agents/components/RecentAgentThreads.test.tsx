@@ -21,35 +21,35 @@ vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
 }))
 
 vi.mock("@/features/agents/components/AgentThreadPage", () => ({
-  AgentThreadPage: ({
-    threadId,
-    active,
-  }: {
-    threadId: string
-    active: boolean
-  }) => <div data-active={active}>thread {threadId}</div>,
+  AgentThreadPage: ({ threadId }: { threadId: string }) => (
+    <div>thread {threadId}</div>
+  ),
 }))
 
 afterEach(cleanup)
 
 describe("RecentAgentThreads", () => {
-  it("keeps the three most recently viewed threads mounted", () => {
+  it("mounts only the active thread", () => {
     const view = render(<RecentAgentThreads activeThreadId="one" />)
 
     act(() => view.rerender(<RecentAgentThreads activeThreadId="two" />))
-    expect(screen.getByText("thread one").dataset.active).toBe("false")
+    expect(screen.queryByText("thread one")).toBeNull()
+    expect(screen.getByText("thread two")).toBeTruthy()
+
+    act(() => view.rerender(<RecentAgentThreads activeThreadId="three" />))
+    expect(screen.queryByText("thread two")).toBeNull()
+    expect(screen.getByText("thread three")).toBeTruthy()
+  })
+
+  it("renders the layout's own thread without a second provider", () => {
+    render(<RecentAgentThreads activeThreadId="one" />)
     expect(screen.getByText("thread one").closest("[data-provider]")).toBeNull()
-    expect(screen.getByText("thread two").dataset.active).toBe("true")
+  })
+
+  it("gives every other thread its own provider", () => {
+    render(<RecentAgentThreads activeThreadId="two" />)
     expect(screen.getByText("thread two").parentElement?.dataset.provider).toBe(
       "two"
     )
-
-    act(() => view.rerender(<RecentAgentThreads activeThreadId="three" />))
-    act(() => view.rerender(<RecentAgentThreads activeThreadId="four" />))
-
-    expect(screen.queryByText("thread one")).toBeNull()
-    expect(screen.getByText("thread two")).toBeTruthy()
-    expect(screen.getByText("thread three")).toBeTruthy()
-    expect(screen.getByText("thread four")).toBeTruthy()
   })
 })

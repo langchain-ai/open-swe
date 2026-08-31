@@ -206,6 +206,7 @@ from .thread_api import (
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
+    get_dashboard_thread_statuses,
     get_dashboard_thread_working_tree_diff,
     list_dashboard_threads,
     list_dashboard_threads_page,
@@ -1944,6 +1945,18 @@ async def api_get_pull_request_checks(
     )
 
 
+class ThreadStatusesRequest(BaseModel):
+    threadIds: list[str] = Field(default_factory=list, max_length=200)
+
+
+@router.post("/threads/statuses")
+async def api_get_thread_statuses(
+    payload: ThreadStatusesRequest,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_statuses(payload.threadIds)
+
+
 @router.get("/threads/{thread_id}/pull-request-status")
 async def api_get_thread_pull_request_status(
     thread_id: str,
@@ -1976,6 +1989,7 @@ async def api_get_thread_pull_request_context(
 async def api_get_thread(
     thread_id: str,
     mark_viewed: bool = True,
+    include_transcript: bool = True,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread(
@@ -1983,6 +1997,7 @@ async def api_get_thread(
         session["sub"],
         email=session.get("email"),
         mark_viewed=mark_viewed,
+        include_transcript=include_transcript,
     )
 
 

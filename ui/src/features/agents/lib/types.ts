@@ -348,6 +348,15 @@ export interface AgentPullRequestContextResponse {
   prompt: string
 }
 
+export interface ThreadTranscript {
+  /** Serialized LangChain messages, revived client-side before rendering. */
+  messages: Array<unknown>
+  /** Whether older turns exist above this window. */
+  hasMore: boolean
+  /** False when the transcript could not be read; the SDK is then the only source. */
+  available: boolean
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -373,11 +382,23 @@ export interface AgentThread {
   resolvedAt?: number | null
   createdAt: number
   updatedAt: number
+  /**
+   * What the sidebar orders on: the thread's creation, re-anchored when the
+   * user last spoke. Distinct from `updatedAt`, which a running agent bumps
+   * constantly and which would reorder the list under the pointer.
+   */
+  sortAnchorAt?: number
   traceUrl?: string | null
   sourceUrl?: string | null
   codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
+  /**
+   * Tail of the thread's transcript, as serialized LangChain messages, so an
+   * opened thread paints before the streaming SDK has hydrated. The SDK's
+   * `stream.messages` supersede it as soon as they arrive.
+   */
+  transcript?: ThreadTranscript
   queuedMessages?: Array<QueuedThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>

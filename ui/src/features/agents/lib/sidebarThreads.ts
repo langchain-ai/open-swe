@@ -22,6 +22,8 @@ interface SidebarThreadItemBase {
   resolved?: boolean
   createdAt: number
   updatedAt: number
+  /** Stable ordering key; see `AgentThread.sortAnchorAt`. */
+  sortAnchorAt: number
   planStatus?: string | null
   pr?: AgentThread["pr"]
   /** `owner/repo` + number of `pr`, when the thread carries a full PR record. */
@@ -91,6 +93,7 @@ export function cloudSidebarThread(
     resolved: thread.resolved,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
+    sortAnchorAt: thread.sortAnchorAt ?? thread.createdAt,
     planStatus: thread.planStatus,
     pr: thread.pr,
     prRef: pullRequestRef(thread),
@@ -126,6 +129,7 @@ export function localSidebarThread(
     resolved: thread.archived === true,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
+    sortAnchorAt: thread.createdAt,
     thread,
   }
 }
@@ -215,7 +219,8 @@ export function groupSidebarThreadsByProject(
       .filter((group) => group.threads.length > 0)
       .sort(
         (left, right) =>
-          (right.threads[0]?.updatedAt ?? 0) - (left.threads[0]?.updatedAt ?? 0)
+          (right.threads[0]?.sortAnchorAt ?? 0) -
+          (left.threads[0]?.sortAnchorAt ?? 0)
       ),
     recents,
   }
@@ -235,7 +240,7 @@ function priorityRank(thread: SidebarThreadItem): number {
 
 function byRecency(left: SidebarThreadItem, right: SidebarThreadItem): number {
   return (
-    right.updatedAt - left.updatedAt ||
+    right.sortAnchorAt - left.sortAnchorAt ||
     right.createdAt - left.createdAt ||
     left.key.localeCompare(right.key)
   )

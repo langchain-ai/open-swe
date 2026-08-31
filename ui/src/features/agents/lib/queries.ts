@@ -53,22 +53,21 @@ export function invalidateAgentThreadLists(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
 }
 
-export function setAgentThreadStatus(
+/**
+ * Apply one edit to every cached thread list. The sidebar and the paged views
+ * each hold their own copy of a thread, so an edit has to reach all of them or
+ * the row it touches snaps back as soon as another list repaints.
+ */
+function mapCachedThreadLists(
   queryClient: QueryClient,
-  threadId: string,
-  status: AgentStatus
+  update: (thread: AgentThread) => AgentThread
 ): void {
-  const update = (thread: AgentThread) =>
-    thread.id === threadId ? { ...thread, status } : thread
-  queryClient.setQueryData<AgentThread>(
-    agentThreadKeys.detail(threadId),
-    (prev) => (prev ? update(prev) : prev)
-  )
   queryClient.setQueriesData<SidebarThreads>(
     { queryKey: ["agent-threads", "lists", "sidebar"] },
     (prev) =>
       prev && {
         ...prev,
+        ...(prev.pinned ? { pinned: prev.pinned.map(update) } : {}),
         active: { ...prev.active, items: prev.active.items.map(update) },
         resolved: { ...prev.resolved, items: prev.resolved.items.map(update) },
       }
@@ -84,6 +83,20 @@ export function setAgentThreadStatus(
         })),
       }
   )
+}
+
+export function setAgentThreadStatus(
+  queryClient: QueryClient,
+  threadId: string,
+  status: AgentStatus
+): void {
+  const update = (thread: AgentThread) =>
+    thread.id === threadId ? { ...thread, status } : thread
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId),
+    (prev) => (prev ? update(prev) : prev)
+  )
+  mapCachedThreadLists(queryClient, update)
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? update(prev) : prev)
@@ -508,6 +521,62 @@ function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
   ]
 }
 
+/** Interval for watching a live run, matching the previous whole-list cadence. */
+const RUNNING_STATUS_POLL_MS = 2000
+
+/**
+ * Keep the running rows of a loaded sidebar current without refetching it.
+ *
+ * Only the threads that are actually running are polled, and the response
+ * carries just the fields that move, so a repaint touches those rows instead of
+ * rebuilding every list the thread appears in.
+ */
+function useRunningThreadStatuses(
+  data: SidebarThreads | undefined,
+  enabled: boolean
+): void {
+  const queryClient = useQueryClient()
+  const runningIds = sidebarThreads(data)
+    .filter((thread) => thread.status === "running")
+    .map((thread) => thread.id)
+    .sort()
+  const idsKey = runningIds.join(",")
+
+  const { data: statuses } = useQuery({
+    queryKey: ["agent-threads", "statuses", idsKey],
+    // Split from the key rather than closing over `runningIds`, so the fetched
+    // ids and the cache key can never disagree.
+    queryFn: () => agentsApi.listThreadStatuses(idsKey.split(",")),
+    enabled: enabled && idsKey.length > 0,
+    refetchInterval: RUNNING_STATUS_POLL_MS,
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (!statuses?.threads.length) return
+    const byId = new Map(statuses.threads.map((row) => [row.id, row]))
+    let settled = false
+    mapCachedThreadLists(queryClient, (thread) => {
+      const update = byId.get(thread.id)
+      if (!update) return thread
+      if (update.status !== "running" && thread.status === "running") {
+        settled = true
+      }
+      // A new object only where something actually changed, so untouched rows
+      // keep their identity and skip re-rendering.
+      return update.status === thread.status &&
+        update.viewed === thread.viewed &&
+        update.resolved === thread.resolved &&
+        update.planStatus === thread.planStatus
+        ? thread
+        : { ...thread, ...update }
+    })
+    // A run ending can add or remove rows (a PR opened, a thread resolved),
+    // which a status patch cannot express — reconcile once, on that edge only.
+    if (settled) invalidateAgentThreadLists(queryClient)
+  }, [queryClient, statuses])
+}
+
 export function useSidebarThreads({
   activeThreadId,
   includeAutomations = false,
@@ -533,13 +602,12 @@ export function useSidebarThreads({
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    refetchInterval: (current) =>
-      sidebarThreads(current.state.data).some(
-        (thread) => thread.status === "running"
-      )
-        ? 2000
-        : false,
+    // Deliberately no interval. Re-fetching the whole list to watch one thread
+    // replaced every row's identity twice a second, so the list re-rendered
+    // (and re-sorted) continuously while an agent worked. `useRunningThreadStatuses`
+    // polls just the running rows and patches them in place instead.
   })
+  useRunningThreadStatuses(query.data, enabled)
   const activeThreadLoaded = sidebarThreads(query.data).some(
     (thread) => thread.id === activeThreadId
   )
@@ -553,8 +621,6 @@ export function useSidebarThreads({
       !activeThreadLoaded,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 2000 : false,
     retry: false,
   })
   const baseData = query.data ?? {
@@ -596,19 +662,49 @@ export function useSidebarThreads({
   }
 }
 
+/**
+ * A thread the sidebar has already loaded, used to paint an opened thread's
+ * chrome while its detail request is in flight. It carries metadata only — no
+ * transcript — so the view still shows a hydrating transcript, not a wrong one.
+ */
+function listedThread(
+  queryClient: QueryClient,
+  threadId: string
+): AgentThread | undefined {
+  for (const [, data] of queryClient.getQueriesData<SidebarThreads>({
+    queryKey: ["agent-threads", "lists", "sidebar"],
+  })) {
+    const match = sidebarThreads(data).find((thread) => thread.id === threadId)
+    if (match) return match
+  }
+  return undefined
+}
+
 export function useAgentThread(threadId: string) {
   const queryClient = useQueryClient()
   const queryKey = agentThreadKeys.detail(threadId)
+  // Resolved per render rather than inside `placeholderData` so the query's
+  // data type stays `AgentThread` — a resolver returning `undefined` widens it.
+  const placeholder = listedThread(queryClient, threadId)
 
   return useQuery({
     queryKey,
     queryFn: async ({ queryKey: key }) => {
-      const thread = await agentsApi.getThread(threadId)
-      const queuedMessages =
-        queryClient.getQueryData<AgentThread>(key)?.queuedMessages
-      return thread.status === "running" && queuedMessages?.length
-        ? { ...thread, queuedMessages }
-        : thread
+      const cached = queryClient.getQueryData<AgentThread>(key)
+      // The snapshot is only needed to paint a thread that has nothing on
+      // screen yet. Asking again on the run-status heartbeat would cost a
+      // `getState` every few seconds for no visible gain.
+      const transcript = cached?.transcript
+      const thread = await agentsApi.getThread(threadId, {
+        includeTranscript: !transcript?.available,
+      })
+      return {
+        ...thread,
+        ...(thread.transcript ? {} : transcript ? { transcript } : {}),
+        ...(thread.status === "running" && cached?.queuedMessages?.length
+          ? { queuedMessages: cached.queuedMessages }
+          : {}),
+      }
     },
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
@@ -620,6 +716,15 @@ export function useAgentThread(threadId: string) {
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and bounce the route back to /agents.
     staleTime: 30_000,
+    // Switching threads must not throw away the thread being left: coming back
+    // to it should paint from cache instead of showing a skeleton through
+    // another round trip. Thread details are small and bounded by how many
+    // threads one session opens.
+    gcTime: Infinity,
+    // First open of a thread the sidebar already lists: show its chrome now
+    // rather than a skeleton. Placeholder data is not written to the cache, so
+    // the real response still lands normally.
+    placeholderData: placeholder,
   })
 }
 
