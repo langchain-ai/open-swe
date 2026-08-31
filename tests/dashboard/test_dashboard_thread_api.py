@@ -1982,7 +1982,15 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
             searches.append(metadata)
-            return threads[offset : offset + limit]
+            matches = [
+                thread
+                for thread in threads
+                if all(
+                    cast(dict[str, object], thread["metadata"]).get(key) == value
+                    for key, value in metadata.items()
+                )
+            ]
+            return matches[offset : offset + limit]
 
     class FakeRuns:
         async def list(self, thread_id, limit=1):
@@ -1999,13 +2007,10 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
     )
 
     assert [item["id"] for item in result["items"]] == ["t0", "t1"]
-    assert any(
-        search.get("repo_owner") == "langchain-ai" and search.get("repo_name") == "open-swe"
-        for search in searches
-    )
-    assert any(
-        search.get("repo") == {"owner": "langchain-ai", "name": "open-swe"} for search in searches
-    )
+    assert searches == [
+        {"participant_logins": {"octocat": True}},
+        {"github_login": "octocat"},
+    ]
 
 
 async def test_list_dashboard_thread_projects_discovers_metadata_without_summaries(

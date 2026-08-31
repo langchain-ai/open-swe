@@ -684,14 +684,13 @@ def _participant_search_filters(
     return filters
 
 
-def _search_metadata_filters(
+def _search_metadata_filter(
     search_filter: dict[str, Any],
     *,
     resolved: bool | None = None,
     source: str | None = None,
     automation_id: str | None = None,
-    repo: str | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     metadata = dict(search_filter)
     if resolved is True:
         metadata["resolved"] = True
@@ -699,13 +698,7 @@ def _search_metadata_filters(
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
-    if not repo:
-        return [metadata]
-    owner, name = repo.split("/", 1)
-    return [
-        {**metadata, "repo_owner": owner, "repo_name": name},
-        {**metadata, "repo": {"owner": owner, "name": name}},
-    ]
+    return metadata
 
 
 async def _search_threads_batch(
@@ -873,20 +866,15 @@ async def _collect_thread_candidates(
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
-    metadata_filters = [
-        metadata_filter
-        for search_filter in searches
-        for metadata_filter in _search_metadata_filters(
+    for search_filter in searches:
+        matched_for_search = 0
+        offset = 0
+        metadata_filter = _search_metadata_filter(
             search_filter,
             resolved=resolved,
             source=source,
             automation_id=automation_id,
-            repo=repo,
         )
-    ]
-    for metadata_filter in metadata_filters:
-        matched_for_search = 0
-        offset = 0
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
