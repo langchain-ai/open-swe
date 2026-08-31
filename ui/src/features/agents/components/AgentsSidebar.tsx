@@ -213,16 +213,28 @@ export function AgentsSidebar({
   const pinnedThreads = sidebar.pinned
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
   const projectThreads = cloudProjects.flatMap((project) => project.threads)
-  // An opened thread no list carries — someone else's, or one past the window —
-  // still needs a row, and Recents is where it goes unless a folder has it.
-  const activeThread =
+  // An opened thread no list carries — someone else's, or one older than the
+  // window — still needs a row. It belongs in its project folder when one
+  // exists, and only falls back to Recents when none does.
+  const openedThread =
     sidebar.activeThread &&
     !projectThreads.some((thread) => thread.id === sidebar.activeThread?.id)
-      ? [sidebar.activeThread]
-      : []
-  const recentThreads = [...activeThread, ...sidebar.recents].filter(
-    (thread) => !cloudPinnedIds.has(thread.id)
-  )
+      ? sidebar.activeThread
+      : undefined
+  const openedProjectKey =
+    openedThread?.repoFullName &&
+    cloudProjects.some(
+      (project) =>
+        !project.deleted &&
+        project.repoFullName.toLowerCase() ===
+          openedThread.repoFullName.toLowerCase()
+    )
+      ? `project:${openedThread.repoFullName.toLowerCase()}`
+      : undefined
+  const recentThreads = [
+    ...(openedThread && !openedProjectKey ? [openedThread] : []),
+    ...sidebar.recents,
+  ].filter((thread) => !cloudPinnedIds.has(thread.id))
   const visibleThreads = [...pinnedThreads, ...recentThreads, ...projectThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
@@ -301,7 +313,12 @@ export function AgentsSidebar({
                 // A checkout of the same repo folds into the cloud folder.
                 threads: sortSidebarThreads(
                   [
-                    ...hydrateProjectThreads(project.threads),
+                    ...hydrateProjectThreads([
+                      ...(key === openedProjectKey && openedThread
+                        ? [openedThread]
+                        : []),
+                      ...project.threads,
+                    ]),
                     ...(localGroups.find((group) => group.key === key)
                       ?.threads ?? []),
                   ],
