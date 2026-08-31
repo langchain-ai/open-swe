@@ -787,7 +787,7 @@ test.describe("threads workspace", () => {
     }
     await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
     const loadMore = sidebar.getByRole("button", {
-      name: "Load more archived cloud threads",
+      name: "Load more threads",
     });
     await loadMore.click();
     await alphaGroup
