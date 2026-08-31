@@ -492,7 +492,7 @@ export function AgentsSidebar({
           {scrollEdges.top && (
             <>
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-border" />
-              <div className="pointer-events-none absolute inset-x-0 top-px z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
             </>
           )}
           {scrollEdges.bottom && (
