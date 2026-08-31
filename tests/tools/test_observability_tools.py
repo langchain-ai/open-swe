@@ -226,9 +226,12 @@ async def test_langsmith_list_runs_caps_limit() -> None:
         async def __aexit__(self, *exc):
             return None
 
-        async def list_runs(self, *, project_name: str, filter, limit: int):
+        async def list_runs(
+            self, *, project_name: str | None, project_id: str | None, filter, limit: int
+        ):
             captured["limit"] = limit
             captured["project_name"] = project_name
+            captured["project_id"] = project_id
             return
             yield
 
@@ -243,6 +246,59 @@ async def test_langsmith_list_runs_caps_limit() -> None:
         )
     assert result["success"] is True
     assert captured["limit"] == langsmith_tools._MAX_LIST_RUNS
+
+
+@pytest.mark.asyncio
+async def test_langsmith_list_runs_passes_project_id() -> None:
+    creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
+    captured: dict[str, object] = {}
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def list_runs(
+            self, *, project_name: str | None, project_id: str | None, filter, limit: int
+        ):
+            captured["project_name"] = project_name
+            captured["project_id"] = project_id
+            return
+            yield
+
+    tools = langsmith_tools._make_tools(allow_team=True)
+    list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
+    with (
+        patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
+        patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()),
+    ):
+        result = await list_runs.ainvoke(
+            {"on_behalf_of": "octo", "project_id": "c7cfabe9-0000-0000-0000-000000000000"}
+        )
+    assert result["success"] is True
+    assert captured == {
+        "project_name": None,
+        "project_id": "c7cfabe9-0000-0000-0000-000000000000",
+    }
+
+
+@pytest.mark.asyncio
+async def test_langsmith_list_runs_requires_exactly_one_project_identifier() -> None:
+    tools = langsmith_tools._make_tools(allow_team=True)
+    list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
+
+    neither = await list_runs.ainvoke({"on_behalf_of": "octo"})
+    both = await list_runs.ainvoke(
+        {"on_behalf_of": "octo", "project_name": "p", "project_id": "project-id"}
+    )
+
+    assert neither == {
+        "success": False,
+        "error": "Provide exactly one of project_name or project_id",
+    }
+    assert both == {"success": False, "error": "Provide exactly one of project_name or project_id"}
 
 
 @pytest.mark.asyncio

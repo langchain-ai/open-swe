@@ -98,22 +98,21 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
 
     async def langsmith_list_runs(
         on_behalf_of: str,
-        project_name: str,
+        project_name: str | None = None,
+        project_id: str | None = None,
         limit: int = 20,
         filter: str | None = None,
     ) -> dict[str, Any]:
-        """List recent LangSmith runs in a project.
+        """List runs by project_name for human-readable names or project_id for UUIDs from LangSmith URLs."""
+        if (project_name is None) == (project_id is None):
+            return {"success": False, "error": "Provide exactly one of project_name or project_id"}
 
-        Args:
-            on_behalf_of: GitHub login of the thread participant to act for.
-            project_name: The LangSmith project (tracing project) name.
-            limit: Maximum runs to return (capped at 50).
-            filter: Optional LangSmith filter string (e.g. "eq(status, 'error')").
-
-        Returns:
-            Dictionary with a list of runs, or an error message.
-        """
         capped = max(1, min(limit, _MAX_LIST_RUNS))
+        identifier = (
+            f"project_id={project_id!r}"
+            if project_id is not None
+            else f"project_name={project_name!r}"
+        )
 
         try:
             creds = await _creds_for(on_behalf_of, allow_team=allow_team)
@@ -122,13 +121,17 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
                     run
                     async for run in client.list_runs(
                         project_name=project_name,
+                        project_id=project_id,
                         filter=filter,
                         limit=capped,
                     )
                 ]
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_list_runs failed", exc_info=True)
-            return {"success": False, "error": f"{type(e).__name__}: {e}"}
+            error = f"{type(e).__name__}: {e}"
+            if "notfound" in type(e).__name__.lower() or "not found" in str(e).lower():
+                error += f" (lookup used {identifier}; use project_id for UUIDs and project_name for names)"
+            return {"success": False, "error": error}
         return {"success": True, "runs": [_serialize_run(r) for r in runs]}
 
     return [
