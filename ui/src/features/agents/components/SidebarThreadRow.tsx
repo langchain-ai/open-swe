@@ -339,7 +339,7 @@ export function SidebarThreadRow({
         ) : null}
       </span>
 
-      <span className="hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
+      <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
         <button
           type="button"
           aria-label={pinned ? "Unpin thread" : "Pin thread"}
