@@ -31,7 +31,8 @@ function stubFetch() {
 
 /** What the app itself requests, captured through the real api client. */
 async function recordedSidebarUrl(
-  includeAutomations: boolean
+  includeAutomations: boolean,
+  projectMode = true
 ): Promise<string> {
   const spy = stubFetch()
   await agentsApi
@@ -40,6 +41,7 @@ async function recordedSidebarUrl(
       offset: 0,
       resolved: false,
       scope: includeAutomations ? "all" : "interactive",
+      ownerless: projectMode,
     })
     .catch(() => undefined)
   const called = spy.mock.calls[0]?.[0]
@@ -129,19 +131,26 @@ describe("apiWarmupScript", () => {
   // has to be checked against the request the api client actually makes —
   // a mismatch would silently fetch the sidebar twice.
   it.each([
-    { includeAutomations: false, prefs: undefined },
+    { includeAutomations: false, projectMode: true, prefs: undefined },
     {
       includeAutomations: true,
+      projectMode: true,
       prefs: { filters: { includeAutomations: true } },
     },
     {
       includeAutomations: true,
+      projectMode: true,
       prefs: { filters: { sources: ["schedule"] } },
     },
+    {
+      includeAutomations: false,
+      projectMode: false,
+      prefs: { organize: "list" },
+    },
   ])(
-    "warms the exact sidebar URL the app requests (automations: $includeAutomations)",
-    async ({ includeAutomations, prefs }) => {
-      const expected = await recordedSidebarUrl(includeAutomations)
+    "warms the exact sidebar URL the app requests (automations: $includeAutomations, project mode: $projectMode)",
+    async ({ includeAutomations, projectMode, prefs }) => {
+      const expected = await recordedSidebarUrl(includeAutomations, projectMode)
 
       setReadyState("loading")
       stubPrefs(prefs)

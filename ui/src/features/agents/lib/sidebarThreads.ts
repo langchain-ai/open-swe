@@ -55,7 +55,7 @@ export interface SidebarProjectGroup extends SidebarProjectOption {
  * `other/api`, and two local projects both called `api`, into one folder that
  * cannot be told apart.
  */
-function projectKey(identity?: string | null): string | null {
+export function sidebarProjectKey(identity?: string | null): string | null {
   const normalized = identity?.trim().toLowerCase()
   return normalized ? `project:${normalized}` : null
 }
@@ -81,7 +81,7 @@ export function cloudSidebarThread(
     id: thread.id,
     location: "cloud",
     title: thread.title,
-    projectKey: projectKey(thread.repoFullName.trim() || projectLabel),
+    projectKey: sidebarProjectKey(thread.repoFullName.trim() || projectLabel),
     projectLabel,
     model: thread.model,
     source: thread.source,
@@ -109,7 +109,7 @@ export function localSidebarThread(
     id: thread.id,
     location: "local",
     title: thread.title,
-    projectKey: projectKey(project?.cwd ?? thread.cwd),
+    projectKey: sidebarProjectKey(project?.cwd ?? thread.cwd),
     projectLabel,
     model: thread.modelId ?? "Default",
     source: "dashboard",
@@ -141,7 +141,7 @@ export function sidebarProjectOptions(
     }
   }
   for (const project of localProjects) {
-    const key = projectKey(project.cwd)
+    const key = sidebarProjectKey(project.cwd)
     if (key) projects.set(key, project.name)
   }
   return [...projects]
