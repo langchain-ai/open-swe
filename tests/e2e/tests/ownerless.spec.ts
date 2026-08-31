@@ -52,17 +52,16 @@ async function expectComposerReady(page: Page) {
 }
 
 async function sidebarThreadIds(page: Page): Promise<Array<string>> {
+  // `include_projects` keeps project threads in the list instead of leaving
+  // them to the per-project folders, so this stays a flat "is it mine" check.
   const res = await page.request.get(
-    "/dashboard/api/threads/sidebar?active_limit=50&resolved_limit=50",
+    "/dashboard/api/threads/sidebar?limit=50&include_resolved=true&include_projects=true",
   );
   expect(res.ok(), await res.text()).toBeTruthy();
   const payload = (await res.json()) as {
-    active: { items: Array<{ id: string }> };
-    resolved: { items: Array<{ id: string }> };
+    recents: { items: Array<{ id: string }> };
   };
-  return [...payload.active.items, ...payload.resolved.items].map(
-    (item) => item.id,
-  );
+  return payload.recents.items.map((item) => item.id);
 }
 
 async function typeIntoComposer(page: Page, text: string) {

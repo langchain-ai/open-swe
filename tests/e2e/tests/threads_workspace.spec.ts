@@ -785,19 +785,18 @@ test.describe("threads workspace", () => {
         sidebar.getByRole("button", { name: group, exact: true }),
       ).toHaveCount(0);
     }
+    // A project folder pages its own repo: a preview, then its own "Show more".
     await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
-    const loadMore = sidebar.getByRole("button", {
-      name: "Load more threads",
+    const showMore = alphaGroup.getByRole("button", {
+      name: "Show more",
+      exact: true,
     });
-    await loadMore.click();
-    await alphaGroup
-      .getByRole("button", { name: "Show more", exact: true })
-      .click();
-    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 20");
-    await loadMore.click();
+    await showMore.click();
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 19");
+    await showMore.click();
     await expect(sidebar).toContainText("E2E Workspace Resolved overflow 21");
     await expect(sidebar).toContainText(TITLES.done);
-    await expect(loadMore).toHaveCount(0);
+    await expect(showMore).toHaveCount(0);
 
     const screenshotPath = testInfo.outputPath("unified-thread-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });

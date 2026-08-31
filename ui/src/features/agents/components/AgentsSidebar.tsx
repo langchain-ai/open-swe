@@ -212,13 +212,17 @@ export function AgentsSidebar({
 
   const pinnedThreads = sidebar.pinned
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
-  const recentThreads = [
-    ...(sidebar.activeThread && !sidebar.activeThread.repoFullName
-      ? [sidebar.activeThread]
-      : []),
-    ...sidebar.recents,
-  ].filter((thread) => !cloudPinnedIds.has(thread.id))
   const projectThreads = cloudProjects.flatMap((project) => project.threads)
+  // An opened thread no list carries — someone else's, or one past the window —
+  // still needs a row, and Recents is where it goes unless a folder has it.
+  const activeThread =
+    sidebar.activeThread &&
+    !projectThreads.some((thread) => thread.id === sidebar.activeThread?.id)
+      ? [sidebar.activeThread]
+      : []
+  const recentThreads = [...activeThread, ...sidebar.recents].filter(
+    (thread) => !cloudPinnedIds.has(thread.id)
+  )
   const visibleThreads = [...pinnedThreads, ...recentThreads, ...projectThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
