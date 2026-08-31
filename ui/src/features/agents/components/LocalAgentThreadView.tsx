@@ -107,6 +107,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [models, threadEffort, threadModelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
+  const [claimedPrompt, setClaimedPrompt] = useState<{
+    sessionId: string
+    prompt: DesktopLocalPromptInput
+  } | null>(null)
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
@@ -145,9 +149,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   const activity = useLocalThreadActivity()[sessionId]
+  const pendingPrompt =
+    thread?.pending ??
+    (claimedPrompt?.sessionId === sessionId ? claimedPrompt.prompt : null)
   const isRunning =
     stream.isLoading ||
-    (Boolean(thread?.pending) && !error) ||
+    (Boolean(pendingPrompt) && !error) ||
     activity === "running"
   const diffVisible =
     !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread)
@@ -179,20 +186,20 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       stream.toolCalls,
       messageArrivalTimestamp
     )
-    if (live.length > 0 || !thread?.pending) return live
-    const text = thread.pending.prompt.trim()
+    if (live.length > 0 || !pendingPrompt || !thread) return live
+    const text = pendingPrompt.prompt.trim()
     return [
       {
         id: `optimistic-user-${sessionId}`,
         author: "user",
         timestamp: new Date(thread.createdAt).toISOString(),
         chunks: [
-          ...thread.pending.images,
+          ...pendingPrompt.images,
           ...(text ? [{ kind: "text" as const, text }] : []),
         ],
       } satisfies Message,
     ]
-  }, [sessionId, stream.messages, stream.toolCalls, thread])
+  }, [pendingPrompt, sessionId, stream.messages, stream.toolCalls, thread])
 
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {
@@ -288,13 +295,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
-        if (await submit(pending.prompt, pending.images, pending.skills)) {
-          const updated =
-            await window.openSweDesktop?.clearLocalPrompt(sessionId)
-          if (updated)
-            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        } else {
-          initialPromptRef.current = null
+        const updated = await window.openSweDesktop?.clearLocalPrompt(sessionId)
+        if (!updated) return
+        queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+        setClaimedPrompt({ sessionId, prompt: pending })
+        try {
+          await submit(pending.prompt, pending.images, pending.skills)
+        } finally {
+          setClaimedPrompt(null)
         }
       })
       .catch((cause) => {
