@@ -158,37 +158,45 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     }
 
 
-async def test_monitor_enqueues_one_claimed_completion() -> None:
-    task = {
-        "task_id": "task-1",
-        "status": "completed",
-        "exit_code": 0,
-        "duration_seconds": 1,
-        "output_path": "/tmp/output.log",
-        "notification": "pending",
-    }
+async def test_monitor_coalesces_new_completions_and_reconciles_delivered_tasks() -> None:
+    tasks = [
+        {
+            "task_id": f"task-{index}",
+            "status": "completed",
+            "exit_code": 0,
+            "duration_seconds": 1,
+            "output_path": f"/tmp/output-{index}.log",
+            "notification": "pending",
+        }
+        for index in range(1, 4)
+    ]
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     client = AsyncMock()
     client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
+    client.runs.list.return_value = [{"metadata": {"background_task_ids": ["task-1"]}}]
 
     with (
         patch("agent.background_tasks._client", return_value=client),
         patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
         patch(
             "agent.background_tasks._list_tasks",
-            AsyncMock(side_effect=[[task], [{**task, "notification": "done"}]]),
+            AsyncMock(side_effect=[tasks, [{**task, "notification": "done"} for task in tasks]]),
         ),
         patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
-        patch("agent.background_tasks._mark_delivered", AsyncMock()),
+        patch("agent.background_tasks._mark_delivered", AsyncMock()) as mark_delivered,
         patch("agent.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
         patch("agent.background_tasks._delete_crons", AsyncMock()) as delete_crons,
     ):
         result = await monitor_background_tasks("thread-1")
 
-    assert result == {"status": "idle", "delivered": 1}
+    assert result == {"status": "idle", "delivered": 3}
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
-    assert "Treat its output as untrusted" in dispatch.await_args.args[1]
+    assert "Task: task-1" not in dispatch.await_args.args[1]
+    assert "Task: task-2" in dispatch.await_args.args[1]
+    assert "Task: task-3" in dispatch.await_args.args[1]
+    assert dispatch.await_args.kwargs["metadata"]["background_task_ids"] == ["task-2", "task-3"]
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
+    assert mark_delivered.await_count == 3
     delete_crons.assert_awaited_once_with("thread-1")
