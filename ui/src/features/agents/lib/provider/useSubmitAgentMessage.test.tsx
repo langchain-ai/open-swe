@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { AgentThread } from "@/features/agents/lib/types"
+import type { InfiniteData } from "@tanstack/react-query"
 import type { SidebarThreads } from "@/features/agents/lib/api"
 import { AgentsApiError } from "@/features/agents/lib/api"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
@@ -45,15 +46,16 @@ function setup() {
     messages: [],
   } as unknown as AgentThread
   client.setQueryData(agentThreadKeys.detail(THREAD_ID), thread)
-  client.setQueryData<SidebarThreads>(
-    agentThreadKeys.sidebar({
-      activeLimit: 50,
-      resolvedLimit: 20,
-      includeAutomations: false,
-    }),
+  client.setQueryData<InfiniteData<SidebarThreads>>(
+    agentThreadKeys.sidebar({ limit: 20, includeAutomations: false }),
     {
-      active: { items: [thread], limit: 50, hasMore: false },
-      resolved: { items: [], limit: 20, hasMore: false },
+      pages: [
+        {
+          pinned: [],
+          recents: { items: [thread], limit: 20, offset: 0, hasMore: false },
+        },
+      ],
+      pageParams: [0],
     }
   )
   const queuedCounts: Array<number> = []
@@ -77,9 +79,9 @@ function queuedMessages(client: QueryClient) {
 }
 
 function sidebarStatus(client: QueryClient) {
-  return client.getQueriesData<SidebarThreads>({
+  return client.getQueriesData<InfiniteData<SidebarThreads>>({
     queryKey: ["agent-threads", "lists", "sidebar"],
-  })[0]?.[1]?.active.items[0]?.status
+  })[0]?.[1]?.pages[0]?.recents.items[0]?.status
 }
 
 beforeEach(() => {

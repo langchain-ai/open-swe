@@ -5,13 +5,16 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
+  AgentProjects,
+  AgentProjectsParams,
   ScheduleUpdateRequest,
   SidebarThreads,
+  SidebarThreadsParams,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -27,11 +30,10 @@ import { api } from "@/lib/api"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
-  sidebar: (params: {
-    activeLimit: number
-    resolvedLimit: number
-    includeAutomations: boolean
-  }) => ["agent-threads", "lists", "sidebar", params] as const,
+  sidebar: (params: SidebarThreadsParams) =>
+    ["agent-threads", "lists", "sidebar", params] as const,
+  projects: (params: AgentProjectsParams) =>
+    ["agent-threads", "lists", "projects", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
@@ -64,13 +66,33 @@ export function setAgentThreadStatus(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  queryClient.setQueriesData<SidebarThreads>(
-    { queryKey: ["agent-threads", "lists", "sidebar"] },
+  mapCachedThreadLists(queryClient, (threads) => threads.map(update))
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(threadId),
+    (prev) => (prev ? update(prev) : prev)
+  )
+}
+
+/**
+ * Apply one edit to every cached thread list. The sidebar, the project
+ * folders, and the paged views all hold their own copies of a thread, so an
+ * optimistic change has to reach all of them or the row it touches snaps back
+ * as soon as another list repaints.
+ */
+function mapCachedThreadLists(
+  queryClient: QueryClient,
+  mapThreads: (threads: Array<AgentThread>) => Array<AgentThread>
+): void {
+  mapCachedSidebar(queryClient, mapThreads)
+  queryClient.setQueriesData<AgentProjects>(
+    { queryKey: ["agent-threads", "lists", "projects"] },
     (prev) =>
       prev && {
         ...prev,
-        active: { ...prev.active, items: prev.active.items.map(update) },
-        resolved: { ...prev.resolved, items: prev.resolved.items.map(update) },
+        items: prev.items.map((project) => ({
+          ...project,
+          threads: mapThreads(project.threads),
+        })),
       }
   )
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
@@ -80,14 +102,71 @@ export function setAgentThreadStatus(
         ...prev,
         pages: prev.pages.map((page) => ({
           ...page,
-          items: page.items.map(update),
+          items: mapThreads(page.items),
         })),
       }
   )
-  queryClient.setQueryData<AgentThread>(
-    agentThreadKeys.sidebarActive(threadId),
-    (prev) => (prev ? update(prev) : prev)
+  queryClient.setQueriesData<ThreadsPage>(
+    { queryKey: ["agent-threads", "lists", "page"] },
+    (prev) => prev && { ...prev, items: mapThreads(prev.items) }
   )
+}
+
+/** The sidebar is an infinite query, so every loaded recents page is patched. */
+function mapCachedSidebar(
+  queryClient: QueryClient,
+  mapThreads: (threads: Array<AgentThread>) => Array<AgentThread>
+): void {
+  queryClient.setQueriesData<InfiniteData<SidebarThreads>>(
+    { queryKey: ["agent-threads", "lists", "sidebar"] },
+    (prev) =>
+      prev && {
+        ...prev,
+        pages: prev.pages.map((page) => ({
+          ...page,
+          pinned: page.pinned && mapThreads(page.pinned),
+          recents: { ...page.recents, items: mapThreads(page.recents.items) },
+        })),
+      }
+  )
+}
+
+function findCachedThread(
+  queryClient: QueryClient,
+  threadId: string
+): AgentThread | undefined {
+  const lists: Array<Array<AgentThread>> = [
+    ...queryClient
+      .getQueriesData<InfiniteData<SidebarThreads>>({
+        queryKey: ["agent-threads", "lists", "sidebar"],
+      })
+      .flatMap(([, data]) =>
+        (data?.pages ?? []).flatMap((page) => [
+          page.pinned ?? [],
+          page.recents.items,
+        ])
+      ),
+    ...queryClient
+      .getQueriesData<AgentProjects>({
+        queryKey: ["agent-threads", "lists", "projects"],
+      })
+      .flatMap(([, data]) =>
+        (data?.items ?? []).map((project) => project.threads)
+      ),
+    ...queryClient
+      .getQueriesData<InfiniteData<ThreadsPage>>({
+        queryKey: ["agent-threads", "lists", "infinite-pages"],
+      })
+      .flatMap(([, data]) => (data?.pages ?? []).map((page) => page.items)),
+    ...queryClient
+      .getQueriesData<ThreadsPage>({
+        queryKey: ["agent-threads", "lists", "page"],
+      })
+      .map(([, data]) => data?.items ?? []),
+  ]
+  return lists
+    .flat()
+    .find((thread): thread is AgentThread => thread?.id === threadId)
 }
 
 function updateThreadPageResolved(
@@ -183,24 +262,7 @@ export function markAgentThreadViewed(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? view(prev) : prev)
   )
-  for (const [key, data] of queryClient.getQueriesData<SidebarThreads>({
-    queryKey: ["agent-threads", "lists", "sidebar"],
-  })) {
-    if (!data) continue
-    queryClient.setQueryData<SidebarThreads>(key, (prev) =>
-      prev
-        ? {
-            ...prev,
-            pinned: prev.pinned && viewList(prev.pinned),
-            active: { ...prev.active, items: viewList(prev.active.items) },
-            resolved: {
-              ...prev.resolved,
-              items: viewList(prev.resolved.items),
-            },
-          }
-        : prev
-    )
-  }
+  mapCachedThreadLists(queryClient, viewList)
 }
 
 function setAgentThreadResolved(
@@ -210,71 +272,33 @@ function setAgentThreadResolved(
 ): void {
   const update = (thread: AgentThread) =>
     thread.id === threadId ? { ...thread, resolved } : thread
-  const detail = queryClient.getQueryData<AgentThread>(
-    agentThreadKeys.detail(threadId)
-  )
-  const sidebarActive = queryClient.getQueryData<AgentThread>(
-    agentThreadKeys.sidebarActive(threadId)
-  )
-  let cachedThread = detail ?? sidebarActive
+  const cachedThread =
+    queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId)) ??
+    queryClient.getQueryData<AgentThread>(
+      agentThreadKeys.sidebarActive(threadId)
+    ) ??
+    findCachedThread(queryClient, threadId)
 
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  for (const [key, data] of queryClient.getQueriesData<SidebarThreads>({
-    queryKey: ["agent-threads", "lists", "sidebar"],
-  })) {
-    cachedThread ??= [
-      ...(data?.active.items ?? []),
-      ...(data?.resolved.items ?? []),
-    ].find((thread) => thread.id === threadId)
-    queryClient.setQueryData<SidebarThreads>(key, (prev) => {
-      if (!prev) return prev
-      const move = (source: Array<AgentThread>, target: Array<AgentThread>) => {
-        const thread = source.find((item) => item.id === threadId)
-        return thread
-          ? [update(thread), ...target.filter((item) => item.id !== threadId)]
-          : target
+  mapCachedSidebar(queryClient, (threads) => threads.map(update))
+  queryClient.setQueriesData<AgentProjects>(
+    { queryKey: ["agent-threads", "lists", "projects"] },
+    (prev) =>
+      prev && {
+        ...prev,
+        items: prev.items.map((project) => ({
+          ...project,
+          threads: project.threads.map(update),
+        })),
       }
-      return resolved
-        ? {
-            ...prev,
-            active: {
-              ...prev.active,
-              items: prev.active.items.filter((item) => item.id !== threadId),
-            },
-            resolved: {
-              ...prev.resolved,
-              items: move(prev.active.items, prev.resolved.items).slice(
-                0,
-                prev.resolved.limit
-              ),
-            },
-          }
-        : {
-            ...prev,
-            active: {
-              ...prev.active,
-              items: move(prev.resolved.items, prev.active.items).slice(
-                0,
-                prev.active.limit
-              ),
-            },
-            resolved: {
-              ...prev.resolved,
-              items: prev.resolved.items.filter((item) => item.id !== threadId),
-            },
-          }
-    })
-  }
-  for (const [key, data] of queryClient.getQueriesData<
-    InfiniteData<ThreadsPage>
-  >({ queryKey: ["agent-threads", "lists", "infinite-pages"] })) {
+  )
+  for (const [key] of queryClient.getQueriesData<InfiniteData<ThreadsPage>>({
+    queryKey: ["agent-threads", "lists", "infinite-pages"],
+  })) {
     const params = key[3] as Omit<ThreadsPageParams, "offset">
-    cachedThread ??= data?.pages
-      .flatMap((page) => page.items)
-      .find((thread) => thread.id === threadId)
     queryClient.setQueryData<InfiniteData<ThreadsPage>>(key, (prev) =>
       prev
         ? {
@@ -286,11 +310,10 @@ function setAgentThreadResolved(
         : prev
     )
   }
-  for (const [key, data] of queryClient.getQueriesData<ThreadsPage>({
+  for (const [key] of queryClient.getQueriesData<ThreadsPage>({
     queryKey: ["agent-threads", "lists", "page"],
   })) {
     const params = key[3] as ThreadsPageParams
-    cachedThread ??= data?.items.find((thread) => thread.id === threadId)
     queryClient.setQueryData<ThreadsPage>(key, (prev) =>
       prev ? updateThreadPageResolved(prev, params, threadId, resolved) : prev
     )
@@ -307,23 +330,22 @@ export function seedAgentThreadLists(
   queryClient: QueryClient,
   thread: AgentThread
 ): void {
-  queryClient.setQueriesData<SidebarThreads>(
+  queryClient.setQueriesData<InfiniteData<SidebarThreads>>(
     { queryKey: ["agent-threads", "lists", "sidebar"] },
-    (prev) => {
-      if (!prev) return prev
-      const activeItems = [
-        thread,
-        ...prev.active.items.filter((item) => item.id !== thread.id),
-      ].slice(0, prev.active.limit)
-      const resolvedItems = prev.resolved.items.filter(
-        (item) => item.id !== thread.id
-      )
-      return {
+    (prev) =>
+      prev && {
         ...prev,
-        active: { ...prev.active, items: activeItems },
-        resolved: { ...prev.resolved, items: resolvedItems },
+        pages: prev.pages.map((page, index) => ({
+          ...page,
+          recents: {
+            ...page.recents,
+            items: [
+              ...(index === 0 ? [thread] : []),
+              ...page.recents.items.filter((item) => item.id !== thread.id),
+            ],
+          },
+        })),
       }
-    }
   )
   queryClient.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
 }
@@ -498,49 +520,57 @@ export function useSeedAgentThreadDetails(
   }, [activeThreadId, queryClient, threads])
 }
 
-export const SIDEBAR_PAGE_SIZE = 10
+export const SIDEBAR_PAGE_SIZE = 20
+/** Threads a project folder shows before it has to page itself. */
+export const SIDEBAR_PROJECT_PREVIEW = 5
 
-function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
-  return [
-    ...(data?.pinned ?? []),
-    ...(data?.active.items ?? []),
-    ...(data?.resolved.items ?? []),
-  ]
+function isRunning(threads: Array<AgentThread>): boolean {
+  return threads.some((thread) => thread.status === "running")
 }
 
+/**
+ * Recents: everything outside a project, paged on its own. Project folders and
+ * pinned threads hydrate separately, so growing this list can never quietly
+ * reshuffle another section.
+ */
 export function useSidebarThreads({
   activeThreadId,
   includeAutomations = false,
   includeResolved = false,
+  includeProjects = false,
   enabled = true,
 }: {
   activeThreadId?: string
   includeAutomations?: boolean
   includeResolved?: boolean
+  includeProjects?: boolean
   enabled?: boolean
 }) {
-  const [activeLimit, setActiveLimit] = useState(SIDEBAR_PAGE_SIZE)
-  const [resolvedLimit, setResolvedLimit] = useState(SIDEBAR_PAGE_SIZE)
   const params = {
-    activeLimit,
-    resolvedLimit: includeResolved ? resolvedLimit : 0,
+    limit: SIDEBAR_PAGE_SIZE,
     includeAutomations,
+    includeResolved,
+    includeProjects,
   }
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: agentThreadKeys.sidebar(params),
-    queryFn: () => agentsApi.listSidebarThreads(params),
+    queryFn: ({ pageParam }) =>
+      agentsApi.listSidebarThreads({ ...params, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (page) =>
+      page.recents.hasMore
+        ? page.recents.offset + page.recents.items.length
+        : undefined,
     enabled,
-    placeholderData: (previous) => previous,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
-      sidebarThreads(current.state.data).some(
-        (thread) => thread.status === "running"
-      )
-        ? 2000
-        : false,
+      isRunning(sidebarThreads(current.state.data?.pages)) ? 2000 : false,
   })
-  const activeThreadLoaded = sidebarThreads(query.data).some(
+  const pages = query.data?.pages
+  const pinned = pages?.[0]?.pinned ?? []
+  const recents = pages?.flatMap((page) => page.recents.items) ?? []
+  const activeThreadLoaded = sidebarThreads(pages).some(
     (thread) => thread.id === activeThreadId
   )
   const activeThreadQuery = useQuery({
@@ -557,47 +587,86 @@ export function useSidebarThreads({
       current.state.data?.status === "running" ? 2000 : false,
     retry: false,
   })
-  const baseData = query.data ?? {
-    active: { items: [], limit: activeLimit, hasMore: false },
-    resolved: { items: [], limit: resolvedLimit, hasMore: false },
-    pinned: [],
-  }
-  const activeThread = activeThreadLoaded ? undefined : activeThreadQuery.data
-  const group = activeThread?.resolved ? "resolved" : "active"
-  const data =
-    activeThread && (!activeThread.resolved || includeResolved)
-      ? {
-          ...baseData,
-          [group]: {
-            ...baseData[group],
-            items: [activeThread, ...baseData[group].items],
-          },
-        }
-      : baseData
 
   return {
-    data,
-    activeQuery: {
-      isFetchingNextPage:
-        query.isFetching && (query.data?.active.limit ?? 0) < activeLimit,
-      fetchNextPage: () => setActiveLimit((limit) => limit + SIDEBAR_PAGE_SIZE),
-    },
-    resolvedQuery: {
-      isLoading: includeResolved && query.isPending,
-      isFetchingNextPage:
-        // Compare against the limit actually requested: with archived hidden
-        // the request sends 0, so comparing to local state left every 2s poll
-        // flickering the button into "Loading…".
-        query.isFetching &&
-        (query.data?.resolved.limit ?? 0) < params.resolvedLimit,
-      fetchNextPage: () =>
-        setResolvedLimit((limit) => limit + SIDEBAR_PAGE_SIZE),
-    },
+    pinned,
+    recents,
+    /** The opened thread when no list already carries it. */
+    activeThread: activeThreadLoaded ? undefined : activeThreadQuery.data,
+    hasMore: query.hasNextPage,
+    isFetchingNextPage: query.isFetchingNextPage,
+    fetchNextPage: () => void query.fetchNextPage(),
     isPending: query.isPending,
     isError: query.isError,
     error: query.error,
     refetch: query.refetch,
   }
+}
+
+function sidebarThreads(pages?: Array<SidebarThreads>): Array<AgentThread> {
+  return (pages ?? []).flatMap((page) => [
+    ...(page.pinned ?? []),
+    ...page.recents.items,
+  ])
+}
+
+export function useSidebarProjects({
+  includeAutomations = false,
+  includeResolved = false,
+  enabled = true,
+}: {
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  enabled?: boolean
+}) {
+  const params = {
+    preview: SIDEBAR_PROJECT_PREVIEW,
+    includeAutomations,
+    includeResolved,
+  }
+  return useQuery({
+    queryKey: agentThreadKeys.projects(params),
+    queryFn: () => agentsApi.listProjects(params),
+    enabled,
+    placeholderData: (previous) => previous,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: (current) =>
+      isRunning(
+        (current.state.data?.items ?? []).flatMap((project) => project.threads)
+      )
+        ? 2000
+        : false,
+  })
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (repoFullName: string) => agentsApi.deleteProject(repoFullName),
+    onMutate: (repoFullName) => {
+      queryClient.setQueriesData<AgentProjects>(
+        { queryKey: ["agent-threads", "lists", "projects"] },
+        (prev) =>
+          prev && {
+            ...prev,
+            items: prev.items.filter(
+              (project) => project.repoFullName !== repoFullName
+            ),
+          }
+      )
+    },
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
+export function useRestoreProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (repoFullName: string) =>
+      agentsApi.restoreProject(repoFullName),
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
 }
 
 export function useAgentThread(threadId: string) {

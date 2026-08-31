@@ -8,7 +8,7 @@ import logging
 import os
 import posixpath
 import uuid
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -72,6 +72,13 @@ from .profiles import get_profile, get_valid_access_token
 from .pull_request_checks import PullRequestState, get_pull_request_check_states
 from .pull_request_context import get_pull_request_context
 from .pull_request_status import get_pull_request_statuses
+from .sidebar_projects import (
+    delete_project,
+    ensure_projects,
+    list_project_records,
+    project_key,
+    restore_project,
+)
 from .slack_oauth import SLACK_TEAM_ID
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -654,6 +661,10 @@ async def _refresh_latest_run_metadata(
 
 _THREADS_SEARCH_PAGE = 500
 _THREADS_PAGE_SCAN_CAP = 5000
+# Recents filters out project threads after the search, so it walks raw pages
+# instead of matches: without a cap a user whose threads all sit in projects
+# would scan their whole history on every sidebar load.
+_RECENTS_SCAN_CAP = 1000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
@@ -984,133 +995,222 @@ async def _pinned_thread_summaries(
     return [summary for summary in summaries if summary is not None]
 
 
+def _thread_repo(thread: ThreadLike) -> str:
+    return _metadata_repo(_thread_metadata(thread))[2]
+
+
+async def _scan_recent_threads(
+    client: Any,
+    searches: list[dict[str, Any]],
+    *,
+    include_automations: bool,
+    include_resolved: bool,
+    keep: Callable[[ThreadLike], bool],
+    target: int,
+) -> tuple[list[ThreadLike], set[str], bool]:
+    """Recency-ordered threads passing ``keep``, the repos seen, and whether more remain."""
+    kept: dict[str, ThreadLike] = {}
+    repos: set[str] = set()
+    truncated = False
+    for search_filter in searches:
+        offset = 0
+        while offset < _RECENTS_SCAN_CAP:
+            batch = await _search_threads_batch(
+                client, search_filter, limit=_THREADS_SEARCH_PAGE, offset=offset
+            )
+            if not batch:
+                break
+            for thread in batch:
+                metadata = _thread_metadata(thread)
+                if repo := _metadata_repo(metadata)[2]:
+                    repos.add(repo)
+                thread_id = _thread_id(thread)
+                if not thread_id or thread_id in kept:
+                    continue
+                if not include_automations and _is_automation_thread(metadata):
+                    continue
+                if not include_resolved and _is_thread_resolved(metadata):
+                    continue
+                if keep(thread):
+                    kept[thread_id] = thread
+            if len(batch) < _THREADS_SEARCH_PAGE:
+                break
+            if len(kept) > target:
+                truncated = True
+                break
+            offset += _THREADS_SEARCH_PAGE
+        else:
+            truncated = True
+    return sorted(kept.values(), key=_thread_updated_ms, reverse=True), repos, truncated
+
+
 async def list_dashboard_threads_sidebar(
     login: str,
     *,
     email: str | None = None,
-    active_limit: int = 50,
-    resolved_limit: int = 20,
+    limit: int = 20,
+    offset: int = 0,
     active_thread_id: str | None = None,
     include_automations: bool = False,
+    include_resolved: bool = False,
+    include_projects: bool = False,
     include_all: bool = False,
     timings: dict[str, float] | None = None,
     counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    """Pinned threads plus the recents page: everything outside an active project.
+
+    Threads in a project live in that project's own folder, which pages itself
+    through ``/threads/page?repo=``. Deleting a project drops its threads back
+    into this list, and ``include_projects`` turns the whole thing into one
+    flat list for callers that do not render folders.
+    """
     record = timings if timings is not None else {}
     count_record = counts if counts is not None else {}
     client = langgraph_client()
     searches = _participant_search_filters(login, email=email, include_all=include_all)
-    safe_active_limit = min(max(active_limit, 1), _THREADS_PAGE_SCAN_CAP)
-    safe_resolved_limit = min(max(resolved_limit, 0), _THREADS_PAGE_SCAN_CAP)
-    active_target = safe_active_limit + 1
-    # A zero limit means the caller wants no resolved threads at all, so nothing
-    # should keep scanning for one after the active bucket fills.
-    resolved_target = safe_resolved_limit + 1 if safe_resolved_limit else 0
-    active: dict[str, ThreadLike] = {}
-    resolved_threads: dict[str, ThreadLike] = {}
+    safe_limit = min(max(limit, 1), 100)
+    safe_offset = max(offset, 0)
+
+    projects = await list_project_records(login)
+    deleted = {
+        key for key, value in projects.items() if isinstance(value.get("deleted_at_ms"), int)
+    }
+
+    def is_recent(thread: ThreadLike) -> bool:
+        if include_projects:
+            return True
+        repo = project_key(_thread_repo(thread))
+        return not repo or repo in deleted
 
     with phase(record, "search"):
-        for search_filter in searches:
-            local_active = 0
-            local_resolved = 0
-            offset = 0
-            while offset < _THREADS_PAGE_SCAN_CAP and (
-                local_active < active_target or local_resolved < resolved_target
-            ):
-                batch = await _search_threads_batch(
-                    client,
-                    search_filter,
-                    limit=_THREADS_SEARCH_PAGE,
-                    offset=offset,
-                )
-                if not batch:
-                    break
-                for thread in batch:
-                    metadata = _thread_metadata(thread)
-                    if not include_automations and _is_automation_thread(metadata):
-                        continue
-                    thread_id = _thread_id(thread)
-                    if not thread_id or thread_id in active or thread_id in resolved_threads:
-                        continue
-                    if _is_thread_resolved(metadata):
-                        local_resolved += 1
-                        resolved_threads[thread_id] = thread
-                    else:
-                        local_active += 1
-                        active[thread_id] = thread
-                if len(batch) < _THREADS_SEARCH_PAGE:
-                    break
-                offset += _THREADS_SEARCH_PAGE
+        candidates, repos, truncated = await _scan_recent_threads(
+            client,
+            searches,
+            include_automations=include_automations,
+            include_resolved=include_resolved,
+            keep=is_recent,
+            target=safe_offset + safe_limit,
+        )
 
-    active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
-    resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
-    active_window = active_candidates[:safe_active_limit]
-    resolved_window = resolved_candidates[:safe_resolved_limit]
-    active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}
-    # The dominant cost when a user's threads have no cached run status: one
-    # `runs.list` per thread, eight at a time.
-    count_record["run_refreshes"] = sum(
-        _should_refresh_latest_run(thread) for thread in (*active_window, *resolved_window)
-    )
-    count_record["threads"] = len(active_window) + len(resolved_window)
+    # Any repo the user has threads in is a project, unless they deleted it.
+    with phase(record, "projects"):
+        await ensure_projects(
+            login, sorted(repo for repo in repos if project_key(repo) not in projects)
+        )
+
+    window = candidates[safe_offset : safe_offset + safe_limit]
+    visible_ids = {thread_id for thread in window if (thread_id := _thread_id(thread))}
+    count_record["run_refreshes"] = sum(_should_refresh_latest_run(thread) for thread in window)
+    count_record["threads"] = len(window)
     with phase(record, "summarize"):
-        active_items, resolved_items, active_thread, pinned_items = await asyncio.gather(
-            _summarize_threads(
-                client,
-                active_window,
-            ),
-            _summarize_threads(
-                client,
-                resolved_window,
-            ),
+        items, active_thread, pinned_items = await asyncio.gather(
+            _summarize_threads(client, window),
             _sidebar_active_thread_summary(
                 client,
-                active_thread_id,
-                fallback_threads={**active, **resolved_threads},
-                visible_thread_ids=active_ids,
+                active_thread_id if safe_offset == 0 else None,
+                fallback_threads={
+                    thread_id: thread for thread in candidates if (thread_id := _thread_id(thread))
+                },
+                visible_thread_ids=visible_ids,
                 include_all=include_all,
             ),
             _pinned_thread_summaries(client, login, email),
         )
-    active_has_more = len(active_candidates) > safe_active_limit
-    resolved_has_more = len(resolved_candidates) > safe_resolved_limit
-    if active_thread:
-        active_thread_summary, is_resolved_active_thread = active_thread
-        if is_resolved_active_thread:
-            resolved_items = [
-                active_thread_summary,
-                *[item for item in resolved_items if item["id"] != active_thread_summary["id"]],
-            ]
-            active_items = [
-                item for item in active_items if item["id"] != active_thread_summary["id"]
-            ]
-            if len(resolved_items) > safe_resolved_limit:
-                resolved_items = resolved_items[:safe_resolved_limit]
-                resolved_has_more = True
-        else:
-            active_items = [
-                active_thread_summary,
-                *[item for item in active_items if item["id"] != active_thread_summary["id"]],
-            ]
-            resolved_items = [
-                item for item in resolved_items if item["id"] != active_thread_summary["id"]
-            ]
-            if len(active_items) > safe_active_limit:
-                active_items = active_items[:safe_active_limit]
-                active_has_more = True
+    has_more = truncated or len(candidates) > safe_offset + safe_limit
+    # An opened thread outside the window still belongs in the list it came
+    # from — but only when it is not inside a project folder.
+    if active_thread and (summary := active_thread[0]) and not summary.get("repoFullName"):
+        items = [summary, *[item for item in items if item["id"] != summary["id"]]]
     return {
-        "active": {
-            "items": active_items,
-            "limit": safe_active_limit,
-            "hasMore": active_has_more,
-        },
-        "resolved": {
-            "items": resolved_items,
-            "limit": safe_resolved_limit,
-            "hasMore": resolved_has_more,
-        },
         "pinned": pinned_items,
+        "recents": {
+            "items": items,
+            "limit": safe_limit,
+            "offset": safe_offset,
+            "hasMore": has_more,
+        },
     }
+
+
+async def list_dashboard_projects(
+    login: str,
+    *,
+    email: str | None = None,
+    preview: int = 5,
+    include_automations: bool = False,
+    include_resolved: bool = False,
+    include_all: bool = False,
+) -> dict[str, Any]:
+    """The user's projects, each with the first page of its threads.
+
+    Deleted projects come back too, with no threads: the sidebar needs them to
+    offer a way back after a delete, and listing them costs nothing.
+    """
+    safe_preview = min(max(preview, 1), 25)
+    # One search per project, so a user with dozens of them does not open
+    # dozens of concurrent searches against the thread store.
+    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+
+    async def load(repo: str) -> dict[str, Any]:
+        async with semaphore:
+            return await _load_project(repo)
+
+    async def _load_project(repo: str) -> dict[str, Any]:
+        page = await list_dashboard_threads_page(
+            login,
+            email=email,
+            limit=safe_preview,
+            offset=0,
+            include_all=include_all,
+            resolved=None if include_resolved else False,
+            scope="all" if include_automations else "interactive",
+            repo=repo,
+        )
+        items = page["items"]
+        return {
+            "repoFullName": repo,
+            "name": repo.split("/")[-1],
+            "threads": items,
+            "hasMore": page["hasMore"],
+            "lastActivityAt": max((item.get("updatedAt") or 0 for item in items), default=0),
+            "deleted": False,
+        }
+
+    records = await list_project_records(login)
+    active = [
+        record["repo_full_name"]
+        for record in records.values()
+        if not isinstance(record.get("deleted_at_ms"), int)
+    ]
+    projects = await asyncio.gather(*(load(repo) for repo in active))
+    deleted = [
+        {
+            "repoFullName": record["repo_full_name"],
+            "name": str(record["repo_full_name"]).split("/")[-1],
+            "threads": [],
+            "hasMore": False,
+            "lastActivityAt": 0,
+            "deleted": True,
+        }
+        for record in records.values()
+        if isinstance(record.get("deleted_at_ms"), int)
+    ]
+    return {
+        "items": [
+            *sorted(projects, key=lambda project: project["lastActivityAt"], reverse=True),
+            *sorted(deleted, key=lambda project: project["name"]),
+        ],
+        "preview": safe_preview,
+    }
+
+
+async def delete_dashboard_project(login: str, repo_full_name: str) -> None:
+    await delete_project(login, repo_full_name)
+
+
+async def restore_dashboard_project(login: str, repo_full_name: str) -> None:
+    await restore_project(login, repo_full_name)
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:

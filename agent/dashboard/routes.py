@@ -197,6 +197,7 @@ from .thread_api import (
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    delete_dashboard_project,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
@@ -207,6 +208,7 @@ from .thread_api import (
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     get_dashboard_thread_working_tree_diff,
+    list_dashboard_projects,
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
@@ -216,6 +218,7 @@ from .thread_api import (
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
     resolve_dashboard_thread,
+    restore_dashboard_project,
     send_dashboard_message,
     stream_dashboard_thread,
     unpin_dashboard_thread,
@@ -1844,10 +1847,12 @@ async def api_list_threads(
 
 @router.get("/threads/sidebar")
 async def api_list_threads_sidebar(
-    active_limit: int = 50,
-    resolved_limit: int = 20,
+    limit: int = 20,
+    offset: int = 0,
     active_thread_id: str | None = None,
     include_automations: bool = False,
+    include_resolved: bool = False,
+    include_projects: bool = False,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
@@ -1859,10 +1864,12 @@ async def api_list_threads_sidebar(
     payload = await list_dashboard_threads_sidebar(
         session["sub"],
         email=session.get("email"),
-        active_limit=active_limit,
-        resolved_limit=resolved_limit,
+        limit=limit,
+        offset=offset,
         active_thread_id=active_thread_id,
         include_automations=include_automations,
+        include_resolved=include_resolved,
+        include_projects=include_projects,
         include_all=all,
         timings=timings,
         counts=counts,
@@ -1927,6 +1934,57 @@ async def api_list_threads_page(
         repo=repo,
         sort_by=sort_by,
     )
+
+
+class ProjectBody(BaseModel):
+    repoFullName: str = Field(max_length=140)
+
+
+def _project_repo(repo_full_name: str) -> str:
+    repo = repo_full_name.strip()
+    owner, _, name = repo.partition("/")
+    if not owner or not name or "/" in name:
+        raise HTTPException(400, "repo must be owner/name")
+    return repo
+
+
+@router.get("/projects")
+async def api_list_projects(
+    preview: int = 5,
+    include_automations: bool = False,
+    include_resolved: bool = False,
+    all: bool = False,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    if all and not _session_is_admin(session):
+        raise HTTPException(403, "admin only")
+    return await list_dashboard_projects(
+        session["sub"],
+        email=session.get("email"),
+        preview=preview,
+        include_automations=include_automations,
+        include_resolved=include_resolved,
+        include_all=all,
+    )
+
+
+@router.post("/projects", status_code=204)
+async def api_restore_project(
+    body: ProjectBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await restore_dashboard_project(session["sub"], _project_repo(body.repoFullName))
+    return Response(status_code=204)
+
+
+@router.delete("/projects/{owner}/{name}", status_code=204)
+async def api_delete_project(
+    owner: str,
+    name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await delete_dashboard_project(session["sub"], _project_repo(f"{owner}/{name}"))
+    return Response(status_code=204)
 
 
 class PullRequestChecksRef(BaseModel):

@@ -138,16 +138,48 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarThreadsGroup {
+export interface SidebarRecentsPage {
   items: Array<AgentThread>
   limit: number
+  offset: number
   hasMore: boolean
 }
 
 export interface SidebarThreads {
-  active: SidebarThreadsGroup
-  resolved: SidebarThreadsGroup
+  recents: SidebarRecentsPage
   pinned?: Array<AgentThread>
+}
+
+/** A repo the user has threads in, plus the first page of those threads. */
+export interface AgentProject {
+  repoFullName: string
+  name: string
+  threads: Array<AgentThread>
+  hasMore: boolean
+  lastActivityAt: number
+  /** Removed by the user: kept only so the sidebar can offer a restore. */
+  deleted: boolean
+}
+
+export interface AgentProjects {
+  items: Array<AgentProject>
+  preview: number
+}
+
+export interface SidebarThreadsParams {
+  limit?: number
+  offset?: number
+  activeThreadId?: string
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  /** Keep project threads in the list instead of leaving them to the folders. */
+  includeProjects?: boolean
+}
+
+export interface AgentProjectsParams {
+  preview?: number
+  includeAutomations?: boolean
+  includeResolved?: boolean
 }
 
 const API_BASE = dashboardApiBase()
@@ -237,24 +269,34 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
-function buildSidebarThreadsQuery(params: {
-  activeLimit?: number
-  resolvedLimit?: number
-  activeThreadId?: string
-  includeAutomations?: boolean
-}): string {
+function buildSidebarThreadsQuery(params: SidebarThreadsParams): string {
   const search = new URLSearchParams()
-  if (params.activeLimit != null) {
-    search.set("active_limit", String(params.activeLimit))
-  }
-  if (params.resolvedLimit != null) {
-    search.set("resolved_limit", String(params.resolvedLimit))
-  }
+  if (params.limit != null) search.set("limit", String(params.limit))
+  if (params.offset != null) search.set("offset", String(params.offset))
   if (params.activeThreadId) {
     search.set("active_thread_id", params.activeThreadId)
   }
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
+  }
+  if (params.includeResolved != null) {
+    search.set("include_resolved", String(params.includeResolved))
+  }
+  if (params.includeProjects != null) {
+    search.set("include_projects", String(params.includeProjects))
+  }
+  const query = search.toString()
+  return query ? `?${query}` : ""
+}
+
+function buildProjectsQuery(params: AgentProjectsParams): string {
+  const search = new URLSearchParams()
+  if (params.preview != null) search.set("preview", String(params.preview))
+  if (params.includeAutomations != null) {
+    search.set("include_automations", String(params.includeAutomations))
+  }
+  if (params.includeResolved != null) {
+    search.set("include_resolved", String(params.includeResolved))
   }
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -276,15 +318,22 @@ export interface PullRequestSnapshot {
 
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
-  listSidebarThreads: (params: {
-    activeLimit?: number
-    resolvedLimit?: number
-    activeThreadId?: string
-    includeAutomations?: boolean
-  }) =>
+  listSidebarThreads: (params: SidebarThreadsParams) =>
     agentsRequest<SidebarThreads>(
       `/threads/sidebar${buildSidebarThreadsQuery(params)}`
     ),
+  listProjects: (params: AgentProjectsParams = {}) =>
+    agentsRequest<AgentProjects>(`/projects${buildProjectsQuery(params)}`),
+  deleteProject: (repoFullName: string) =>
+    agentsRequest<void>(
+      `/projects/${repoFullName.split("/").map(encodeURIComponent).join("/")}`,
+      { method: "DELETE" }
+    ),
+  restoreProject: (repoFullName: string) =>
+    agentsRequest<void>("/projects", {
+      method: "POST",
+      body: JSON.stringify({ repoFullName }),
+    }),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   resolveThread: (threadId: string, resolved: boolean) =>

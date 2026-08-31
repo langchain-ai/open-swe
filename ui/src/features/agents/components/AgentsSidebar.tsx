@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
+  ArrowCounterClockwiseIcon,
   CircleNotchIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -59,9 +60,13 @@ import type {
 } from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
+  useDeleteProject,
   usePinAgentThread,
   useResolveAgentThread,
+  useRestoreProject,
+  SIDEBAR_PROJECT_PREVIEW,
   useSeedAgentThreadDetails,
+  useSidebarProjects,
   useSidebarProjectThreads,
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
@@ -104,9 +109,6 @@ const NAV = [
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
-
-/** Threads shown per project before the group needs a "Show more". */
-const PROJECT_PREVIEW_COUNT = 5
 
 /**
  * Tracks whether the scroll container has content hidden above or below, so
@@ -181,6 +183,8 @@ export function AgentsSidebar({
       prefs.filters.includeAutomations ||
       prefs.filters.sources.includes("schedule"),
     includeResolved: prefs.filters.includeResolved,
+    // One flat list means no folders to hold the project threads back.
+    includeProjects: prefs.organize === "list",
     enabled: !localOnly,
   })
   const localThreads = useDesktopLocalThreads({ enabled: isDesktop })
@@ -195,19 +199,27 @@ export function AgentsSidebar({
     removeProject: removeLocalProject,
   } = useDesktopProjects()
 
-  const pinnedThreads = sidebar.data.pinned ?? []
+  const projectsQuery = useSidebarProjects({
+    includeAutomations:
+      prefs.filters.includeAutomations ||
+      prefs.filters.sources.includes("schedule"),
+    includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly && prefs.organize === "project",
+  })
+  const cloudProjects = projectsQuery.data?.items ?? []
+  const deleteProject = useDeleteProject()
+  const restoreProject = useRestoreProject()
+
+  const pinnedThreads = sidebar.pinned
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
-  const activeThreads = sidebar.data.active.items.filter(
-    (thread) => !cloudPinnedIds.has(thread.id)
-  )
-  const resolvedThreads = sidebar.data.resolved.items.filter(
-    (thread) => !cloudPinnedIds.has(thread.id)
-  )
-  const visibleThreads = [
-    ...pinnedThreads,
-    ...activeThreads,
-    ...resolvedThreads,
-  ]
+  const recentThreads = [
+    ...(sidebar.activeThread && !sidebar.activeThread.repoFullName
+      ? [sidebar.activeThread]
+      : []),
+    ...sidebar.recents,
+  ].filter((thread) => !cloudPinnedIds.has(thread.id))
+  const projectThreads = cloudProjects.flatMap((project) => project.threads)
+  const visibleThreads = [...pinnedThreads, ...recentThreads, ...projectThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
@@ -231,8 +243,8 @@ export function AgentsSidebar({
     .filter((item) => prefs.filters.includeResolved || !item.resolved)
   const cloudItems = [
     ...pinnedThreads.map(cloudSidebarThread),
-    ...activeThreads.map(cloudSidebarThread),
-    ...resolvedThreads.map(cloudSidebarThread),
+    ...recentThreads.map(cloudSidebarThread),
+    ...projectThreads.map(cloudSidebarThread),
   ]
   // Fold a local checkout into the cloud project of the same name so the repo
   // renders as one folder; project keys are otherwise full identities.
@@ -242,36 +254,80 @@ export function AgentsSidebar({
     ...pinnedThreads.map(cloudSidebarThread),
     ...alignedLocalItems.filter((item) => localPinnedIds.has(item.id)),
   ]
-  const threadItems: Array<SidebarThreadItem> = [
-    ...activeThreads.map(cloudSidebarThread),
-    ...resolvedThreads.map(cloudSidebarThread),
-    ...alignedLocalItems.filter((item) => !localPinnedIds.has(item.id)),
-  ]
-  const allItems = [...pinnedItems, ...threadItems]
-  const projects = sidebarProjectOptions(allItems, localProjects)
+  const unpinnedLocalItems = alignedLocalItems.filter(
+    (item) => !localPinnedIds.has(item.id)
+  )
+  const allItems = [...cloudItems, ...alignedLocalItems]
   const filteredPinnedItems = sortSidebarThreads(
     filterThreads(pinnedItems, prefs.filters),
     prefs.sortPinned
   )
-  const filteredThreadItems = filterThreads(threadItems, prefs.filters)
-  // "In one list" drops the per-project buckets and pours everything into
-  // Recents, so the Projects section disappears along with its groups.
-  const grouped =
+  const hydrateProjectThreads = (threads: Array<AgentThread>) =>
+    filterThreads(
+      threads
+        .filter((thread) => !cloudPinnedIds.has(thread.id))
+        .map(cloudSidebarThread),
+      prefs.filters
+    )
+  // Local checkouts stay client-side: the desktop bridge owns them, so they
+  // are grouped here and merged into the server's project list.
+  const localGroups =
     prefs.organize === "list"
-      ? {
-          projects: [],
-          recents: sortSidebarThreads(filteredThreadItems, prefs.sortChats),
-        }
+      ? []
       : groupSidebarThreadsByProject(
-          filteredThreadItems,
-          projects,
+          filterThreads(unpinnedLocalItems, prefs.filters),
+          sidebarProjectOptions(unpinnedLocalItems, localProjects),
           prefs.sortChats
-        )
+        ).projects
+  const projectGroups: Array<
+    SidebarProjectGroup & { repoFullName?: string; hasMore?: boolean }
+  > =
+    prefs.organize === "list"
+      ? []
+      : [
+          ...cloudProjects
+            .filter((project) => !project.deleted)
+            .map((project) => {
+              const key = `project:${project.repoFullName.toLowerCase()}`
+              return {
+                key,
+                label: project.name,
+                repoFullName: project.repoFullName,
+                hasMore: project.hasMore,
+                // A checkout of the same repo folds into the cloud folder.
+                threads: sortSidebarThreads(
+                  [
+                    ...hydrateProjectThreads(project.threads),
+                    ...(localGroups.find((group) => group.key === key)
+                      ?.threads ?? []),
+                  ],
+                  prefs.sortChats
+                ),
+              }
+            }),
+          ...localGroups.filter(
+            (group) =>
+              !cloudProjects.some(
+                (project) =>
+                  `project:${project.repoFullName.toLowerCase()}` === group.key
+              )
+          ),
+        ]
+  const deletedProjects = cloudProjects.filter((project) => project.deleted)
+  const recents = sortSidebarThreads(
+    filterThreads(
+      prefs.organize === "list"
+        ? [...recentThreads.map(cloudSidebarThread), ...unpinnedLocalItems]
+        : recentThreads.map(cloudSidebarThread),
+      prefs.filters
+    ),
+    prefs.sortChats
+  )
   const pinnedProjectKeys = new Set(prefs.pinnedProjectKeys)
-  const pinnedGroups = grouped.projects.filter((group) =>
+  const pinnedGroups = projectGroups.filter((group) =>
     pinnedProjectKeys.has(group.key)
   )
-  const unpinnedGroups = grouped.projects.filter(
+  const unpinnedGroups = projectGroups.filter(
     (group) => !pinnedProjectKeys.has(group.key)
   )
 
@@ -333,30 +389,71 @@ export function AgentsSidebar({
   const sectionCollapsed = (key: string) =>
     prefs.collapsedSectionKeys.includes(key)
 
-  // Projects and Recents share one menu: both control the same list.
-  const removeProjectItems = isDesktop && localProjects.length > 0 && (
+  // Deleting a project only hides the folder: its threads fall back into
+  // Recents and the project can be restored from the same menu.
+  const removableProjects = [
+    ...cloudProjects
+      .filter((project) => !project.deleted)
+      .map((project) => ({
+        id: project.repoFullName,
+        name: project.name,
+        remove: () => deleteProject.mutate(project.repoFullName),
+      })),
+    ...(isDesktop
+      ? localProjects.map((project) => ({
+          id: project.cwd,
+          name: project.name,
+          remove: () => void removeLocalProject(project.cwd),
+        }))
+      : []),
+  ]
+  const removeProjectItems = (removableProjects.length > 0 ||
+    deletedProjects.length > 0) && (
     <>
       <MenuSeparator />
-      <MenuSub>
-        <MenuSubTrigger>
-          <TrashIcon />
-          Remove project…
-        </MenuSubTrigger>
-        <MenuSubPopup className="w-56">
-          <MenuGroup>
-            {localProjects.map((project) => (
-              <MenuItem
-                key={project.cwd}
-                onClick={() => void removeLocalProject(project.cwd)}
-                variant="destructive"
-              >
-                <TrashIcon />
-                <span className="min-w-0 truncate">{project.name}</span>
-              </MenuItem>
-            ))}
-          </MenuGroup>
-        </MenuSubPopup>
-      </MenuSub>
+      {removableProjects.length > 0 && (
+        <MenuSub>
+          <MenuSubTrigger>
+            <TrashIcon />
+            Remove project…
+          </MenuSubTrigger>
+          <MenuSubPopup className="w-56">
+            <MenuGroup>
+              {removableProjects.map((project) => (
+                <MenuItem
+                  key={project.id}
+                  onClick={project.remove}
+                  variant="destructive"
+                >
+                  <TrashIcon />
+                  <span className="min-w-0 truncate">{project.name}</span>
+                </MenuItem>
+              ))}
+            </MenuGroup>
+          </MenuSubPopup>
+        </MenuSub>
+      )}
+      {deletedProjects.length > 0 && (
+        <MenuSub>
+          <MenuSubTrigger>
+            <ArrowCounterClockwiseIcon />
+            Restore project…
+          </MenuSubTrigger>
+          <MenuSubPopup className="w-56">
+            <MenuGroup>
+              {deletedProjects.map((project) => (
+                <MenuItem
+                  key={project.repoFullName}
+                  onClick={() => restoreProject.mutate(project.repoFullName)}
+                >
+                  <ArrowCounterClockwiseIcon />
+                  <span className="min-w-0 truncate">{project.name}</span>
+                </MenuItem>
+              ))}
+            </MenuGroup>
+          </MenuSubPopup>
+        </MenuSub>
+      )}
     </>
   )
 
@@ -409,24 +506,9 @@ export function AgentsSidebar({
     </>
   )
 
-  // Each folder pages its own repo, so a project's "Show more" cannot spill
-  // threads into the other sections.
-  const repoByProjectKey = new Map(
-    cloudItems.flatMap((item) =>
-      item.projectKey && item.thread.repoFullName
-        ? [[item.projectKey, item.thread.repoFullName] as const]
-        : []
-    )
-  )
-  const hydrateProjectThreads = (threads: Array<AgentThread>) =>
-    filterThreads(
-      threads
-        .filter((thread) => !cloudPinnedIds.has(thread.id))
-        .map(cloudSidebarThread),
-      prefs.filters
-    )
-
-  const renderProjectGroup = (group: SidebarProjectGroup) => (
+  const renderProjectGroup = (
+    group: SidebarProjectGroup & { repoFullName?: string; hasMore?: boolean }
+  ) => (
     <ProjectGroup
       key={group.key}
       group={group}
@@ -434,9 +516,8 @@ export function AgentsSidebar({
       collapsed={prefs.collapsedProjectKeys.includes(group.key)}
       expanded={prefs.expandedProjectKeys.includes(group.key)}
       pinned={pinnedProjectKeys.has(group.key)}
-      repoFullName={
-        localOnly ? null : (repoByProjectKey.get(group.key) ?? null)
-      }
+      repoFullName={localOnly ? null : (group.repoFullName ?? null)}
+      serverHasMore={group.hasMore === true}
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={prefs.filters.includeAutomations}
       sort={prefs.sortChats}
@@ -451,41 +532,25 @@ export function AgentsSidebar({
   )
 
   const cloudPending = !localOnly && sidebar.isPending
-  const resolvedLoading =
-    !localOnly &&
-    !sidebar.isPending &&
-    prefs.filters.includeResolved &&
-    sidebar.resolvedQuery.isLoading
   const sourcesLoading = cloudPending || (isDesktop && localThreads.isPending)
-  const hasMoreActive = !sidebar.isPending && sidebar.data.active.hasMore
-  const hasMoreArchived =
-    !sidebar.isPending &&
-    prefs.filters.includeResolved &&
-    sidebar.data.resolved.hasMore
-  // The global window feeds every section, so it grows on scroll at the bottom
-  // of the list rather than from a button inside one section.
-  const loadMoreThreads = (hasMoreActive || hasMoreArchived) && (
+  // Recents grows on scroll at the bottom of the list; the project folders and
+  // the pinned section each load their own threads.
+  const loadMoreThreads = !sidebar.isPending && sidebar.hasMore && (
     <LoadMoreThreadsOnScroll
       label="Load more threads"
       root={scrollViewport}
-      loading={
-        sidebar.activeQuery.isFetchingNextPage ||
-        sidebar.resolvedQuery.isFetchingNextPage
-      }
-      onLoadMore={() => {
-        if (hasMoreActive) sidebar.activeQuery.fetchNextPage()
-        if (hasMoreArchived) sidebar.resolvedQuery.fetchNextPage()
-      }}
+      loading={sidebar.isFetchingNextPage}
+      onLoadMore={sidebar.fetchNextPage}
     />
   )
   const byProject = prefs.organize === "project"
   const isEmpty =
     !cloudPending &&
     (!isDesktop || !localThreads.isPending) &&
-    !resolvedLoading &&
+    !projectsQuery.isPending &&
     filteredPinnedItems.length === 0 &&
-    grouped.projects.length === 0 &&
-    grouped.recents.length === 0
+    projectGroups.length === 0 &&
+    recents.length === 0
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -666,7 +731,7 @@ export function AgentsSidebar({
               </section>
             )}
 
-            {(grouped.recents.length > 0 || resolvedLoading) && (
+            {recents.length > 0 && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Recents"
@@ -690,15 +755,9 @@ export function AgentsSidebar({
                 />
                 {!sectionCollapsed("recents") && (
                   <>
-                    {grouped.recents.map((item) => (
+                    {recents.map((item) => (
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
-                    {resolvedLoading && (
-                      <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-                        <CircleNotchIcon className="size-3.5 animate-spin" />
-                        Loading archived threads…
-                      </div>
-                    )}
                   </>
                 )}
               </section>
@@ -740,6 +799,7 @@ function ProjectGroup({
   expanded,
   pinned,
   repoFullName,
+  serverHasMore,
   includeResolved,
   includeAutomations,
   sort,
@@ -755,6 +815,8 @@ function ProjectGroup({
   expanded: boolean
   pinned: boolean
   repoFullName: string | null
+  /** The server already knows whether this repo has threads past the preview. */
+  serverHasMore: boolean
   includeResolved: boolean
   includeAutomations: boolean
   sort: ChatSort
@@ -781,7 +843,7 @@ function ProjectGroup({
         sort
       )
     : group.threads
-  const preview = threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const preview = threads.slice(0, SIDEBAR_PROJECT_PREVIEW)
   const active = threads.find((thread) => thread.key === activeKey)
   const shown = expanded
     ? threads
@@ -791,12 +853,9 @@ function ProjectGroup({
   const loading =
     project.isFetchingNextPage ||
     (expanded && Boolean(repoFullName) && project.isPending)
-  // Before expanding, a full preview is the only hint that the repo has more
-  // threads than the sidebar's global window happened to include.
   const hasMore = expanded
     ? project.hasMore || loading
-    : shown.length < threads.length ||
-      (Boolean(repoFullName) && threads.length >= PROJECT_PREVIEW_COUNT)
+    : shown.length < threads.length || serverHasMore
 
   return (
     <div className="mb-1">
@@ -827,6 +886,11 @@ function ProjectGroup({
       {!collapsed && (
         <>
           {shown.map(renderRow)}
+          {shown.length === 0 && !loading && (
+            <p className="py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/60">
+              No chats
+            </p>
+          )}
           {hasMore && (
             <button
               type="button"

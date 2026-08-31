@@ -1930,81 +1930,22 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
     assert [item["id"] for item in result["items"]] == ["surfaced"]
 
 
-async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 10, resolved_before=page_size)
-    searches: list[dict[str, object]] = []
+def _stub_projects(monkeypatch, records: dict[str, dict[str, object]] | None = None) -> list[str]:
+    created: list[str] = []
 
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            searches.append({"metadata": metadata, "offset": offset})
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
+    async def fake_records(login: str) -> dict[str, dict[str, object]]:
+        return records or {}
 
-        async def update(self, *, thread_id, metadata):
-            return None
+    async def fake_ensure(login: str, repos: list[str]) -> list[str]:
+        created.extend(repos)
+        return repos
 
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=5
-    )
-
-    assert len(result["active"]["items"]) == 5
-    assert len(result["resolved"]["items"]) == 5
-    assert result["active"]["hasMore"] is True
-    assert result["resolved"]["hasMore"] is True
-    assert {call["offset"] for call in searches} == {0, page_size}
+    monkeypatch.setattr(thread_api, "list_project_records", fake_records)
+    monkeypatch.setattr(thread_api, "ensure_projects", fake_ensure)
+    return created
 
 
-async def test_list_dashboard_threads_sidebar_stops_scanning_when_resolved_hidden(
-    monkeypatch,
-) -> None:
-    """`resolved_limit=0` must not keep paging in search of a resolved thread."""
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 10, resolved_before=0)
-    offsets: list[int] = []
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            offsets.append(offset)
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=0
-    )
-
-    assert len(result["active"]["items"]) == 5
-    assert result["resolved"]["items"] == []
-    # The first filter stops after one page: the active bucket is full and no
-    # resolved thread was ever wanted. Waiting on one paged to the scan cap.
-    assert offsets[1] == 0
-
-
-async def test_list_dashboard_threads_sidebar_allows_limits_beyond_100(monkeypatch) -> None:
-    threads = _make_threads(120, resolved_before=0)
-
+def _fake_client(threads: list[dict[str, object]], monkeypatch) -> None:
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
             return threads[offset : offset + limit]
@@ -2016,86 +1957,118 @@ async def test_list_dashboard_threads_sidebar_allows_limits_beyond_100(monkeypat
         async def list(self, thread_id, limit=1):
             return []
 
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=110, resolved_limit=0
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
 
-    assert result["active"]["limit"] == 110
-    assert len(result["active"]["items"]) == 110
-    assert result["active"]["hasMore"] is True
 
+async def test_list_dashboard_threads_sidebar_pages_recents(monkeypatch) -> None:
+    threads = _make_threads(12, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    _stub_projects(monkeypatch)
+    _fake_client(threads, monkeypatch)
 
-async def test_list_dashboard_threads_sidebar_accepts_zero_resolved_limit(monkeypatch) -> None:
-    threads = _make_threads(2, resolved_before=1)
+    first = await thread_api.list_dashboard_threads_sidebar("octocat", limit=5)
+    second = await thread_api.list_dashboard_threads_sidebar("octocat", limit=5, offset=5)
 
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=1, resolved_limit=0
-    )
-
-    assert result["active"]["limit"] == 1
-    assert result["resolved"] == {"items": [], "limit": 0, "hasMore": True}
-
-
-async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiting(
-    monkeypatch,
-) -> None:
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 5, resolved_before=0)
-    for thread in threads[:page_size]:
-        metadata = cast(dict[str, object], thread["metadata"])
-        metadata["source"] = "schedule"
-        metadata["schedule_id"] = f"schedule-{thread['thread_id']}"
-    offsets: list[int] = []
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            offsets.append(offset)
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=5
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == [
-        f"t{index}" for index in range(page_size, page_size + 5)
+    assert [item["id"] for item in first["recents"]["items"]] == [f"t{index}" for index in range(5)]
+    assert first["recents"]["hasMore"] is True
+    assert [item["id"] for item in second["recents"]["items"]] == [
+        f"t{index}" for index in range(5, 10)
     ]
-    assert set(offsets) == {0, page_size}
+    assert second["recents"]["offset"] == 5
+
+
+async def test_list_dashboard_threads_sidebar_leaves_project_threads_to_folders(
+    monkeypatch,
+) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for index, thread in enumerate(threads):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata["latest_run_status"] = "success"
+        if index < 2:
+            metadata["repo_owner"] = "acme"
+            metadata["repo_name"] = "api" if index == 0 else "web"
+    _stub_projects(
+        monkeypatch,
+        {
+            "acme/api": {"repo_full_name": "acme/api", "deleted_at_ms": None},
+            "acme/web": {"repo_full_name": "acme/web", "deleted_at_ms": 5},
+        },
+    )
+    _fake_client(threads, monkeypatch)
+
+    result = await thread_api.list_dashboard_threads_sidebar("octocat", limit=10)
+
+    # t0 lives in a project folder; t1's project was deleted, so it falls back here.
+    assert [item["id"] for item in result["recents"]["items"]] == ["t1", "t2"]
+
+
+async def test_list_dashboard_threads_sidebar_registers_new_projects(monkeypatch) -> None:
+    threads = _make_threads(1, resolved_before=0)
+    metadata = cast(dict[str, object], threads[0]["metadata"])
+    metadata.update({"repo_owner": "acme", "repo_name": "api", "latest_run_status": "success"})
+    created = _stub_projects(monkeypatch)
+    _fake_client(threads, monkeypatch)
+
+    await thread_api.list_dashboard_threads_sidebar("octocat", limit=10)
+
+    assert created == ["acme/api"]
+
+
+async def test_list_dashboard_threads_sidebar_keeps_project_threads_when_flat(monkeypatch) -> None:
+    threads = _make_threads(1, resolved_before=0)
+    metadata = cast(dict[str, object], threads[0]["metadata"])
+    metadata.update({"repo_owner": "acme", "repo_name": "api", "latest_run_status": "success"})
+    _stub_projects(monkeypatch, {"acme/api": {"repo_full_name": "acme/api", "deleted_at_ms": None}})
+    _fake_client(threads, monkeypatch)
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", limit=10, include_projects=True
+    )
+
+    assert [item["id"] for item in result["recents"]["items"]] == ["t0"]
+
+
+async def test_list_dashboard_threads_sidebar_excludes_automations(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    automation = cast(dict[str, object], threads[0]["metadata"])
+    automation.update({"source": "schedule", "schedule_id": "s1", "latest_run_status": "success"})
+    cast(dict[str, object], threads[1]["metadata"])["latest_run_status"] = "success"
+    _stub_projects(monkeypatch)
+    _fake_client(threads, monkeypatch)
+
+    result = await thread_api.list_dashboard_threads_sidebar("octocat", limit=10)
+
+    assert [item["id"] for item in result["recents"]["items"]] == ["t1"]
+
+
+async def test_list_dashboard_projects_previews_threads_and_lists_deleted(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    for thread in threads:
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata.update({"repo_owner": "acme", "repo_name": "api", "latest_run_status": "success"})
+    _stub_projects(
+        monkeypatch,
+        {
+            "acme/api": {"repo_full_name": "acme/api", "deleted_at_ms": None},
+            "acme/old": {"repo_full_name": "acme/old", "deleted_at_ms": 5},
+        },
+    )
+    _fake_client(threads, monkeypatch)
+
+    result = await thread_api.list_dashboard_projects("octocat", preview=1)
+
+    assert [(item["repoFullName"], item["deleted"]) for item in result["items"]] == [
+        ("acme/api", False),
+        ("acme/old", True),
+    ]
+    active = result["items"][0]
+    assert [item["id"] for item in active["threads"]] == ["t0"]
+    assert active["hasMore"] is True
 
 
 async def test_pin_dashboard_thread_allows_readable_non_owner(monkeypatch) -> None:
@@ -2189,6 +2162,7 @@ async def test_list_dashboard_threads_sidebar_includes_pinned_thread(monkeypatch
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
+    _stub_projects(monkeypatch)
 
     async def fake_pin_ids(login: str) -> list[str]:
         assert login == "octocat"
@@ -2196,17 +2170,16 @@ async def test_list_dashboard_threads_sidebar_includes_pinned_thread(monkeypatch
 
     monkeypatch.setattr(thread_api, "list_thread_pin_ids", fake_pin_ids)
 
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", active_limit=5, resolved_limit=0
-    )
+    result = await thread_api.list_dashboard_threads_sidebar("octocat", limit=5)
 
     assert [item["id"] for item in result["pinned"]] == ["shared-thread"]
 
 
-async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(
+async def test_list_dashboard_threads_sidebar_surfaces_readable_active_thread(
     monkeypatch,
 ) -> None:
     threads = _make_threads(1, resolved_before=0)
+    cast(dict[str, object], threads[0]["metadata"])["latest_run_status"] = "success"
     shared_thread = {
         "thread_id": "shared-thread",
         "metadata": {
@@ -2218,119 +2191,17 @@ async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(
             "sandbox_id": "sandbox-123",
         },
     }
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def get(self, thread_id):
-            assert thread_id == "shared-thread"
-            return shared_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="shared-thread",
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == ["shared-thread", "t0"]
-    shared = result["active"]["items"][0]
-    assert shared["sandboxId"] == "sandbox-123"
-
-
-async def test_list_dashboard_threads_sidebar_keeps_resolved_active_thread_resolved(
-    monkeypatch,
-) -> None:
-    threads = _make_threads(1, resolved_before=0)
-    shared_thread = {
-        "thread_id": "shared-resolved-thread",
-        "metadata": {
-            "source": "slack",
-            "github_login": "teammate",
-            "title": "Resolved teammate thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
-            "resolved": True,
-            "sandbox_id": "sandbox-456",
-        },
-    }
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def get(self, thread_id):
-            assert thread_id == "shared-resolved-thread"
-            return shared_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="shared-resolved-thread",
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == ["t0"]
-    assert [item["id"] for item in result["resolved"]["items"]] == ["shared-resolved-thread"]
-    shared = result["resolved"]["items"][0]
-    assert shared["resolved"] is True
-    assert shared["sandboxId"] == "sandbox-456"
-
-
-async def test_list_dashboard_threads_sidebar_ignores_unreadable_active_thread(
-    monkeypatch,
-) -> None:
-    threads = _make_threads(1, resolved_before=0)
     private_thread = {
         "thread_id": "private-thread",
-        "metadata": {
-            "source": "internal",
-            "github_login": "teammate",
-            "title": "Private thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
-        },
+        "metadata": {"source": "internal", "github_login": "teammate", "updated_at_ms": 100},
     }
 
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
 
         async def get(self, thread_id):
-            assert thread_id == "private-thread"
-            return private_thread
+            return shared_thread if thread_id == "shared-thread" else private_thread
 
         async def update(self, *, thread_id, metadata):
             return None
@@ -2339,21 +2210,23 @@ async def test_list_dashboard_threads_sidebar_ignores_unreadable_active_thread(
         async def list(self, thread_id, limit=1):
             return []
 
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
+    )
+    _stub_projects(monkeypatch)
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="private-thread",
+    visible = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", limit=5, active_thread_id="shared-thread"
+    )
+    hidden = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", limit=5, active_thread_id="private-thread"
     )
 
-    assert [item["id"] for item in result["active"]["items"]] == ["t0"]
+    assert [item["id"] for item in visible["recents"]["items"]] == ["shared-thread", "t0"]
+    assert visible["recents"]["items"][0]["sandboxId"] == "sandbox-123"
+    assert [item["id"] for item in hidden["recents"]["items"]] == ["t0"]
 
 
 async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch) -> None:
