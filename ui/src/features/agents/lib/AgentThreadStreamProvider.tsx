@@ -25,7 +25,7 @@ interface RuntimeEntry {
   transport: AgentThreadTransport
   client: Client<Record<string, unknown>>
   controller: StreamController
-  threadIdCallbacks: Set<(threadId: string) => void>
+  createdThreadCallbacks: Set<(threadId: string) => void>
   deactivate: () => void
   disposeTimer?: ReturnType<typeof setTimeout>
   mounts: number
@@ -130,10 +130,14 @@ function createRuntime(
     threadId,
     onThreadId: (id) => {
       rekeyRuntime(entry, id)
-      for (const callback of entry.threadIdCallbacks) callback(id)
     },
     onCreated: () => {
-      if (transport === "cloud") invalidateAgentThreadLists(queryClient)
+      if (transport !== "cloud") return
+      const id = entry.controller.rootStore.getSnapshot().threadId
+      if (id) {
+        for (const callback of entry.createdThreadCallbacks) callback(id)
+      }
+      invalidateAgentThreadLists(queryClient)
     },
     onCompleted: () => {
       if (transport !== "cloud") return
@@ -151,7 +155,7 @@ function createRuntime(
     transport,
     client,
     controller,
-    threadIdCallbacks: new Set(),
+    createdThreadCallbacks: new Set(),
     deactivate: controller.activate(),
     mounts: 0,
     lastUsedAt: Date.now(),
@@ -256,12 +260,12 @@ export function AgentThreadStreamProvider({
   threadId,
   children,
   transport = "cloud",
-  onThreadId,
+  onThreadCreated,
 }: {
   threadId: string | null
   children: ReactNode
   transport?: AgentThreadTransport
-  onThreadId?: (threadId: string) => void
+  onThreadCreated?: (threadId: string) => void
 }) {
   const queryClient = useQueryClient()
   const entry = useMemo(
@@ -272,12 +276,12 @@ export function AgentThreadStreamProvider({
 
   useEffect(() => retainRuntime(entry), [entry])
   useEffect(() => {
-    if (!onThreadId) return
-    entry.threadIdCallbacks.add(onThreadId)
+    if (!onThreadCreated) return
+    entry.createdThreadCallbacks.add(onThreadCreated)
     return () => {
-      entry.threadIdCallbacks.delete(onThreadId)
+      entry.createdThreadCallbacks.delete(onThreadCreated)
     }
-  }, [entry, onThreadId])
+  }, [entry, onThreadCreated])
 
   return (
     <AgentThreadRuntimeContext.Provider value={stream}>

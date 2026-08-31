@@ -73,7 +73,7 @@ function AgentsLayout() {
       <AgentThreadStreamProvider
         threadId={activeLocalSessionId ?? activeThreadId ?? null}
         transport={activeLocalSessionId ? "local" : "cloud"}
-        onThreadId={(id) => {
+        onThreadCreated={(id) => {
           if (!activeThreadId) {
             void navigate({ to: "/agents/$threadId", params: { threadId: id } })
           }

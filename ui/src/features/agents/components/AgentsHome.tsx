@@ -325,6 +325,7 @@ export function AgentsHome() {
     }
     draftRef.current = draft
     setSubmittedDraft(draft)
+    setLocalError(null)
 
     const configurable: Record<string, unknown> = {}
     if (activeSelection?.modelId && activeSelection.effort) {
@@ -337,18 +338,25 @@ export function AgentsHome() {
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
 
+    const handleCloudSubmitError = (error: unknown) => {
+      resetPendingSubmit()
+      setLocalError(
+        error instanceof Error
+          ? error.message
+          : "Could not start the cloud Open SWE agent"
+      )
+    }
     void stream
       .submit(
         {
           messages: [{ type: "human", content: promptContent(prompt, images) }],
         },
-        { config: { configurable } }
+        {
+          config: { configurable },
+          onError: handleCloudSubmitError,
+        }
       )
-      .catch(() => {
-        // Submit failed before the SDK minted a thread id — re-enable the
-        // prompt instead of leaving it disabled until a reload.
-        resetPendingSubmit()
-      })
+      .catch(handleCloudSubmitError)
   }
 
   const hasProjects =

@@ -13,6 +13,7 @@ import type { ReactNode } from "react"
 interface ControllerOptions {
   threadId: string | null
   onThreadId: (threadId: string) => void
+  onCreated: () => void
 }
 
 class TestStore<T> {
@@ -171,11 +172,14 @@ describe("AgentThreadStreamProvider", () => {
     ])
   })
 
-  it("rekeys a lazy cloud runtime when LangGraph creates the thread", () => {
-    const onThreadId = vi.fn()
+  it("waits for server acceptance before announcing a lazy cloud thread", () => {
+    const onThreadCreated = vi.fn()
     render(
       wrapper(
-        <AgentThreadStreamProvider threadId={null} onThreadId={onThreadId}>
+        <AgentThreadStreamProvider
+          threadId={null}
+          onThreadCreated={onThreadCreated}
+        >
           <div />
         </AgentThreadStreamProvider>
       )
@@ -184,7 +188,17 @@ describe("AgentThreadStreamProvider", () => {
     mocks.controllers[0]?.options.onThreadId("created")
 
     expect([...__testing.entries.keys()]).toEqual(["cloud:created"])
-    expect(onThreadId).toHaveBeenCalledWith("created")
+    expect(onThreadCreated).not.toHaveBeenCalled()
+
+    const entry = __testing.entries.get("cloud:created")
+    if (!entry) throw new Error("runtime was not rekeyed")
+    const store = entry.controller.rootStore as unknown as TestStore<
+      ReturnType<typeof entry.controller.rootStore.getSnapshot>
+    >
+    store.setSnapshot({ ...store.getSnapshot(), threadId: "created" })
+    mocks.controllers[0]?.options.onCreated()
+
+    expect(onThreadCreated).toHaveBeenCalledWith("created")
   })
 
   it("disposes an inactive runtime after its retention window", () => {
