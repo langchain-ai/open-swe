@@ -10,12 +10,16 @@ const {
   packagedBackendTarget,
 } = require("../src/backend-supervisor.cjs");
 
-test("development target runs the repository LangGraph app through uv", () => {
+test("development target isolates repository LangGraph state", () => {
   const repoRoot = path.resolve("/work/open-swe");
-  assert.deepEqual(devBackendTarget({ repoRoot, port: 49152, env: {} }), {
+  const stateDir = path.resolve("/tmp/open-swe-state");
+  const target = devBackendTarget({ repoRoot, stateDir, port: 49152, env: {} });
+  assert.deepEqual(target, {
     command: "uv",
     args: [
       "run",
+      "--project",
+      repoRoot,
       "langgraph",
       "dev",
       "--no-browser",
@@ -27,7 +31,7 @@ test("development target runs the repository LangGraph app through uv", () => {
       "--config",
       path.join(repoRoot, "langgraph.desktop.json"),
     ],
-    cwd: repoRoot,
+    cwd: stateDir,
   });
 });
 
@@ -41,29 +45,6 @@ test("development target accepts an explicit LangGraph config", () => {
   });
 
   assert.equal(target.args.at(-1), config);
-});
-
-test("development target isolates LangGraph runtime state", () => {
-  const repoRoot = path.resolve("/work/open-swe");
-  const stateDir = path.resolve("/tmp/open-swe-state");
-  const target = devBackendTarget({
-    repoRoot,
-    stateDir,
-    port: 49152,
-    env: { OPEN_SWE_LOCAL_BACKEND_CONFIG: "tests/e2e/langgraph.e2e.json" },
-  });
-
-  assert.equal(target.cwd, stateDir);
-  assert.deepEqual(target.args.slice(0, 4), [
-    "run",
-    "--project",
-    repoRoot,
-    "langgraph",
-  ]);
-  assert.equal(
-    target.args.at(-1),
-    path.join(repoRoot, "tests/e2e/langgraph.e2e.json"),
-  );
 });
 
 test("reports whether the selected provider is configured", () => {

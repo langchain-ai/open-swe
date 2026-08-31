@@ -78,8 +78,7 @@ function isAppLoginUrl(value) {
 
 function desktopLoginUrl(backendUrl, { challenge, port }) {
   const target = new URL(LOGIN_PATH, backendUrl);
-  // The backend derives the OAuth redirect_uri from this request's own origin,
-  // so login follows the backend the app is pointed at.
+  // Make OAuth redirect back through this backend's origin.
   target.searchParams.set("desktop", "true");
   target.searchParams.set("desktop_handoff", challenge);
   target.searchParams.set("desktop_port", String(port));

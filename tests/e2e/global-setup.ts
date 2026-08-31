@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-function listeningPids(port: string): number[] {
+function reclaimStaleUiServer(port: string, server: string) {
   let output: string;
   try {
     output = execFileSync(
@@ -11,26 +11,19 @@ function listeningPids(port: string): number[] {
       { encoding: "utf8" },
     );
   } catch (error) {
-    if ((error as { status?: number }).status === 1) return [];
+    if ((error as { status?: number }).status === 1) return;
     throw error;
   }
-  return [...new Set(output.match(/\d+/g)?.map(Number) ?? [])];
-}
-
-export function reclaimStaleUiServer(port: string, server: string) {
-  const listeners = listeningPids(port).map((pid) => ({
-    pid,
-    command: execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+  const pids = new Set(output.match(/\d+/g) ?? []);
+  for (const pid of pids) {
+    const command = execFileSync("ps", ["-p", pid, "-o", "command="], {
       encoding: "utf8",
-    }).trim(),
-  }));
-  const unrelated = listeners.find(({ command }) => !command.includes(server));
-  if (unrelated) {
-    throw new Error(
-      `E2E UI port ${port} is already in use by PID ${unrelated.pid}`,
-    );
+    }).trim();
+    if (!command.includes(server)) {
+      throw new Error(`E2E UI port ${port} is already in use by PID ${pid}`);
+    }
   }
-  for (const { pid } of listeners) process.kill(pid, "SIGKILL");
+  for (const pid of pids) process.kill(Number(pid), "SIGKILL");
 }
 
 // Build the real ui/ app once, then run its Nitro server so the harness can
@@ -46,8 +39,6 @@ export default async function globalSetup() {
   const uiPort = process.env.E2E_UI_PORT ?? "3100";
   const harness = `http://127.0.0.1:${port}`;
 
-  // Reclaim only the Nitro server from a hard-killed prior run. Refuse to
-  // terminate unrelated processes using the configured port.
   reclaimStaleUiServer(uiPort, server);
 
   if (!existsSync(server) || process.env.E2E_FORCE_UI_BUILD) {

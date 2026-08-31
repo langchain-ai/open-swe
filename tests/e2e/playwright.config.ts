@@ -45,9 +45,7 @@ export default defineConfig({
     // Deterministic busy window for the interrupt-debounce spec: the fake LLM
     // holds the first run open this long so follow-ups reliably land mid-run.
     // E2E_UI_SERVER is where the harness proxies page requests for rendering;
-    // global-setup starts that server on the same port. E2E_EXIT_WHEN_ORPHANED
-    // makes the harness exit when this runner's stdin pipe closes, so a
-    // hard-killed run cannot leave the port bound in the background.
+    // global-setup starts that server on the same port.
     env: {
       ...process.env,
       E2E_BUSY_HOLD_SECONDS: "20",

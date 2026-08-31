@@ -24,11 +24,7 @@ const GATEWAY_KEYS = [
 ];
 
 function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
-  const configuredPath =
-    env.OPEN_SWE_LOCAL_BACKEND_CONFIG || "langgraph.desktop.json";
-  const configPath = path.isAbsolute(configuredPath)
-    ? configuredPath
-    : path.resolve(repoRoot, configuredPath);
+  const config = env.OPEN_SWE_LOCAL_BACKEND_CONFIG || "langgraph.desktop.json";
   return {
     command:
       env.OPEN_SWE_LOCAL_BACKEND_COMMAND || env.OPEN_SWE_UV_COMMAND || "uv",
@@ -44,7 +40,7 @@ function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
       "--port",
       String(port),
       "--config",
-      configPath,
+      path.resolve(repoRoot, config),
     ],
     cwd: stateDir || repoRoot,
   };

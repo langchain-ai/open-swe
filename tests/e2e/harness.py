@@ -86,9 +86,7 @@ EVENT_ID_SALT = uuid.uuid4().hex[:8]
 fakes.seed_bare_remotes()
 
 if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
-    # Playwright pipes this process's stdin, so the pipe hits EOF the moment the
-    # runner dies. A hard-killed runner never tears its webServer down, and the
-    # orphan keeps the harness port — which then shadows `make dev`.
+    # Playwright closes the webServer stdin pipe when its runner exits.
     def _exit_when_orphaned() -> None:
         try:
             sys.stdin.buffer.read()
@@ -400,8 +398,7 @@ async def mock_github_login(
         params["desktop_handoff"] = desktop_handoff
     if desktop_port is not None:
         params["desktop_port"] = desktop_port
-    query = urlencode(params)
-    return RedirectResponse(f"/fake-gh/login/oauth/authorize?{query}", 302)
+    return RedirectResponse(f"/fake-gh/login/oauth/authorize?{urlencode(params)}", 302)
 
 
 @app.get("/fake-gh/login/oauth/authorize")
@@ -446,10 +443,8 @@ async def fake_github_authorize(
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    challenge = valid_handoff_challenge(desktop_handoff)
-    if challenge and desktop_port is not None:
-        # Desktop login belongs to the app, not this browser: hand a PKCE-bound
-        # code back to its loopback listener and leave no session cookie here.
+    if desktop_port is not None and (challenge := valid_handoff_challenge(desktop_handoff)):
+        # Return the PKCE-bound code to the app without setting a browser session.
         code = issue_desktop_handoff(login=login, email=email, avatar_url=None, challenge=challenge)
         return RedirectResponse(desktop_callback_url(desktop_port, code), status_code=303)
     token = issue_session(login=login, email=email, avatar_url=None)
