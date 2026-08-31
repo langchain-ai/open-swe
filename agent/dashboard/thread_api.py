@@ -1105,10 +1105,14 @@ async def list_dashboard_threads_sidebar(
                     break
                 offset += _THREADS_SEARCH_PAGE
 
-    active_candidates = sorted(active.values(), key=_thread_sidebar_anchor_ms, reverse=True)
-    resolved_candidates = sorted(
-        resolved_threads.values(), key=_thread_sidebar_anchor_ms, reverse=True
-    )
+    # Which threads make the window is a recency question, and stays one: a
+    # thread worked on today belongs in the sidebar however long ago it was
+    # created. Only the *order* uses the stable anchor, and the client applies
+    # that itself — sorting the window by the anchor here would drop an old
+    # thread the user is actively using out of the window entirely, leaving it
+    # visible only while open.
+    active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
+    resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
     active_window = active_candidates[:safe_active_limit]
     resolved_window = resolved_candidates[:safe_resolved_limit]
     active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}

@@ -222,3 +222,103 @@ async def test_detail_carries_the_stable_sort_anchor(monkeypatch) -> None:
 
     assert summary["sortAnchorAt"] == 100
     assert summary["updatedAt"] == 9_000
+
+
+def _sidebar_client(threads: list[dict[str, object]]):
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit] if offset == 0 else []
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    return FakeClient()
+
+
+@pytest.fixture()
+def _no_pins(monkeypatch):
+    async def empty_pins(login: str) -> list[str]:
+        return []
+
+    monkeypatch.setattr(thread_api, "list_thread_pin_ids", empty_pins)
+
+
+async def test_sidebar_window_keeps_an_old_thread_used_today(monkeypatch, _no_pins) -> None:
+    """Membership is recency; only the display order uses the stable anchor.
+
+    Windowing on the anchor would drop a thread created long ago but worked on
+    today out of the sidebar, leaving it visible only while open.
+    """
+    threads = [
+        {
+            "thread_id": f"new-{index}",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "created_at_ms": 5_000 + index,
+                "updated_at_ms": 5_000 + index,
+            },
+        }
+        for index in range(3)
+    ]
+    threads.append(
+        {
+            "thread_id": "old-but-active",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "created_at_ms": 1,
+                "updated_at_ms": 9_999,
+            },
+        }
+    )
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _sidebar_client(threads))
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=2, resolved_limit=0
+    )
+
+    assert "old-but-active" in [item["id"] for item in result["active"]["items"]]
+
+
+async def test_sidebar_returns_threads_with_no_repository(monkeypatch, _no_pins) -> None:
+    threads = [
+        {
+            "thread_id": "no-repo",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "created_at_ms": 2_000,
+                "updated_at_ms": 2_000,
+            },
+        },
+        {
+            "thread_id": "with-repo",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "repo_owner": "acme",
+                "repo_name": "api",
+                "created_at_ms": 1_000,
+                "updated_at_ms": 1_000,
+            },
+        },
+    ]
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _sidebar_client(threads))
+
+    # No active thread: nothing is open in the chat window.
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=10, resolved_limit=0
+    )
+
+    items = {item["id"]: item for item in result["active"]["items"]}
+    assert set(items) == {"no-repo", "with-repo"}
+    assert items["no-repo"]["repoFullName"] == ""
