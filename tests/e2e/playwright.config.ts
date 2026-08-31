@@ -28,8 +28,16 @@ export default defineConfig({
     // spec, pass or fail. Default to keeping them only for failures; set
     // E2E_ARTIFACTS=1 to capture everything, which is what you want when
     // debugging a spec that passes but does the wrong thing.
-    trace: process.env.E2E_ARTIFACTS ? "on" : "on-first-retry",
-    video: process.env.E2E_ARTIFACTS ? "on" : "on-first-retry",
+    trace: process.env.E2E_ARTIFACTS
+      ? "on"
+      : process.env.CI
+        ? "on-first-retry"
+        : "retain-on-failure",
+    video: process.env.E2E_ARTIFACTS
+      ? "on"
+      : process.env.CI
+        ? "on-first-retry"
+        : "retain-on-failure",
     screenshot: "only-on-failure",
     // SLOW_MO=700 pnpm exec playwright test --headed  → watch it run in human time.
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
