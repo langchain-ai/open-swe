@@ -143,6 +143,7 @@ export interface SidebarRecentsPage {
   limit: number
   offset: number
   hasMore: boolean
+  nextOffset?: number
 }
 
 export interface SidebarThreads {

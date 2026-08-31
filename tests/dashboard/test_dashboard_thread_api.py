@@ -2012,6 +2012,7 @@ async def test_list_dashboard_threads_sidebar_pages_recents(monkeypatch) -> None
 
     assert [item["id"] for item in first["recents"]["items"]] == [f"t{index}" for index in range(5)]
     assert first["recents"]["hasMore"] is True
+    assert first["recents"]["nextOffset"] == 5
     assert [item["id"] for item in second["recents"]["items"]] == [
         f"t{index}" for index in range(5, 10)
     ]
@@ -2261,6 +2262,7 @@ async def test_list_dashboard_threads_sidebar_surfaces_readable_active_thread(
     )
 
     assert [item["id"] for item in visible["recents"]["items"]] == ["shared-thread", "t0"]
+    assert visible["recents"]["nextOffset"] is None
     assert visible["recents"]["items"][0]["sandboxId"] == "sandbox-123"
     assert [item["id"] for item in hidden["recents"]["items"]] == ["t0"]
 

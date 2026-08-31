@@ -9,7 +9,9 @@ import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
   markAgentThreadViewed,
+  seedPendingAgentThread,
   setAgentThreadStatus,
+  setPendingAgentThreadDraft,
   useAgentThreadWorkingTreeDiff,
   useResolveAgentThread,
   useSidebarThreads,
@@ -36,6 +38,7 @@ const clients: Array<QueryClient> = []
 
 afterEach(() => {
   vi.useRealTimers()
+  setPendingAgentThreadDraft(null)
   for (const client of clients) client.clear()
   clients.length = 0
   vi.restoreAllMocks()
@@ -48,6 +51,27 @@ function testClient() {
   clients.push(client)
   return client
 }
+
+describe("seedPendingAgentThread", () => {
+  it("seeds an ownerless optimistic detail before navigation", () => {
+    const client = testClient()
+    setPendingAgentThreadDraft({
+      prompt: "start without a repository",
+      repo: null,
+      repo_explicitly_none: true,
+    })
+
+    const thread = seedPendingAgentThread(client, "thread-1")
+
+    expect(thread).toMatchObject({
+      id: "thread-1",
+      repoFullName: "",
+      status: "running",
+    })
+    expect(client.getQueryData(agentThreadKeys.detail("thread-1"))).toBe(thread)
+    expect(seedPendingAgentThread(client, "thread-2")).toBeNull()
+  })
+})
 
 describe("useAgentThreadWorkingTreeDiff", () => {
   const diff: ThreadTurnDiff = {
@@ -272,7 +296,13 @@ describe("useSidebarThreads", () => {
     { offset = 0, hasMore = false }: { offset?: number; hasMore?: boolean } = {}
   ) => ({
     pinned: [],
-    recents: { items, limit: SIDEBAR_PAGE_SIZE, offset, hasMore },
+    recents: {
+      items,
+      limit: SIDEBAR_PAGE_SIZE,
+      offset,
+      hasMore,
+      nextOffset: hasMore ? offset + items.length : undefined,
+    },
   })
 
   it("asks for archived threads only when they are shown", async () => {

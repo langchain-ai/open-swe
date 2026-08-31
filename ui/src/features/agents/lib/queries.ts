@@ -558,9 +558,7 @@ export function useSidebarThreads({
       agentsApi.listSidebarThreads({ ...params, offset: pageParam }),
     initialPageParam: 0,
     getNextPageParam: (page) =>
-      page.recents.hasMore
-        ? page.recents.offset + page.recents.items.length
-        : undefined,
+      page.recents.hasMore ? page.recents.nextOffset : undefined,
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -857,10 +855,31 @@ export interface CreateAgentThreadVariables {
   effort?: string | null
 }
 
+let pendingAgentThreadDraft: CreateAgentThreadVariables | null = null
+
+export function setPendingAgentThreadDraft(
+  draft: CreateAgentThreadVariables | null
+): void {
+  pendingAgentThreadDraft = draft
+}
+
+export function seedPendingAgentThread(
+  queryClient: QueryClient,
+  threadId: string
+): AgentThread | null {
+  const draft = pendingAgentThreadDraft
+  pendingAgentThreadDraft = null
+  if (!draft) return null
+  const thread = optimisticThread(threadId, draft)
+  queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+  seedAgentThreadLists(queryClient, thread)
+  return thread
+}
+
 /**
  * Build the placeholder thread shown the instant a run is started from the
  * home page — before the server has stamped the thread record. Seeded into
- * the detail + list caches by `AgentsHome` so the `$threadId` route renders
+ * the detail + list caches before navigation so the `$threadId` route renders
  * immediately (the 30s `staleTime` keeps it from refetching into a 404), then
  * reconciled to server truth by the list's running refetch + the stream's
  * `onCreated` / `onCompleted` invalidations.

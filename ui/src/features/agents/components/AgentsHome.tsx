@@ -17,10 +17,8 @@ import { LocalProjectSelector } from "@/features/agents/components/composer/RunT
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import {
-  agentThreadKeys,
-  invalidateAgentThreadLists,
   optimisticThread,
-  seedAgentThreadLists,
+  setPendingAgentThreadDraft,
   useAgentSkills,
   useEnvironmentOptions,
 } from "@/features/agents/lib/queries"
@@ -145,19 +143,6 @@ export function AgentsHome() {
       ? (profileQuery.data?.default_repo ?? null)
       : repoOverride
 
-  // Holds the just-submitted prompt until the SDK mints the thread id.
-  const draftRef = useRef<CreateAgentThreadVariables | null>(null)
-
-  useEffect(() => {
-    const id = stream.threadId
-    const draft = draftRef.current
-    if (!id || !draft) return
-    const thread = optimisticThread(id, draft)
-    queryClient.setQueryData(agentThreadKeys.detail(id), thread)
-    seedAgentThreadLists(queryClient, thread)
-    invalidateAgentThreadLists(queryClient)
-  }, [stream.threadId, queryClient])
-
   useEffect(() => {
     if (stream.threadId) {
       writeStoredPanelCollapsed(stream.threadId, panelCollapsed)
@@ -234,7 +219,7 @@ export function AgentsHome() {
   }
 
   const resetPendingSubmit = () => {
-    draftRef.current = null
+    setPendingAgentThreadDraft(null)
     setSubmittedDraft(null)
   }
 
@@ -320,7 +305,7 @@ export function AgentsHome() {
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
     }
-    draftRef.current = draft
+    setPendingAgentThreadDraft(draft)
     setSubmittedDraft(draft)
 
     const configurable: Record<string, unknown> = {}

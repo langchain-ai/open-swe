@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { seedPendingAgentThread } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
@@ -28,6 +30,7 @@ function useAgentsTheme() {
 
 function AgentsLayout() {
   useAgentsTheme()
+  const queryClient = useQueryClient()
   const session = useSession()
   const navigate = Route.useNavigate()
   const pathname = useRouterState({
@@ -86,6 +89,7 @@ function AgentsLayout() {
       <AgentThreadStreamProvider
         threadId={streamTarget.threadId ?? null}
         onThreadId={(id) => {
+          seedPendingAgentThread(queryClient, id)
           setStreamTarget({ activeThreadId: id, threadId: id })
           if (!activeThreadId) {
             void navigate({ to: "/agents/$threadId", params: { threadId: id } })

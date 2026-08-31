@@ -1123,7 +1123,7 @@ async def list_dashboard_threads_sidebar(
         return not repo or repo in deleted
 
     with phase(record, "search"):
-        candidates, repos, truncated = await _scan_recent_threads(
+        candidates, repos, _ = await _scan_recent_threads(
             client,
             searches,
             include_automations=include_automations,
@@ -1153,7 +1153,8 @@ async def list_dashboard_threads_sidebar(
             ),
             _pinned_thread_summaries(client, login, email),
         )
-    has_more = truncated or len(candidates) > safe_offset + safe_limit
+    has_more = len(candidates) > safe_offset + safe_limit
+    next_offset = safe_offset + len(window) if has_more else None
     # An opened thread outside the window still belongs in the list it came
     # from — but only when it is not inside a project folder.
     if active_thread and (summary := active_thread[0]) and not summary.get("repoFullName"):
@@ -1165,6 +1166,7 @@ async def list_dashboard_threads_sidebar(
             "limit": safe_limit,
             "offset": safe_offset,
             "hasMore": has_more,
+            "nextOffset": next_offset,
         },
     }
 
