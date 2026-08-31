@@ -18,11 +18,12 @@ export default async function globalSetup() {
   // A hard-killed run leaves this server bound, and the replacement would exit
   // with EADDRINUSE. Test-only port, so reclaim it.
   try {
-    execFileSync(
-      "bash",
-      ["-c", `pids=$(lsof -ti tcp:${uiPort}) && kill -9 $pids`],
-      { stdio: "ignore" },
-    );
+    const listeners = execFileSync("lsof", ["-ti", `tcp:${uiPort}`], {
+      encoding: "utf8",
+    });
+    for (const pid of listeners.split(/\s+/)) {
+      if (/^\d+$/.test(pid)) process.kill(Number(pid), "SIGKILL");
+    }
   } catch {
     // nothing listening
   }
