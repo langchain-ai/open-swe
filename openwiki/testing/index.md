@@ -1,3 +1,3 @@
 # Files
 
-- [Testing Guide](overview.md) - A map of Open SWE's Python, dashboard, desktop, and browser end-to-end test layers, including shared test isolation and the focused validation commands for each boundary.
+- [Testing Guide](overview.md) - A production-owner test map for Open SWE's Python, dashboard, desktop, and Playwright layers. It highlights dashboard-thread and sandbox contracts plus the isolated Electron end-to-end scenario.
