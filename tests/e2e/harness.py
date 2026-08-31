@@ -40,7 +40,7 @@ from e2e_env import (  # noqa: E402
     REPO_ROOT,
     TEST_USERS,
 )
-from fastapi import HTTPException, Request  # noqa: E402
+from fastapi import HTTPException, Query, Request  # noqa: E402
 from fastapi.responses import (  # noqa: E402
     FileResponse,
     HTMLResponse,
@@ -383,7 +383,9 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
 
 @app.get("/dashboard/api/auth/login")
 async def mock_github_login(
-    redirect_to: str = "", desktop_handoff: str = "", desktop_port: int = 0
+    redirect_to: str = "",
+    desktop_handoff: str = "",
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> Response:
     """E2E stand-in for the dashboard OAuth start route.
 
@@ -393,20 +395,33 @@ async def mock_github_login(
     """
     ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
-    query = urlencode(
-        {"redirect_to": dest, "desktop_handoff": desktop_handoff, "desktop_port": desktop_port}
-    )
+    params: dict[str, str | int] = {"redirect_to": dest}
+    if desktop_handoff:
+        params["desktop_handoff"] = desktop_handoff
+    if desktop_port is not None:
+        params["desktop_port"] = desktop_port
+    query = urlencode(params)
     return RedirectResponse(f"/fake-gh/login/oauth/authorize?{query}", 302)
 
 
 @app.get("/fake-gh/login/oauth/authorize")
 async def fake_github_authorize(
-    redirect_to: str = "", login: str = "", desktop_handoff: str = "", desktop_port: int = 0
+    redirect_to: str = "",
+    login: str = "",
+    desktop_handoff: str = "",
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> Response:
     """Fake GitHub OAuth consent/login page for dashboard e2e tests."""
     ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
     if not login:
+        handoff_inputs = ""
+        if desktop_handoff and desktop_port is not None:
+            handoff_inputs = (
+                f'<input type=hidden name=desktop_handoff value="'
+                f'{escape(desktop_handoff, quote=True)}">'
+                f'<input type=hidden name=desktop_port value="{desktop_port}">'
+            )
         options = "".join(
             f'<option value="{escape(u["login"], quote=True)}">'
             f"{escape(u['name'])} (@{escape(u['login'])})</option>"
@@ -420,8 +435,7 @@ async def fake_github_authorize(
               <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
               <form method=get action=/fake-gh/login/oauth/authorize>
                 <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
-                <input type=hidden name=desktop_handoff value="{escape(desktop_handoff, quote=True)}">
-                <input type=hidden name=desktop_port value="{desktop_port}">
+                {handoff_inputs}
                 <label>GitHub user
                   <select name=login style="font:inherit;padding:0.4rem">{options}</select>
                 </label>
@@ -433,7 +447,7 @@ async def fake_github_authorize(
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
     challenge = valid_handoff_challenge(desktop_handoff)
-    if challenge and desktop_port:
+    if challenge and desktop_port is not None:
         # Desktop login belongs to the app, not this browser: hand a PKCE-bound
         # code back to its loopback listener and leave no session cookie here.
         code = issue_desktop_handoff(login=login, email=email, avatar_url=None, challenge=challenge)

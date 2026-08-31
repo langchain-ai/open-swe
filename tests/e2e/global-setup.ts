@@ -2,6 +2,37 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
+function listeningPids(port: string): number[] {
+  let output: string;
+  try {
+    output = execFileSync(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf8" },
+    );
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) return [];
+    throw error;
+  }
+  return [...new Set(output.match(/\d+/g)?.map(Number) ?? [])];
+}
+
+export function reclaimStaleUiServer(port: string, server: string) {
+  const listeners = listeningPids(port).map((pid) => ({
+    pid,
+    command: execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+    }).trim(),
+  }));
+  const unrelated = listeners.find(({ command }) => !command.includes(server));
+  if (unrelated) {
+    throw new Error(
+      `E2E UI port ${port} is already in use by PID ${unrelated.pid}`,
+    );
+  }
+  for (const { pid } of listeners) process.kill(pid, "SIGKILL");
+}
+
 // Build the real ui/ app once, then run its Nitro server so the harness can
 // proxy page requests to it — the tests exercise server rendering, not a
 // prerendered shell. Both API bases are baked in at build time, so they must
@@ -15,18 +46,9 @@ export default async function globalSetup() {
   const uiPort = process.env.E2E_UI_PORT ?? "3100";
   const harness = `http://127.0.0.1:${port}`;
 
-  // A hard-killed run leaves this server bound, and the replacement would exit
-  // with EADDRINUSE. Test-only port, so reclaim it.
-  try {
-    const listeners = execFileSync("lsof", ["-ti", `tcp:${uiPort}`], {
-      encoding: "utf8",
-    });
-    for (const pid of listeners.split(/\s+/)) {
-      if (/^\d+$/.test(pid)) process.kill(Number(pid), "SIGKILL");
-    }
-  } catch {
-    // nothing listening
-  }
+  // Reclaim only the Nitro server from a hard-killed prior run. Refuse to
+  // terminate unrelated processes using the configured port.
+  reclaimStaleUiServer(uiPort, server);
 
   if (!existsSync(server) || process.env.E2E_FORCE_UI_BUILD) {
     if (!existsSync(resolve(ui, "node_modules"))) {
