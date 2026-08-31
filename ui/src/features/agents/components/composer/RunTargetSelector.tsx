@@ -67,6 +67,7 @@ export function LocalProjectSelector({
   onRemoveProject,
   placeholder = "Select project",
   triggerClassName,
+  side = "bottom",
 }: {
   projects: Array<DesktopProject>
   selectedProjectPath: string | null
@@ -75,6 +76,7 @@ export function LocalProjectSelector({
   onRemoveProject: (cwd: string) => void
   placeholder?: string
   triggerClassName?: string
+  side?: "top" | "bottom"
 }) {
   const selectedProject = projects.find(
     (project) => project.cwd === selectedProjectPath
@@ -92,7 +94,7 @@ export function LocalProjectSelector({
         <span className="truncate">{selectedProject?.name ?? placeholder}</span>
         <ComposerControlChevron />
       </MenuTrigger>
-      <MenuPopup align="start" className="w-64" sideOffset={7}>
+      <MenuPopup align="start" className="w-64" side={side} sideOffset={7}>
         <MenuGroup>
           <MenuGroupLabel>Projects</MenuGroupLabel>
           {projects.length === 0 && (
