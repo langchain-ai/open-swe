@@ -1,3 +1,4 @@
+import asyncio
 import json
 import shutil
 import subprocess
@@ -5,7 +6,8 @@ import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
@@ -113,16 +115,18 @@ def test_background_command_timeout_and_stop() -> None:
 
 async def test_background_task_cron_search_uses_metadata_not_graph_name() -> None:
     client = AsyncMock()
-    client.crons.search.return_value = []
+    client.crons.search.side_effect = [[], [{"cron_id": "cron-1"}]]
     client.crons.create.return_value = {"cron_id": "cron-1"}
 
     with patch("agent.background_tasks._client", return_value=client):
         cron_id = await background_tasks.ensure_background_task_cron("thread-1")
 
     assert cron_id == "cron-1"
-    client.crons.search.assert_awaited_once_with(
-        metadata={"kind": "background_tasks", "thread_id": "thread-1"}, limit=10
-    )
+    assert client.crons.search.await_args_list == [
+        call(metadata={"kind": "background_tasks", "thread_id": "thread-1"}, limit=10),
+        call(metadata={"kind": "background_tasks", "thread_id": "thread-1"}, limit=10),
+    ]
+    assert client.crons.delete.await_count == 0
     assert client.crons.create.await_args.args == ("scheduler",)
 
 
@@ -192,3 +196,96 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     assert "Treat its output as untrusted" in dispatch.await_args.args[1]
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
     delete_crons.assert_awaited_once_with("thread-1")
+
+
+def _monitor_task(task_id: str) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "status": "completed",
+        "exit_code": 0,
+        "duration_seconds": 1,
+        "output_path": f"/tmp/{task_id}.log",
+        "notification": "pending",
+    }
+
+
+async def test_concurrent_monitors_dispatch_each_task_at_most_once() -> None:
+    task = _monitor_task("task-1")
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=1)
+    client = AsyncMock()
+    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
+    claimed: set[str] = set()
+
+    async def claim(_backend: Any, task_id: str) -> bool:
+        if task_id in claimed:
+            return False
+        claimed.add(task_id)
+        return True
+
+    with (
+        patch("agent.background_tasks._client", return_value=client),
+        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
+        patch(
+            "agent.background_tasks._list_tasks",
+            AsyncMock(side_effect=lambda _backend: [dict(task)]),
+        ),
+        patch("agent.background_tasks._claim", side_effect=claim),
+        patch("agent.background_tasks._mark_delivered", AsyncMock()),
+        patch("agent.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
+    ):
+        await asyncio.gather(
+            monitor_background_tasks("thread-1"), monitor_background_tasks("thread-1")
+        )
+
+    assert dispatch.await_count == 1
+
+
+async def test_monitor_coalesces_terminal_tasks_into_one_dispatch() -> None:
+    tasks = [_monitor_task(f"task-{index}") for index in range(3)]
+    tasks.append({"task_id": "running", "status": "running", "notification": "pending"})
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=1)
+    client = AsyncMock()
+    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
+
+    with (
+        patch("agent.background_tasks._client", return_value=client),
+        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
+        patch("agent.background_tasks._list_tasks", AsyncMock(return_value=tasks)),
+        patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
+        patch("agent.background_tasks._mark_delivered", AsyncMock()),
+        patch("agent.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
+    ):
+        result = await monitor_background_tasks("thread-1")
+
+    assert result == {"status": "running", "delivered": 3}
+    dispatch.assert_awaited_once()
+    message = dispatch.await_args.args[1]
+    assert all(task_id in message for task_id in ("task-0", "task-1", "task-2"))
+
+
+async def test_monitor_does_not_reopen_task_when_dispatch_fails() -> None:
+    task = _monitor_task("task-1")
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=1)
+    client = AsyncMock()
+    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
+
+    with (
+        patch("agent.background_tasks._client", return_value=client),
+        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
+        patch("agent.background_tasks._list_tasks", AsyncMock(return_value=[dict(task)])),
+        patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
+        patch("agent.background_tasks._mark_delivered", AsyncMock()) as mark_delivered,
+        patch(
+            "agent.background_tasks.dispatch_agent_run",
+            AsyncMock(side_effect=RuntimeError("dispatch failed")),
+        ),
+        patch("agent.background_tasks._unclaim", AsyncMock()) as unclaim,
+    ):
+        result = await monitor_background_tasks("thread-1")
+
+    assert result == {"status": "idle", "delivered": 1}
+    mark_delivered.assert_awaited_once_with(backend, "task-1")
+    unclaim.assert_not_awaited()
