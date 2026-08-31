@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
@@ -20,6 +21,7 @@ export function RecentAgentThreads({
   activeThreadId: string
   autoFocusComposer?: boolean
 }) {
+  const inheritedThreadId = useAgentThreadStream().threadId
   const [recentThreadIds, setRecentThreadIds] = useState(() => [activeThreadId])
   const visibleThreadIds = addRecentThread(recentThreadIds, activeThreadId)
 
@@ -30,19 +32,26 @@ export function RecentAgentThreads({
 
   return visibleThreadIds.map((threadId) => {
     const active = threadId === activeThreadId
+    const page = (
+      <AgentThreadPage
+        threadId={threadId}
+        active={active}
+        autoFocusComposer={active && autoFocusComposer}
+      />
+    )
     return (
       <div
         key={threadId}
         className={cn(active ? "contents" : "hidden")}
         aria-hidden={!active}
       >
-        <AgentThreadStreamProvider threadId={threadId}>
-          <AgentThreadPage
-            threadId={threadId}
-            active={active}
-            autoFocusComposer={active && autoFocusComposer}
-          />
-        </AgentThreadStreamProvider>
+        {threadId === inheritedThreadId ? (
+          page
+        ) : (
+          <AgentThreadStreamProvider threadId={threadId}>
+            {page}
+          </AgentThreadStreamProvider>
+        )}
       </div>
     )
   })

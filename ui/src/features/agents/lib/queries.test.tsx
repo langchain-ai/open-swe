@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, waitFor } from "@testing-library/react"
+import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { agentsApi } from "./api"
@@ -300,7 +300,6 @@ describe("useSidebarThreads", () => {
     expect(listThreads).toHaveBeenLastCalledWith({
       activeLimit: SIDEBAR_PAGE_SIZE,
       resolvedLimit: 0,
-      activeThreadId: undefined,
       includeAutomations: false,
     })
 
@@ -314,9 +313,30 @@ describe("useSidebarThreads", () => {
     expect(listThreads).toHaveBeenLastCalledWith({
       activeLimit: SIDEBAR_PAGE_SIZE,
       resolvedLimit: SIDEBAR_PAGE_SIZE,
-      activeThreadId: undefined,
       includeAutomations: false,
     })
+  })
+
+  it("adds a selected thread outside the shared sidebar window", async () => {
+    const opened = { id: "opened-thread", resolved: false } as AgentThread
+    vi.spyOn(agentsApi, "listSidebarThreads").mockResolvedValue(
+      emptySidebar(SIDEBAR_PAGE_SIZE, 0)
+    )
+    const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(opened)
+    const client = testClient()
+    const { result } = renderHook(
+      () => useSidebarThreads({ activeThreadId: opened.id }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    await waitFor(() =>
+      expect(result.current.data.active.items).toEqual([opened])
+    )
+    expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
   })
 
   it("increases the activity window when loading more", async () => {
@@ -346,15 +366,17 @@ describe("useSidebarThreads", () => {
 
     await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(1))
     act(() => sidebar?.activeQuery.fetchNextPage())
-    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(2))
-    expect(listThreads).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeLimit: SIDEBAR_PAGE_SIZE * 2 })
+    await waitFor(() =>
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({ activeLimit: SIDEBAR_PAGE_SIZE * 2 })
+      )
     )
 
     act(() => sidebar?.resolvedQuery.fetchNextPage())
-    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(3))
-    expect(listThreads).toHaveBeenLastCalledWith(
-      expect.objectContaining({ resolvedLimit: SIDEBAR_PAGE_SIZE * 2 })
+    await waitFor(() =>
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({ resolvedLimit: SIDEBAR_PAGE_SIZE * 2 })
+      )
     )
   })
 

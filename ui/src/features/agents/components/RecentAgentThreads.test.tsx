@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { RecentAgentThreads } from "./RecentAgentThreads"
 import type { ReactNode } from "react"
 
+vi.mock("@langchain/react", () => ({
+  useStreamContext: () => ({ threadId: "one" }),
+}))
+
 vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
   AgentThreadStreamProvider: ({
     threadId,
@@ -34,7 +38,11 @@ describe("RecentAgentThreads", () => {
 
     act(() => view.rerender(<RecentAgentThreads activeThreadId="two" />))
     expect(screen.getByText("thread one").dataset.active).toBe("false")
+    expect(screen.getByText("thread one").closest("[data-provider]")).toBeNull()
     expect(screen.getByText("thread two").dataset.active).toBe("true")
+    expect(screen.getByText("thread two").parentElement?.dataset.provider).toBe(
+      "two"
+    )
 
     act(() => view.rerender(<RecentAgentThreads activeThreadId="three" />))
     act(() => view.rerender(<RecentAgentThreads activeThreadId="four" />))
