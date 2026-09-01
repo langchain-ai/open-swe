@@ -431,8 +431,23 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
     )
 
 
-def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | None) -> str:
+def _scheduled_prompt(
+    record: dict[str, Any],
+    slack_thread: dict[str, Any] | None,
+    last_outcome: dict[str, Any] | None = None,
+) -> str:
     prompt = str(record["prompt"])
+    if last_outcome:
+        prompt = (
+            f"{prompt}\n\n## Previous tick outcome\n{last_outcome}\n\n"
+            "Treat this as the prior tick's recorded state. Report only state changes, "
+            "reconcile any contradictory verdicts explicitly, and notify only for a new "
+            "signature or a signature whose state changed, including resolution or crossing "
+            "the configured threshold. After the investigation, call `record_schedule_outcome` "
+            "with the current verdict, counted signatures, resolving PR, and notification state. "
+            "Pass the notification state (for example `new`, `still_failing`, `resolved`, "
+            "or a threshold transition) to `notify_automation_channel`."
+        )
     if slack_thread:
         return (
             f"{prompt}\n\n"
@@ -449,10 +464,32 @@ def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | Non
             f"{prompt}\n\n"
             "This automation uses conditional Slack notifications. If and only if you perform "
             "a concrete requested action, such as changing code or updating an external system, "
-            "call `notify_automation_channel` exactly once with a concise final outcome. Do not "
+            "call `notify_automation_channel` exactly once with a concise final outcome and the "
+            "notification state. Do not "
             "call it for read-only checks or when no action was needed."
         )
     return prompt
+
+
+async def record_schedule_outcome(
+    schedule_id: str,
+    verdict: str,
+    counted_signatures: list[str],
+    resolving_pr: str | None = None,
+    notified_signatures: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Persist the bounded outcome digest for a scheduled run."""
+    record = await get_agent_schedule(schedule_id)
+    if not record:
+        return {"success": False, "error": "schedule not found"}
+    outcome = {
+        "verdict": verdict,
+        "counted_signatures": counted_signatures[-20:],
+        "resolving_pr": resolving_pr,
+        "notified_signatures": (notified_signatures or [])[-20:],
+    }
+    await _put_run_state(record, {"last_outcome": outcome})
+    return {"success": True, "outcome": outcome}
 
 
 def _admin_thread_enabled(record: dict[str, Any]) -> bool:
@@ -557,6 +594,10 @@ async def _launch_agent_schedule_record(
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
+    last_state = await _get_run_state(schedule_id)
+    last_outcome = last_state.get("last_outcome") if isinstance(last_state, dict) else None
+    if not isinstance(last_outcome, dict):
+        last_outcome = None
 
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     full_name = _repo_full_name(repo)
@@ -647,7 +688,7 @@ async def _launch_agent_schedule_record(
         thread_id,
         _AGENT_ASSISTANT_ID,
         input=build_run_input(
-            _scheduled_prompt(record, slack_thread),
+            _scheduled_prompt(record, slack_thread, last_outcome),
             input_context,
             systems=[
                 {

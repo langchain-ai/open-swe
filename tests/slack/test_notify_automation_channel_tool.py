@@ -53,6 +53,13 @@ def _config(thread_id: str = "thread_1") -> dict[str, Any]:
     }
 
 
+def _config_for(thread_id: str, state: str) -> dict[str, Any]:
+    config = _config(thread_id)
+    config["configurable"]["automation_slack_notification"]["dedup_window_hours"] = 6
+    config["configurable"]["automation_outcome_state"] = state
+    return config
+
+
 def test_notify_automation_channel_exported() -> None:
     from agent.tools import notify_automation_channel
 
@@ -203,3 +210,65 @@ async def test_notify_automation_channel_allows_retry_after_slack_failure(
     }
     assert second == {"success": True, "message_ts": "1786504009.596419"}
     assert responses == []
+
+
+async def test_notify_automation_channel_suppresses_same_signature_across_ticks(
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    post_count = 0
+
+    async def fake_post(*args: Any, **kwargs: Any) -> tuple[str, None]:
+        nonlocal post_count
+        post_count += 1
+        return f"1786504009.5964{post_count}", None
+
+    monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
+    monkeypatch.setattr(
+        notification_tool,
+        "get_config",
+        lambda: _config_for("thread_1", "still_failing"),
+    )
+    first = await notification_tool.notify_automation_channel("TestError: database unavailable")
+    monkeypatch.setattr(
+        notification_tool,
+        "get_config",
+        lambda: _config_for("thread_2", "still_failing"),
+    )
+    second = await notification_tool.notify_automation_channel("testerror: database unavailable")
+
+    assert first["success"] is True
+    assert second == {"success": True, "suppressed": True, "reason": "already_notified"}
+    assert post_count == 1
+
+
+@pytest.mark.parametrize("state", ["resolved", "threshold_crossed", "below_threshold"])
+async def test_notify_automation_channel_allows_state_transition(
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    posted: list[str] = []
+
+    async def fake_post(channel_id: str, text: str, **kwargs: Any) -> tuple[str, None]:
+        posted.append(text)
+        return f"1786504009.5964{len(posted)}", None
+
+    monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
+    monkeypatch.setattr(
+        notification_tool,
+        "get_config",
+        lambda: _config_for("thread_1", "still_failing"),
+    )
+    await notification_tool.notify_automation_channel(
+        "TestError: database unavailable", state="still_failing"
+    )
+    monkeypatch.setattr(
+        notification_tool,
+        "get_config",
+        lambda: _config_for("thread_2", state),
+    )
+    result = await notification_tool.notify_automation_channel(
+        "TestError: database unavailable", state=state
+    )
+
+    assert result["success"] is True
+    assert result.get("suppressed") is not True
+    assert len(posted) == 2

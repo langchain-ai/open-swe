@@ -90,6 +90,23 @@ class _FakeClient:
         self.runs = _FakeRuns()
 
 
+def test_scheduled_prompt_renders_previous_outcome_conditionally() -> None:
+    record = {"prompt": "Check CI", "slack_notification_mode": "always"}
+    assert "Previous tick outcome" not in schedules._scheduled_prompt(record, None)
+    prompt = schedules._scheduled_prompt(
+        record,
+        None,
+        {
+            "verdict": "still_failing",
+            "counted_signatures": ["TestError"],
+            "resolving_pr": None,
+            "notified_signatures": [],
+        },
+    )
+    assert "Previous tick outcome" in prompt
+    assert "Report only state changes" in prompt
+
+
 @pytest.fixture
 def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     client = _FakeClient()

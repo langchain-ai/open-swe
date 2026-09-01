@@ -1,6 +1,9 @@
 import asyncio
+import hashlib
 import logging
+import re
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from weakref import WeakValueDictionary
 
@@ -15,7 +18,10 @@ from ..utils.slack import append_slack_web_link_footer, post_slack_top_level_mes
 logger = logging.getLogger(__name__)
 
 _NOTIFICATION_NAMESPACE = ["automation_notifications"]
+_DEDUP_NAMESPACE = ["automation_notification_dedup"]
 _MAX_MESSAGE_CHARS = 3_000
+_DEDUP_WINDOW = timedelta(hours=6)
+_MAX_DEDUP_ENTRIES = 20
 _notification_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
@@ -44,7 +50,44 @@ async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
         logger.exception("Failed to mark automation action posted for %s", thread_id)
 
 
-async def notify_automation_channel(message: str) -> dict[str, Any]:
+def _notification_signature(message: str) -> tuple[str, str]:
+    normalized = " ".join(message.lower().split())
+    candidates = re.findall(
+        r"(?:failed|failure|error|test|signature|assert(?:ion)?)[^\n.!?]*",
+        normalized,
+    )
+    source = " | ".join(candidates) or normalized
+    return normalized, hashlib.sha256(source.encode()).hexdigest()
+
+
+def _notification_state(value: str | None) -> str:
+    return value.strip().lower() if isinstance(value, str) and value.strip() else "new"
+
+
+def _recently_notified(
+    entries: object, signature: str, state: str, window: timedelta
+) -> bool:
+    if not isinstance(entries, list):
+        return False
+    cutoff = datetime.now(UTC) - window
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("signature") != signature or entry.get("state") != state:
+            continue
+        timestamp = entry.get("notified_at")
+        if not isinstance(timestamp, str):
+            continue
+        try:
+            notified_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if notified_at >= cutoff:
+            return True
+    return False
+
+
+async def notify_automation_channel(message: str, state: str = "new") -> dict[str, Any]:
     """Notify the configured automation channel once after a concrete requested action."""
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, Mapping) else {}
@@ -79,7 +122,15 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             "error": f"Message must be at most {_MAX_MESSAGE_CHARS} characters",
         }
 
-    async with _notification_lock(thread_id):
+    notification_state = _notification_state(state)
+    normalized_signature, signature = _notification_signature(clean_message)
+    window_hours = notification.get("dedup_window_hours", 6)
+    try:
+        dedup_window = timedelta(hours=max(0, float(window_hours)))
+    except (TypeError, ValueError):
+        dedup_window = _DEDUP_WINDOW
+
+    async with _notification_lock(f"{schedule_id}:{signature}:{notification_state}"):
         try:
             existing = await get_value(_NOTIFICATION_NAMESPACE, thread_id)
         except Exception:
@@ -93,6 +144,19 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
                 "success": True,
                 "already_notified": True,
                 "message_ts": existing.get("message_ts"),
+            }
+
+        try:
+            dedup = await get_value(_DEDUP_NAMESPACE, schedule_id)
+        except Exception:
+            logger.exception("Failed to check automation notification dedup for %s", schedule_id)
+            return {"success": False, "error": "Could not check notification deduplication"}
+        entries = dedup.get("entries") if isinstance(dedup, dict) else []
+        if _recently_notified(entries, signature, notification_state, dedup_window):
+            return {
+                "success": True,
+                "suppressed": True,
+                "reason": "already_notified",
             }
 
         pending = {
@@ -134,10 +198,29 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             "status": "delivered",
             "message_ts": message_ts,
             "notified_at": now_iso(),
+            "signature": signature,
+            "state": notification_state,
         }
         try:
             await put_value(_NOTIFICATION_NAMESPACE, thread_id, delivered)
         except Exception:
             logger.exception("Failed to finalize automation notification for %s", thread_id)
         await _mark_action_posted(thread_id, delivered["notified_at"])
+        dedup_entries = [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+        dedup_entries.append(
+            {
+                "signature": signature,
+                "normalized_signature": normalized_signature,
+                "notified_at": delivered["notified_at"],
+                "state": notification_state,
+            }
+        )
+        try:
+            await put_value(
+                _DEDUP_NAMESPACE,
+                schedule_id,
+                {"schedule_id": schedule_id, "entries": dedup_entries[-_MAX_DEDUP_ENTRIES:]},
+            )
+        except Exception:
+            logger.exception("Failed to store automation notification dedup for %s", schedule_id)
         return {"success": True, "message_ts": message_ts}

@@ -167,6 +167,7 @@ from .tools import (
     open_pull_request,
     output_iframe,
     read_user_settings,
+    record_schedule_outcome,
     recreate_sandbox,
     report_platform_issue,
     request_pr_review,
@@ -837,6 +838,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
+        "record_schedule_outcome",
         "read_user_settings",
     }
 
@@ -1669,6 +1671,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_thread,
         manage_baby_sit,
         notify_automation_channel,
+        record_schedule_outcome,
         open_pull_request,
         *(
             (output_iframe, create_sandbox_file_download_url, create_sandbox_service_url)

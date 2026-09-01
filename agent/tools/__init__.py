@@ -35,6 +35,7 @@ _TOOL_MODULES = {
     "manage_code_channel": ".manage_code_channel",
     "manage_thread": ".threads",
     "notify_automation_channel": ".notify_automation_channel",
+    "record_schedule_outcome": ".record_schedule_outcome",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
@@ -100,6 +101,7 @@ __all__ = [
     "manage_code_channel",
     "manage_thread",
     "notify_automation_channel",
+    "record_schedule_outcome",
     "open_pull_request",
     "output_iframe",
     "publish_review",
@@ -174,6 +176,7 @@ if TYPE_CHECKING:
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
     from .read_user_settings import read_user_settings
+    from .record_schedule_outcome import record_schedule_outcome
     from .recreate_sandbox import recreate_sandbox
     from .reply_to_finding_thread import reply_to_finding_thread
     from .report_platform_issue import report_platform_issue
