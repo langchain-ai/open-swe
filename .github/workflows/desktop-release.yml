@@ -2,6 +2,10 @@ name: Release Desktop
 
 on:
   workflow_call:
+    inputs:
+      release_ref:
+        type: string
+        default: main
   workflow_dispatch:
 
 permissions:
@@ -17,28 +21,40 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout main
+      - name: Checkout release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ inputs.release_ref || 'main' }}
           fetch-depth: 0
 
       - name: Resolve desktop release
         id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           stable_version=$(node -p "require('./desktop/package.json').version")
-          if git rev-parse "refs/tags/desktop-v${stable_version}" >/dev/null 2>&1; then
-            timestamp=$(date -u +%Y%m%d%H%M%S)
-            version="${stable_version}-nightly.${timestamp}"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "label=Open SWE Desktop Nightly ${timestamp}" >> "$GITHUB_OUTPUT"
+          stable_tag="desktop-v${stable_version}"
+          if git rev-parse "refs/tags/${stable_tag}" >/dev/null 2>&1; then
+            if ! gh release view "$stable_tag" --json assets --jq '.assets | length >= 3' | grep -qx true; then
+              git checkout --detach "$stable_tag"
+              version="$stable_version"
+              prerelease=false
+              label="Open SWE Desktop v${version}"
+            else
+              timestamp=$(date -u +%Y%m%d%H%M%S)
+              version="${stable_version}-nightly.${timestamp}"
+              prerelease=true
+              label="Open SWE Desktop Nightly ${timestamp}"
+            fi
           else
             version="$stable_version"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "label=Open SWE Desktop v${version}" >> "$GITHUB_OUTPUT"
+            prerelease=false
+            label="Open SWE Desktop v${version}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=desktop-v${version}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
 
       - name: Set build version
         env:
@@ -138,8 +154,10 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
-          git tag "$TAG"
-          git push origin "$TAG"
+          if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

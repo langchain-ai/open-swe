@@ -15,11 +15,16 @@ concurrency:
 jobs:
   promote:
     runs-on: ubuntu-latest
+    outputs:
+      promoted_sha: ${{ steps.promoted.outputs.sha }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: main
           fetch-depth: 0
+      - name: Record promoted commit
+        id: promoted
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Force-push main to prod
         run: |
           git push --force origin HEAD:refs/heads/prod
@@ -27,4 +32,6 @@ jobs:
   release-desktop:
     needs: promote
     uses: ./.github/workflows/desktop-release.yml
+    with:
+      release_ref: ${{ needs.promote.outputs.promoted_sha }}
     secrets: inherit
