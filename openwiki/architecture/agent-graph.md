@@ -5,7 +5,7 @@ description: Per-run assembly of the Open SWE main-agent graph, including execut
 tags: [agent-graph, get-agent, deep-agents, langgraph, middleware, subagents, sandbox, tools]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-08-28T11:53:01.759Z
+    at: 2026-08-31T08:17:06.525Z
 sources:
   - id: openwiki-source-bd55a0c7231ffb3eb9e8ded0
     resource: repo://agent/dashboard/agent_overrides.py
@@ -13,6 +13,10 @@ sources:
     resource: repo://agent/desktop.py
   - id: openwiki-source-f8665996049065d2172f68e2
     resource: repo://agent/graphs/agent.py
+  - id: openwiki-source-9103280889fa6c4d9c5bb0df
+    resource: repo://agent/middleware/dynamic_tools.py
+  - id: openwiki-source-f26d060fb4408e89b50964a5
+    resource: repo://agent/middleware/plan_mode.py
   - id: openwiki-source-de97adb0acb9dec0664a44b6
     resource: repo://agent/middleware/prepare_run.py
   - id: openwiki-source-10938886c8b24d0cdc72ad9e
@@ -23,6 +27,10 @@ sources:
     resource: repo://agent/runtime/execution.py
   - id: openwiki-source-856ade03ef31ac38e1347f7c
     resource: repo://agent/server.py
+  - id: openwiki-source-d8298c1a08304a86bd1da991
+    resource: repo://agent/tools/approve_plan.py
+  - id: openwiki-source-e89cf8ceb9792c1cbeb7569e
+    resource: repo://agent/tools/enter_plan_mode.py
   - id: openwiki-source-1af687f97a01401e2fad2ce2
     resource: repo://agent/utils/tracing.py
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
@@ -31,7 +39,9 @@ sources:
     resource: repo://docs/CUSTOMIZATION.md
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
-generated: { by: "openwiki/0.4.2", at: "2026-08-28T11:53:01.759Z" }
+  - id: openwiki-source-fef236c0a2029fbda76955d6
+    resource: repo://tests/agent/test_plan_mode.py
+generated: { by: "openwiki/0.4.2", at: "2026-08-31T08:17:06.525Z" }
 ---
 
 # Agent Graph & get_agent Factory
@@ -116,9 +126,11 @@ The selected routes form an ordered `skill_sources` list supplied to both the pa
 
 `static_tools` is an intentionally curated parent surface, not every export in `agent.tools`. It includes web, plan, background, Linear, thread, PR, Slack, and skill-management operations. It is adjusted for trusted Slack source context, admin-thread workspace tools, and sandbox-download capability; desktop reduces it to web request/search tools and stop-summary mode reduces it to the Slack read/reply pair.
 
-Browser, Observability, Currents, Notion, and Corridor are not equivalent eager static tools. Browser tools are loaded for non-desktop, non-stop-summary runs. The integration groups are supplied to `DynamicToolMiddleware`; each group loads only on agent request, avoiding an MCP/credential handshake before the first model call. The middleware reserves built-in and static names so a dynamic group cannot collide with them. `ExcludeToolsMiddleware` then removes permanently unsafe/unwanted tool names, using `DEEP_AGENT_EXCLUDED_TOOLS` normally and the broader stop-summary exclusion set for stop summaries.
+Browser tools are loaded only for non-desktop, non-stop-summary runs. `DynamicToolMiddleware` exposes integration *schemas* through `load_integration_tools`, then adds selected tools to subsequent model calls. In this factory, Observability, Currents, and Notion are first loaded while assembling the graph and passed as eager groups; the middleware still requires the model to select their names before exposing them. Corridor is different: its static allowlist creates an `IntegrationGroup` whose loader performs the cached MCP load only after selection. Group loads are serialized per group, failures are logged and become an unavailable-tool response rather than an exception, and `loaded_integration_tools` is reset at each `before_agent` hook. Reserved Deep Agent and static names prevent catalog collisions.
 
-`PlanModeMiddleware` is installed for every full graph and is state-aware, not merely a factory-time filter. A run starts in plan mode only when `configurable.plan_mode is True`; an `enter_plan_mode` tool call can also update state during the run. In plan mode it excludes delegation, background execution, PR and sandbox mutation, selected skill/thread/Slack/Linear mutations, and environment-management tools. Read-only operations, filesystem tools, `save_plan`, and `approve_plan` remain available. This blocks a delegated subagent from bypassing the plan-mode read-only intent because `task` itself is excluded.
+`ExcludeToolsMiddleware` removes permanently unsafe/unwanted names after the dynamic layer: `DEEP_AGENT_EXCLUDED_TOOLS` currently excludes `grep`; stop-summary mode also excludes built-in mutating filesystem/delegation tools (`delete`, `edit_file`, `execute`, `task`, and `write_file`).
+
+`PlanModeMiddleware` is installed for every full graph and is state-aware, not merely a factory-time filter. Its `before_agent` hook resets state to the factory's `configurable.plan_mode is True` value, so a stale state value from a prior run does not leak into a later run. An `enter_plan_mode` tool call can set state during the run; filtering is recomputed on the next model turn. `approve_plan` clears the state after it verifies active plan mode and persists the approved status. In plan mode the factory's exclusion set removes delegation, background execution, PR and sandbox mutation, selected skill/thread/Slack/Linear mutations, environment management, and automation operations: `create_automation`, `update_automation`, `trigger_automation`, and `delete_automation`. Read-only operations, filesystem tools, `save_plan`, and `approve_plan` remain available. `execute` also remains exposed; the prompt, rather than middleware, imposes the no-mutating-command discipline. Excluding `task` is essential because a general-purpose subagent is a separate graph and would otherwise not inherit the parent's plan-mode filter.
 
 ## Subagents
 
