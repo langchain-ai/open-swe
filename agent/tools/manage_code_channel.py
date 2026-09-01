@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
@@ -279,6 +280,77 @@ async def _resolve_content(content: str, file_path: str) -> tuple[str, str | Non
         return "", "file_path must contain valid UTF-8 text"
 
 
+async def _promote_locked(
+    client: Any,
+    thread_id: str,
+    active: dict[str, Any],
+    title: str,
+    source_channel: str,
+    source_ts: str,
+    origin_message_ts: str,
+    team_id: str,
+    is_private: bool,
+) -> tuple[str, dict[str, Any] | None]:
+    channel_id, error = await create_code_channel(
+        name=title,
+        session_id=thread_id,
+        origin_channel_id=source_channel,
+        origin_message_ts=origin_message_ts,
+        team_id=team_id,
+        is_private=is_private,
+    )
+    if not channel_id:
+        return "", {
+            "success": False,
+            "error": error or "Slack could not create the code channel",
+        }
+    new_slack = {
+        **{
+            key: active.get(key, "")
+            for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email")
+        },
+        "channel_id": channel_id,
+        "thread_ts": CODE_CHANNEL_SESSION_TS,
+        "triggering_event_ts": origin_message_ts,
+    }
+    bound = False
+    try:
+        await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
+        bound = True
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                "source": "slack",
+                "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        if bound:
+            with suppress(Exception):
+                await delete_slack_thread_associations(
+                    client, channel_id, CODE_CHANNEL_SESSION_TS, expected_thread_id=thread_id
+                )
+        with suppress(Exception):
+            await archive_code_channel(channel_id)
+        return "", {
+            "success": False,
+            "error": f"Could not bind the code channel to this session: {exc}",
+            "retryable": True,
+        }
+    try:
+        await delete_slack_thread_associations(
+            client, source_channel, source_ts, expected_thread_id=thread_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        return "", {
+            "success": False,
+            "error": f"Code channel created but the source thread was not detached: {exc}",
+            "channel_id": channel_id,
+            "retryable": True,
+        }
+    return channel_id, None
+
+
 async def _create(
     client: Any,
     thread_id: str,
@@ -295,70 +367,34 @@ async def _create(
     source_ts = str(active.get("thread_ts") or "")
     origin_message_ts = str(active.get("triggering_event_ts") or "") or source_ts
 
-    channel_id, error = await create_code_channel(
-        name=title,
-        session_id=thread_id,
-        origin_channel_id=source_channel,
-        origin_message_ts=origin_message_ts,
-        team_id=team_id,
-        is_private=is_private,
-    )
-    if not channel_id:
-        return {"success": False, "error": error or "Slack could not create the code channel"}
-
-    new_slack = {
-        **{
-            key: active.get(key, "")
-            for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email")
-        },
-        "channel_id": channel_id,
-        "thread_ts": CODE_CHANNEL_SESSION_TS,
-        "triggering_event_ts": origin_message_ts,
-    }
-    bound = False
-    try:
-        async with slack_thread_mutation_lock(
-            client, source_channel, source_ts, thread_id=thread_id
-        ) as locked_active:
-            if not locked_active or (
-                locked_active.get("channel_id"),
-                locked_active.get("thread_ts"),
-            ) != (source_channel, source_ts):
-                raise RuntimeError("Slack thread moved concurrently; retry")
-            await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
-            bound = True
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "source": "slack",
-                    "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
-                },
+    async with slack_thread_mutation_lock(
+        client, source_channel, source_ts, thread_id=thread_id
+    ) as locked_active:
+        if not locked_active or (
+            locked_active.get("channel_id"),
+            locked_active.get("thread_ts"),
+        ) != (source_channel, source_ts):
+            return {"success": False, "error": "Slack thread moved concurrently; retry"}
+        promotion = asyncio.create_task(
+            _promote_locked(
+                client,
+                thread_id,
+                active,
+                title,
+                source_channel,
+                source_ts,
+                origin_message_ts,
+                team_id,
+                is_private,
             )
-    except Exception as exc:  # noqa: BLE001
-        if bound:
-            with suppress(Exception):
-                await delete_slack_thread_associations(
-                    client, channel_id, CODE_CHANNEL_SESSION_TS, expected_thread_id=thread_id
-                )
-        with suppress(Exception):
-            await archive_code_channel(channel_id)
-        return {
-            "success": False,
-            "error": f"Could not bind the code channel to this session: {exc}",
-            "retryable": True,
-        }
-
-    try:
-        await delete_slack_thread_associations(
-            client, source_channel, source_ts, expected_thread_id=thread_id
         )
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "success": False,
-            "error": f"Code channel created but the source thread was not detached: {exc}",
-            "channel_id": channel_id,
-            "retryable": True,
-        }
+        try:
+            channel_id, failure = await asyncio.shield(promotion)
+        except asyncio.CancelledError:
+            await promotion
+            raise
+    if failure:
+        return failure
 
     warnings: list[str] = []
     _, status_error = await set_session_status_result(channel_id, "processing")

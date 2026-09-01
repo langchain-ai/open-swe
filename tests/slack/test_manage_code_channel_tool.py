@@ -75,13 +75,20 @@ async def test_promotion_initializes_status_context_and_runtime_commands(
     }
     client = SimpleNamespace(threads=SimpleNamespace(update=AsyncMock()))
 
+    lock_held = False
+
     @asynccontextmanager
     async def locked(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+        nonlocal lock_held
+        lock_held = True
         yield source
+        lock_held = False
 
-    monkeypatch.setattr(
-        manage_tool, "create_code_channel", AsyncMock(return_value=("C-code", None))
-    )
+    async def create_code_channel(**_kwargs: Any) -> tuple[str, None]:
+        assert lock_held
+        return "C-code", None
+
+    monkeypatch.setattr(manage_tool, "create_code_channel", create_code_channel)
     monkeypatch.setattr(manage_tool, "slack_thread_mutation_lock", locked)
     monkeypatch.setattr(manage_tool, "bind_slack_thread_id", AsyncMock())
     monkeypatch.setattr(manage_tool, "delete_slack_thread_associations", AsyncMock())
