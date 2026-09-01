@@ -114,7 +114,7 @@ window.addEventListener("DOMContentLoaded", () => {
       pointer-events: none;
       position: fixed;
       top: 0;
-      left: 90px;
+      left: 118px;
       right: 0;
       height: ${DRAG_REGION_HEIGHT}px;
       z-index: 2147483647;
