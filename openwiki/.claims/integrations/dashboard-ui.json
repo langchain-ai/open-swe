@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:e634581589997fced600025578dbb7f94660ef2efed957f8df824d4cf5e102f9",
+  "pageVersion": "sha256:2ed1139f825f44af724c841ccc304ca1cbe2ffecd81fdd636671e25e93df0c9d",
   "claims": [
     {
       "id": "claim_dbbc3ca9eca441849138011e70eadf76",
@@ -180,19 +180,19 @@
     },
     {
       "id": "claim_e4b73cab22f148d5b028fd1a6c4d2e0d",
-      "statement": "Desktop \"This Mac\" local runs are supervised by Electron starting a loopback LangGraph server from langgraph.desktop.json, and agent/desktop.py gates them to an allowlisted local_project_path and builds a LocalShellBackend over that project, keeping the same graph/tools/streaming as cloud threads while differing only in filesystem backend and unavailable integrations.",
+      "statement": "Electron’s BackendSupervisor lazily starts a token-authenticated loopback LangGraph server on 127.0.0.1 from langgraph.desktop.json in development or the bundled configuration when packaged; agent/desktop.py permits a desktop run only for a real local_project_path in OPEN_SWE_LOCAL_PROJECTS_FILE and builds a LocalShellBackend rooted at that project.",
       "evidence": [
         {
-          "resource": "repo://agent/desktop.py#L15-L45",
-          "version": "repo-lines-v1:sha256:3c62dea3071150a5a976cc1459764b286518e5c883983ad955f598cc975cc56a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhMzBiNmQ3NjVjY2FmODIxMDVjZGMwZTdjZDNjYmVmM2QxMzJkY2Q4NjlhYmMwM2I0OTRjMDhmZDI2ZDEwNmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDY4YWJhYjE0MDhkOGJhNWMzNDk3MDFmMzRiZTUyZjg2ZmZiYWUzYTJkOWUwODE4N2MwZjFhM2IyMjc1MzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2MTJkZTFkNjY0YTg4M2Q3NzExYjZjZWFhMTUyNDdhNWE1NzgwODE4OTMzNmZlZTA2M2I1OWJlNDE1OTcxZWYifQ"
+          "resource": "repo://agent/desktop.py#L15-L44",
+          "version": "repo-lines-v1:sha256:1935780777a59ec8cd2aa49662c94f28c770088cddbe2efef66de9a819de560b:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhMzBiNmQ3NjVjY2FmODIxMDVjZGMwZTdjZDNjYmVmM2QxMzJkY2Q4NjlhYmMwM2I0OTRjMDhmZDI2ZDEwNmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDY4YWJhYjE0MDhkOGJhNWMzNDk3MDFmMzRiZTUyZjg2ZmZiYWUzYTJkOWUwODE4N2MwZjFhM2IyMjc1MzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5MWMxOTk4NmE4ZDBlMjE5ODA4YzJlNjgwOGY1NTUyMmQ0MGUxZWFhN2Y0ZGVjOGJhNzMwZjQ2YTQ1ZjZiYjEifQ"
         },
         {
-          "resource": "repo://desktop/README.md#L9-L11",
-          "version": "repo-lines-v1:sha256:41f1edb5d0060f738b05798dd30e6bbda2dac2539a5f88eba88557611dab62cc:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNWQ0MmQ3MTdlNTBmZjBjMTBlZjEyNzJmMzExMjM2ZTY3Y2U2YTg0NDJiNWUxMTYzNTc2ZTg0ZTZkZDg1OTY4MSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWZiNDg5OTgxOGQ4ODRmMWY5OTU1NjI4MzNjMTg5ZDQ1MmEwZTlmMmZlYzQ2YmQ2MDI5ZWNjOTdlOTY2NWRiZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGZkN2RlNmRhZTRjZGIyNjQzNzAyMjVkMDk3NzM0MTNjYTM1MTU3MWM3NGY4ZmJlOTdjMWQ1MjcyMTg4ZWExMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZmFmN2ZkNGQ0NmI3MjYwNmFhN2YxM2JiYzFjNTRlMzA1MzUzZTJkZGRkM2Q3YzFjMjJiOGI2M2VjYjdmZmE3YyJ9"
+          "resource": "repo://desktop/src/backend-supervisor.cjs#L176-L269",
+          "version": "repo-lines-v1:sha256:c12517b1e020f30cc842ed6da0164fe991af6afc61d2aba96a1030786043093d:eyJzZWxlY3RlZExpbmVDb3VudCI6OTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNzQ3NmVhNTljMTdiYmEyNmIyZWY5ZjI0ZTA3MTkzYTE3YjgzMjVlNWU0M2YwMzFiNjFkMmFmYTljMjY2MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0ZTQyMDhjZDZmZmI4YzRhMzU0N2IyZjU0YWRhMTk5NzhjM2YzNjVlNzhmOTUwMmVmNTE0NWNkZDJhYTg1NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVhNDcwOTY0ZjYxYWUxMjZiM2IyZjMxMGFhNGRiNzYxN2VhMzE1YzViM2Q3ZmFhYjFhOTliMWY0NjNiOGE5NzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzMDQzOWNjZDdjNWE5NDQwNGM0ZWJmZDg5NmNjNGZiZTNkZjIzMTg4ZjZkYjU2MDIzNzE2YjBjZTQ1Yzg4N2IifQ"
         },
         {
-          "resource": "repo://desktop/src/backend-supervisor.cjs#L31-L45",
-          "version": "repo-lines-v1:sha256:3107aa9ebc8e23157cb114112c230e42606966a91c38d72941ba13706c603f10:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjMTYwZTgwYjgzMWFhMWM5NWQ5MDJmNzljMjE0ZTI1ZjNjMzQ2MmNlMTI0MWNlYzg5NGViNmVhOTdjMGVmNjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyYTJjYjI1YTEyMmI0NDIyMWE2MjM0ZWM2NjBhN2I1ZmI3ZjliZGU3YjNiOWUyYjNjNTU5YTBkOTZmYWM3MzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5ODAwMzkxMjk0ZTg1YzEyMmVmYzM1YTQ5OTc2NGZiYWE0YzFhZDVlNDA2ZDZiODU5MGM5ZDYxOWU0MjBhMDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI3NzhlZDdmYWE5MWU3MjQ0MjMxZjE1NjVmNzQ2OGVlZjk3OTc3Njg0ZTczMjcyYWU2NTNhODFjNDM3NGVjODcifQ"
+          "resource": "repo://desktop/src/backend-supervisor.cjs#L26-L46",
+          "version": "repo-lines-v1:sha256:753268a4e41cbb1e1852673402c690b2b2ef9e70a9046b6a1a1ce9e68cdc5274:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliM2ZmNjJkOTA4OTI0OWY1OGIzMGRhNzIzYTE5MzM2MmJiZTVlOWYyNDViNmZkYTdlYjZiMGQ0ZjIwNDg5NWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyYTJjYjI1YTEyMmI0NDIyMWE2MjM0ZWM2NjBhN2I1ZmI3ZjliZGU3YjNiOWUyYjNjNTU5YTBkOTZmYWM3MzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhODVkZTczN2JiYmMxNzAyY2QxMGZmMjI0NGNlMzkyNDQ3NTFlMTMwYTU0NTc0ZjlmMDZmZmIyOWIyOTgwNzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI3NzhlZDdmYWE5MWU3MjQ0MjMxZjE1NjVmNzQ2OGVlZjk3OTc3Njg0ZTczMjcyYWU2NTNhODFjNDM3NGVjODcifQ"
         }
       ]
     },
@@ -373,10 +373,60 @@
           "version": "repo-lines-v1:sha256:e3bcf5847857679d63e7e9eea96c2e344db1f55c9d50091f14357d392a4b8f15:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI1MzBhOWUwNTEwNDAyYzdjMzhhZmZjNjcwYTZmM2FkMzA4ZGRkNzE4M2YwMzE5MWU2MTU4MmQ2NjQ0MmI1MGNlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1YTVkZTVlNzI3M2Y1Mjk4ZmZiYjY1NWYzM2UyNGVkNjk0YmRmNmY0YTA0NjA0YTU1NjQzODMwM2FkNzNhNjFlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhZmRhNmI3ZGYzY2Y3M2ZjMDQ4NmMzNjJhYzc1NTdiZjc0ZjFmNDJhY2FmZjE0ZGFmYzZkMWM1YzRlZDk2YjQ4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI4ODM3YmVlZDE3MDIwODZjZjYwMzZmNGI0ZmQ1OGRlMDA5NTIwNTdjMmI2OGRiN2ZjNDVlODBkMDk2MzgzOGZhIn0"
         }
       ]
+    },
+    {
+      "id": "claim_e7796f97182e4b4dbc5213701c81d7ed",
+      "statement": "The local-graph proxy removes renderer cookies, injects the supervisor's random bearer token, and exposes the stable /local-graph agent configuration; startup polls that authenticated loopback server, while shutdown escalates from SIGTERM to SIGKILL after its timeout.",
+      "evidence": [
+        {
+          "resource": "repo://desktop/src/backend-supervisor.cjs#L176-L269",
+          "version": "repo-lines-v1:sha256:c12517b1e020f30cc842ed6da0164fe991af6afc61d2aba96a1030786043093d:eyJzZWxlY3RlZExpbmVDb3VudCI6OTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNzQ3NmVhNTljMTdiYmEyNmIyZWY5ZjI0ZTA3MTkzYTE3YjgzMjVlNWU0M2YwMzFiNjFkMmFmYTljMjY2MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0ZTQyMDhjZDZmZmI4YzRhMzU0N2IyZjU0YWRhMTk5NzhjM2YzNjVlNzhmOTUwMmVmNTE0NWNkZDJhYTg1NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVhNDcwOTY0ZjYxYWUxMjZiM2IyZjMxMGFhNGRiNzYxN2VhMzE1YzViM2Q3ZmFhYjFhOTliMWY0NjNiOGE5NzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzMDQzOWNjZDdjNWE5NDQwNGM0ZWJmZDg5NmNjNGZiZTNkZjIzMTg4ZjZkYjU2MDIzNzE2YjBjZTQ1Yzg4N2IifQ"
+        },
+        {
+          "resource": "repo://desktop/src/backend-supervisor.cjs#L284-L296",
+          "version": "repo-lines-v1:sha256:4280c996fadadd265d57eec92c7d38e66cd186341dc385e965b7497ae4fd419e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3MTUyNTMxM2FiYjQ4YjBmZDc5Y2NmMDBiMWJkYThlNjU3OTg4NDg2MDE3ZjI4YTNlYjBkY2JhY2I2N2VkMzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyZDExY2FmNDNlOTdlZjM2OWU2YmVlZDFhMjY4YmQwNTgzOGYyOWI5ZGQyNTRiZjY5YmE2NDg4NDE0NzIzNGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFkYjNlN2NkMGMzYTYyMzA0NzY2ODE2MWQxMDRlOTlkODYyMDljYTNlNzc1NGEyNWIxMTlhNDkwNzg3ODA0MjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNkNDY2ODY1NzdjOGNmZGNiMjc4Zjg0ODZhN2YzMzA4NzIzODlmZTcxY2RiY2U0MDNlNjY5NTVhOTA2ZGE0YmYifQ"
+        },
+        {
+          "resource": "repo://desktop/src/backend-supervisor.cjs#L360-L415",
+          "version": "repo-lines-v1:sha256:66fc2c98db44124561c979599fd8a33ef5c0caa3a4b91dfe99c2bb4a06c2f850:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBhNTVjNDk0MDlhYmU2MmI2YjQ4YjM3OGNiNzNjMDdjNzUzNjZmOTMzMjY4ZGMwYTQ2ZDNlZmE4Mjg0NzEzYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3ZDg2MzJlNTRlOTI5OGFiYjk1ODcyN2UyZDUxNDA4YWJhZjEzNjYwMzUzNzkxMDE0MGFiZjY1YjMwYWI2MTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc2ODY5YjUxMTE5Mzk2ZTk4ZjQ0OWJjYmJmZDQyYWY2YzIxZTlkNWI5YTljODhiNTlhMjk1MTMwMGE0Mzk0ZDMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a6e0619c0e8e40c9a64a77f7a58ec447",
+      "statement": "For configurable.source == \"desktop\", the agent factory selects the local backend rather than a cloud sandbox, disables cloud sandbox file downloads, uses local model defaults, exposes state-backed user skills rather than organization skills, and routes scratch artifacts to sanitized per-thread filesystem backends outside the project.",
+      "evidence": [
+        {
+          "resource": "repo://agent/desktop.py#L47-L72",
+          "version": "repo-lines-v1:sha256:c11cf22a1b4635ebbc3a127f648ce44b39b969036b2194ac4f8a871baf53479f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiMjEzNmVkNzdhZDI5NDE2NDBhODRiYjk3ZGFkYWViMDJjNWYwOTRlYjZlMmI2YTFmMzUxMTAyOTcxZjc1YmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5NDAxM2VmZGU4YTQ4MDFiYmRiM2RlNTViMDE0M2EzNzgzYTBhYzU4MjcxZmNhMWM2MDA0NjQ0ODEzMWI2MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1153-L1160",
+          "version": "repo-lines-v1:sha256:7b82603f94a44203443903355a64aac9eafd906d3bf7792f5b7aa0c4d0e8970e:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTMyNTU1MTc3NzhlNzkyNTcyNzFmYmUwMjA1YWFiODIxNTQ1NmFjYWFiNTNiOWM0NWQ5YTJjZjI3NGQwOWIxOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzBjMWYxODhmMTQyZWQ3YTgyNDY4MGIyMDcxNzJjNTUxOWJjNjE0YTQ4ZmRhN2NmMTY3ZWRiOGRkZjc5OTU2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGNjNGE3ZDFjYzc5NmFiYTNlNDY3MjMzMjdmNTE3ZTlmODExOTgyZDI1MGYwNzAyOTg2ZTRiNTc2NGFkOTU4OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODFlODAzODA5YjllY2JmNmVjZDQ4NWYzZjc4YzFkMmIxMjY4N2I4NzNjYTdiMWFmZDRkZWMzM2FkNDQ4ZWM5MyJ9"
+        },
+        {
+          "resource": "repo://agent/server.py#L1400-L1447",
+          "version": "repo-lines-v1:sha256:21bb2281904406f2e3629fc21ebd74b1d1e53d71266552233fe0067f45338849:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4NTlkMDZjZjNjZmI0Y2I1YjNmMzUzMTI5NDU0ZTk3NzAyZmViNGJhNjViM2MxMGVlOTM2NWUzMjA0MjMzYTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJjMGM5MDNhYjI4YzE4Yjg5YWU2YWQ4MTA5NjQ5NDUxYjYxOTEzMmEzNDdhZjM0MDI3MTcyNzVhMzg0NzA0NDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmOGNmNmU2MjBjMDg2ZDAzMTIyYzIxNThkMTY2ODZkMmIzYzBkZGE3YjY1ZDdkMjc4YjVkNWFlOGE2MDMxMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU0ZjI4NmFiZjY5ZTlhYzZmY2EzNzhmNGQ1NmJiZDYwMDVmNGQ0MDViNTg3NTQzODM3NWRkY2IyMzcyZDU1ZDQifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1721-L1745",
+          "version": "repo-lines-v1:sha256:83e818a8abae3654108b1d4c08a49288cd46826289348c8fab5a4b009acc6a4e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3OGVlODljNGY0ZTE2M2MzOWM5ODQyNTVjNWQwMjZkYjA1NTg0NjYwMjEzYWZjMDZiYjU4NDMwZTA1MmViNjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM3NjI0OWViYTE5YzIzOWNkMDFjYjYwNGY1NWE0YTg1OTNiN2FiNDc0ZWRhYWQwOTkzYjIwYTQ2YWMzZDEzODEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwZmQzOTdmYWUyNzU0ODg4NTUzOWNkMWNjN2NmNzk5MzQzYzIxNTg0ZDVkZmQzZjYyMzlmOGYzOGI1OTAyMTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg2N2Q1YmFjNmVkYWFmMWY5YzQzZjUzM2RhNWIwZDUxYjliNzIyZWI5YTM1OGJhNGYyYzY5OTQ5OWM5ZDQ0MmEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_48715b1ddd4849d49c6cdff195e4a61b",
+      "statement": "The Agents UI permits an unauthenticated desktop-local-only session only on the root or /agents/local/ routes; its shared stream provider selects local transport for a local session and cloud transport otherwise.",
+      "evidence": [
+        {
+          "resource": "repo://ui/src/routes/agents.tsx#L48-L84",
+          "version": "repo-lines-v1:sha256:aba3301e5ec33c5656797ccf20d3e5bd5b469dae0ce3d010a10e181338bafb88:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzNDE5ZmIzZjQxMDVhNGM3ZjM1NzEwZjc4NjllNjY0MTYzZmYxMGQxYzEyMWVhZTU1YTYxMGM4MDA3NjZkZWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZiZDc3OGFhOGE2MGExMGYwM2FhMmQxNTVjOGVkNGNlMzM0YmI2MmU5ZjcyMTM3YzhkNGJmNTQ1ZjdkZWVkM2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjExMzdhMTFjYjNmNTk4NzY3NGNjZDgyODAwODZiMjg3NGM0MzBmMzBhNGI1Njg2MjNhMGRmZTg4MWZhNTAwNzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmMTMxNTBkMjFjNmM2NjU0Yjc5NWFkNjIwZmY3ZmRiZDQ1YTQ1OTVjMjI4NzMyYWY0Yjc3Y2YwMDU1NjQ2MGEifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-31T08:17:06.525Z"
+    "at": "2026-09-01T08:16:00.848Z"
   }
 }

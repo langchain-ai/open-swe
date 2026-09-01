@@ -24,6 +24,8 @@ sources:
     resource: repo://agent/dashboard/thread_api.py
   - id: openwiki-source-8c60a9544ea26006748dd7a3
     resource: repo://agent/desktop.py
+  - id: openwiki-source-856ade03ef31ac38e1347f7c
+    resource: repo://agent/server.py
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
   - id: openwiki-source-2f66613e587b7c57d9be522e
@@ -46,10 +48,10 @@ sources:
     resource: repo://ui/src/routes/integrations.tsx
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
-generated: { by: "openwiki/0.4.2", at: "2026-08-31T08:17:06.525Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-09-01T08:16:00.848Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-08-31T08:17:06.525Z
+    at: 2026-09-01T08:16:00.848Z
 ---
 
 # Dashboard API & Web/Desktop UI
@@ -152,7 +154,9 @@ Browser fetches use the relative `/dashboard/api` path with `credentials: "inclu
 
 The experimental Electron client serves the compiled UI at `open-swe://app`, proxies dashboard API paths to its configured backend, and separately proxies `/local-graph` to its loopback local LangGraph server. It keeps LangSmith credentials out of renderer code and does not expose raw LangGraph calls to the browser. Desktop OAuth uses a PKCE-bound handoff: the browser callback receives a code bound to a verifier retained by the desktop app, and `POST /auth/desktop/exchange` mints the desktop session only after verifier validation.
 
-“This Mac” runs are distinct from cloud threads. Electron supervises `langgraph dev` on `127.0.0.1` using the desktop graph configuration. The backend accepts a desktop project only if its real path appears in `OPEN_SWE_LOCAL_PROJECTS_FILE`; it creates `LocalShellBackend` rooted there with a minimal inherited environment. Agent artifacts and evicted history are routed to a per-thread artifacts directory outside the repository to avoid polluting user changes. Thus the graph protocol can be shared while filesystem authority remains explicitly local and allowlisted.
+“This Mac” runs are distinct from cloud threads. Electron owns a `BackendSupervisor` which starts the local server on demand for `/local-graph`, reserves a random loopback port on `127.0.0.1`, and generates a new random bearer token for that child. It launches either source-development `uv run langgraph dev` with `langgraph.desktop.json` or the packaged Python runtime, then polls its authenticated health endpoint for up to 60 seconds. The UI only receives the stable `{ apiUrl: "/local-graph", graphId: "agent" }` configuration: the supervisor removes renderer cookies and injects the bearer token when forwarding to loopback. Startup failure includes retained child logs; an unexpected child exit is remembered as a failure, and application shutdown sends `SIGTERM` before escalating to `SIGKILL` after the stop timeout.
+
+The desktop graph uses `agent.local_auth:auth` and disables its own UI. A run with `configurable.source == "desktop"` accepts a project only when the real path of `local_project_path` is an existing directory listed in `OPEN_SWE_LOCAL_PROJECTS_FILE`. It then creates a non-virtual `LocalShellBackend` rooted at that directory with only a small shell-environment allowlist. The main agent factory takes that branch instead of creating a cloud sandbox; it also uses local defaults and routes user skills to state, while omitting organization skills. Agent artifacts and evicted history are routed to a sanitized per-thread directory under `OPEN_SWE_LOCAL_ARTIFACTS_DIR` (or an OS temporary fallback), outside the repository, to avoid polluting user changes. Thus the graph protocol can be shared while filesystem authority remains explicitly local and allowlisted.
 
 ## Focused verification
 
