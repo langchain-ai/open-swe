@@ -444,9 +444,9 @@ export function SidebarThreadRow({
                   Open trace
                 </ContextMenu.LinkItem>
               )}
-              {thread?.sourceAppUrl && (
+              {thread?.sourceUrl && (
                 <ContextMenu.LinkItem
-                  href={thread.sourceAppUrl}
+                  href={thread.sourceAppUrl ?? thread.sourceUrl}
                   closeOnClick
                   className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                 >
