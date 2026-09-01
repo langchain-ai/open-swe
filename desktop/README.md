@@ -109,9 +109,10 @@ to `desktop/dist/`.
 prerelease nightly from the promoted commit with a UTC timestamp, such as
 `desktop-v0.2.3-nightly.20260902080000`. Nightly releases never publish the stable version.
 
-To publish a stable release, bump `desktop/package.json` in a normal pull request, merge it, then run
-**Release Desktop** manually from `main`. The workflow publishes the exact package version and fails
-if that stable release is already complete.
+To publish a stable release, bump `desktop/package.json` in a normal pull request. Merging that
+change to `main` automatically runs **Release Desktop** for the exact package version. The workflow
+fails if that stable release is already complete and remains manually runnable to retry a partial
+release.
 
 Both paths build the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
 app and DMG, create the tag, and publish the DMG, macOS zip, and app zip to a GitHub release.
