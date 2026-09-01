@@ -281,6 +281,14 @@ export const ChatComposer = memo(function ChatComposer({
         group: "Composer",
         showInPalette: false,
       },
+      {
+        id: "open-model-picker",
+        label: "Choose model",
+        aliases: ["model picker", "change model", "reasoning effort"],
+        shortcuts: ["mod+shift+m"],
+        group: "Composer",
+        run: () => setModelPickerOpen(true),
+      },
       ...(activeRun?.running
         ? [
             {
