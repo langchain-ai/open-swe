@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e680c5e5f3f8f3b56004a38440279b3c45c754b25e60c2bceafa373dc28f781a",
+  "claims": [
+    {
+      "id": "claim_5705cfc7c26a4fecbe1f78d84822fd3c",
+      "statement": "langgraph.json registers five named LangGraph graphs (agent, reviewer, analyzer, chat, scheduler), each mapped to a dotted entrypoint under agent.graphs.*.",
+      "evidence": [
+        {
+          "resource": "repo://agent/graphs/agent.py#L1-L3",
+          "version": "repo-lines-v1:sha256:22d489eba9206277c952b0725a7934230b3b4ac21229eed750a3d799b592a40d:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjBkY2RkNjhjZWU3ZDUwZjc2NzA1YTUxNTlhZDJlN2ZkOWRjZmNiYzJkZjdkN2NjMGEzZjU4MWYwZjE2ZDk1YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWMwZWNiZWUyM2RmMTRmMTI5YWVmNGZiOTViY2JjOWJkZWQ2ZDVlOGQyYzYwMTYyNzQ4ZGQyYThhNWUyYmRjNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://agent/graphs/reviewer.py#L1-L3",
+          "version": "repo-lines-v1:sha256:67014945fb2e6c05f4156c09bbb9279a00051ee636bee012d39cd9437ae12a73:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzY0MTBmM2EyMjZhYjBlMThmZDRhN2Q4NTZhYjEzMjRlOWI5OWNmN2U4NWQ0NTdhMmFkYjQ0YTQ2NjMzZWMyZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjI5YTA5MWJkY2JhMjg5ZTYyZGUwMmEwMGQ0NjcxYWI1OWIzZDRkZmU2MzYzZjYzMzE1MGE1NDBmZWZmM2IyOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://agent/graphs/scheduler.py#L1-L3",
+          "version": "repo-lines-v1:sha256:38f828039e6212641cf3ba7e13473711fbc24ea3c1d8e63de8f6722df7ec3ef2:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTBhNWRiODI1NDkyZmE5ZjAzODQ4NGI0OGIyNzE2YWNiNTk5MTRkNmFiYTE2MjAyMTI3M2FjNGZkZTE1MjlkMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGE1ZGYxM2U4MmM2NmQ3Y2U3NTE5MDI1YzNkNWFiYTc4MWViZmZiMWYyYTBiOTM4OTRhMWI4MmRkZDA2ZTlkNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://langgraph.json#L5-L11",
+          "version": "repo-lines-v1:sha256:8937854c8ed7235e3289ebe6d1011930b7c87b8232a8c51bf6b63c5f46a8e130:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjdlYTBjYWNkNTRlYWU4NTIwYjQzYWI1MTIwNWJkZDZiMTQxN2NjMDI1MGI5MmM2NDExNTFkYzQzZjkyOTBlMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_bc031d485a804454bb2618fa79d1f192",
+      "statement": "langgraph.json mounts a custom FastAPI app at agent.webapp:app, and agent/webapp.py is a compatibility shim that re-exports the application assembled in agent/api/app.py.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L38-L67",
+          "version": "repo-lines-v1:sha256:d72f1aa470a262fc845d2fd05867c6f44f00b2489dae80eb5ecc3a35c803b2bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyNzUyOGIwMjRjMzQ2YmIwZGJjMmVkZjQ2YjMyZGI1M2I0NzEwMDQwMDg4ZmQyOTRhNWM3NjEzNjkwNzU0NjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/webapp.py#L1-L5",
+          "version": "repo-lines-v1:sha256:6c2995eef985a1649902b9656feef841717a86f37131325362cb23082c5e3f18:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGY4YWRmYTNmNDg3NGUxM2VjYjFjZGZmODc0ZTI5NTkxOWQ3OTc1ZWFmNGMyNzAwNGQ4OTEwODdkMTJiYzA1ZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMmU5OTI3MzllZTgxNDg2MTkwMGIyYjU1ZTg0NGY4Y2EzZDA2NjYyOTIyN2U1MjIwNGE4YTUxNzc5NjM2ODFkYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://langgraph.json#L15-L17",
+          "version": "repo-lines-v1:sha256:130930adb6db91d30a09ca2b86823a8e02bb1c1dd0df17dbb0aa4e48a353359e:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNWYxZDc0NWJiZmIzMzliZDkxZTZmZTgwZWU5NDk4ZWU3M2M4ZjcwNTgyMjk0ZmExYWNjYWI0OGVlNzk2ZTYzMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGEwYjJjODA5NDZjN2I1ZjgyODg5OTg2ZGMxMGM5NmEyYzAwMDUzOTMxYzJiNjdhODRhYmMzMGE0OTk2YjMyYyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_8f802b7a7a8d4a0d964dea5480abdbb1",
+      "statement": "agent/api/app.py:create_app composes the FastAPI application, including the dashboard, plan, workflow-approval, Linear/Slack/GitHub webhook, and health routers, and configures CORS from DASHBOARD_ALLOWED_ORIGINS while rejecting '*' when credentials are allowed.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L38-L67",
+          "version": "repo-lines-v1:sha256:d72f1aa470a262fc845d2fd05867c6f44f00b2489dae80eb5ecc3a35c803b2bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyNzUyOGIwMjRjMzQ2YmIwZGJjMmVkZjQ2YjMyZGI1M2I0NzEwMDQwMDg4ZmQyOTRhNWM3NjEzNjkwNzU0NjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f050fa0510c4438a8da3078a324a2e4",
+      "statement": "The FastAPI app validates sandbox and local-dev LLM configuration at startup and closes cached models on shutdown via an asynccontextmanager lifespan hook.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L24-L35",
+          "version": "repo-lines-v1:sha256:f8ddc718a44c8b4d6b98bac6c0568c6c9bb73560e306a1fb50fc2d33e071bbbc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3Y2ZmM2YxNzg0MmRlYzZlN2U5MWMzZTNiOGZjZTBhODIyZmMzMTEyNzM4MWIwMGY0NGE5ZjEzMzMzMDNhMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzZTIwNWU5ODg2OGI2YzkyMTlmNWJmOTQ5MzhiYWNkZTM2ODk2MjgxYjQzZjZjOTYyMGM3NWNjZWYzY2UxYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBiOWFhNmVjOTliNjQ0OGRiODZjZmQzZTc4MzNjMzNhMDJiNTMzYWMxMjFkZTAyOWQ2ZTUzNjhkYTgwNjVkOWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU3MDYzZDc5YWEzZTVhN2MzMzdmNThjZDc4YzE2NTc1M2JjNzRiMDEyNDM4M2M2YWEyYTg2NmY0OGFmMGEzOGEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a103c6fa6021493791ae6e57641d567c",
+      "statement": "agent/server.py:get_agent is the main graph factory, called per-thread, that resolves the GitHub token, gets-or-creates the thread's sandbox, resolves model/effort, and constructs a fresh create_deep_agent with a curated tool list and middleware stack.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L44-L44",
+          "version": "repo-lines-v1:sha256:1742e8b4f65cad039ea62e1dc0e3d8476ef4b73fd92b6f3ceb1db9dd7371fd78:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTc0MmU4YjRmNjVjYWQwMzllYTYyZTFkYzBlM2Q4NDc2ZWY0YjczZmQ5MmI2ZjNjZWIxZGI5ZGQ3MzcxZmQ3OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTc0MmU4YjRmNjVjYWQwMzllYTYyZTFkYzBlM2Q4NDc2ZWY0YjczZmQ5MmI2ZjNjZWIxZGI5ZGQ3MzcxZmQ3OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjJiZTVjYWEwZTQyMTcyZGNhOWU2N2ZmNjkxMzU0MDU2ZTI1Yzk2NjQ4ODhkZWEyYTc3MmI1YzU4OTQ2M2IzZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNWEzZTkzZmVjOTQxMDE4YTdhNmU3NjM2ZGUzNzgyMzIzYmUzYjQ2ZmZjYTgxOGYyNGJiYTI2MmEyYTE2MTFiZCJ9"
+        },
+        {
+          "resource": "repo://agent/server.py#L1384-L1410",
+          "version": "repo-lines-v1:sha256:e05eae8d705c87f61db5f18d66201c97ff14ff4f24f6e6cba5bc24de4229c6aa:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4NTlkMDZjZjNjZmI0Y2I1YjNmMzUzMTI5NDU0ZTk3NzAyZmViNGJhNjViM2MxMGVlOTM2NWUzMjA0MjMzYTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlMzM2NmQyNDQ3N2RhMjc2Y2YxZTU1NjRhNTFjMjkwMDE4YjFiMTBlNTgyMjNmYjIyYTQ0ZjllMGY3ZDYyZTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmOGNmNmU2MjBjMDg2ZDAzMTIyYzIxNThkMTY2ODZkMmIzYzBkZGE3YjY1ZDdkMjc4YjVkNWFlOGE2MDMxMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZkOWVhOWRjOGEyZjkwYjI4MjBmMWNlMmNiY2EyM2QwMjRjZWUwN2U0NzBhOTQ5NTY5ZDI5NGY0ZWY1MGY0ZjEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c793412d4fdc4788ad96e2dc7fca416a",
+      "statement": "When there is no thread_id or the graph is not loaded for execution, get_agent returns a trivial no-sandbox deep agent instead of provisioning a sandbox.",
+      "evidence": [
+        {
+          "resource": "repo://agent/server.py#L1385-L1396",
+          "version": "repo-lines-v1:sha256:94764e0f80ba237d8b736fab39954d6b7d15ce36b60b6af7bd5458c63b7f2451:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwYjE1NzNjMDkwMTViZDA0ZWNiMDg5OTRiNGVlMmZkOWJkY2NjMWQ2NTE1OWE4ZWMwNDYxY2M0MWU0OTQzYjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkZDQwMzUxNTUwZmY5MjM1ZWI1NTAxYjkxMjhjY2ExOGUzYzE1NjgxOGJiZjRjNmY2Y2U0NDJlZTE1YjI0ODQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY0MTZmMGRjNzE3NDk5ODZmNWU4MjFiY2UwZTEyYmMyNzk5MmQ5YjMxOWYyYmI1MDRkYjg4NTAyNWRiYWZhYjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNkZTI0NTMzMTQzMmQxMDQyYzNlMGMzNzBmMTg5OTI1ZWJhMzZkM2E2NTI5YjJkNmQxNGFiNGYyZGU4MmVlMjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b7c16a43198c40f3af8283a2ecf3e7a8",
+      "statement": "The reviewer graph mirrors the main agent's sandbox lifecycle but wires a review-only toolset (add_finding, update_finding, list_findings, publish_review) with no commit/push/PR-opening tools.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L45-L45",
+          "version": "repo-lines-v1:sha256:e4c346c348877d6b9c89d16d23057a2cf54b58145e54ac03c9ec62cb4ec03185:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTRjMzQ2YzM0ODg3N2Q2YjljODlkMTZkMjMwNTdhMmNmNTRiNTgxNDVlNTRhYzAzYzllYzYyY2I0ZWMwMzE4NSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZTRjMzQ2YzM0ODg3N2Q2YjljODlkMTZkMjMwNTdhMmNmNTRiNTgxNDVlNTRhYzAzYzllYzYyY2I0ZWMwMzE4NSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiN2JiMGI0ZTNkMzQ0YmI2Nzc3MWNjODg5NmIxMTlkYTZiZGY2ZmMyODRiMWIzNjNiMDE1YTU2ODBjNDcwZTcxNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZWYzNjYwMDllNTJkMjMzNTA1YzAzY2U2ZmZkZTVjNWQxM2RhZDIzYjllYjA2MDk0MjFiODE0ZmVhMDYyZDVmMiJ9"
+        },
+        {
+          "resource": "repo://agent/reviewer.py#L2-L15",
+          "version": "repo-lines-v1:sha256:cd9581d9a8bb7d4378dc35b1a2ec3c5893673d7a919e34d7fa14338f5ca9fdbb:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoxLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1OTYxM2I0ZDYxNThmZTM2ZDhiMTA4YTkxODE2ZjhhN2U3NjY1YmU5NzQzNDNiZTQ4M2UxM2MwMmE5NzE3ZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyNTJhMzdhNmFjZGYwMGJjMzY1NzE3OGU3ZDRiZDVjNGZiNWJmYWExMjNkOTVmNzZlNjdmYjQ2ZDBlYzE5ZTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8cb46cbc9e5948d2b57945c47b805b0b",
+      "statement": "The analyzer graph learns a per-repo review-style prompt (emitted via save_review_style_prompt) for the reviewer by mining historical PR reviews and past finding outcomes, using the same sandbox and gh pattern as the reviewer.",
+      "evidence": [
+        {
+          "resource": "repo://agent/analyzer.py#L1-L10",
+          "version": "repo-lines-v1:sha256:60e3a02173abeee467251fd540b6c6d002a8da4037920d600eeeb0de12179f3d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdiNmYxM2Q2ZTc5M2Y4ZWM0NWI1ZjdlMzVlZTRmMjM1NDA4MGIwZTk1NjMyYzhjYmI3NTM1OWVkN2I3MGIwYTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxMDkwNzY0ZWJhZGM4NTlkNGVkZjk1MWFmODkzMWM3ZDRhN2JmMDJjZjBiZWI3YmM5NzU5MmUwZmRmODQ1YTMifQ"
+        },
+        {
+          "resource": "repo://agent/analyzer.py#L52-L53",
+          "version": "repo-lines-v1:sha256:c38835c5172a86536e2318178ac2bdda0932469bf9670afce285045b34351ab3:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiN2U2MzRkZWY0NDYxYzllN2ZiMmQ0ZmM1Yjc3YTBkODFkODA2MjJjZjgwODU0Y2JhNjAzOWFmM2I1ZjkwYmIzZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTAxNDk4YTRhMTc4YTIwZDFiYjMwZmZjOTQ3ZTczMzIzM2M2MzhjMDExNmYxZTkyZTE5YWUwZDFmMmZhNTEyNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTk3ZDUzZTFjNWQ2NDUwOTA0NTllODNlYTAzMmVlYjQ4ZjE5MzFjNDg0MDU5ZTgwMWViYjgxZDdiNWI2MWRjZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjk3ZjgwN2UyYzgyZjJjMDI4NzUxMzRiZDNjZDU1OTgzMjZiNzE5NzczODI4MDMyNmRlOWM4OGI0MmQ5ZmFhNSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_f73f16e843044747a6a0a4342a0098fa",
+      "statement": "The chat graph is a read-only chat-with-this-PR agent for the review UI that has no sandbox; PR context is seeded as virtual files under /pr/ into the files state channel by the dashboard chat proxy.",
+      "evidence": [
+        {
+          "resource": "repo://agent/chat.py#L1-L14",
+          "version": "repo-lines-v1:sha256:aeddb8184f847cab7c27d1115c53336bf01df8c12b7333cc2052f54b1566a86f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2NzlkNzc4ZTMzYTdkYTEzYjlmZjBiOTViY2U5OTcyYTJiMDYxNzgyMTEzNmYzYWZiZjJhM2JlNDZlNWQxMjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxMDkwNzY0ZWJhZGM4NTlkNGVkZjk1MWFmODkzMWM3ZDRhN2JmMDJjZjBiZWI3YmM5NzU5MmUwZmRmODQ1YTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0ed5beb42ec048d48bb1b5745c722438",
+      "statement": "The scheduler graph is a single-node StateGraph whose _launch node dispatches a cron tick to the right background task by task name (reconcile, baby_sit, background-task monitoring, session_cost, or launching a scheduled agent run), fanning time-based ticks into fresh agent threads and jobs.",
+      "evidence": [
+        {
+          "resource": "repo://agent/scheduler.py#L33-L61",
+          "version": "repo-lines-v1:sha256:d5d3bbfe5a7c0c9ed3db1786c61e6c8d4eed09ab205f6ef8822dfad2b2c6c97a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyMTc1NWE0NzlkNzgxYTY2NDkzYTBkMTI3Y2IyYmU5MzE4YTk5ZjZlZWQ3ZmY3MGMyYmE0NTU2MTk4OTk2YTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2OTk1MGUxNWNjMDg1M2UxNDIzMmJkNTdkNTAwY2JlMGQ1NTZlNTY0OWFhNTY0NzNjODNmZWUwN2ZmYzhkMzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2MzM3MDFjMGFiZDcxM2EyYTA4ZjhhNjhlYTY1NzFlZTFhZDE3NzI3OTcwZTBlNTkwMzNkMmViY2Y3NzM2YTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwMGM2YjYzMzk1NDBjOGFhN2M2ZTZmMjkyNDIwNzVmYjRkYjY4ZWIzN2VmYTBiZDE1MWVkZGRlMDdhOTIyYjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_601aad1795a44aa1b637e7d4d876fd63",
+      "statement": "The dashboard router (agent/dashboard/routes.py) is an APIRouter prefixed at /dashboard/api guarded by a same-origin dependency for mutations, owning OAuth, profiles, admin endpoints, team defaults, enabled-repo lists, review-style management, and the thread API used by the web UI.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L48-L48",
+          "version": "repo-lines-v1:sha256:9ff6dd5cf0004fc9b452cdd1ae5093aefdd87751fd7c40aceadc6f5f8c546228:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWZmNmRkNWNmMDAwNGZjOWI0NTJjZGQxYWU1MDkzYWVmZGQ4Nzc1MWZkN2M0MGFjZWFkYzZmNWY4YzU0NjIyOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOWZmNmRkNWNmMDAwNGZjOWI0NTJjZGQxYWU1MDkzYWVmZGQ4Nzc1MWZkN2M0MGFjZWFkYzZmNWY4YzU0NjIyOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWEzZTkzZmVjOTQxMDE4YTdhNmU3NjM2ZGUzNzgyMzIzYmUzYjQ2ZmZjYTgxOGYyNGJiYTI2MmEyYTE2MTFiZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmFhMzQ4NzFhZThiYmY4Y2NhMzEwYTc2NjYzNTYyYTEzY2Y3MTRmYmVlMTdkZjJjOTZmZmEyMWUxOWE0YzEwMSJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L256-L260",
+          "version": "repo-lines-v1:sha256:b2142f8f7618bb20374837dc6826b6846f3ecbba64b027cb0d916ec6f3f35268:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjliYWQ2ZjFjY2Y1NDcwM2FiNGU5N2ZiZTk2MGRhOGU1MjlkNDYyMWUxZDY1NGJlNzJiNDY2MTFhYmE1Zjg1YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmFmYmEwNTI3YzM5NTNjNGI2ZTBlNWI1NzM5YmE4MzYxMmY4MDUzYmNkYzk0NjY3MzAxOTNjZDFkNTkwYjQwOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjMWM0NjJlMmEzOWQ3NDc1OWY1ZTFiMTI2Zjc2ODNhMmI3MzAxMThlMThmNTEyMmIwOGNlZGVlYjY1MGUyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzgzMTVhNmJhZjJhYjI3ZTA3MmE5ODFmZTA5OWRjZDMzZTEzMjZmZTJmNmE4NTJkMjRhYTlkNjgzNWU3NWUwYSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_ebe896c8192546c0996e4b62a911efab",
+      "statement": "The dashboard router is loaded lazily via agent/dashboard/__init__.py (PEP 562 __getattr__) so importing a dashboard submodule from middleware does not import routes.py and the full FastAPI/API/job surface; only the webapp that mounts the router pays that cost.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/__init__.py#L1-L23",
+          "version": "repo-lines-v1:sha256:0a6e7700e895302fb121ce6945ffd27e5c790311259baaad98b661acf3f8e5ec:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViOWM3MzdkNDJlMGFlZDU5NDA5NTRjNzNlZmM1NDUxYWE5YjdmN2NiNjk2MWM3YmM0YzllNTM5Y2FlNGU1Y2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzOWMzOTU1NmJiN2VjZjE2MmM5ZTExNzY0YWZlN2U4NTM0ODdkOTYwOWQ4ZTZlYmI2NjAxMWE3NTBkMzFmM2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7899fcade86a45eea7fc03374de8c10c",
+      "statement": "Slack, Linear, and GitHub webhooks are received by APIRouters in agent/webhooks/*_routes.py, each resolving a deterministic thread_id so follow-up messages on the same issue/thread/PR route to the same agent run.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L47-L47",
+          "version": "repo-lines-v1:sha256:b5b0b9e9cb6041a08709be0507b4ac70181ccae84a17d850da32d811159383b7:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjViMGI5ZTljYjYwNDFhMDg3MDliZTA1MDdiNGFjNzAxODFjY2FlODRhMTdkODUwZGEzMmQ4MTExNTkzODNiNyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjViMGI5ZTljYjYwNDFhMDg3MDliZTA1MDdiNGFjNzAxODFjY2FlODRhMTdkODUwZGEzMmQ4MTExNTkzODNiNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2IzNmQ5N2U3OTg2NjEyNzk2N2Q4ZWUxYjYxZTM4NmYyMTM2YjQ1NDVjOTJjYzE4NTQ3NmE0YjQ0ZWI2OTg3MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmJjNjg2Yjk5NzkyMGRjMmIwY2E2OTM1YzE4YWExMzc0NDU0MDk0M2Y3ODc0MTE2OGI1ZTU0YjA2ZTk1MzdkOSJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/github_routes.py#L8-L8",
+          "version": "repo-lines-v1:sha256:32604261ac80c9d23b96fcf26c95f43f331ef955662e5f2665feabecb38c5f59:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzI2MDQyNjFhYzgwYzlkMjNiOTZmY2YyNmM5NWY0M2YzMzFlZjk1NTY2MmU1ZjI2NjVmZWFiZWNiMzhjNWY1OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzI2MDQyNjFhYzgwYzlkMjNiOTZmY2YyNmM5NWY0M2YzMzFlZjk1NTY2MmU1ZjI2NjVmZWFiZWNiMzhjNWY1OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjJlNjNmOGQwNDNiNjA3MmMzNTQ4N2U5YjFhNDg4MzRkOWI2ZDFlNDRmNDM5NzRlNmI2ZWRmOWFhZTg1NmM1ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDg3OTkyYTcwNGRlNDUzN2QyYWYzZTkzOTA3OTRkNzM4YjAxMzcyNTlkY2I5MGFmZWViNjU3OTAxMWJkOTI4OCJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/linear_routes.py#L8-L8",
+          "version": "repo-lines-v1:sha256:32604261ac80c9d23b96fcf26c95f43f331ef955662e5f2665feabecb38c5f59:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzI2MDQyNjFhYzgwYzlkMjNiOTZmY2YyNmM5NWY0M2YzMzFlZjk1NTY2MmU1ZjI2NjVmZWFiZWNiMzhjNWY1OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzI2MDQyNjFhYzgwYzlkMjNiOTZmY2YyNmM5NWY0M2YzMzFlZjk1NTY2MmU1ZjI2NjVmZWFiZWNiMzhjNWY1OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGZkOTdmNTcwNzQxOGE2NDRhNzBlN2NlNzZjZTY0MjRiOGMyYTdiODc2NTBjZWEwYzBlMmZhMjg0MmY3NTQwZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDEwNTkxYjI5NGU5NDdmZGE4MGZlZTgyZmI4NGY3NjdjZjg2ZmMxMzBlZWFmNTk5YjAxMzRmODI5Y2JiZGJiOSJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/slack_routes.py#L15-L15",
+          "version": "repo-lines-v1:sha256:32604261ac80c9d23b96fcf26c95f43f331ef955662e5f2665feabecb38c5f59:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzI2MDQyNjFhYzgwYzlkMjNiOTZmY2YyNmM5NWY0M2YzMzFlZjk1NTY2MmU1ZjI2NjVmZWFiZWNiMzhjNWY1OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzI2MDQyNjFhYzgwYzlkMjNiOTZmY2YyNmM5NWY0M2YzMzFlZjk1NTY2MmU1ZjI2NjVmZWFiZWNiMzhjNWY1OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjBhMTJiOTMyNzc3YTkwZjAzNDFkMmM4YmRiYzU0YmVlMjMxNjY4Nzg1OTA4MjlkYTNlYjhhYjhiOWQ2NWFhMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTAxMjVkOWQ5NWY3ZTc1NmU2NWFlOWQ2M2I1NDBmMjcyNWQyOTY1YjQ3NTQ1Y2Q1N2IzZDM5MTAxOWM2MDVhYiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_d82f88f3daa04efeacd6ef5092f8d56e",
+      "statement": "Every agent/reviewer run trigger (Slack, Linear, GitHub, dashboard, scheduler) routes through a single durable dispatch contract, agent/dispatch.py:dispatch_agent_run, which selects the graph via assistant_id ('agent' or 'reviewer') and treats source as metadata/logging only.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L1-L26",
+          "version": "repo-lines-v1:sha256:e71c74fc5048f1e615b592f848c5845a1f9a22d9d5c85c85ce993cebbca90080:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhZjlhYmFlNTkxYTcyMzFiM2YyZjkwNTAzMjllOTg0ZTJhYzQyY2I1Yzc0MTg3MjUwNTg0Njg4YTZkZTQ0ZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5YmVjNGExOTk5YWIyNzhmYzkyNjVmODNkNmYxMWRmZmU3MTA0NmRjMzYzNjJhZjA0N2FjNTA3ZjY0NGE2MjkifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L278-L327",
+          "version": "repo-lines-v1:sha256:c435a1e830c1e2792545f4c82f88e89c6a9a02ae98de7f1d13deaba10d6f9404:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MGNlNzc2OGIwZmMzMDA2ZmQ0MWYzZjUxOTU2M2FhZWFjYjc3OGQ3NDEwODM3YjM2NDcxYzJlNDgwZjJiM2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3NGRlNjBlNmIxYzBkNjA1OTlmMWI3NTU5YzA0M2ZiODBlOTFkYTdlZGNlODdjZjM1Y2JmM2U1NzNkY2FlYzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_45387ab772f3437e9c3a2030f69732d5",
+      "statement": "The dispatch contract defaults to multitask_strategy='interrupt' (a follow-up halts and resumes the active run with full history plus the new message), durability='sync' checkpointing before each step, a completion webhook, and stream_resumable plus the Protocol v2 run shape so the dashboard can attach to and observe runs it did not itself start.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L1-L26",
+          "version": "repo-lines-v1:sha256:e71c74fc5048f1e615b592f848c5845a1f9a22d9d5c85c85ce993cebbca90080:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhZjlhYmFlNTkxYTcyMzFiM2YyZjkwNTAzMjllOTg0ZTJhYzQyY2I1Yzc0MTg3MjUwNTg0Njg4YTZkZTQ0ZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5YmVjNGExOTk5YWIyNzhmYzkyNjVmODNkNmYxMWRmZmU3MTA0NmRjMzYzNjJhZjA0N2FjNTA3ZjY0NGE2MjkifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L292-L327",
+          "version": "repo-lines-v1:sha256:dfdd055817d0b6c2a8a5f4d95e979fcefbc13b6b41731b27599b13d67a01bb86:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ5OWRiNDE2NTM5MWVmODMyYTE2N2FmMjMxYWEyNDVmYTFiNTc5ODAzYmVkYjQwMTI2NmU3NzYwOTg5NzNlMGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkOWY2NWUzNDg5NjFlMDY5ZjRlYzA3ODc0NGEzZDNjMjk0Y2Q3OGEyOTBkMzk0ZGZmYzUwNThhMzYyODM0OWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_205bd74b52d74ccb9b7016a98342ad7b",
+      "statement": "The agent is stateless: get_agent builds a fresh deep agent per run and all per-thread state lives in the sandbox and thread metadata.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L44-L44",
+          "version": "repo-lines-v1:sha256:1742e8b4f65cad039ea62e1dc0e3d8476ef4b73fd92b6f3ceb1db9dd7371fd78:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTc0MmU4YjRmNjVjYWQwMzllYTYyZTFkYzBlM2Q4NDc2ZWY0YjczZmQ5MmI2ZjNjZWIxZGI5ZGQ3MzcxZmQ3OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTc0MmU4YjRmNjVjYWQwMzllYTYyZTFkYzBlM2Q4NDc2ZWY0YjczZmQ5MmI2ZjNjZWIxZGI5ZGQ3MzcxZmQ3OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjJiZTVjYWEwZTQyMTcyZGNhOWU2N2ZmNjkxMzU0MDU2ZTI1Yzk2NjQ4ODhkZWEyYTc3MmI1YzU4OTQ2M2IzZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNWEzZTkzZmVjOTQxMDE4YTdhNmU3NjM2ZGUzNzgyMzIzYmUzYjQ2ZmZjYTgxOGYyNGJiYTI2MmEyYTE2MTFiZCJ9"
+        },
+        {
+          "resource": "repo://agent/server.py#L2-L8",
+          "version": "repo-lines-v1:sha256:907f077ed09d18a250863dba141d540f7a3de2f68cc476fbfa3a2adb6d23e9df:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjEsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODQ2ODZlNmE3OGJkODhkYzJkMjJmZDU0NDAwZTYzMTJlMzU2MmQ1YzVjMWJkZjVmOGNkMDY0NzgyNjA2NjA1YiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzRiNDFhMjg4ZTA2NDQ5ZTZlMDhjZTA5ZjI3ODUwYTBjYzFmNjVhNTcwNGNjNWIyNWE4MjExN2I4OGY3N2JmNSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_337d59c264a24b0fb309d75da0043c83",
+      "statement": "The sandbox backend cache is an in-process dict keyed by thread_id while thread metadata persists sandbox_id across processes, so a recycled worker reconnects the same sandbox; an existing sandbox that cannot be reached raises rather than being replaced, because an empty replacement would destroy uncommitted work.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L52-L60",
+          "version": "repo-lines-v1:sha256:63107552e35712671b1701fa00c6c938e17db9afd254b4741fe169607a0c924b:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGRiZWFiYmVjNDFkNmVjMmYxOWI0NzE4MDg2ZGU1OTBjZDU5NzU1MzZkNDRlNjQwOTlhNTM2MDAwNTdjOTI2YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjJjZGM0NjkzMzI4OGQ0NTExYmFlZjU4ZGNhNWI5YzdkM2ViZDMzYzc4Yjg3NDA0MzFmZTNhYTIxODY2ZDE3NiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNmFhMzQ4NzFhZThiYmY4Y2NhMzEwYTc2NjYzNTYyYTEzY2Y3MTRmYmVlMTdkZjJjOTZmZmEyMWUxOWE0YzEwMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTA3ZGM4YmE0NjM2ZGYyMDZmMjc3NjhhYWI5MGIyYzZiZWYxNDdlMTA2ZjRhOTE5N2M4NTI4YzBhODk0MGMzNiJ9"
+        },
+        {
+          "resource": "repo://agent/runtime/sandbox.py#L6-L30",
+          "version": "repo-lines-v1:sha256:4eccb83a2a1293687b1b53c85ceea966a01416b18f19b14b376780853b546856:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmODdhYzZjOWY4NmZlNGE1ZDExOGQ3YjQ5NzNkZjU5NjVhN2ZkNzMzZTI3MmY5ZGVhYTkyYTdmMmM0YmUzY2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjY2M4MjJiOWFiMjA0OTk0N2YyOTk1NjFhM2ZkYzQ4YjNlMDEyZDc3MDBiNTI5NzVmMTA0MDI2ZDhkNmFiNDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU3NGQ4MjVkMGM1MWZiNTgyNWVlNzcwMTdjYWRlMTlmOTliMGFkZGNjMzcxYWJhZGUzZDA0MGQ4MjdjOGUyM2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFkMDQxNmNjOTg3YzZlZWRjZjg4MmM3MTZiNmUzMGIxZDNhMDcxNDkxNDg1MWM3MzYzNDUyZDA4ZTU2N2FkYmQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_648529033ee943358728fb7277ab7d00",
+      "statement": "langgraph.json pins python_version 3.12 and api_version 0.12.6, and configures the checkpointer TTL with a delete strategy, a 60-minute sweep interval, a default TTL of 43200 minutes, and env from .env.",
+      "evidence": [
+        {
+          "resource": "repo://langgraph.json#L3-L25",
+          "version": "repo-lines-v1:sha256:7c978cb9307c233c2458a7eced183a0f931b5cd3e0c39d40ac1c6e6f2ebf8fc3:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5MDhlY2VmOWMzMTkxMGY4MDllZGU2ODMwNDRjMTYwZjkwMzczMDQyNjQwMWNjN2Q0ODA2MzBkNDg3MTY0MWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjNjE1MGYxZjFmN2M2MjQyZmI4ZmUwZjhmNjNlZDMyZTRlNzc2MWM4NjA5OTc5Zjg4MzdlMWJlMzZjYWQxMDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRhZDA4YWJkNTFiOGYyMDE0NDhiNDcwN2JkYmM2MjVjMjI0NDcyZTg1MmJlYjAzOGViNmNhYTA2NGNjMjE0OTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_59942e255c704e01ae696c153136bece",
+      "statement": "A separate desktop manifest langgraph.desktop.json registers only the agent graph, disables Studio auth via agent.local_auth:auth, and disables the bundled UI, corresponding to local desktop runs where the sandbox is replaced by a local shell backend in agent/desktop.py.",
+      "evidence": [
+        {
+          "resource": "repo://agent/desktop.py#L15-L40",
+          "version": "repo-lines-v1:sha256:5f206562de85ad8ac69c7dd8ac1c81dbdd51d85a0db488e454fa5a3c4892b3d6:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhMzBiNmQ3NjVjY2FmODIxMDVjZGMwZTdjZDNjYmVmM2QxMzJkY2Q4NjlhYmMwM2I0OTRjMDhmZDI2ZDEwNmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkNGJkOTBkYWEzZjJmZWY1OTQzY2Q0MzU0NDk3NjZkMDhjOTk1NzlkMzk0YzgzMmY0YTk5NzlkOGJmMzQ3YzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDY4YWJhYjE0MDhkOGJhNWMzNDk3MDFmMzRiZTUyZjg2ZmZiYWUzYTJkOWUwODE4N2MwZjFhM2IyMjc1MzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk5ZGQxMzhmNGY3MWM1Y2Q1ODY2NGU2OGUxMGZkYmIzOWMwYmI1ZDhlMjk1MTRmZjY3MzI5YWFkN2RlNjkzMjkifQ"
+        },
+        {
+          "resource": "repo://langgraph.desktop.json#L1-L18",
+          "version": "repo-lines-v1:sha256:45aa248abd553935ed38a5e3b711fc81dfa0cfae5c49ffaf02ce7ce31ba32d3e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2ZmIwOGZkYTFhY2I5NTdiNjExNmJkMzc4MTFhMWZlNDFhMDE2MTFjMDYzMWVkYmY3ODZkNjg4OWEyN2E1NWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8dcc0ec6dd6e4053a1362ddf78586de6",
+      "statement": "The web dashboard in ui/ is a TanStack-Router React application whose route tree covers agents/threads, PR review, review styles, admin, usage, and settings, talking to the dashboard router endpoints.",
+      "evidence": [
+        {
+          "resource": "repo://ui/src/router.tsx#L1-L21",
+          "version": "repo-lines-v1:sha256:9c5ccc42319afea9bf42a3df48cfa2ca943c52d91430facbab0662f90bb01594:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzNmMxM2I1YjZmNzlkNTU4YmM3N2RjYTk0YjBkNDQxMjI3NjQ2ZTJkYWQ0MzQ5ZWI2Zjk4ZWJiYzhlZDdmOGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFhY2UzYzMzNzgzMzdiZmQ2Y2YzYTA3ZDU4ZWZjNDJkMDdhYzNiYjQxYjZjZTA1ZTM2YTk4ZDMyOWRjMzg1OWEifQ"
+        },
+        {
+          "resource": "repo://ui/src/routes/agents.tsx",
+          "version": "repo-file-v1:sha256:7d01004957e2fb01b2639a3b32a3417a83dab944b957e30f502343dd0482edff"
+        },
+        {
+          "resource": "repo://ui/src/routes/review.tsx",
+          "version": "repo-file-v1:sha256:57fe581682a6833da0c57ab17e1b061852aef188e9c0716575edf76552006491"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-27T06:27:22.313Z"
+  }
+}

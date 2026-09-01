@@ -22,7 +22,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..utils.thread_ops import langgraph_url
 from ..utils.timing import server_timing_header
@@ -97,6 +97,7 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
+from .pull_request_checks import PullRequestState
 from .repo_access import require_repo_access_for_user
 from .repo_cache import (
     REPO_LIST_FRESH_MS,
@@ -197,6 +198,7 @@ from .thread_api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
+    get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
@@ -205,9 +207,10 @@ from .thread_api import (
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     get_dashboard_thread_working_tree_diff,
+    list_dashboard_pinned_threads,
+    list_dashboard_thread_projects,
     list_dashboard_threads,
     list_dashboard_threads_page,
-    list_dashboard_threads_sidebar,
     pin_dashboard_thread,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
@@ -1783,21 +1786,18 @@ async def api_agent_usage_leaderboard(
 
 @router.get("/schedules")
 async def api_list_schedules(
-    session: dict[str, Any] = _SESSION_DEP,
+    _session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_agent_schedules(session["sub"], email=session.get("email"))
+    return await list_agent_schedules()
 
 
 @router.post("/schedules")
 async def api_create_schedule(
     body: ScheduleCreateBody,
-    session: dict[str, Any] = _SESSION_DEP,
+    admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await create_agent_schedule(
-        session["sub"],
-        body,
-        email=session.get("email"),
-        allow_admin_thread=_session_is_admin(session),
+        admin["sub"], body, email=admin.get("email"), allow_admin_thread=True
     )
 
 
@@ -1805,31 +1805,31 @@ async def api_create_schedule(
 async def api_update_schedule(
     schedule_id: str,
     body: ScheduleUpdateBody,
-    session: dict[str, Any] = _SESSION_DEP,
+    admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await update_agent_schedule(
         schedule_id,
-        session["sub"],
+        admin["sub"],
         body,
-        email=session.get("email"),
-        allow_admin_thread=_session_is_admin(session),
+        email=admin.get("email"),
+        allow_admin_thread=True,
     )
 
 
 @router.post("/schedules/{schedule_id}/trigger")
 async def api_trigger_schedule(
     schedule_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
+    _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await trigger_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
+    return await trigger_agent_schedule(schedule_id)
 
 
 @router.delete("/schedules/{schedule_id}")
 async def api_delete_schedule(
     schedule_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
+    _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Response:
-    await delete_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
+    await delete_agent_schedule(schedule_id)
     return Response(status_code=204)
 
 
@@ -1843,35 +1843,29 @@ async def api_list_threads(
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
-@router.get("/threads/sidebar")
-async def api_list_threads_sidebar(
-    active_limit: int = 50,
-    resolved_limit: int = 20,
-    active_thread_id: str | None = None,
+@router.get("/threads/projects")
+async def api_list_thread_projects(
+    include_resolved: bool = False,
     include_automations: bool = False,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
-) -> Response:
+) -> list[dict[str, Any]]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    timings: dict[str, float] = {}
-    counts: dict[str, int] = {}
-    started = perf_counter()
-    payload = await list_dashboard_threads_sidebar(
+    return await list_dashboard_thread_projects(
         session["sub"],
         email=session.get("email"),
-        active_limit=active_limit,
-        resolved_limit=resolved_limit,
-        active_thread_id=active_thread_id,
+        include_resolved=include_resolved,
         include_automations=include_automations,
         include_all=all,
-        timings=timings,
-        counts=counts,
     )
-    timings["total"] = (perf_counter() - started) * 1000
-    header = server_timing_header(timings, counts)
-    logger.info("thread sidebar timings login=%s %s", session["sub"], header)
-    return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.get("/threads/pinned")
+async def api_list_pinned_threads(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
@@ -1904,11 +1898,20 @@ async def api_list_threads_page(
     q: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
+    if repo and ownerless:
+        raise HTTPException(400, "repo and ownerless are mutually exclusive")
+    if repo:
+        owner, separator, name = repo.strip().partition("/")
+        if not separator or not owner or not name or "/" in name:
+            raise HTTPException(400, "repo must be owner/name")
+        repo = f"{owner}/{name}"
     return await list_dashboard_threads_page(
         session["sub"],
         email=session.get("email"),
@@ -1922,7 +1925,28 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        repo=repo,
+        ownerless=ownerless,
         sort_by=sort_by,
+    )
+
+
+class PullRequestChecksRef(BaseModel):
+    repoFullName: str = Field(max_length=140)
+    number: int = Field(ge=1)
+
+
+class PullRequestChecksRequest(BaseModel):
+    pullRequests: list[PullRequestChecksRef] = Field(default_factory=list, max_length=50)
+
+
+@router.post("/threads/pull-request-checks")
+async def api_get_pull_request_checks(
+    payload: PullRequestChecksRequest,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, PullRequestState]:
+    return await get_dashboard_pull_request_checks(
+        [ref.model_dump() for ref in payload.pullRequests], session["sub"]
     )
 
 

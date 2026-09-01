@@ -23,6 +23,7 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "@/components/ui/menu"
+import { cn } from "@/lib/utils"
 
 export type RunTarget = "cloud" | "local"
 
@@ -64,12 +65,18 @@ export function LocalProjectSelector({
   onSelectProject,
   onAddProject,
   onRemoveProject,
+  placeholder = "Select project",
+  triggerClassName,
+  side = "bottom",
 }: {
   projects: Array<DesktopProject>
   selectedProjectPath: string | null
   onSelectProject: (cwd: string) => void
   onAddProject: () => void
   onRemoveProject: (cwd: string) => void
+  placeholder?: string
+  triggerClassName?: string
+  side?: "top" | "bottom"
 }) {
   const selectedProject = projects.find(
     (project) => project.cwd === selectedProjectPath
@@ -77,16 +84,17 @@ export function LocalProjectSelector({
   return (
     <Menu>
       <MenuTrigger
-        className="flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80"
+        className={cn(
+          "flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80",
+          triggerClassName
+        )}
         title={selectedProject?.cwd}
       >
         <FolderOpen className="size-3.5 shrink-0" />
-        <span className="truncate">
-          {selectedProject?.name ?? "Select project"}
-        </span>
+        <span className="truncate">{selectedProject?.name ?? placeholder}</span>
         <ComposerControlChevron />
       </MenuTrigger>
-      <MenuPopup align="start" className="w-64" sideOffset={7}>
+      <MenuPopup align="start" className="w-64" side={side} sideOffset={7}>
         <MenuGroup>
           <MenuGroupLabel>Projects</MenuGroupLabel>
           {projects.length === 0 && (

@@ -8,8 +8,10 @@ _TOOL_MODULES = {
     "background_execute": ".background_execute",
     "background_task": ".background_execute",
     "capture_environment_snapshot": ".environments",
+    "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "create_sandbox_service_url": ".create_sandbox_service_url",
+    "delete_automation": ".automations",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
@@ -24,6 +26,7 @@ _TOOL_MODULES = {
     "linear_list_teams": ".linear_list_teams",
     "linear_search_issues": ".linear_search_issues",
     "linear_update_issue": ".linear_update_issue",
+    "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -58,6 +61,8 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
     "slack_thread_reply": ".slack_thread_reply",
+    "trigger_automation": ".automations",
+    "update_automation": ".automations",
     "update_finding": ".update_finding",
     "web_search": ".web_search",
 }
@@ -68,8 +73,10 @@ __all__ = [
     "background_execute",
     "background_task",
     "capture_environment_snapshot",
+    "create_automation",
     "create_sandbox_file_download_url",
     "create_sandbox_service_url",
+    "delete_automation",
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
@@ -84,6 +91,7 @@ __all__ = [
     "linear_list_teams",
     "linear_search_issues",
     "linear_update_issue",
+    "list_automations",
     "list_environments",
     "list_findings",
     "list_review_findings",
@@ -118,6 +126,8 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
+    "trigger_automation",
+    "update_automation",
     "update_finding",
     "web_search",
 ]
@@ -125,6 +135,13 @@ __all__ = [
 if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
+    from .automations import (
+        create_automation,
+        delete_automation,
+        list_automations,
+        trigger_automation,
+        update_automation,
+    )
     from .background_execute import background_execute, background_task
     from .create_sandbox_file_download_url import create_sandbox_file_download_url
     from .create_sandbox_service_url import create_sandbox_service_url

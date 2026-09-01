@@ -10,12 +10,16 @@ const {
   packagedBackendTarget,
 } = require("../src/backend-supervisor.cjs");
 
-test("development target runs the repository LangGraph app through uv", () => {
+test("development target isolates repository LangGraph state", () => {
   const repoRoot = path.resolve("/work/open-swe");
-  assert.deepEqual(devBackendTarget({ repoRoot, port: 49152, env: {} }), {
+  const stateDir = path.resolve("/tmp/open-swe-state");
+  const target = devBackendTarget({ repoRoot, stateDir, port: 49152, env: {} });
+  assert.deepEqual(target, {
     command: "uv",
     args: [
       "run",
+      "--project",
+      repoRoot,
       "langgraph",
       "dev",
       "--no-browser",
@@ -27,7 +31,7 @@ test("development target runs the repository LangGraph app through uv", () => {
       "--config",
       path.join(repoRoot, "langgraph.desktop.json"),
     ],
-    cwd: repoRoot,
+    cwd: stateDir,
   });
 });
 

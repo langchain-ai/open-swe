@@ -16,7 +16,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@langchain/react", () => ({
   STREAM_CONTROLLER: mocks.streamController,
-  useStreamContext: () => ({
+}))
+
+vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
+  useAgentThreadRuntime: () => ({
     ...mocks.stream,
     [mocks.streamController]: mocks.controller,
   }),

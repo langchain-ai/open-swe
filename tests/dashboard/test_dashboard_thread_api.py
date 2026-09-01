@@ -96,19 +96,19 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
     assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
 
 
-async def test_resolve_agent_model_choice_migrates_deprecated_request_model(monkeypatch) -> None:
+async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(monkeypatch) -> None:
     async def fake_team_default(role: str) -> tuple[str, str]:
         return _VISION_MODEL, "medium"
 
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
 
     model_id, effort = await thread_api._resolve_agent_model_choice(
-        {},
-        "openai:gpt-5.5",
+        {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
+        "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
     )
 
-    assert (model_id, effort) == ("openai:gpt-5.6-sol", "high")
+    assert (model_id, effort) == (_VISION_MODEL, "medium")
 
 
 async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
@@ -148,15 +148,17 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
     assert model_id == "anthropic:claude-opus-5"
 
 
-async def test_resolve_agent_model_id_migrates_deprecated_per_thread_override(monkeypatch) -> None:
+async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monkeypatch) -> None:
     async def fake_team_default(role: str) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
-    model_id = await resolve_agent_model_id(None, per_thread_model_id="openai:gpt-5.5")
-    assert model_id == "openai:gpt-5.6-sol"
+    model_id = await resolve_agent_model_id(
+        None, per_thread_model_id="fireworks:accounts/fireworks/models/glm-5p2"
+    )
+    assert model_id == _TEXT_ONLY_MODEL
 
 
 def _new_thread_client(created: dict[str, object]) -> object:
@@ -1202,7 +1204,7 @@ async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> 
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch) -> None:
@@ -1459,7 +1461,7 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
@@ -1469,6 +1471,19 @@ def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
         {"source": "dashboard", "admin_thread": True},
         "workspace-admin",
     )
+
+
+def test_assert_thread_postable_restricts_workspace_automation(monkeypatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+
+    with pytest.raises(HTTPException) as exc_info:
+        thread_api._assert_thread_postable(
+            {"source": "schedule", "thread_category": "automation"},
+            "teammate",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
@@ -1915,172 +1930,136 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
     assert [item["id"] for item in result["items"]] == ["surfaced"]
 
 
-async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 10, resolved_before=page_size)
+async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "open-swe"}
+    )
+    cast(dict[str, object], threads[1]["metadata"])["repo"] = {
+        "owner": "langchain-ai",
+        "name": "langgraph",
+    }
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
+    )
+
+    result = await thread_api.list_dashboard_threads_page("octocat", email=None, ownerless=True)
+
+    assert [item["id"] for item in result["items"]] == ["t2"]
+
+
+async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata(
+    monkeypatch,
+) -> None:
+    threads = _make_threads(4, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "open-swe"}
+    )
+    cast(dict[str, object], threads[1]["metadata"])["repo"] = {
+        "owner": "LANGCHAIN-AI",
+        "name": "OPEN-SWE",
+    }
+    cast(dict[str, object], threads[2]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "langgraph"}
+    )
     searches: list[dict[str, object]] = []
 
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            searches.append({"metadata": metadata, "offset": offset})
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=5
-    )
-
-    assert len(result["active"]["items"]) == 5
-    assert len(result["resolved"]["items"]) == 5
-    assert result["active"]["hasMore"] is True
-    assert result["resolved"]["hasMore"] is True
-    assert {call["offset"] for call in searches} == {0, page_size}
-
-
-async def test_list_dashboard_threads_sidebar_stops_scanning_when_resolved_hidden(
-    monkeypatch,
-) -> None:
-    """`resolved_limit=0` must not keep paging in search of a resolved thread."""
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 10, resolved_before=0)
-    offsets: list[int] = []
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            offsets.append(offset)
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
+            searches.append(metadata)
+            matches = [
+                thread
+                for thread in threads
+                if all(
+                    cast(dict[str, object], thread["metadata"]).get(key) == value
+                    for key, value in metadata.items()
+                )
+            ]
+            return matches[offset : offset + limit]
 
     class FakeRuns:
         async def list(self, thread_id, limit=1):
             return []
 
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=0
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
 
-    assert len(result["active"]["items"]) == 5
-    assert result["resolved"]["items"] == []
-    # The first filter stops after one page: the active bucket is full and no
-    # resolved thread was ever wanted. Waiting on one paged to the scan cap.
-    assert offsets[1] == 0
-
-
-async def test_list_dashboard_threads_sidebar_allows_limits_beyond_100(monkeypatch) -> None:
-    threads = _make_threads(120, resolved_before=0)
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=110, resolved_limit=0
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, repo="langchain-ai/open-swe"
     )
 
-    assert result["active"]["limit"] == 110
-    assert len(result["active"]["items"]) == 110
-    assert result["active"]["hasMore"] is True
-
-
-async def test_list_dashboard_threads_sidebar_accepts_zero_resolved_limit(monkeypatch) -> None:
-    threads = _make_threads(2, resolved_before=1)
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=1, resolved_limit=0
-    )
-
-    assert result["active"]["limit"] == 1
-    assert result["resolved"] == {"items": [], "limit": 0, "hasMore": True}
-
-
-async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiting(
-    monkeypatch,
-) -> None:
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 5, resolved_before=0)
-    for thread in threads[:page_size]:
-        metadata = cast(dict[str, object], thread["metadata"])
-        metadata["source"] = "schedule"
-        metadata["schedule_id"] = f"schedule-{thread['thread_id']}"
-    offsets: list[int] = []
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            offsets.append(offset)
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=5
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == [
-        f"t{index}" for index in range(page_size, page_size + 5)
+    assert [item["id"] for item in result["items"]] == ["t0", "t1"]
+    assert searches == [
+        {"participant_logins": {"octocat": True}},
+        {"github_login": "octocat"},
     ]
-    assert set(offsets) == {0, page_size}
+
+
+async def test_list_dashboard_thread_projects_discovers_metadata_without_summaries(
+    monkeypatch,
+) -> None:
+    threads = _make_threads(5, resolved_before=0)
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "open-swe", "updated_at_ms": 50}
+    )
+    cast(dict[str, object], threads[1]["metadata"])["repo"] = {
+        "owner": "LANGCHAIN-AI",
+        "name": "OPEN-SWE",
+    }
+    cast(dict[str, object], threads[2]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "langgraph", "updated_at_ms": 30}
+    )
+    cast(dict[str, object], threads[3]["metadata"]).update(
+        {
+            "repo_owner": "langchain-ai",
+            "repo_name": "private",
+            "resolved": True,
+            "updated_at_ms": 60,
+        }
+    )
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    result = await thread_api.list_dashboard_thread_projects("octocat")
+
+    assert result == [
+        {
+            "repoFullName": "langchain-ai/open-swe",
+            "name": "open-swe",
+            "updatedAt": 50,
+        },
+        {
+            "repoFullName": "langchain-ai/langgraph",
+            "name": "langgraph",
+            "updatedAt": 30,
+        },
+    ]
 
 
 async def test_pin_dashboard_thread_allows_readable_non_owner(monkeypatch) -> None:
@@ -2144,26 +2123,31 @@ async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> No
     assert exc_info.value.status_code == 404
 
 
-async def test_list_dashboard_threads_sidebar_includes_pinned_thread(monkeypatch) -> None:
-    owned = _make_threads(1, resolved_before=0)
-    shared = {
-        "thread_id": "shared-thread",
-        "metadata": {
-            "source": "slack",
-            "github_login": "teammate",
-            "title": "Pinned teammate thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
+async def test_list_dashboard_pinned_threads_returns_only_readable_threads(
+    monkeypatch,
+) -> None:
+    threads = {
+        "shared-thread": {
+            "thread_id": "shared-thread",
+            "metadata": {
+                "source": "slack",
+                "github_login": "teammate",
+                "title": "Pinned teammate thread",
+                "updated_at_ms": 100,
+                "latest_run_status": "success",
+            },
+        },
+        "private-thread": {
+            "thread_id": "private-thread",
+            "metadata": {"source": "reviewer"},
         },
     }
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            return owned[offset : offset + limit]
-
         async def get(self, thread_id):
-            assert thread_id == "shared-thread"
-            return shared
+            if thread_id == "missing-thread":
+                raise RuntimeError("missing")
+            return threads[thread_id]
 
     class FakeRuns:
         async def list(self, thread_id, limit=1):
@@ -2177,168 +2161,13 @@ async def test_list_dashboard_threads_sidebar_includes_pinned_thread(monkeypatch
 
     async def fake_pin_ids(login: str) -> list[str]:
         assert login == "octocat"
-        return ["shared-thread"]
+        return ["shared-thread", "private-thread", "missing-thread"]
 
     monkeypatch.setattr(thread_api, "list_thread_pin_ids", fake_pin_ids)
 
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", active_limit=5, resolved_limit=0
-    )
+    result = await thread_api.list_dashboard_pinned_threads("octocat")
 
-    assert [item["id"] for item in result["pinned"]] == ["shared-thread"]
-
-
-async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(
-    monkeypatch,
-) -> None:
-    threads = _make_threads(1, resolved_before=0)
-    shared_thread = {
-        "thread_id": "shared-thread",
-        "metadata": {
-            "source": "slack",
-            "github_login": "teammate",
-            "title": "Teammate thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
-            "sandbox_id": "sandbox-123",
-        },
-    }
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def get(self, thread_id):
-            assert thread_id == "shared-thread"
-            return shared_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="shared-thread",
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == ["shared-thread", "t0"]
-    shared = result["active"]["items"][0]
-    assert shared["sandboxId"] == "sandbox-123"
-
-
-async def test_list_dashboard_threads_sidebar_keeps_resolved_active_thread_resolved(
-    monkeypatch,
-) -> None:
-    threads = _make_threads(1, resolved_before=0)
-    shared_thread = {
-        "thread_id": "shared-resolved-thread",
-        "metadata": {
-            "source": "slack",
-            "github_login": "teammate",
-            "title": "Resolved teammate thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
-            "resolved": True,
-            "sandbox_id": "sandbox-456",
-        },
-    }
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def get(self, thread_id):
-            assert thread_id == "shared-resolved-thread"
-            return shared_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="shared-resolved-thread",
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == ["t0"]
-    assert [item["id"] for item in result["resolved"]["items"]] == ["shared-resolved-thread"]
-    shared = result["resolved"]["items"][0]
-    assert shared["resolved"] is True
-    assert shared["sandboxId"] == "sandbox-456"
-
-
-async def test_list_dashboard_threads_sidebar_ignores_unreadable_active_thread(
-    monkeypatch,
-) -> None:
-    threads = _make_threads(1, resolved_before=0)
-    private_thread = {
-        "thread_id": "private-thread",
-        "metadata": {
-            "source": "internal",
-            "github_login": "teammate",
-            "title": "Private thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
-        },
-    }
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def get(self, thread_id):
-            assert thread_id == "private-thread"
-            return private_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="private-thread",
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == ["t0"]
+    assert [item["id"] for item in result] == ["shared-thread"]
 
 
 async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch) -> None:
@@ -2454,23 +2283,19 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_get_my_profile_migrates_deprecated_models() -> None:
+async def test_get_my_profile_drops_deprecated_models() -> None:
     with patch(
         "agent.dashboard.routes.get_profile",
         new_callable=AsyncMock,
         return_value={
-            "default_model": "openai:gpt-5.5",
-            "reasoning_effort": "medium",
-            "default_subagent_model": "anthropic:claude-opus-4-8",
-            "subagent_reasoning_effort": "low",
+            "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
+            "reasoning_effort": "high",
         },
     ):
         payload = await routes.get_my_profile({"sub": "octocat"})
 
-    assert payload["default_model"] == "openai:gpt-5.6-sol"
-    assert payload["reasoning_effort"] == "medium"
-    assert payload["default_subagent_model"] == "anthropic:claude-opus-5"
-    assert payload["subagent_reasoning_effort"] == "low"
+    assert "default_model" not in payload
+    assert "reasoning_effort" not in payload
 
 
 @pytest.mark.asyncio
