@@ -460,38 +460,30 @@ function configureDesktopIpc() {
     return true;
   });
   /**
-   * Move a running-free thread between working trees. A branch already checked
-   * out somewhere can only be worked on there, so selecting one follows it:
-   * into that worktree, or back into the project's own checkout.
+   * Move a thread onto a branch. A branch already checked out somewhere can
+   * only be worked on there, so the thread follows it: into that worktree, or
+   * back into the project's own checkout. Anything else is checked out in the
+   * tree the thread is already in.
    */
-  ipcMain.handle("desktop:set-local-workspace", async (event, input) => {
+  ipcMain.handle("desktop:set-local-branch", async (event, input) => {
     requireTrustedDesktopIpc(event);
     const thread = localThreadStore.get(input?.threadId);
     if (!thread) throw new Error("Local thread not found");
     const project = registeredProject(thread.cwd);
     if (!project) throw new Error("Project is not registered");
+    const branch = await validBranchName(project, input?.branch);
+    if (!branch) throw new Error("Branch name is required");
     const activity = await backendSupervisor.threadActivity();
     if (!activity || activity[thread.id] === "running")
-      throw new Error("Stop the local agent before changing its workspace");
+      throw new Error("Stop the local agent before switching its branch");
 
-    const branch = await validBranchName(project, input?.branch);
-    if (branch) {
-      const ref = (await localBranches(project)).find(
-        (candidate) => candidate.name === branch,
-      );
-      if (ref?.worktreePath)
-        return moveThreadWorkspace(thread, ref.worktreePath);
-      if (ref?.current) return moveThreadWorkspace(thread, null);
-      await checkoutBranch(threadRoot(thread), branch);
-      return syncThreadBranch(thread);
-    }
-    if (input?.mode === "worktree") {
-      await closeThreadTerminals(thread.id);
-      return recordLocalCheckpoint(
-        await createThreadWorktree(thread, thread.checkpoint.branch),
-      );
-    }
-    return moveThreadWorkspace(thread, null);
+    const ref = (await localBranches(project)).find(
+      (candidate) => candidate.name === branch,
+    );
+    if (ref?.worktreePath) return moveThreadWorkspace(thread, ref.worktreePath);
+    if (ref?.current) return moveThreadWorkspace(thread, null);
+    await checkoutBranch(threadRoot(thread), branch);
+    return syncThreadBranch(thread);
   });
 
   ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {

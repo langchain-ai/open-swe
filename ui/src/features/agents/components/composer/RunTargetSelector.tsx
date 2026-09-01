@@ -161,16 +161,25 @@ export function LocalWorkspaceSelector({
   worktreeLabel = "New worktree",
 }: {
   value: DesktopWorkspaceMode
-  onChange: (value: DesktopWorkspaceMode) => void
-  /** What the trigger calls a worktree the thread is already working in. */
+  /** Omitted once the thread has started: its workspace follows the branch. */
+  onChange?: (value: DesktopWorkspaceMode) => void
+  /** What the label calls a worktree the thread is already working in. */
   worktreeLabel?: string
 }) {
   const Icon = value === "worktree" ? FolderGit2 : Folder
+  const label = value === "worktree" ? worktreeLabel : "Current checkout"
+  if (!onChange)
+    return (
+      <span className="flex items-center gap-1 text-muted-foreground">
+        <Icon className="size-3.5 shrink-0" />
+        {label}
+      </span>
+    )
   return (
     <Menu>
       <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
         <Icon className="size-3.5 shrink-0" />
-        <span>{value === "worktree" ? worktreeLabel : "Current checkout"}</span>
+        <span>{label}</span>
         <ComposerControlChevron />
       </MenuTrigger>
       <MenuPopup align="start" className="w-52" sideOffset={7}>

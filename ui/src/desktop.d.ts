@@ -158,10 +158,9 @@ declare global {
         cwd: string
         branch: string
       }) => Promise<string>
-      setLocalWorkspace: (input: {
+      setLocalBranch: (input: {
         threadId: string
-        mode?: DesktopWorkspaceMode
-        branch?: string
+        branch: string
       }) => Promise<DesktopLocalThreadSummary | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>

@@ -156,13 +156,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       worktreePath ? candidate.worktreePath === worktreePath : candidate.current
     )?.name ?? null
 
-  const moveWorkspace = useCallback(
-    async (input: { mode?: "local" | "worktree"; branch?: string }) => {
+  const selectBranch = useCallback(
+    async (branch: string) => {
       setError(null)
       try {
-        const updated = await window.openSweDesktop?.setLocalWorkspace({
+        const updated = await window.openSweDesktop?.setLocalBranch({
           threadId: sessionId,
-          ...input,
+          branch,
         })
         if (updated)
           queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
@@ -453,14 +453,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               localProjectBranches={projectRefs}
               selectedLocalProjectBranch={threadBranch}
               onRefreshLocalProjectBranch={() => void refetchProjectRefs()}
-              onSelectLocalProjectBranch={(branch) =>
-                void moveWorkspace({ branch })
-              }
+              onSelectLocalProjectBranch={(branch) => void selectBranch(branch)}
               localWorkspaceMode={thread.worktreePath ? "worktree" : "local"}
               localWorktreeLabel="Worktree"
-              onLocalWorkspaceModeChange={(mode) =>
-                void moveWorkspace({ mode })
-              }
             />
           </AgentComposerDock>
         </div>

@@ -23,8 +23,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranches: (cwd) =>
     ipcRenderer.invoke("desktop:project-branches", cwd),
-  setLocalWorkspace: (input) =>
-    ipcRenderer.invoke("desktop:set-local-workspace", { ...input }),
+  setLocalBranch: (input) =>
+    ipcRenderer.invoke("desktop:set-local-branch", { ...input }),
   checkoutProjectBranch: (input) =>
     ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
