@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:4617b41314739a707c14953250e5a43c16cb05ec70a468825c38ab18b544bcb9",
+  "pageVersion": "sha256:13287a5c5faa439fdf5f1d911256199b11d75a5bfd1eaf253f841e4da9f861cc",
   "claims": [
     {
       "id": "claim_9a77e9c5301a46b8bbd02832b9de5a90",
@@ -136,7 +136,7 @@
         },
         {
           "resource": "repo://tests/e2e/tests/full_flow.spec.ts",
-          "version": "repo-file-v1:sha256:61e173979d69aeb28ef59ce41ad2a294c2fe0ad4d91cd186632c1dafe596a927"
+          "version": "repo-file-v1:sha256:aa6448ee98680d23e193fcf8d705ceb07e8b43564f2f4372f67741b87a7f248f"
         }
       ]
     },
@@ -150,7 +150,7 @@
         },
         {
           "resource": "repo://tests/e2e/fake_llm.py",
-          "version": "repo-file-v1:sha256:0d32db2b16bd9b541c9d6df35fd76ef6e363fca8860347d114844197ea8457ec"
+          "version": "repo-file-v1:sha256:4dd649e2bf7f7879bb270ce11108d215c2de9e7a2f4f6ef2181562bdd8dfa763"
         },
         {
           "resource": "repo://tests/e2e/fakes.py",
@@ -174,11 +174,15 @@
     },
     {
       "id": "claim_4f3e741fd05043b4ac499d926c71ea4b",
-      "statement": "Browser e2e runs record a trace and video (with a screenshot on failure) under test-results/ and playwright-report/, which can be replayed with `playwright show-report` or `show-trace`.",
+      "statement": "Browser Playwright runs retain trace and video on failed attempts locally and on the first retry in CI, with screenshots on failure; E2E_ARTIFACTS=1 records trace and video for every attempt under test-results/ and playwright-report/.",
       "evidence": [
         {
-          "resource": "repo://tests/e2e/README.md#L86-L101",
-          "version": "repo-lines-v1:sha256:0b735cb59489ab574322c8e6a3922a430b69806c43c5b14cbc65af12879335aa:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwNGZlNGM1MTJlM2YyZDk0YTc3ZTcyY2VkMGJmYTI3OTEyNWQ1ZjcyNmQxNDM1MzU0YTk3N2NjMWRkM2E5ZDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkMDUzOWQ1Mzk0ZGMyZmQwZmUxMTI0Yjc4NTE5YTljNzViNjNlNzUyYWJjMzdjYzRmMzg4ZWZiNGRhZGRmN2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1YjYwMjNhYWM1NzY3NDQyYmIxNzQyYjE3OTQ0ZWQ1NTQzMDRiYjNmYWFjODA1NjQ5NWE0YTc0OGIxYmJkNGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2OGVkMTUyZTc5NjM1MDJhY2IyNDcxNTk4MmVmOTY1ZmVlMDZlZTE3ZDc0NTJlODE5YTVhODViYjMyMjg4ZjAifQ"
+          "resource": "repo://tests/e2e/README.md#L93-L111",
+          "version": "repo-lines-v1:sha256:17cfaac571852ad6579c653d0caa66e4a59ab7a1214229a4af1e001386148fc1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwNGZlNGM1MTJlM2YyZDk0YTc3ZTcyY2VkMGJmYTI3OTEyNWQ1ZjcyNmQxNDM1MzU0YTk3N2NjMWRkM2E5ZDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkMDUzOWQ1Mzk0ZGMyZmQwZmUxMTI0Yjc4NTE5YTljNzViNjNlNzUyYWJjMzdjYzRmMzg4ZWZiNGRhZGRmN2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlNDZkMzI3MzQ3YzIyYzMwNjdiODAxMjJhMjQ2ZDQyMmJjYjExZmQwNzE2NTVjMGM1NjYxMjA3ZWJkZjc0ZmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2OGVkMTUyZTc5NjM1MDJhY2IyNDcxNTk4MmVmOTY1ZmVlMDZlZTE3ZDc0NTJlODE5YTVhODViYjMyMjg4ZjAifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/playwright.config.ts#L23-L44",
+          "version": "repo-lines-v1:sha256:770267e2dab34658b73d8ff77c2aaf39f8e92e5656041568fd00204d221d52df:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjNDQyZDgyNzY5NmVhMjk3MzIwNThlY2EzYWY4MmExNjUyNDAzZDZkZTQ2YWI2ZTA1NzMzZjUzZjkxMzUwMWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkNWNkMmZiNGYzZGY4ODQ1MTUyNTViMzk1MjNmMmY4YjU0NzJiZWVhOWY1NjZmZmNhMjA0ZGI4MDI1NjEwNDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNiNTMyNGY5YmU4ZTdjY2Y0NmYxZDVhNWVhNWVmZmI4YWY0M2NlMjgxYWYwMTUwMWRkZDc0ZDBkZTgxNWM3Y2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJmZGI1ZDI3YWNhOTQ2NTk0OGJmZjUzMmEwNjU2Y2M3YzY1YjdjYWY3ZjUzMDViNTlmYzdkZGZjYmMzOWNjNGMifQ"
         }
       ]
     },
@@ -209,16 +213,12 @@
       "statement": "The browser Playwright configuration runs serially against a real `langgraph dev` server, excludes the desktop spec, and uses a 90-second test timeout; the desktop configuration selects only desktop.spec.ts and raises its timeout to 180 seconds.",
       "evidence": [
         {
-          "resource": "repo://tests/e2e/playwright.config.ts#L35-L53",
-          "version": "repo-lines-v1:sha256:cb6d7ffdf21bdbaf00f3309c4c50ca7cd0c382fc9e9ca876171547b8b664735d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxNWMwYjBkYTAwMDIyN2JiM2YyMGVkMjI3MDRiOTFkM2Q3NzhlZmMzYjEzZjY0YzBjOWFmYzczNzM2MGEwNjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMGNkYjk3MmE3YmZiN2VkMjQ2ZjlmZjY3MjM4NWU1NWY0OTY4ZmMxMTA0M2RjNWI2ODRkNTFkZmEzMWRiY2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFhNzczMDRlMDhiZDJhYTNmMDJlMmZiOTYzMmQwNjMzMGQxN2U3OWM3OWNmNWMwNDY4OTkzZDQwOGM4NmRmNDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI4M2MwM2ZiZGY5YjM0NmFhNTUyNzg2YjVlZWJiM2FhZDRmYWM4M2FiOWU1YzZiNWQ1MTVhM2ViNTljZWVkNTIifQ"
+          "resource": "repo://tests/e2e/playwright.config.ts",
+          "version": "repo-file-v1:sha256:4c8192587d1bd86a846b8e34bbbcd909f1c50a2f0d889b5b5e9280ccd2d20760"
         },
         {
-          "resource": "repo://tests/e2e/playwright.config.ts#L9-L19",
-          "version": "repo-lines-v1:sha256:4005434d0c0c12d4f00e033d27767ab215c83d612aaf541581e6966c3b8b3e83:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyY2VjYjE0NGE0NmY1ZGNmMTJhNjE2OWZjZWVkNzY5NWU4Mjk0YjA5MGRlNzZmMzY2MWNkZDAyNDkzMDAxNDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjNDQyZDgyNzY5NmVhMjk3MzIwNThlY2EzYWY4MmExNjUyNDAzZDZkZTQ2YWI2ZTA1NzMzZjUzZjkxMzUwMWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmYmUzMWRkYjJkZTViZWExM2UwZDFkMzUxNDBmZDkxNzJiMDE0ZjRmODZiNTFlYjIxZTIyZTVjZmM1ZGI0YmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI1NjIyMWFjOTY0YmM1NjhhY2I3NjYwYzQ1OTAzODgzYzIxYTdlOGE2ZjIwN2VhMTk1YjE0YzYwOGNmMmNkZDcifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/playwright.desktop.config.ts#L5-L23",
-          "version": "repo-lines-v1:sha256:12a3bd3c40fb0c417716860491aae02a91ffa6737f20044492e73a9cf3a201c3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyY2VjYjE0NGE0NmY1ZGNmMTJhNjE2OWZjZWVkNzY5NWU4Mjk0YjA5MGRlNzZmMzY2MWNkZDAyNDkzMDAxNDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlY2E5YjNjZWNlMGFhNjVhZmZiNzkyOTEwNjE4ODAzZTI5NmJiNmY0MmRhYWExNzM5NmViOTQ1YWVjMWEzZmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRjMTQ1MjQ2ZWU4OTAwZTRjZjRhYWU0MGMwN2Y2NDliNDkxNTljMDRhZmIyOTNlOWIwYmI1YjVjOWFiZTlkMDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
+          "resource": "repo://tests/e2e/playwright.desktop.config.ts",
+          "version": "repo-file-v1:sha256:5b11dee4a16df00bf6bc7fae78ef69104cb1b28614d1a6c9849e893da14ff088"
         }
       ]
     },
@@ -299,10 +299,66 @@
           "version": "repo-lines-v1:sha256:3f967e3cc482353e82c7a29044e4faaf83690cf8257b88f743b0dcf4f68fcb43:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjZDc3MjFjZThhMmM2MTE4NDkwNTZkZTIyZDg0Yjc3N2UwODYxYzQ4YzdlZTcxMzBmZTI5YjhjMjE0ZGQyN2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NGQzNmRhZjE1ODg4ZTNiOGMxNmI5MDdiNTc4MzJlYWM0ZjI1NTg0YzgzNTcxZmM3NzI2ZmQxNGZiMDYwYzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
         }
       ]
+    },
+    {
+      "id": "claim_3ead8d5bc73242aa998940fccb41cd3e",
+      "statement": "The e2e harness overlays the real agent API with fake GitHub/Slack endpoints, mock UIs, and control endpoints, and signs the simulated Slack Events API delivery before posting it to the real webhook route.",
+      "evidence": [
+        {
+          "resource": "repo://tests/e2e/harness.py#L1-L10",
+          "version": "repo-lines-v1:sha256:db5803815575a4739d5e44cfb3b870c45f5349c414138886607f25458eee4fe5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhZTVkOTg0MzFhMDYzODE4NzA5YWQ2MjM0YjA0ZGNlZThjMDFhMzIwODU5ZGRlOTJmMzA5MWVhN2E4M2YyNzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmNzg3NGQ4YzQ5MTlhYTYwYTU5OGQzZDYyYTRiYjNlYjhhOTFjZjk0NDE1YmE4ZTgxMjJlZmI3NGU0MTFmZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk4MWQ1ZDY4OTMzYzZiMDYzOTg0OGNiY2UzMTgxYTExMWIyZDdjYzcyOWY2OTFiZjMzMTFkMWQ1NTE0ODhkMGIifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/harness.py#L171-L203",
+          "version": "repo-lines-v1:sha256:cd928ed75bcfa6fad136a75c20fb18f3d4279a1ed9462ad0385ebf2d04294c56:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4N2NiZmZkZDI2NjIxN2RiYWY2Y2NhMjVhNmFiZmJkNDIxOWZiYjVhMjBhNTA5NjI3ODUyNTA2OGVlYTliYWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiNWMyM2EwNGU0ZGRjMDM3MWFjYjZjM2FjMjE2OGQ3YzUxYjE2ZjI3YWIzN2JmYTc5NjNhZDU2MzliY2FkZTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMzNjA1NGZlODEzMzYzZmMzZjAxOWY5OTA2Nzc4NWM5OTEyYTY4MTdjMGY2NjAzNDcxNTdlMjdhYTFkYTgyM2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3MDgxNDJkNDk3Yjc4ZGUwMmFjNzM1NDQ3NmUzYWQ3ZjgxMTMyM2IyNDcwMGRhM2VjNzU5NmZmNmUzOGM2NTYifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/harness.py#L237-L260",
+          "version": "repo-lines-v1:sha256:1c569ec2001d6e25f3d2430499e564e00d0cc239d7d7c1da40b012b05b04e349:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwOWI3NWIwNTJjNzM1M2MwMjM5NWQ4YmU3MzRiZDY1NTljODU4YWU1MjJiNzU4OWQzZjVmZTA1OGZjMjE3YzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3MDFmNjEwNmJjYmMxZWI4NTI4ZDFhY2ZiMzNjYmI0OWRiZGM0ZDg4NWNmMjJhNmMwZjE2MjJhYmQ3YmY1ZjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY5YTQxOTJiNDViZDY2NjdjNjFhYmJjZWZhM2EzY2NjZGRlMTAwY2FlZDIwYjZmNTU1NDZjYmYyMDY5YjAzZjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cd3916dc8a624441a4a6ec9760d8fadd",
+      "statement": "Beyond the basic Slack-to-PR flow, browser e2e tests cover Slack-to-web continuation, plan approval, environment authorization and propagation, Slack redelivery and busy-thread queueing, raw SSR authentication behavior, PR health presentation, and thread-tool changes reflected in the dashboard.",
+      "evidence": [
+        {
+          "resource": "repo://tests/e2e/tests/dashboard.spec.ts#L17-L114",
+          "version": "repo-lines-v1:sha256:59c3777aa7ed5cadba0000a0c9fb318ad733a0f171e724e1299debabc40f6c39:eyJzZWxlY3RlZExpbmVDb3VudCI6OTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmNmUwNDJjMWM4NmFlMTAxOWQyYmM3YTIyMmQxNDkxNDg0MjQ3Zjk4NjhkNDQ5MDUxNWUyYWUwZDRkY2M5YjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkzMjkxMDgxZGJkOGQ4MzI5NTk5MjczMTExM2E3MDdhMzY0MDBiZTA5YzFiZDQ2MmQyNDkzNjE2MzFmM2M4NWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM1NjE5NWQ3MmEyNTQ4YjViYTVmMzc4NTY3ZWMxMDg3ZjM2ZmJhM2RjOWM2ODJkMzIxMWVjMzRlYjAzZDgxOTIifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/tests/dashboard_pull_requests.spec.ts#L15-L100",
+          "version": "repo-lines-v1:sha256:7b2164fc9fbf133d0fe1b89eef26347d524d207a8c727e60fa056131f7967252:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzNTczMzlkMzFkZjdlZmZkNDE4Y2RmMzRhOTVlY2QyZDZiMzkxNGU1NWI5OWFmYTdjOTlhNDgwZGRjNDEyMWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyNzJlYzkxM2U0NTE5YzY1OTQ4OWU1MjVjODI4ZWI5MWJhMWRiZjhhMDE1ODc5N2ZhNWQ0NzYwMjhhNzA5MDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2MWVhOTc1NTNlNDMyZjE5Yzk1YjQ5YWQ5ZDg3ZjJhMzg3NzllMWIzYzVmNWM0MWYwYzFhODU2MWVkNjZlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEzMDNkYmUwMzMzMDMxNjU2YzYwYWQ5N2ZhOWMwMzdjMmNhNGQwYjYzMTFmMzlhN2FlMzdjZmQwMjFkYzUwMWUifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/tests/environments.spec.ts#L133-L254",
+          "version": "repo-lines-v1:sha256:bd01593f17dbddf37616c5851287ec3f8db3ddc5fe050f7ace1a789472fa3ae7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJjMjBlNzNkOWY3YjUyOWY0MTVmZTVmMGY5Mjg3ZGRmNmU2MzJkYmQ3ZDRiMTlkYTFlODE5MmYwZTVjZDBhNGU3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI2YmZjMzU2ZDk1ZWQ0NTJmMTM0ZmQ0ZWI0NDVhYzI5MzQ0YTExYmIxZGQ5YzYzZjM0ZjhkMzU4MmFkM2RmN2NiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiZjk5OWFmMjQxZWI3ZjgxNDkzYjI1M2E3NzI4Njg2Y2Q1ZjBhN2ZjMzc3NTRkYjczNDlkZTk5MWVkOTFkYWZjIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJkZTI3ZmFlNjkyMDgyZTBjMmNmNGQ5N2Q2MWUyMGNhZmUxOWQ2N2YwMWJiNGI1NjZmZDYzMTYyNTFkNDljY2RjIn0"
+        },
+        {
+          "resource": "repo://tests/e2e/tests/plan_review.spec.ts#L8-L15",
+          "version": "repo-lines-v1:sha256:cb3e64030ae61300ddd81d43269b84bfef822c489f0bd4775d2b67be4b920ef5:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmFlNWMwZmUzYTk3MDQ2OWRiZmJiZjM5OGVmMGUyYjVhYmRlNjU1NjU0YWFlYjU5MjQyY2EzMWY1MDU1NDczYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDhkNTVmNjg3YmQwMTNkMDAyNDM0NjQ2YThhMDhhY2U5M2Y2Y2Y4NGU3NjRlZjg0MTllNjA5MGIyM2M1ODgyOSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODM0YmI1NjExYWQzNDRhNGNiNjYxODgyZWQ5MGJjYzFhZDM1YWQzMzQ5NTY0YmIzNjE0MjMxNjExODRjMzNmNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDEzOTdlNTQ3MTY3MjFjNTQ5ODIyOTNkMTk0ZmUyZTc0NTI4ZTA0ZmJlZTNhZmE0M2NjYTg5Yjg0MmU0YjAzNSJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/tests/slack_debounce.spec.ts#L3-L85",
+          "version": "repo-lines-v1:sha256:e2b795bb9cba9a58a0e9a54f573ef6dd5e56fad92e2897b876104834f6737b26:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYwNDJjOTMzYjNiNmMwNDYzNDVkOTJjZGNjY2I0MzM2YzhhMzBmNzgxYmNiM2Q5YTEzZDQ1MjJiYmNkMjc3NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNkNTQyNzFhNGFmMzk5Nzk3NjQ2YTI1ZjEzMjE5NTg0NzA3NDczNjM1MzUyMjc1MGQzNDhmZTM3YjEzMWExYmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/tests/slack_event_dedupe.spec.ts#L3-L80",
+          "version": "repo-lines-v1:sha256:9ae1b3083da0d07755a53112d093849ce39542f32b29f2cd80a2728640492aa3:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YzE2OGZkOGJlOGRiNGI1ZjdjYTUzZWE1YWNlODgwYTgyZWI1YTc1MTMxYmFkNjEwNDAxMTRiZTljMjg0YTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNkNTQyNzFhNGFmMzk5Nzk3NjQ2YTI1ZjEzMjE5NTg0NzA3NDczNjM1MzUyMjc1MGQzNDhmZTM3YjEzMWExYmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/tests/ssr.spec.ts#L3-L33",
+          "version": "repo-lines-v1:sha256:74d677e03da16202799461f5c3f5d0d1c64cfef9f0c61442660b71a2e14060bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1MTkwNGJiYTk3YzMxMDllNzJiZDk3M2I2OWUwNDE1ZjNiOTJlM2FhMmVlMTRkNDhjMWYyMTE4NzA4NWYwMDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJiNDk4NjA2YjlkNjYyMDMzM2I5YWZhZjQwMzM2YzhlZGRjODg5YzM3ZGRkNzE5MDIyMjVkYTE4ZDM4MmUxYmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/tests/thread_tools.spec.ts#L160-L228",
+          "version": "repo-lines-v1:sha256:3824dcbf662b301fd810c6f8e41db8e43d7403af463d087e5141e702a01d2843:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5OWQyZDM3YWFjMThjMTFiMmNjNjBhMzA0NTdkYWM1MTVjNDAwZDQxOTFmODcxOWRiZDJlODgwZjdmYTk3MWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjViNmRjOTU0NTkyZGExYTBiZWRhMTI1YTExYjg4MjQ1NzRmOGE2NWIwZTVlMWM1YTQ2ZDhiMGIyMmI3ZDNmZDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-31T08:17:06.525Z"
+    "at": "2026-09-01T08:16:00.848Z"
   }
 }
