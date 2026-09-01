@@ -4,6 +4,8 @@ import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   CalendarBlankIcon,
+  CaretDownIcon,
+  CaretRightIcon,
   ChatCircleIcon,
   CircleNotchIcon,
   CopyIcon,
@@ -175,7 +177,9 @@ export function SidebarThreadRow({
   live,
   compact = false,
   indent = false,
+  subagentsExpanded = false,
   onNavigate,
+  onToggleSubagents,
   onDeleteLocal,
   onTogglePin,
   onToggleArchived,
@@ -188,7 +192,9 @@ export function SidebarThreadRow({
   compact?: boolean
   /** Nested under a project: indent the content, not the highlight box. */
   indent?: boolean
+  subagentsExpanded?: boolean
   onNavigate?: () => void
+  onToggleSubagents?: () => void
   onDeleteLocal: (threadId?: string) => void
   onTogglePin: () => void
   onToggleArchived: () => void
@@ -282,6 +288,25 @@ export function SidebarThreadRow({
 
   const rowContent = (
     <>
+      {item.location === "cloud" && onToggleSubagents && (
+        <button
+          type="button"
+          aria-label={subagentsExpanded ? "Hide subagents" : "Show subagents"}
+          aria-expanded={subagentsExpanded}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onToggleSubagents()
+          }}
+          className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+        >
+          {subagentsExpanded ? (
+            <CaretDownIcon className="size-3" />
+          ) : (
+            <CaretRightIcon className="size-3" />
+          )}
+        </button>
+      )}
       <span
         ref={marquee.viewport}
         className={cn(

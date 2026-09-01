@@ -29,6 +29,7 @@ import type {
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import { SidebarSubagents } from "@/features/agents/components/SidebarSubagents"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -179,6 +180,9 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const [expandedSubagentThreadIds, setExpandedSubagentThreadIds] = useState<
+    Set<string>
+  >(new Set())
   const {
     viewport: scrollViewport,
     edges: scrollEdges,
@@ -409,18 +413,44 @@ export function AgentsSidebar({
   const rowProps = (
     item: SidebarThreadItem,
     live: PullRequestSnapshot | undefined = pullRequestFor(item)
-  ) => ({
-    item,
-    isActive: item.key === activeKey,
-    pinned: isPinned(item),
-    archived: isArchived(item),
-    live,
-    compact: prefs.compact,
-    onNavigate: layout.closeOnMobile,
-    onDeleteLocal: refreshLocalThreads,
-    onTogglePin: () => togglePin(item),
-    onToggleArchived: () => toggleArchived(item),
-  })
+  ) => {
+    const subagentsExpanded = expandedSubagentThreadIds.has(item.id)
+    return {
+      item,
+      isActive: item.key === activeKey,
+      pinned: isPinned(item),
+      archived: isArchived(item),
+      live,
+      compact: prefs.compact,
+      subagentsExpanded,
+      onNavigate: layout.closeOnMobile,
+      onToggleSubagents:
+        item.location === "cloud"
+          ? () =>
+              setExpandedSubagentThreadIds((current) => {
+                const next = new Set(current)
+                if (subagentsExpanded) next.delete(item.id)
+                else next.add(item.id)
+                return next
+              })
+          : undefined,
+      onDeleteLocal: refreshLocalThreads,
+      onTogglePin: () => togglePin(item),
+      onToggleArchived: () => toggleArchived(item),
+    }
+  }
+  const renderThreadRow = (
+    item: SidebarThreadItem,
+    live?: PullRequestSnapshot,
+    indent = false
+  ) => (
+    <div key={item.key}>
+      <SidebarThreadRow {...rowProps(item, live)} indent={indent} />
+      {item.location === "cloud" && expandedSubagentThreadIds.has(item.id) && (
+        <SidebarSubagents threadId={item.id} />
+      )}
+    </div>
+  )
 
   const sectionCollapsed = (key: string) =>
     prefs.collapsedSectionKeys.includes(key)
@@ -525,9 +555,7 @@ export function AgentsSidebar({
       onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
       onExpand={() => expandProject(group.key)}
       onTogglePin={() => toggleProjectPin(group.key)}
-      renderRow={(item, live) => (
-        <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
-      )}
+      renderRow={(item, live) => renderThreadRow(item, live, true)}
     />
   )
 
@@ -695,9 +723,7 @@ export function AgentsSidebar({
                 />
                 {!sectionCollapsed("pinned") && (
                   <>
-                    {filteredPinnedItems.map((item) => (
-                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                    ))}
+                    {filteredPinnedItems.map((item) => renderThreadRow(item))}
                     {pinnedGroups.map(renderProjectGroup)}
                   </>
                 )}
@@ -755,9 +781,7 @@ export function AgentsSidebar({
                 />
                 {!sectionCollapsed("recents") && (
                   <>
-                    {recents.map((item) => (
-                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                    ))}
+                    {recents.map((item) => renderThreadRow(item))}
                     {recentsQuery.hasMore && (
                       <LoadMoreThreadsOnScroll
                         label="Load more threads"
