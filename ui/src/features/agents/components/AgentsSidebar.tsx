@@ -1169,7 +1169,7 @@ export function AgentsShell({
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
-        <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">
+        <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-black">
           {children}
         </main>
       </div>
