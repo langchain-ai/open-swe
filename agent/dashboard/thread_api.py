@@ -374,8 +374,6 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
 
 
 def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
-    if metadata.get("repo_private") is not True:
-        return None
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None:
         return None
@@ -383,8 +381,6 @@ def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
 
 
 def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
-    if metadata.get("repo_private") is not True:
-        return None
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     team_id = SLACK_TEAM_ID.strip()
     if (
