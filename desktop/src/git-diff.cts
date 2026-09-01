@@ -62,13 +62,32 @@ async function defaultBranch(cwd) {
   }
 }
 
+/** Branch name to the worktree that has it checked out, for every worktree. */
+async function worktreeBranches(cwd) {
+  const paths = new Map<string, string>();
+  try {
+    const output = text(
+      await git(cwd, ["worktree", "list", "--porcelain"], null, 5_000),
+    );
+    let worktree = null;
+    for (const line of output.split("\n")) {
+      if (line.startsWith("worktree ")) worktree = line.slice(9).trim();
+      else if (line.startsWith("branch refs/heads/") && worktree)
+        paths.set(line.slice(18).trim(), worktree);
+    }
+  } catch {}
+  return paths;
+}
+
 /**
  * Local branches, most recently committed first, with the two the picker
- * annotates pulled to the front so they survive the list's scroll area.
+ * annotates pulled to the front so they survive the list's scroll area. A ref
+ * carries the worktree holding it, which is what lets the picker move a thread
+ * between its worktree and the project's own checkout.
  */
 async function localBranches(cwd) {
   try {
-    const [output, current, fallback] = await Promise.all([
+    const [output, current, fallback, worktrees, root] = await Promise.all([
       git(
         cwd,
         [
@@ -82,12 +101,18 @@ async function localBranches(cwd) {
       ).then(text),
       currentBranch(cwd),
       defaultBranch(cwd),
+      worktreeBranches(cwd),
+      repoRoot(cwd),
     ]);
-    const refs = (output ? output.split("\n") : []).map((name) => ({
-      name,
-      current: name === current,
-      isDefault: name === fallback,
-    }));
+    const refs = (output ? output.split("\n") : []).map((name) => {
+      const worktree = worktrees.get(name) ?? null;
+      return {
+        name,
+        current: name === current,
+        isDefault: name === fallback,
+        worktreePath: worktree && worktree !== root ? worktree : null,
+      };
+    });
     const rank = (ref) => (ref.current ? 0 : ref.isDefault ? 1 : 2);
     return refs.sort((left, right) => rank(left) - rank(right));
   } catch {

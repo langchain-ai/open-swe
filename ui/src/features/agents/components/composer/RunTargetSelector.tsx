@@ -158,18 +158,19 @@ export function LocalProjectSelector({
 export function LocalWorkspaceSelector({
   value,
   onChange,
+  worktreeLabel = "New worktree",
 }: {
   value: DesktopWorkspaceMode
   onChange: (value: DesktopWorkspaceMode) => void
+  /** What the trigger calls a worktree the thread is already working in. */
+  worktreeLabel?: string
 }) {
   const Icon = value === "worktree" ? FolderGit2 : Folder
   return (
     <Menu>
       <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
         <Icon className="size-3.5 shrink-0" />
-        <span>
-          {value === "worktree" ? "New worktree" : "Current checkout"}
-        </span>
+        <span>{value === "worktree" ? worktreeLabel : "Current checkout"}</span>
         <ComposerControlChevron />
       </MenuTrigger>
       <MenuPopup align="start" className="w-52" sideOffset={7}>
@@ -189,6 +190,12 @@ export function LocalWorkspaceSelector({
       </MenuPopup>
     </Menu>
   )
+}
+
+function badge(ref: DesktopProjectRef) {
+  if (ref.current) return "current"
+  if (ref.worktreePath) return "worktree"
+  return ref.isDefault ? "default" : null
 }
 
 export function LocalBranchSelector({
@@ -273,15 +280,11 @@ export function LocalBranchSelector({
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate">{ref.name}</span>
-                  {ref.current ? (
+                  {badge(ref) && (
                     <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                      current
+                      {badge(ref)}
                     </span>
-                  ) : ref.isDefault ? (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                      default
-                    </span>
-                  ) : null}
+                  )}
                 </button>
               ))
             )}

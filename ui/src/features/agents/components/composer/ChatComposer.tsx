@@ -116,6 +116,7 @@ export interface ChatComposerProps {
   selectedLocalProjectBranch?: string | null
   localProjectBranches?: Array<DesktopProjectRef>
   localWorkspaceMode?: DesktopWorkspaceMode
+  localWorktreeLabel?: string
   onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
@@ -240,6 +241,7 @@ export const ChatComposer = memo(function ChatComposer({
   selectedLocalProjectBranch = null,
   localProjectBranches = [],
   localWorkspaceMode = "local",
+  localWorktreeLabel,
   onLocalWorkspaceModeChange,
   onSelectLocalProject,
   onAddLocalProject,
@@ -682,7 +684,11 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       )}
 
-      {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
+      {(onRepoChange ||
+        onRunTargetChange ||
+        onEnvironmentChange ||
+        onSelectLocalProjectBranch ||
+        onLocalWorkspaceModeChange) && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
@@ -709,12 +715,6 @@ export const ChatComposer = memo(function ChatComposer({
                 side="top"
               />
             )}
-          {runTarget === "local" && onLocalWorkspaceModeChange && (
-            <LocalWorkspaceSelector
-              onChange={onLocalWorkspaceModeChange}
-              value={localWorkspaceMode}
-            />
-          )}
           {runTarget && onRunTargetChange && (
             <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
           )}
@@ -736,6 +736,13 @@ export const ChatComposer = memo(function ChatComposer({
                 selectedBranch={selectedLocalProjectBranch}
               />
             )}
+          {runTarget === "local" && onLocalWorkspaceModeChange && (
+            <LocalWorkspaceSelector
+              onChange={onLocalWorkspaceModeChange}
+              value={localWorkspaceMode}
+              worktreeLabel={localWorktreeLabel}
+            />
+          )}
         </div>
       )}
 

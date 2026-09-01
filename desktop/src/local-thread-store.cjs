@@ -231,14 +231,18 @@ class LocalThreadStore {
     return this.get(id);
   }
 
+  /** `null` moves the thread back into the project's own checkout. */
   setWorktree(id, worktreePath) {
     const current = this.threads.get(id);
     if (!current) return null;
-    if (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath))
+    if (
+      worktreePath !== null &&
+      (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath))
+    )
       throw new Error("Invalid worktree path");
     this.threads.set(id, {
       ...current,
-      worktreePath: path.normalize(worktreePath),
+      worktreePath: worktreePath && path.normalize(worktreePath),
       updatedAt: this.now(),
     });
     this.persist();

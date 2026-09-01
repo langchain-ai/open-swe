@@ -33,6 +33,7 @@ import {
   ensureDesktopModelCredential,
   localThreadKeys,
   useDesktopLocalThread,
+  useLocalProjectRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
@@ -142,6 +143,35 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange, openSurface, threadRef]
+  )
+
+  const worktreePath = thread?.worktreePath ?? null
+  const refsQuery = useLocalProjectRefs(thread?.cwd)
+  const projectRefs = refsQuery.data
+  const refetchProjectRefs = refsQuery.refetch
+  // The thread's branch is wherever its working tree is: the ref checked out in
+  // its worktree, or the project's own checkout when it has none.
+  const threadBranch =
+    projectRefs.find((candidate) =>
+      worktreePath ? candidate.worktreePath === worktreePath : candidate.current
+    )?.name ?? null
+
+  const moveWorkspace = useCallback(
+    async (input: { mode?: "local" | "worktree"; branch?: string }) => {
+      setError(null)
+      try {
+        const updated = await window.openSweDesktop?.setLocalWorkspace({
+          threadId: sessionId,
+          ...input,
+        })
+        if (updated)
+          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+        await refetchProjectRefs()
+      } catch (cause) {
+        setError(errorMessage(cause))
+      }
+    },
+    [queryClient, refetchProjectRefs, sessionId]
   )
 
   const activity = useLocalThreadActivity()[sessionId]
@@ -418,6 +448,19 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               }}
               placeholder="Add a follow up"
               skills={skills.data}
+              runTarget="local"
+              selectedLocalProjectPath={thread.cwd}
+              localProjectBranches={projectRefs}
+              selectedLocalProjectBranch={threadBranch}
+              onRefreshLocalProjectBranch={() => void refetchProjectRefs()}
+              onSelectLocalProjectBranch={(branch) =>
+                void moveWorkspace({ branch })
+              }
+              localWorkspaceMode={thread.worktreePath ? "worktree" : "local"}
+              localWorktreeLabel="Worktree"
+              onLocalWorkspaceModeChange={(mode) =>
+                void moveWorkspace({ mode })
+              }
             />
           </AgentComposerDock>
         </div>

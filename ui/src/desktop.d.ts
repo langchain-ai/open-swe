@@ -35,6 +35,7 @@ export interface DesktopProjectRef {
   name: string
   current: boolean
   isDefault: boolean
+  worktreePath: string | null
 }
 
 export type DesktopLocalActivity = Record<string, "running" | "error">
@@ -157,6 +158,11 @@ declare global {
         cwd: string
         branch: string
       }) => Promise<string>
+      setLocalWorkspace: (input: {
+        threadId: string
+        mode?: DesktopWorkspaceMode
+        branch?: string
+      }) => Promise<DesktopLocalThreadSummary | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       onProjectsChanged: (

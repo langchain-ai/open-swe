@@ -1,3 +1,4 @@
+const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -229,13 +230,27 @@ async function createThreadWorktree(thread, baseBranch) {
     (await validBranchName(repo, baseBranch)) ??
     (await currentBranch(repo)) ??
     "HEAD";
-  const short = thread.id.replace(/[^0-9a-f]/gi, "").slice(0, 8);
+  // A token per worktree, not per thread: a thread that moves back to the
+  // project and out again must not land on a path and branch it already used.
+  const token = randomBytes(4).toString("hex");
   const worktree = path.join(
     worktreesPath(),
-    `${path.basename(repo)}-${short}`,
+    `${path.basename(repo)}-${token}`,
   );
-  await addWorktree(repo, worktree, `open-swe/local-${short}`, base);
+  await addWorktree(repo, worktree, `open-swe/local-${token}`, base);
   return localThreadStore.setWorktree(thread.id, worktree);
+}
+
+/**
+ * Point a thread at another working tree. Its terminals and its Changes
+ * baseline both belong to the tree it was in, so both are re-established.
+ */
+async function moveThreadWorkspace(thread, worktreePath) {
+  if ((thread.worktreePath || null) === worktreePath) return thread;
+  await closeThreadTerminals(thread.id);
+  return recordLocalCheckpoint(
+    localThreadStore.setWorktree(thread.id, worktreePath),
+  );
 }
 
 /**
@@ -444,6 +459,41 @@ function configureDesktopIpc() {
     await discardThreadWorktree(thread);
     return true;
   });
+  /**
+   * Move a running-free thread between working trees. A branch already checked
+   * out somewhere can only be worked on there, so selecting one follows it:
+   * into that worktree, or back into the project's own checkout.
+   */
+  ipcMain.handle("desktop:set-local-workspace", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const thread = localThreadStore.get(input?.threadId);
+    if (!thread) throw new Error("Local thread not found");
+    const project = registeredProject(thread.cwd);
+    if (!project) throw new Error("Project is not registered");
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity || activity[thread.id] === "running")
+      throw new Error("Stop the local agent before changing its workspace");
+
+    const branch = await validBranchName(project, input?.branch);
+    if (branch) {
+      const ref = (await localBranches(project)).find(
+        (candidate) => candidate.name === branch,
+      );
+      if (ref?.worktreePath)
+        return moveThreadWorkspace(thread, ref.worktreePath);
+      if (ref?.current) return moveThreadWorkspace(thread, null);
+      await checkoutBranch(threadRoot(thread), branch);
+      return syncThreadBranch(thread);
+    }
+    if (input?.mode === "worktree") {
+      await closeThreadTerminals(thread.id);
+      return recordLocalCheckpoint(
+        await createThreadWorktree(thread, thread.checkpoint.branch),
+      );
+    }
+    return moveThreadWorkspace(thread, null);
+  });
+
   ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
     const thread = await diffThread(threadId);

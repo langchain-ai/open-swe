@@ -86,8 +86,8 @@ test("diffs the worktree against a session checkpoint", async (t) => {
   git(dir, ["branch", "feature"]);
   // The checked-out branch is annotated and sorts ahead of the rest.
   assert.deepEqual(await localBranches(dir), [
-    { name: "main", current: true, isDefault: false },
-    { name: "feature", current: false, isDefault: false },
+    { name: "main", current: true, isDefault: false, worktreePath: null },
+    { name: "feature", current: false, isDefault: false, worktreePath: null },
   ]);
   const ref = checkpointRef("session-id");
   await captureCheckpoint(repo, ref);
@@ -207,6 +207,13 @@ test("a thread worktree survives its directory being deleted", async (t) => {
   t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
   await addWorktree(dir, worktree, "open-swe/local-abc12345", "main");
   assert.equal(await currentBranch(worktree), "open-swe/local-abc12345");
+  // The picker moves a thread by following where a ref is checked out.
+  assert.equal(
+    (await localBranches(dir)).find(
+      (ref) => ref.name === "open-swe/local-abc12345",
+    ).worktreePath,
+    fs.realpathSync(worktree),
+  );
 
   fs.rmSync(worktree, { recursive: true, force: true });
   await restoreWorktree(dir, worktree, "open-swe/local-abc12345");
