@@ -192,12 +192,27 @@ export function AgentsHome() {
     }
   }, [])
 
-  // "Current checkout" runs where the project already is, so picking a branch
-  // there has to actually switch the project to it. A worktree only starts from
-  // the branch, and is created when the thread starts.
+  const selectedLocalRef = localProjectBranches.find(
+    (ref) => ref.name === localProjectBranch
+  )
+
+  /**
+   * A branch already checked out in a worktree can only be worked on there, so
+   * selecting it runs the thread in that worktree. Otherwise "Current checkout"
+   * has to switch the project to the branch, while a worktree only starts from
+   * it and is created when the thread starts.
+   */
   const selectLocalProjectBranch = useCallback(
     async (branch: string) => {
       setLocalError(null)
+      const ref = localProjectBranches.find(
+        (candidate) => candidate.name === branch
+      )
+      if (ref?.worktreePath) {
+        setLocalWorkspaceMode("worktree")
+        setLocalProjectBranch(branch)
+        return
+      }
       if (localWorkspaceMode === "worktree" || !localProjectPathRef.current) {
         setLocalProjectBranch(branch)
         return
@@ -214,7 +229,7 @@ export function AgentsHome() {
         )
       }
     },
-    [localWorkspaceMode]
+    [localProjectBranches, localWorkspaceMode]
   )
 
   // A base branch chosen for a worktree was never checked out, so going back to
@@ -511,6 +526,9 @@ export function AgentsHome() {
               void selectLocalProjectBranch(branch)
             }
             localWorkspaceMode={localWorkspaceMode}
+            localWorktreeLabel={
+              selectedLocalRef?.worktreePath ? "Worktree" : undefined
+            }
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}

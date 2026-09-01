@@ -242,6 +242,22 @@ async function createThreadWorktree(thread, baseBranch) {
 }
 
 /**
+ * A branch can only be checked out in one working tree, so a thread starting on
+ * one that already has a worktree runs in that worktree rather than trying to
+ * create a second checkout of it.
+ */
+async function startThreadWorktree(thread, baseBranch) {
+  const project = await repoRoot(thread.cwd);
+  const existing = project
+    ? (await localBranches(project)).find((ref) => ref.name === baseBranch)
+        ?.worktreePath
+    : null;
+  return existing
+    ? localThreadStore.setWorktree(thread.id, existing)
+    : createThreadWorktree(thread, baseBranch);
+}
+
+/**
  * Point a thread at another working tree. Its terminals and its Changes
  * baseline both belong to the tree it was in, so both are re-established.
  */
@@ -387,7 +403,7 @@ function configureDesktopIpc() {
     let thread = localThreadStore.create({ ...input, cwd });
     try {
       if (input?.workspaceMode === "worktree")
-        thread = await createThreadWorktree(thread, input?.baseBranch);
+        thread = await startThreadWorktree(thread, input?.baseBranch);
       thread = await recordLocalCheckpoint(thread);
       await backendSupervisor.createThread(thread.id);
     } catch (error) {
