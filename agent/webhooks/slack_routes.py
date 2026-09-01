@@ -357,9 +357,9 @@ async def slack_webhook(
             or previous_thread_ts != thread_ts
         ):
             return {"status": "ignored", "reason": "Updated message identity changed"}
-        if text == previous_message.get("text") and attachments == previous_message.get(
-            "attachments", []
-        ):
+        # Link unfurls arrive as edits that only add `attachments`, so comparing
+        # them starts a run for text the agent has already been given.
+        if text == previous_message.get("text"):
             return {"status": "ignored", "reason": "No user-visible message changes"}
 
     # A code channel is one session for the whole channel, so every message in it
