@@ -231,6 +231,24 @@ export function AgentsSidebar({
     addProject: addLocalProject,
     removeProject: removeLocalProject,
   } = useDesktopProjects()
+  const projectCommands = useMemo(
+    () =>
+      isDesktop
+        ? [
+            {
+              id: "add-project",
+              label: "Add project",
+              aliases: ["open folder", "add folder", "repository", "repo"],
+              group: "Workspace",
+              run: async () => {
+                await addLocalProject()
+              },
+            },
+          ]
+        : [],
+    [addLocalProject, isDesktop]
+  )
+  useRegisterAppCommands(projectCommands)
 
   const pinnedThreads = pinnedQuery.data ?? []
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
@@ -1061,8 +1079,19 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const sidebarCommands = useMemo(
-    () => [
+  const pinThread = usePinAgentThread()
+  const resolveThread = useResolveAgentThread()
+  const pinnedThreads = useSidebarPinnedThreads({
+    enabled: Boolean(activeThreadId),
+  })
+  const activeThread = useSidebarActiveThread({
+    activeThreadId,
+    loadedThreads: [],
+    includeResolved: true,
+    enabled: Boolean(activeThreadId),
+  })
+  const sidebarCommands = useMemo(() => {
+    const commands = [
       {
         id: "toggle-sidebar",
         label: "Toggle sidebar",
@@ -1073,9 +1102,61 @@ export function AgentsShell({
         desktopId: "toggle-sidebar" as const,
         desktopShortcuts: ["mod+b"],
       },
-    ],
-    [layout.toggle]
-  )
+    ]
+    if (!activeThread) return commands
+    const reference =
+      activeThread.pullRequests?.at(-1)?.url ??
+      activeThread.pr?.url ??
+      activeThread.id
+    return [
+      ...commands,
+      {
+        id: "copy-thread-reference",
+        label:
+          reference === activeThread.id ? "Copy thread ID" : "Copy PR link",
+        aliases: ["copy reference", "pull request", "pr link"],
+        shortcuts: ["mod+shift+c"],
+        group: "Thread",
+        run: () => navigator.clipboard.writeText(reference),
+      },
+      {
+        id: "pin-thread",
+        label: pinnedThreads.data?.some(
+          (thread) => thread.id === activeThread.id
+        )
+          ? "Unpin thread"
+          : "Pin thread",
+        aliases: ["pin thread", "unpin thread"],
+        shortcuts: ["mod+shift+p"],
+        group: "Thread",
+        run: () =>
+          pinThread.mutate({
+            threadId: activeThread.id,
+            pinned: !pinnedThreads.data?.some(
+              (thread) => thread.id === activeThread.id
+            ),
+          }),
+      },
+      {
+        id: "archive-thread",
+        label: activeThread.resolved ? "Unarchive thread" : "Archive thread",
+        aliases: ["resolve thread", "settle thread", "restore thread"],
+        shortcuts: ["mod+shift+s"],
+        group: "Thread",
+        run: () =>
+          resolveThread.mutate({
+            threadId: activeThread.id,
+            resolved: !activeThread.resolved,
+          }),
+      },
+    ]
+  }, [
+    activeThread,
+    layout.toggle,
+    pinThread,
+    pinnedThreads.data,
+    resolveThread,
+  ])
   useRegisterAppCommands(sidebarCommands)
 
   return (

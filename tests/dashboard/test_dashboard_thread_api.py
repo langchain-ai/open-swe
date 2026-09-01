@@ -1727,6 +1727,9 @@ def test_summary_matches_filters() -> None:
         "source": "github",
         "status": "finished",
         "title": "Fix the flaky test",
+        "repoFullName": "langchain-ai/open-swe",
+        "branch": "open-swe/fix-flake",
+        "pr": {"number": 123, "url": "https://github.com/langchain-ai/open-swe/pull/123"},
     }
 
     assert thread_api._summary_matches_filters(
@@ -1741,10 +1744,27 @@ def test_summary_matches_filters() -> None:
     assert not thread_api._summary_matches_filters(
         summary, resolved=None, viewed=None, source=None, status=None, query="missing"
     )
+    assert thread_api._summary_matches_filters(
+        summary, resolved=None, viewed=None, source=None, status=None, query="pull/123"
+    )
 
 
 def test_metadata_matches_filters() -> None:
-    metadata = {"source": "dashboard", "title": "Fix login bug", "resolved": True}
+    metadata = {
+        "source": "dashboard",
+        "title": "Fix login bug",
+        "resolved": True,
+        "repo_owner": "langchain-ai",
+        "repo_name": "open-swe",
+        "branch_name": "open-swe/fix-login",
+        "pull_requests": [
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "number": 123,
+                "url": "https://github.com/langchain-ai/open-swe/pull/123",
+            }
+        ],
+    }
     automation = {
         "source": "schedule",
         "schedule_id": "schedule-1",
@@ -1761,6 +1781,10 @@ def test_metadata_matches_filters() -> None:
     assert not thread_api._metadata_matches_filters(
         metadata, resolved=None, source="github", query=None
     )
+    for query in ("langchain-ai/open-swe", "fix-login", "pull/123"):
+        assert thread_api._metadata_matches_filters(
+            metadata, resolved=None, source=None, query=query
+        )
     assert thread_api._metadata_matches_filters(
         metadata, resolved=None, source=None, query=None, scope="interactive"
     )
