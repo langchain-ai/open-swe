@@ -48,6 +48,7 @@ const project: DesktopProject = {
   cwd: "/Users/example/open-swe",
   name: "open-swe",
   addedAt: 1,
+  scopeId: "project-open-swe",
 }
 
 describe("sidebar thread adapters", () => {
@@ -111,7 +112,12 @@ describe("sidebar thread adapters", () => {
     // The label is ambiguous, so a local "api" must not be folded into either.
     const local = localSidebarThread(
       localThread({ cwd: "/Users/example/api" }),
-      { cwd: "/Users/example/api", name: "api", addedAt: 1 },
+      {
+        cwd: "/Users/example/api",
+        name: "api",
+        addedAt: 1,
+        scopeId: "project-api",
+      },
       undefined
     )
     const aliases = cloudProjectKeysByLabel([acme, other])

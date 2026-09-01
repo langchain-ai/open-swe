@@ -22,6 +22,16 @@ export const localThreadKeys = {
   ready: (threadId: string) => ["local-thread-ready", threadId] as const,
   diff: (threadId: string) => ["local-thread-diff", threadId] as const,
   prDiff: (threadId: string) => ["local-thread-pr-diff", threadId] as const,
+  projectDiff: (cwd: string) => ["local-project-diff", cwd] as const,
+}
+
+/** Worktree changes for a project, for screens without a thread yet. */
+export function useProjectDiff(cwd: string, enabled: boolean) {
+  return useQuery({
+    queryKey: localThreadKeys.projectDiff(cwd),
+    queryFn: () => window.openSweDesktop?.getProjectDiff(cwd) ?? NO_DIFF,
+    enabled: enabled && Boolean(cwd),
+  })
 }
 
 export async function ensureDesktopModelCredential(

@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -112,8 +113,25 @@ function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
 }
 
+/**
+ * Terminal identity for a project itself, so the new-thread screen can open
+ * terminals before a thread exists. Short and stable, unlike the cwd.
+ */
+function projectScopeId(cwd) {
+  return `project-${createHash("sha256").update(cwd).digest("hex").slice(0, 16)}`;
+}
+
+function withScopeId(project) {
+  return { ...project, scopeId: projectScopeId(project.cwd) };
+}
+
 function listProjects() {
-  return readProjects(projectsPath());
+  return readProjects(projectsPath()).map(withScopeId);
+}
+
+function projectScopeSession(scopeId) {
+  const project = listProjects().find((item) => item.scopeId === scopeId);
+  return project ? { id: scopeId, cwd: project.cwd } : null;
 }
 
 function sendProjectsChanged() {
@@ -238,7 +256,7 @@ function configureDesktopIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
     sendProjectsChanged();
-    return project;
+    return withScopeId(project);
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {
@@ -404,6 +422,23 @@ function configureDesktopIpc() {
           undefined,
           thread.checkpoint.branch,
         ),
+      ]);
+      return { ...diff, repository };
+    } catch {
+      return { status: "error", files: [], truncated: false };
+    }
+  });
+  /** Worktree changes for a project, for screens with no thread yet. */
+  ipcMain.handle("desktop:get-project-diff", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    const repo = project ? await repoRoot(project) : null;
+    if (!repo) return { status: "missing", files: [], truncated: false };
+    try {
+      const branch = await currentBranch(repo);
+      const [diff, repository] = await Promise.all([
+        readDiff(repo, "HEAD"),
+        repositoryMetadata(repo, undefined, branch),
       ]);
       return { ...diff, repository };
     } catch {
@@ -1057,7 +1092,8 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
-      getLocalThread: (id) => localThreadStore.get(id),
+      getLocalThread: (id) =>
+        localThreadStore.get(id) ?? projectScopeSession(id),
       userDataPath: app.getPath("userData"),
     });
 

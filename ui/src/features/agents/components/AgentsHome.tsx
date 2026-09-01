@@ -15,6 +15,7 @@ import { AgentComposerDock } from "@/features/agents/components/composer/AgentCo
 import { LocalProjectSelector } from "@/features/agents/components/composer/RunTargetSelector"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { LocalProjectRightPanel } from "@/features/agents/components/LocalProjectRightPanel"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
@@ -355,6 +356,15 @@ export function AgentsHome() {
       .catch(handleCloudSubmitError)
   }
 
+  const handlePanelCollapsedChange = (next: boolean) => {
+    setPanelCollapsed(next)
+    writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
+  }
+
+  const localProject =
+    runTarget === "local"
+      ? localProjects.find((project) => project.cwd === localProjectPath)
+      : undefined
   const hasProjects =
     runTarget === "local"
       ? localProjects.length > 0
@@ -499,20 +509,26 @@ export function AgentsHome() {
           />
         </AgentComposerDock>
       </div>
-      <AgentRightPanel
-        threadRef={NEW_AGENT_PANEL_REF}
-        terminals={newAgentTerminals}
-        terminalTarget={{ kind: "cloud", threadId: NEW_AGENT_PANEL_ID }}
-        cwd=""
-        terminalAvailable={false}
-        diffAvailable={false}
-        collapsed={panelCollapsed}
-        onCollapsedChange={(next) => {
-          setPanelCollapsed(next)
-          writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
-        }}
-        renderDiff={() => null}
-      />
+      {localProject ? (
+        <LocalProjectRightPanel
+          scopeId={localProject.scopeId}
+          cwd={localProject.cwd}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      ) : (
+        <AgentRightPanel
+          threadRef={NEW_AGENT_PANEL_REF}
+          terminals={newAgentTerminals}
+          terminalTarget={{ kind: "cloud", threadId: NEW_AGENT_PANEL_ID }}
+          cwd=""
+          terminalAvailable={false}
+          diffAvailable={false}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+          renderDiff={() => null}
+        />
+      )}
     </>
   )
 }
