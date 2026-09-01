@@ -374,12 +374,23 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
 
 
 def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
-    if metadata.get("repo_private") is not True:
-        return None
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None:
         return None
     return slack_thread.permalink.strip() or None
+
+
+def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    team_id = SLACK_TEAM_ID.strip()
+    if (
+        slack_thread is None
+        or not team_id
+        or not slack_thread.channel_id
+        or not slack_thread.thread_ts
+    ):
+        return None
+    return f"slack://channel?{urlencode({'team': team_id, 'id': slack_thread.channel_id, 'message': slack_thread.thread_ts})}"
 
 
 def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
@@ -554,6 +565,7 @@ async def _thread_summary(
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
         "sourceUrl": _thread_source_url(metadata),
+        "sourceAppUrl": _thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
     }

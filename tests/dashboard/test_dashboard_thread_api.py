@@ -471,32 +471,52 @@ async def test_terminal_sandbox_requires_existing_sandbox(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
-async def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:
+async def test_thread_summary_includes_slack_source_urls_for_private_repo(monkeypatch) -> None:
+    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T workspace")
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
                 "repo_private": True,
-                "source_context": {"slack_thread": {"permalink": "https://slack.example/thread"}},
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "C channel",
+                        "thread_ts": "123.456",
+                        "permalink": "https://slack.example/thread",
+                    }
+                },
             }
         )
     )
 
     assert summary["sourceUrl"] == "https://slack.example/thread"
+    assert summary["sourceAppUrl"] == (
+        "slack://channel?team=T+workspace&id=C+channel&message=123.456"
+    )
 
 
-async def test_thread_summary_omits_slack_source_url_for_public_repo() -> None:
+async def test_thread_summary_includes_slack_source_urls_for_public_repo(monkeypatch) -> None:
+    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T-workspace")
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
                 "repo_private": False,
-                "source_context": {"slack_thread": {"permalink": "https://slack.example/thread"}},
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "C-channel",
+                        "thread_ts": "123.456",
+                        "permalink": "https://slack.example/thread",
+                    }
+                },
             }
         )
     )
 
-    assert summary["sourceUrl"] is None
+    assert summary["sourceUrl"] == "https://slack.example/thread"
+    assert summary["sourceAppUrl"] == (
+        "slack://channel?team=T-workspace&id=C-channel&message=123.456"
+    )
 
 
 async def test_thread_summary_includes_code_channel_url(monkeypatch) -> None:
