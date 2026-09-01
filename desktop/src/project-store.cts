@@ -20,7 +20,13 @@ function readProjects(filePath) {
       ) {
         continue;
       }
-      const cwd = path.normalize(item.cwd);
+      let cwd;
+      try {
+        cwd = fs.realpathSync(item.cwd);
+        if (!fs.statSync(cwd).isDirectory()) continue;
+      } catch {
+        continue;
+      }
       projects.set(cwd, {
         cwd,
         name:

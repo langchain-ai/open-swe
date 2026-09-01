@@ -14,7 +14,7 @@ describe("app commands", () => {
   it("uses Linear-style C for new threads on web and desktop", () => {
     const newThread = createNewThreadCommand(vi.fn())
 
-    expect(newThread.shortcuts).toEqual(["c"])
+    expect(newThread.shortcuts).toEqual(["c", "mod+n", "mod+shift+o"])
     expect(newThread.desktopShortcuts).toBeUndefined()
     expect(newThread.desktopId).toBe("new-thread")
   })

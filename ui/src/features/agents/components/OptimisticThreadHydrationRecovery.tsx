@@ -1,5 +1,7 @@
 import { useEffect } from "react"
-import { STREAM_CONTROLLER, useStreamContext } from "@langchain/react"
+import { STREAM_CONTROLLER } from "@langchain/react"
+
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 const RETRY_DELAYS_MS = [250, 1_000, 2_500]
 
@@ -10,7 +12,7 @@ export function OptimisticThreadHydrationRecovery({
   threadId: string
   enabled: boolean
 }) {
-  const stream = useStreamContext()
+  const stream = useAgentThreadRuntime()
   const controller = stream[STREAM_CONTROLLER]
 
   useEffect(() => {
