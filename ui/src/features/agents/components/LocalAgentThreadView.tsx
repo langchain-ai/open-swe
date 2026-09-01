@@ -7,7 +7,11 @@ import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type {
+  ImageChunk,
+  Message,
+  QueuedThreadMessage,
+} from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -42,20 +46,27 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
 import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
-function promptContent(text: string, images: Array<ImageChunk>) {
-  const trimmed = text.trim()
-  const imageBlocks = images.map((image) => ({
+function imageBlocks(images: Array<ImageChunk>) {
+  return images.map((image) => ({
     type: "image",
     base64: image.base64,
     mime_type: image.mimeType,
     ...(image.fileName ? { file_name: image.fileName } : {}),
   }))
-  return [...imageBlocks, ...(trimmed ? [{ type: "text", text: trimmed }] : [])]
+}
+
+function promptContent(text: string, images: Array<ImageChunk>) {
+  const trimmed = text.trim()
+  return [
+    ...imageBlocks(images),
+    ...(trimmed ? [{ type: "text", text: trimmed }] : []),
+  ]
 }
 
 function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
@@ -76,6 +87,7 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
+  const login = session.data?.login
   const stream = useAgentThreadRuntime()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
@@ -109,6 +121,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const initialPromptRef = useRef<string | null>(null)
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [queuedState, setQueuedState] = useState<{
+    sessionId: string
+    items: Array<QueuedThreadMessage>
+  }>({ sessionId, items: [] })
+  const queued = queuedState.sessionId === sessionId ? queuedState.items : []
   const isMobile = useIsMobile()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
@@ -280,6 +297,46 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [activeSelection, rememberSelection, stream, thread]
   )
 
+  // Mid-run follow-ups go to the thread's store queue, which
+  // `check_message_queue_before_model` drains into the running agent, rather
+  // than starting a second run on a busy thread.
+  const enqueue = useCallback(
+    async (prompt: string, images: Array<ImageChunk>) => {
+      const text = prompt.trim()
+      const namespace = ["queue", sessionId]
+      const key = "pending_messages"
+      const existing = await stream.client.store.getItem(namespace, key)
+      const pending = existing?.value?.messages
+      await stream.client.store.putItem(namespace, key, {
+        messages: [
+          ...(Array.isArray(pending) ? pending : []),
+          {
+            content: {
+              text,
+              images: imageBlocks(images),
+              ...(login && {
+                sender: {
+                  id: `github:${login}`,
+                  platform: "github",
+                  github_login: login,
+                },
+              }),
+            },
+          },
+        ],
+      })
+      const createdAt = Date.now()
+      setQueuedState((current) => ({
+        sessionId,
+        items: [
+          ...(current.sessionId === sessionId ? current.items : []),
+          { id: `queued-${createdAt}`, content: text, images, createdAt },
+        ],
+      }))
+    },
+    [login, sessionId, stream.client]
+  )
+
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
       return
@@ -363,6 +420,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             isThinking={isRunning}
             messages={messages}
             onOpenFile={handleOpenFile}
+            queuedMessages={
+              isRunning ? visibleQueuedMessages(queued, messages) : []
+            }
             streamIsLoading={stream.isLoading}
           />
           <AgentComposerDock>
@@ -409,12 +469,18 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               onSubmit={async (prompt, images) => {
                 const terminalContext = terminalContexts.join("\n\n")
                 setTerminalContexts([])
-                await submit(
-                  terminalContext
-                    ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
-                    : prompt,
-                  images
-                )
+                const text = terminalContext
+                  ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
+                  : prompt
+                if (!isRunning) {
+                  await submit(text, images)
+                  return
+                }
+                try {
+                  await enqueue(text, images)
+                } catch (cause) {
+                  setError(errorMessage(cause))
+                }
               }}
               placeholder="Add a follow up"
               skills={skills.data}
