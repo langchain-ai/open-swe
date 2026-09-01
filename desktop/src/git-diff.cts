@@ -44,10 +44,32 @@ function git(
   });
 }
 
+/** The branch `origin/HEAD` points at, which is the repository's default. */
+async function defaultBranch(cwd) {
+  try {
+    return (
+      text(
+        await git(
+          cwd,
+          ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+          null,
+          5_000,
+        ),
+      ).replace(/^origin\//, "") || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Local branches, most recently committed first, with the two the picker
+ * annotates pulled to the front so they survive the list's scroll area.
+ */
 async function localBranches(cwd) {
   try {
-    const output = text(
-      await git(
+    const [output, current, fallback] = await Promise.all([
+      git(
         cwd,
         [
           "for-each-ref",
@@ -57,12 +79,34 @@ async function localBranches(cwd) {
         ],
         null,
         5_000,
-      ),
-    );
-    return output ? output.split("\n") : [];
+      ).then(text),
+      currentBranch(cwd),
+      defaultBranch(cwd),
+    ]);
+    const refs = (output ? output.split("\n") : []).map((name) => ({
+      name,
+      current: name === current,
+      isDefault: name === fallback,
+    }));
+    const rank = (ref) => (ref.current ? 0 : ref.isDefault ? 1 : 2);
+    return refs.sort((left, right) => rank(left) - rank(right));
   } catch {
     return [];
   }
+}
+
+async function checkoutBranch(cwd, branch, create = false) {
+  if (typeof branch !== "string" || !branch.trim())
+    throw new Error("Branch name is required");
+  const name = branch.trim();
+  await git(cwd, ["check-ref-format", "--branch", name], null, 5_000);
+  await git(
+    cwd,
+    create ? ["switch", "-c", name] : ["switch", name],
+    null,
+    30_000,
+  );
+  return name;
 }
 
 /** Check out `baseRef` into its own worktree on a new branch. */
@@ -540,8 +584,10 @@ module.exports = {
   addWorktree,
   captureCheckpoint,
   readBranchDiff,
+  checkoutBranch,
   checkpointRef,
   currentBranch,
+  defaultBranch,
   localBranches,
   deleteRefs,
   parsePullRequest,

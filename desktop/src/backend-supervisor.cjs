@@ -196,6 +196,8 @@ class BackendSupervisor {
     this.port = await this.reservePort(HOST);
     this.token = randomBytes(32).toString("base64url");
     const target = localBackendTarget({ ...this.options, port: this.port });
+    if (!this.options.projectsFile)
+      throw new Error("Local project allowlist is not configured");
     if (!this.options.worktreesDir)
       throw new Error("Local worktree directory is not configured");
     fs.mkdirSync(this.options.worktreesDir, { recursive: true });
@@ -212,6 +214,7 @@ class BackendSupervisor {
         ...this.gatewayEnvironment(),
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
+        OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
         OPEN_SWE_LOCAL_WORKTREES_DIR: this.options.worktreesDir,
         ...(this.options.stateDir
           ? {

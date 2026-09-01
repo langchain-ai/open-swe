@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranches: (cwd) =>
     ipcRenderer.invoke("desktop:project-branches", cwd),
+  checkoutProjectBranch: (input) =>
+    ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),

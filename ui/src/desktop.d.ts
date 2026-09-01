@@ -29,6 +29,14 @@ export interface DesktopLocalThreadSummary {
   pending?: DesktopLocalPromptInput | null
 }
 
+export type DesktopWorkspaceMode = "local" | "worktree"
+
+export interface DesktopProjectRef {
+  name: string
+  current: boolean
+  isDefault: boolean
+}
+
 export type DesktopLocalActivity = Record<string, "running" | "error">
 
 export interface DesktopLocalDiff {
@@ -143,8 +151,12 @@ declare global {
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
         current: string | null
-        branches: Array<string>
+        branches: Array<DesktopProjectRef>
       }>
+      checkoutProjectBranch: (input: {
+        cwd: string
+        branch: string
+      }) => Promise<string>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       onProjectsChanged: (
@@ -164,6 +176,7 @@ declare global {
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string
+          workspaceMode?: DesktopWorkspaceMode
           baseBranch?: string | null
           modelId?: string
           effort?: string

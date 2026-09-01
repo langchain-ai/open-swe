@@ -19,6 +19,7 @@ const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   addWorktree,
   captureCheckpoint,
+  checkoutBranch,
   checkpointRef,
   currentBranch,
   localBranches,
@@ -150,14 +151,21 @@ function registeredProject(cwd) {
   }
 }
 
+/** Where a thread's agent actually works: its own worktree, or the project. */
+function threadRoot(thread) {
+  const project = thread ? registeredProject(thread.cwd) : null;
+  if (!project) return null;
+  return thread.worktreePath || project;
+}
+
 function resolveLocalProjectPath(localSessionId, value) {
   const localSession = localThreadStore.get(localSessionId);
   if (!localSession || typeof value !== "string" || value.length === 0)
     return null;
   try {
-    if (!localSession.worktreePath || !registeredProject(localSession.cwd))
-      return null;
-    const projectRoot = fs.realpathSync(localSession.worktreePath);
+    const root = threadRoot(localSession);
+    if (!root) return null;
+    const projectRoot = fs.realpathSync(root);
     const windowsAbsolute = path.win32.isAbsolute(value);
     if (windowsAbsolute && process.platform !== "win32") return null;
     const candidate = fs.realpathSync(
@@ -174,7 +182,7 @@ function resolveLocalProjectPath(localSessionId, value) {
 }
 
 async function recordLocalCheckpoint(thread) {
-  const repo = await repoRoot(thread.worktreePath);
+  const repo = await repoRoot(thread.worktreePath || thread.cwd);
   if (!repo) return thread;
   const ref = checkpointRef(thread.id);
   await captureCheckpoint(repo, ref);
@@ -195,15 +203,24 @@ async function syncThreadBranch(thread) {
   );
 }
 
+/**
+ * A worktree thread owns its checkout outright. A thread running in the
+ * project's own checkout shares it with every other session, so the branch that
+ * happens to be checked out is only this thread's while this thread is running.
+ */
 async function diffThread(threadId) {
   const thread = localThreadStore.get(threadId);
-  return thread ? syncThreadBranch(thread) : thread;
+  if (!thread) return thread;
+  if (thread.worktreePath) return syncThreadBranch(thread);
+  const activity = await backendSupervisor.threadActivity();
+  return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
 }
 
 /**
  * Give a thread its own checkout of the project, so agents never contend for
  * one working tree. `baseBranch` is only a starting point: the agent owns the
- * worktree's branch from there on.
+ * worktree's branch from there on, starting by renaming it away from the
+ * temporary name once it understands the request.
  */
 async function createThreadWorktree(thread, baseBranch) {
   const repo = await repoRoot(thread.cwd);
@@ -212,7 +229,7 @@ async function createThreadWorktree(thread, baseBranch) {
     (await validBranchName(repo, baseBranch)) ??
     (await currentBranch(repo)) ??
     "HEAD";
-  const short = thread.id.slice(0, 8);
+  const short = thread.id.replace(/[^0-9a-f]/gi, "").slice(0, 8);
   const worktree = path.join(
     worktreesPath(),
     `${path.basename(repo)}-${short}`,
@@ -255,6 +272,16 @@ function configureDesktopIpc() {
       localBranches(project),
     ]);
     return { current, branches };
+  });
+
+  ipcMain.handle("desktop:checkout-project-branch", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const project =
+      input && typeof input.cwd === "string"
+        ? registeredProject(input.cwd)
+        : null;
+    if (!project) throw new Error("Project is not registered");
+    return checkoutBranch(project, input.branch);
   });
 
   ipcMain.handle("desktop:add-project", async (event) => {
@@ -344,7 +371,8 @@ function configureDesktopIpc() {
     await backendSupervisor.start();
     let thread = localThreadStore.create({ ...input, cwd });
     try {
-      thread = await createThreadWorktree(thread, input?.baseBranch);
+      if (input?.workspaceMode === "worktree")
+        thread = await createThreadWorktree(thread, input?.baseBranch);
       thread = await recordLocalCheckpoint(thread);
       await backendSupervisor.createThread(thread.id);
     } catch (error) {
@@ -1063,6 +1091,7 @@ if (!hasSingleInstanceLock) {
       repoRoot: path.resolve(__dirname, "../.."),
       resourcesPath: process.resourcesPath,
       stateDir: path.join(app.getPath("userData"), "local-backend"),
+      projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
       providerEnv: () => openAiOAuth?.backendEnv() || {},
       openAiOAuthAvailable: () =>
@@ -1078,7 +1107,7 @@ if (!hasSingleInstanceLock) {
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
-      getLocalThread: (id) => localThreadStore.get(id),
+      getSessionRoot: (id) => threadRoot(localThreadStore.get(id)),
       userDataPath: app.getPath("userData"),
     });
 

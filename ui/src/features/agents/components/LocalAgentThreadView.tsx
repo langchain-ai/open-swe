@@ -124,7 +124,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const terminals = useTerminalGroups(
     { kind: "local", sessionId },
-    thread?.worktreePath ?? ""
+    thread?.worktreePath ?? thread?.cwd ?? ""
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
@@ -262,7 +262,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             config: {
               configurable: {
                 source: "desktop",
-                local_project_path: thread.worktreePath,
+                local_project_path: thread.worktreePath ?? thread.cwd,
                 ...(activeSelection && {
                   agent_model_id: activeSelection.modelId,
                   agent_effort: activeSelection.effort,
@@ -426,7 +426,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         threadRef={threadRef}
         terminals={terminals}
         terminalTarget={{ kind: "local", sessionId: thread.id }}
-        cwd={thread.worktreePath ?? ""}
+        cwd={thread.worktreePath ?? thread.cwd}
         terminalAvailable
         diffAvailable
         collapsed={panelCollapsed}

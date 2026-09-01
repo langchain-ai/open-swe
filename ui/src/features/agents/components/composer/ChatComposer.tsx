@@ -22,6 +22,7 @@ import { EnvironmentSelector } from "./EnvironmentSelector"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
+  LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
 import {
@@ -37,7 +38,11 @@ import type {
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
-import type { DesktopProject } from "@/desktop"
+import type {
+  DesktopProject,
+  DesktopProjectRef,
+  DesktopWorkspaceMode,
+} from "@/desktop"
 import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -109,7 +114,9 @@ export interface ChatComposerProps {
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
   selectedLocalProjectBranch?: string | null
-  localProjectBranches?: Array<string>
+  localProjectBranches?: Array<DesktopProjectRef>
+  localWorkspaceMode?: DesktopWorkspaceMode
+  onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
@@ -232,6 +239,8 @@ export const ChatComposer = memo(function ChatComposer({
   selectedLocalProjectPath = null,
   selectedLocalProjectBranch = null,
   localProjectBranches = [],
+  localWorkspaceMode = "local",
+  onLocalWorkspaceModeChange,
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
@@ -700,6 +709,12 @@ export const ChatComposer = memo(function ChatComposer({
                 side="top"
               />
             )}
+          {runTarget === "local" && onLocalWorkspaceModeChange && (
+            <LocalWorkspaceSelector
+              onChange={onLocalWorkspaceModeChange}
+              value={localWorkspaceMode}
+            />
+          )}
           {runTarget && onRunTargetChange && (
             <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
           )}
@@ -714,7 +729,7 @@ export const ChatComposer = memo(function ChatComposer({
             onRefreshLocalProjectBranch &&
             onSelectLocalProjectBranch && (
               <LocalBranchSelector
-                branches={localProjectBranches}
+                refs={localProjectBranches}
                 disabled={!selectedLocalProjectPath}
                 onRefresh={onRefreshLocalProjectBranch}
                 onSelectBranch={onSelectLocalProjectBranch}

@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -42,14 +43,30 @@ def test_desktop_backend_allows_a_thread_worktree_without_provider_secrets(
     assert backend.read(str(marker)).file_data == {"content": "marker", "encoding": "utf-8"}
 
 
-def test_desktop_backend_rejects_a_path_outside_the_worktrees_directory(
+def test_desktop_backend_allows_an_allowlisted_project_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
+    allowlist = tmp_path / "projects.json"
+    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
     monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
 
-    with pytest.raises(ValueError, match="not an agent worktree"):
+    assert resolve_desktop_project({"local_project_path": str(project)}) == str(project)
+
+
+def test_desktop_backend_rejects_an_unregistered_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    allowlist = tmp_path / "projects.json"
+    allowlist.write_text(json.dumps([]))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
+
+    with pytest.raises(ValueError, match="not an allowed project directory"):
         resolve_desktop_project({"local_project_path": str(project)})
 
 

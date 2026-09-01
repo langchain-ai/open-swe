@@ -84,7 +84,11 @@ test("diffs the worktree against a session checkpoint", async (t) => {
   const repo = await repoRoot(dir);
   assert.equal(await currentBranch(dir), "main");
   git(dir, ["branch", "feature"]);
-  assert.deepEqual(await localBranches(dir), ["feature", "main"]);
+  // The checked-out branch is annotated and sorts ahead of the rest.
+  assert.deepEqual(await localBranches(dir), [
+    { name: "main", current: true, isDefault: false },
+    { name: "feature", current: false, isDefault: false },
+  ]);
   const ref = checkpointRef("session-id");
   await captureCheckpoint(repo, ref);
 
