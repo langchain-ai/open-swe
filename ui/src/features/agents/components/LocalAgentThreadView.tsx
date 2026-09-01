@@ -61,6 +61,28 @@ function imageBlocks(images: Array<ImageChunk>) {
   }))
 }
 
+const QUEUE_KEY = "pending_messages"
+
+type QueuedPayload = {
+  text?: string
+  images?: Array<{ base64?: string; mime_type?: string; file_name?: string }>
+}
+
+function payloadImages(payload: QueuedPayload): Array<ImageChunk> {
+  return (payload.images ?? []).flatMap((block) =>
+    block.base64 && block.mime_type
+      ? [
+          {
+            kind: "image" as const,
+            base64: block.base64,
+            mimeType: block.mime_type,
+            ...(block.file_name ? { fileName: block.file_name } : {}),
+          },
+        ]
+      : []
+  )
+}
+
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
   return [
@@ -126,6 +148,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     items: Array<QueuedThreadMessage>
   }>({ sessionId, items: [] })
   const queued = queuedState.sessionId === sessionId ? queuedState.items : []
+  const queueNamespace = useMemo(() => ["queue", sessionId], [sessionId])
+  const stoppedRef = useRef(false)
+  const handoffRef = useRef(false)
   const isMobile = useIsMobile()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
@@ -259,6 +284,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     ) => {
       if (!thread) return false
       setError(null)
+      stoppedRef.current = false
       const credentialError = await ensureDesktopModelCredential(
         activeSelection?.modelId
       )
@@ -303,11 +329,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const enqueue = useCallback(
     async (prompt: string, images: Array<ImageChunk>) => {
       const text = prompt.trim()
-      const namespace = ["queue", sessionId]
-      const key = "pending_messages"
-      const existing = await stream.client.store.getItem(namespace, key)
+      const existing = await stream.client.store.getItem(
+        queueNamespace,
+        QUEUE_KEY
+      )
       const pending = existing?.value?.messages
-      await stream.client.store.putItem(namespace, key, {
+      await stream.client.store.putItem(queueNamespace, QUEUE_KEY, {
         messages: [
           ...(Array.isArray(pending) ? pending : []),
           {
@@ -334,8 +361,42 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         ],
       }))
     },
-    [login, sessionId, stream.client]
+    [login, queueNamespace, sessionId, stream.client]
   )
+
+  // A live run does not guarantee another queue check: a follow-up written
+  // after its last model call is never read. Once the run ends, take back
+  // whatever the agent left behind and send it as a fresh run — unless the
+  // user stopped the run, in which case the pending work is discarded.
+  const flushUndrainedQueue = useCallback(async () => {
+    const item = await stream.client.store.getItem(queueNamespace, QUEUE_KEY)
+    if (!item) return
+    await stream.client.store.deleteItem(queueNamespace, QUEUE_KEY)
+    const pending = item.value?.messages
+    if (stoppedRef.current || !Array.isArray(pending)) return
+    const payloads = pending.map(
+      (entry) =>
+        ((entry as { content?: QueuedPayload }).content ?? {}) as QueuedPayload
+    )
+    const text = payloads
+      .map((payload) => payload.text?.trim())
+      .filter(Boolean)
+      .join("\n\n")
+    const images = payloads.flatMap(payloadImages)
+    if (text || images.length > 0) await submit(text, images)
+  }, [queueNamespace, stream.client, submit])
+
+  useEffect(() => {
+    if (isRunning || queued.length === 0 || handoffRef.current) return
+    handoffRef.current = true
+    // oxlint-disable-next-line react/set-state-in-effect
+    setQueuedState({ sessionId, items: [] })
+    void flushUndrainedQueue()
+      .catch((cause) => setError(errorMessage(cause)))
+      .finally(() => {
+        handoffRef.current = false
+      })
+  }, [flushUndrainedQueue, isRunning, queued.length, sessionId])
 
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
@@ -461,6 +522,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               onSelectionChange={setSelection}
               onStop={async () => {
                 try {
+                  stoppedRef.current = true
                   await stream.stop()
                 } catch (cause) {
                   setError(errorMessage(cause))
