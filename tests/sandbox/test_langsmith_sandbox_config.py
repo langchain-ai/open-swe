@@ -52,7 +52,7 @@ def test_nothing_deletes_sandboxes() -> None:
     offenders = [
         f"{path.relative_to(agent_root)}:{lineno}"
         for path in agent_root.rglob("*.py")
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1)
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
         if "delete_sandbox" in line
     ]
     assert offenders == []

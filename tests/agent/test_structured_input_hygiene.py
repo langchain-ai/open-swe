@@ -34,7 +34,7 @@ def test_no_module_hand_rolls_a_user_message() -> None:
         relative = path.relative_to(AGENT_ROOT).as_posix()
         if relative in _SERIALIZER_MODULES:
             continue
-        lines = _role_user_literals(ast.parse(path.read_text()))
+        lines = _role_user_literals(ast.parse(path.read_text(encoding="utf-8")))
         if lines:
             offenders[relative] = lines
     assert not offenders, (

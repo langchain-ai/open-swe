@@ -73,7 +73,7 @@ def test_background_command_active_limit() -> None:
         for task_id in task_ids:
             task_dir = Path(TASK_ROOT, task_id)
             task_dir.mkdir(parents=True)
-            task_dir.joinpath("state.json").write_text('{"status": "running"}')
+            task_dir.joinpath("state.json").write_text('{"status": "running"}', encoding="utf-8")
         result = subprocess.run(
             ["/bin/sh", "-c", _launch_command(f"test-{uuid.uuid4().hex}", "true", 10)],
             capture_output=True,

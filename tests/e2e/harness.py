@@ -617,12 +617,12 @@ async def slack_state(channel: str = "") -> JSONResponse:
 # --- mock UIs --------------------------------------------------------------
 @app.get("/mock/slack", response_class=HTMLResponse)
 async def mock_slack_page() -> str:
-    return (STATIC_DIR / "slack.html").read_text()
+    return (STATIC_DIR / "slack.html").read_text(encoding="utf-8")
 
 
 @app.get("/mock/github", response_class=HTMLResponse)
 async def mock_github_page() -> str:
-    return (STATIC_DIR / "github.html").read_text()
+    return (STATIC_DIR / "github.html").read_text(encoding="utf-8")
 
 
 def _pr_html_url(pr: dict[str, Any]) -> str:

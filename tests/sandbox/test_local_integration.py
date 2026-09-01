@@ -41,10 +41,13 @@ def test_create_local_sandbox_scopes_global_git_config(monkeypatch, tmp_path):
     root = tmp_path / "work"
     monkeypatch.setenv("LOCAL_SANDBOX_ROOT_DIR", str(root))
     monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    # Path.home() reads USERPROFILE on Windows and HOME elsewhere; set both so
+    # the test never falls through to the developer's real ~/.gitconfig.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     host_config = tmp_path / "home" / ".gitconfig"
     host_config.parent.mkdir()
-    host_config.write_text("[user]\n\tname = Dev\n")
+    host_config.write_text("[user]\n\tname = Dev\n", encoding="utf-8")
     monkeypatch.setattr(local_mod, "LocalShellBackend", _StubLocalShellBackend)
 
     backend = local_mod.create_local_sandbox()
@@ -52,8 +55,8 @@ def test_create_local_sandbox_scopes_global_git_config(monkeypatch, tmp_path):
     scoped = root / local_mod.SANDBOX_GITCONFIG
     stub = cast(_StubLocalShellBackend, backend)
     assert stub.env["GIT_CONFIG_GLOBAL"] == str(scoped)
-    assert str(host_config) in scoped.read_text()
-    assert host_config.read_text() == "[user]\n\tname = Dev\n"
+    assert str(host_config) in scoped.read_text(encoding="utf-8")
+    assert host_config.read_text(encoding="utf-8") == "[user]\n\tname = Dev\n"
 
 
 def test_create_local_sandbox_keeps_explicit_global_git_config(monkeypatch, tmp_path):
