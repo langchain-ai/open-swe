@@ -8,6 +8,9 @@ const http = require("node:http");
 const path = require("node:path");
 
 const HOST = "127.0.0.1";
+// `langgraph dev` runs one job per worker unless told otherwise; every thread
+// has its own worktree, so runs no longer have to wait for each other.
+const JOBS_PER_WORKER = "10";
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 5_000;
 const THREAD_STATUS = { busy: "running", error: "error" };
@@ -39,6 +42,8 @@ function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
       HOST,
       "--port",
       String(port),
+      "--n-jobs-per-worker",
+      JOBS_PER_WORKER,
       "--config",
       path.resolve(repoRoot, config),
     ],
@@ -70,6 +75,8 @@ function packagedBackendTarget({
       HOST,
       "--port",
       String(port),
+      "--n-jobs-per-worker",
+      JOBS_PER_WORKER,
       "--config",
       path.join(root, "langgraph.json"),
     ],
@@ -189,8 +196,9 @@ class BackendSupervisor {
     this.port = await this.reservePort(HOST);
     this.token = randomBytes(32).toString("base64url");
     const target = localBackendTarget({ ...this.options, port: this.port });
-    if (!this.options.projectsFile)
-      throw new Error("Local project allowlist is not configured");
+    if (!this.options.worktreesDir)
+      throw new Error("Local worktree directory is not configured");
+    fs.mkdirSync(this.options.worktreesDir, { recursive: true });
     if (this.options.stateDir)
       fs.mkdirSync(this.options.stateDir, { recursive: true });
     if (this.options.isPackaged && !fs.existsSync(target.command)) {
@@ -204,7 +212,7 @@ class BackendSupervisor {
         ...this.gatewayEnvironment(),
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
-        OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
+        OPEN_SWE_LOCAL_WORKTREES_DIR: this.options.worktreesDir,
         ...(this.options.stateDir
           ? {
               OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(

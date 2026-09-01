@@ -18,6 +18,7 @@ export interface DesktopProject {
 export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
+  worktreePath: string | null
   title: string
   viewed: boolean
   archived?: boolean
@@ -144,11 +145,6 @@ declare global {
         current: string | null
         branches: Array<string>
       }>
-      checkoutProjectBranch: (input: {
-        cwd: string
-        branch: string
-        create?: boolean
-      }) => Promise<string>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       onProjectsChanged: (
@@ -168,6 +164,7 @@ declare global {
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string
+          baseBranch?: string | null
           modelId?: string
           effort?: string
         }

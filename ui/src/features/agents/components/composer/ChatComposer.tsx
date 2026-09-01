@@ -115,7 +115,6 @@ export interface ChatComposerProps {
   onRemoveLocalProject?: (cwd: string) => void
   onRefreshLocalProjectBranch?: () => void
   onSelectLocalProjectBranch?: (branch: string) => void
-  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -238,7 +237,6 @@ export const ChatComposer = memo(function ChatComposer({
   onRemoveLocalProject,
   onRefreshLocalProjectBranch,
   onSelectLocalProjectBranch,
-  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -714,12 +712,10 @@ export const ChatComposer = memo(function ChatComposer({
           )}
           {runTarget === "local" &&
             onRefreshLocalProjectBranch &&
-            onSelectLocalProjectBranch &&
-            onCreateLocalProjectBranch && (
+            onSelectLocalProjectBranch && (
               <LocalBranchSelector
                 branches={localProjectBranches}
                 disabled={!selectedLocalProjectPath}
-                onCreateBranch={onCreateLocalProjectBranch}
                 onRefresh={onRefreshLocalProjectBranch}
                 onSelectBranch={onSelectLocalProjectBranch}
                 selectedBranch={selectedLocalProjectBranch}

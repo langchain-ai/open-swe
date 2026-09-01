@@ -17,16 +17,19 @@ const {
 const { BackendSupervisor } = require("./backend-supervisor.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
+  addWorktree,
   captureCheckpoint,
   checkpointRef,
-  checkoutBranch,
   currentBranch,
   localBranches,
   deleteRefs,
   readBranchDiff,
   readDiff,
+  removeWorktree,
   repoRoot,
   repositoryMetadata,
+  restoreWorktree,
+  validBranchName,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -112,6 +115,10 @@ function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
 }
 
+function worktreesPath() {
+  return path.join(app.getPath("userData"), "worktrees");
+}
+
 function listProjects() {
   return readProjects(projectsPath());
 }
@@ -148,8 +155,9 @@ function resolveLocalProjectPath(localSessionId, value) {
   if (!localSession || typeof value !== "string" || value.length === 0)
     return null;
   try {
-    const projectRoot = fs.realpathSync(localSession.cwd);
-    if (!registeredProject(projectRoot)) return null;
+    if (!localSession.worktreePath || !registeredProject(localSession.cwd))
+      return null;
+    const projectRoot = fs.realpathSync(localSession.worktreePath);
     const windowsAbsolute = path.win32.isAbsolute(value);
     if (windowsAbsolute && process.platform !== "win32") return null;
     const candidate = fs.realpathSync(
@@ -166,7 +174,7 @@ function resolveLocalProjectPath(localSessionId, value) {
 }
 
 async function recordLocalCheckpoint(thread) {
-  const repo = await repoRoot(thread.cwd);
+  const repo = await repoRoot(thread.worktreePath);
   if (!repo) return thread;
   const ref = checkpointRef(thread.id);
   await captureCheckpoint(repo, ref);
@@ -174,11 +182,7 @@ async function recordLocalCheckpoint(thread) {
   return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
 }
 
-/**
- * Remember which branch this thread is working on. Sessions share one worktree,
- * so the checked-out branch only belongs to a thread while that thread has it:
- * record it then, and read the recorded value afterwards.
- */
+/** Follow the thread's own worktree when the agent switches branches in it. */
 async function syncThreadBranch(thread) {
   if (!thread?.checkpoint.repo) return thread;
   const branch = await currentBranch(thread.checkpoint.repo);
@@ -191,12 +195,49 @@ async function syncThreadBranch(thread) {
   );
 }
 
-/** A running thread owns the checkout, so its branch can still be changing. */
 async function diffThread(threadId) {
   const thread = localThreadStore.get(threadId);
-  if (!thread) return thread;
-  const activity = await backendSupervisor.threadActivity();
-  return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
+  return thread ? syncThreadBranch(thread) : thread;
+}
+
+/**
+ * Give a thread its own checkout of the project, so agents never contend for
+ * one working tree. `baseBranch` is only a starting point: the agent owns the
+ * worktree's branch from there on.
+ */
+async function createThreadWorktree(thread, baseBranch) {
+  const repo = await repoRoot(thread.cwd);
+  if (!repo) throw new Error("Local projects must be git repositories");
+  const base =
+    (await validBranchName(repo, baseBranch)) ??
+    (await currentBranch(repo)) ??
+    "HEAD";
+  const short = thread.id.slice(0, 8);
+  const worktree = path.join(
+    worktreesPath(),
+    `${path.basename(repo)}-${short}`,
+  );
+  await addWorktree(repo, worktree, `open-swe/local-${short}`, base);
+  return localThreadStore.setWorktree(thread.id, worktree);
+}
+
+/**
+ * A worktree deleted behind our back would make every later turn fail in the
+ * agent's cwd, so re-check it out from the branch it was last on.
+ */
+async function ensureThreadWorktree(thread) {
+  if (!thread?.worktreePath || fs.existsSync(thread.worktreePath))
+    return thread;
+  const repo = registeredProject(thread.cwd) && (await repoRoot(thread.cwd));
+  const branch = thread.checkpoint.branch;
+  if (!repo || !branch) return thread;
+  await restoreWorktree(repo, thread.worktreePath, branch);
+  return thread;
+}
+
+async function discardThreadWorktree(thread) {
+  const repo = thread.worktreePath && (await repoRoot(thread.cwd));
+  if (repo) await removeWorktree(repo, thread.worktreePath);
 }
 
 function configureDesktopIpc() {
@@ -214,16 +255,6 @@ function configureDesktopIpc() {
       localBranches(project),
     ]);
     return { current, branches };
-  });
-
-  ipcMain.handle("desktop:checkout-project-branch", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const project =
-      input && typeof input.cwd === "string"
-        ? registeredProject(input.cwd)
-        : null;
-    if (!project) throw new Error("Project is not registered");
-    return checkoutBranch(project, input.branch, input.create === true);
   });
 
   ipcMain.handle("desktop:add-project", async (event) => {
@@ -313,12 +344,14 @@ function configureDesktopIpc() {
     await backendSupervisor.start();
     let thread = localThreadStore.create({ ...input, cwd });
     try {
+      thread = await createThreadWorktree(thread, input?.baseBranch);
       thread = await recordLocalCheckpoint(thread);
       await backendSupervisor.createThread(thread.id);
     } catch (error) {
       localThreadStore.delete(thread.id);
       if (thread.checkpoint.repo && thread.checkpoint.ref)
         deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
+      await discardThreadWorktree(thread).catch(() => {});
       throw error;
     }
     return thread;
@@ -333,7 +366,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:get-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
+    const thread = await ensureThreadWorktree(localThreadStore.get(threadId));
     if (!thread) return null;
     await backendSupervisor.createThread(thread.id);
     return thread;
@@ -355,10 +388,6 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
-    // Metadata only — never sync the branch here. Sessions share one worktree,
-    // so recording the current checkout against an inactive thread would
-    // overwrite the branch its checkpoint belongs to. Only a running thread
-    // owns the checkout (see diffThread).
     return localThreadStore.update(input?.threadId, {
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.archived === "boolean"
@@ -384,6 +413,7 @@ function configureDesktopIpc() {
     localThreadStore.delete(threadId);
     if (thread.checkpoint.repo && thread.checkpoint.ref)
       deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
+    await discardThreadWorktree(thread);
     return true;
   });
   ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
@@ -399,11 +429,7 @@ function configureDesktopIpc() {
     try {
       const [diff, repository] = await Promise.all([
         readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
-        repositoryMetadata(
-          thread.checkpoint.repo,
-          undefined,
-          thread.checkpoint.branch,
-        ),
+        repositoryMetadata(thread.checkpoint.repo),
       ]);
       return { ...diff, repository };
     } catch {
@@ -416,11 +442,7 @@ function configureDesktopIpc() {
     if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
       return { status: "missing", files: [], truncated: false };
     try {
-      const repository = await repositoryMetadata(
-        thread.checkpoint.repo,
-        undefined,
-        thread.checkpoint.branch,
-      );
+      const repository = await repositoryMetadata(thread.checkpoint.repo);
       if (!repository.pr)
         return { status: "missing", files: [], truncated: false, repository };
       const diff = await readBranchDiff(
@@ -1041,7 +1063,7 @@ if (!hasSingleInstanceLock) {
       repoRoot: path.resolve(__dirname, "../.."),
       resourcesPath: process.resourcesPath,
       stateDir: path.join(app.getPath("userData"), "local-backend"),
-      projectsFile: projectsPath(),
+      worktreesDir: worktreesPath(),
       providerEnv: () => openAiOAuth?.backendEnv() || {},
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
@@ -1056,7 +1078,6 @@ if (!hasSingleInstanceLock) {
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
-      listProjects,
       getLocalThread: (id) => localThreadStore.get(id),
       userDataPath: app.getPath("userData"),
     });

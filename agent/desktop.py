@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import re
 import tempfile
@@ -17,23 +16,21 @@ def is_desktop_run(configurable: dict[str, Any]) -> bool:
 
 
 def resolve_desktop_project(configurable: dict[str, Any]) -> str:
+    """The thread's own git worktree, which is the only place a desktop run may run.
+
+    The desktop app checks every thread out into its own worktree under
+    `OPEN_SWE_LOCAL_WORKTREES_DIR`, so containment in that directory is what
+    makes a path trustworthy — and what keeps concurrent runs off each other's
+    working tree.
+    """
     requested = configurable.get("local_project_path")
-    allowlist_path = os.environ.get("OPEN_SWE_LOCAL_PROJECTS_FILE")
-    if not isinstance(requested, str) or not requested or not allowlist_path:
-        raise ValueError("Desktop runs require an allowlisted local_project_path")
-    with open(allowlist_path, encoding="utf-8") as file:
-        entries = json.load(file)
-    if not isinstance(entries, list):
-        raise ValueError("OPEN_SWE_LOCAL_PROJECTS_FILE must contain a JSON array")
-    allowed = {
-        os.path.realpath(entry["cwd"] if isinstance(entry, dict) else entry)
-        for entry in entries
-        if isinstance(entry, str) or (isinstance(entry, dict) and isinstance(entry.get("cwd"), str))
-    }
-    project = os.path.realpath(requested)
-    if project not in allowed or not Path(project).is_dir():
-        raise ValueError("local_project_path is not an allowed project directory")
-    return project
+    worktrees_dir = os.environ.get("OPEN_SWE_LOCAL_WORKTREES_DIR")
+    if not isinstance(requested, str) or not requested or not worktrees_dir:
+        raise ValueError("Desktop runs require a local worktree path")
+    project = Path(os.path.realpath(requested))
+    if Path(os.path.realpath(worktrees_dir)) not in project.parents or not project.is_dir():
+        raise ValueError("local_project_path is not an agent worktree")
+    return str(project)
 
 
 def create_desktop_backend(configurable: dict[str, Any]) -> LocalShellBackend:

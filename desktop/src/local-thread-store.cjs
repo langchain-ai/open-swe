@@ -89,9 +89,14 @@ function normalizeThread(value) {
         skills: cleanSkills(value.pending.skills),
       }
     : null;
+  const worktreePath = stringOrNull(value.worktreePath, 8_192);
   return {
     id: value.id,
     cwd: path.normalize(value.cwd),
+    worktreePath:
+      worktreePath && path.isAbsolute(worktreePath)
+        ? path.normalize(worktreePath)
+        : null,
     title: value.title.slice(0, 80) || "New local agent",
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
@@ -170,6 +175,7 @@ class LocalThreadStore {
     const thread = {
       id: this.uuid(),
       cwd: input.cwd,
+      worktreePath: null,
       title: sessionTitle(prompt),
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
@@ -221,6 +227,20 @@ class LocalThreadStore {
     )
       next.updatedAt = this.now();
     this.threads.set(id, next);
+    this.persist();
+    return this.get(id);
+  }
+
+  setWorktree(id, worktreePath) {
+    const current = this.threads.get(id);
+    if (!current) return null;
+    if (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath))
+      throw new Error("Invalid worktree path");
+    this.threads.set(id, {
+      ...current,
+      worktreePath: path.normalize(worktreePath),
+      updatedAt: this.now(),
+    });
     this.persist();
     return this.get(id);
   }

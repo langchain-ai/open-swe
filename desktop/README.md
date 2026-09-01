@@ -8,6 +8,8 @@ compatible Open SWE backend; they do not need a separately hosted dashboard.
 
 Desktop users can choose **This Mac** in the new-task composer to run the same Open SWE LangGraph agent over a selected local project. Electron owns a loopback-only LangGraph server, proxies it to the bundled UI, and stops it with the app. Local threads use the same streaming protocol, graph, tools, subagents, and middleware assembly as cloud threads; only the filesystem backend and unavailable cloud integrations differ.
 
+Each local thread gets its own git worktree of the project, checked out from the base branch picked in the composer and branched as `open-swe/local-<id>`. The agent, its terminals, and the **Changes** tab all work in that worktree, so up to ten local threads run at once without contending for a working tree, and your own checkout is never touched. Deleting a thread removes its worktree along with anything uncommitted in it.
+
 The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
 
 For local OpenAI models, the app can use either `OPENAI_API_KEY` or Sign in with ChatGPT. When no
@@ -23,7 +25,7 @@ shell commands.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
-the current branch and discovers its pull request when the GitHub CLI is installed and authenticated.
+the worktree's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 
 ## How it connects
 

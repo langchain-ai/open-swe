@@ -6,15 +6,17 @@ const os = require("node:os");
 const path = require("node:path");
 
 const {
+  addWorktree,
   captureCheckpoint,
   checkpointRef,
-  checkoutBranch,
   currentBranch,
   localBranches,
   parsePullRequest,
   readBranchDiff,
   readDiff,
+  removeWorktree,
   repoRoot,
+  restoreWorktree,
 } = require("../build/git-diff.cjs");
 
 function git(cwd, args) {
@@ -81,11 +83,8 @@ test("diffs the worktree against a session checkpoint", async (t) => {
 
   const repo = await repoRoot(dir);
   assert.equal(await currentBranch(dir), "main");
-  await checkoutBranch(dir, "feature", true);
-  assert.equal(await currentBranch(dir), "feature");
+  git(dir, ["branch", "feature"]);
   assert.deepEqual(await localBranches(dir), ["feature", "main"]);
-  await checkoutBranch(dir, "main");
-  assert.equal(await currentBranch(dir), "main");
   const ref = checkpointRef("session-id");
   await captureCheckpoint(repo, ref);
 
@@ -144,12 +143,12 @@ test("branch diff reports only what the branch committed", async (t) => {
   git(dir, ["commit", "-qm", "init"]);
 
   const repo = await repoRoot(dir);
-  await checkoutBranch(dir, "feature", true);
+  git(dir, ["switch", "-q", "-c", "feature"]);
   fs.writeFileSync(path.join(dir, "models.ts"), "one\ntwo\n");
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-qm", "feature work"]);
 
-  // Another session dirties the shared worktree; none of it is this branch's.
+  // Uncommitted noise in the checkout is not part of the branch's diff.
   fs.writeFileSync(path.join(dir, "search.ts"), "search\nelsewhere\n");
   fs.writeFileSync(path.join(dir, "stray.txt"), "stray\n");
 
@@ -170,7 +169,7 @@ test("branch diff reports only what the branch committed", async (t) => {
   );
 
   // The thread's branch is reported even while another one holds the checkout.
-  await checkoutBranch(dir, "main");
+  git(dir, ["switch", "-q", "main"]);
   fs.writeFileSync(path.join(dir, "search.ts"), "search\nmain work\n");
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-qm", "main work"]);
@@ -188,4 +187,30 @@ test("branch diff reports only what the branch committed", async (t) => {
     (await readBranchDiff(repo, "main", "--upload-pack=touch")).status,
     "missing",
   );
+});
+
+test("a thread worktree survives its directory being deleted", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(dir, "kept.txt"), "one\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "init"]);
+
+  const worktree = path.join(dir, "..", path.basename(dir) + "-wt");
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  await addWorktree(dir, worktree, "open-swe/local-abc12345", "main");
+  assert.equal(await currentBranch(worktree), "open-swe/local-abc12345");
+
+  fs.rmSync(worktree, { recursive: true, force: true });
+  await restoreWorktree(dir, worktree, "open-swe/local-abc12345");
+  assert.equal(fs.existsSync(path.join(worktree, "kept.txt")), true);
+
+  // Uncommitted work is discarded with the worktree, and removal is idempotent.
+  fs.writeFileSync(path.join(worktree, "kept.txt"), "dirty\n");
+  await removeWorktree(dir, worktree);
+  await removeWorktree(dir, worktree);
+  assert.equal(fs.existsSync(worktree), false);
 });

@@ -5,7 +5,6 @@ import {
   FolderPlus,
   GitBranch,
   Laptop,
-  Plus,
   Trash2,
 } from "lucide-react"
 
@@ -155,19 +154,13 @@ export function LocalBranchSelector({
   disabled = false,
   onRefresh,
   onSelectBranch,
-  onCreateBranch,
 }: {
   branches: Array<string>
   selectedBranch: string | null
   disabled?: boolean
   onRefresh: () => void
   onSelectBranch: (branch: string) => void
-  onCreateBranch: (branch: string) => void
 }) {
-  const createBranch = () => {
-    const branch = window.prompt("New branch name")?.trim()
-    if (branch) onCreateBranch(branch)
-  }
   return (
     <Menu onOpenChange={(open) => open && onRefresh()}>
       <MenuTrigger
@@ -180,7 +173,7 @@ export function LocalBranchSelector({
       </MenuTrigger>
       <MenuPopup align="start" className="w-64" sideOffset={7}>
         <MenuGroup>
-          <MenuGroupLabel>Branches</MenuGroupLabel>
+          <MenuGroupLabel>Base branch</MenuGroupLabel>
           {branches.length === 0 && (
             <MenuItem disabled>No local branches</MenuItem>
           )}
@@ -192,11 +185,6 @@ export function LocalBranchSelector({
             </MenuItem>
           ))}
         </MenuGroup>
-        <MenuSeparator />
-        <MenuItem onClick={createBranch}>
-          <Plus />
-          Create and checkout new branch…
-        </MenuItem>
       </MenuPopup>
     </Menu>
   )

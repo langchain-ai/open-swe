@@ -9,6 +9,9 @@ const MAX_CONTENT_BYTES = 16 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const MAX_GH_OUTPUT_BYTES = 1024 * 1024;
 const CHECKPOINT_NAMESPACE = "refs/open-swe/local";
+// `worktree add` checks out the whole tree, which on a large repository takes
+// far longer than any other git call here.
+const WORKTREE_TIMEOUT_MS = 300_000;
 
 // The project is whatever directory the user picked, so never let its git config
 // start helper processes of its own on our behalf.
@@ -62,18 +65,41 @@ async function localBranches(cwd) {
   }
 }
 
-async function checkoutBranch(cwd, branch, create = false) {
-  if (typeof branch !== "string" || !branch.trim())
-    throw new Error("Branch name is required");
-  const name = branch.trim();
-  await git(cwd, ["check-ref-format", "--branch", name], null, 5_000);
+/** Check out `baseRef` into its own worktree on a new branch. */
+async function addWorktree(repo, worktreePath, branch, baseRef) {
   await git(
-    cwd,
-    create ? ["switch", "-c", name] : ["switch", name],
+    repo,
+    ["worktree", "add", "-b", branch, worktreePath, baseRef],
     null,
-    30_000,
+    WORKTREE_TIMEOUT_MS,
   );
-  return name;
+  return worktreePath;
+}
+
+/**
+ * Re-check out a thread's worktree after its directory disappeared. Git still
+ * holds the administrative entry, which makes `worktree add` refuse the path
+ * until it is pruned.
+ */
+async function restoreWorktree(repo, worktreePath, branch) {
+  await ok(git(repo, ["worktree", "prune"], null, 30_000));
+  await git(
+    repo,
+    ["worktree", "add", worktreePath, branch],
+    null,
+    WORKTREE_TIMEOUT_MS,
+  );
+  return worktreePath;
+}
+
+/** Discard a thread's worktree, including anything uncommitted in it. */
+async function removeWorktree(repo, worktreePath) {
+  const removed = await ok(
+    git(repo, ["worktree", "remove", "--force", worktreePath], null, 30_000),
+  );
+  if (removed) return;
+  fs.rmSync(worktreePath, { recursive: true, force: true });
+  await ok(git(repo, ["worktree", "prune"], null, 30_000));
 }
 
 async function currentBranch(cwd) {
@@ -175,15 +201,10 @@ async function pullRequest(repo, env, branch = null) {
   }
 }
 
-/**
- * `threadBranch` is the branch the thread last worked on. Every session in the
- * project shares one worktree, so the branch that happens to be checked out
- * right now is not necessarily the one this thread's pull request belongs to.
- */
-async function repositoryMetadata(repo, env, threadBranch = null) {
-  const named = await validBranchName(repo, threadBranch);
-  const branch = named ?? (await currentBranch(repo));
-  return { branch, pr: branch ? await pullRequest(repo, env, named) : null };
+/** `repo` is the thread's own worktree, so its checkout is the thread's branch. */
+async function repositoryMetadata(repo, env) {
+  const branch = await currentBranch(repo);
+  return { branch, pr: branch ? await pullRequest(repo, env, branch) : null };
 }
 
 function gitStdin(cwd, args, input) {
@@ -482,10 +503,8 @@ async function resolveBaseRef(repo, baseRef) {
 
 /**
  * What `headRef` has *committed* on top of `baseRef` — the pull request's own
- * content. Committed refs only: the worktree is shared with every other
- * session in the project, so its uncommitted state says nothing about which
- * thread made a change. `headRef` defaults to the checkout only when the
- * thread's own branch is unknown.
+ * content. `headRef` defaults to the checkout when the thread's own branch is
+ * unknown.
  */
 async function readBranchDiff(repo, baseRef, headRef = null) {
   const missing = { status: "missing", files: [], truncated: false };
@@ -518,16 +537,19 @@ async function readBranchDiff(repo, baseRef, headRef = null) {
 }
 
 module.exports = {
+  addWorktree,
   captureCheckpoint,
   readBranchDiff,
   checkpointRef,
-  checkoutBranch,
   currentBranch,
   localBranches,
   deleteRefs,
   parsePullRequest,
   readDiff,
+  removeWorktree,
   repoRoot,
   repositoryMetadata,
+  restoreWorktree,
   staleRefs,
+  validBranchName,
 };
