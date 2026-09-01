@@ -152,7 +152,6 @@ function registeredProject(cwd) {
   }
 }
 
-/** Where a thread's agent actually works: its own worktree, or the project. */
 function threadRoot(thread) {
   const project = thread ? registeredProject(thread.cwd) : null;
   if (!project) return null;
@@ -191,7 +190,6 @@ async function recordLocalCheckpoint(thread) {
   return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
 }
 
-/** Follow the thread's own worktree when the agent switches branches in it. */
 async function syncThreadBranch(thread) {
   if (!thread?.checkpoint.repo) return thread;
   const branch = await currentBranch(thread.checkpoint.repo);
@@ -217,12 +215,6 @@ async function diffThread(threadId) {
   return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
 }
 
-/**
- * Give a thread its own checkout of the project, so agents never contend for
- * one working tree. `baseBranch` is only a starting point: the agent owns the
- * worktree's branch from there on, starting by renaming it away from the
- * temporary name once it understands the request.
- */
 async function createThreadWorktree(thread, baseBranch) {
   const repo = await repoRoot(thread.cwd);
   if (!repo) throw new Error("Local projects must be git repositories");
@@ -230,8 +222,6 @@ async function createThreadWorktree(thread, baseBranch) {
     (await validBranchName(repo, baseBranch)) ??
     (await currentBranch(repo)) ??
     "HEAD";
-  // A token per worktree, not per thread: a thread that moves back to the
-  // project and out again must not land on a path and branch it already used.
   const token = randomBytes(4).toString("hex");
   const worktree = path.join(
     worktreesPath(),
@@ -279,10 +269,6 @@ async function startThreadWorktree(thread, baseBranch) {
   return localThreadStore.setWorktree(thread.id, existing);
 }
 
-/**
- * Point a thread at another working tree. Its terminals and its Changes
- * baseline both belong to the tree it was in, so both are re-established.
- */
 async function moveThreadWorkspace(thread, worktreePath) {
   if ((thread.worktreePath || null) === worktreePath) return thread;
   await closeThreadTerminals(thread.id);
@@ -291,10 +277,6 @@ async function moveThreadWorkspace(thread, worktreePath) {
   );
 }
 
-/**
- * A worktree deleted behind our back would make every later turn fail in the
- * agent's cwd, so re-check it out from the branch it was last on.
- */
 async function ensureThreadWorktree(thread) {
   if (!thread?.worktreePath || fs.existsSync(thread.worktreePath))
     return thread;

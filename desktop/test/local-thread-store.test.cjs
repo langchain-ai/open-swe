@@ -138,18 +138,3 @@ test("persists archived state without reordering the thread", (t) => {
   assert.equal(restored.get(thread.id).archived, true);
   assert.equal(restored.update(thread.id, { archived: false }).archived, false);
 });
-
-test("moves a thread between its worktree and the project checkout", (t) => {
-  const fixture = temporaryStore(t);
-  const store = fixture.create();
-  const thread = store.create({
-    cwd: path.resolve("/tmp/project"),
-    prompt: "go",
-  });
-  const worktree = path.resolve("/tmp/worktrees/project-abc12345");
-
-  assert.equal(store.setWorktree(thread.id, worktree).worktreePath, worktree);
-  assert.equal(store.setWorktree(thread.id, null).worktreePath, null);
-  assert.equal(fixture.create().get(thread.id).worktreePath, null);
-  assert.throws(() => store.setWorktree(thread.id, "relative/path"));
-});

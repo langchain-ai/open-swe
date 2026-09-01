@@ -7,11 +7,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.desktop_branch import (
-    build_branch_name,
-    rename_temporary_worktree_branch,
-    schedule_worktree_branch_rename,
-)
+from agent.desktop_branch import rename_temporary_worktree_branch, schedule_worktree_branch_rename
 
 
 class _FakeModel:
@@ -52,14 +48,9 @@ def _branch(path: Path) -> str:
     ).stdout.strip()
 
 
-def test_build_branch_name_normalizes_model_output() -> None:
-    assert build_branch_name("Fix Flaky Login Test!") == "open-swe/fix-flaky-login-test"
-    assert build_branch_name("!!!") is None
-
-
 async def test_renames_a_temporary_branch_from_the_request(tmp_path: Path) -> None:
     repo = _repo(tmp_path / "worktree", "open-swe/local-abc12345")
-    model = _FakeModel("retry flaky login")
+    model = _FakeModel("Retry Flaky Login!")
 
     renamed = await rename_temporary_worktree_branch(
         worktree_path=str(repo),

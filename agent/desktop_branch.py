@@ -18,9 +18,6 @@ TEMPORARY_BRANCH_PREFIX = f"{BRANCH_PREFIX}/local"
 MAX_BRANCH_INPUT_CHARS = 4_000
 MAX_BRANCH_SLUG_CHARS = 48
 BRANCH_GENERATION_TIMEOUT_SECONDS = 10
-# The desktop app names a new worktree's branch before anyone has read the
-# request. Only that placeholder shape may be renamed: anything else is a name
-# the user or the agent chose deliberately.
 _TEMPORARY_BRANCH = re.compile(rf"^{re.escape(TEMPORARY_BRANCH_PREFIX)}-[0-9a-f]{{8}}$")
 _background_tasks: set[asyncio.Task[None]] = set()
 _inflight_paths: set[str] = set()
@@ -44,8 +41,11 @@ def is_temporary_branch(branch: str) -> bool:
 
 
 def build_branch_name(raw: str) -> str | None:
-    slug = re.sub(r"[^a-z0-9]+", "-", raw.strip().lower()).strip("-")[:MAX_BRANCH_SLUG_CHARS]
-    slug = slug.rstrip("-")
+    slug = (
+        re.sub(r"[^a-z0-9]+", "-", raw.strip().lower())
+        .strip("-")[:MAX_BRANCH_SLUG_CHARS]
+        .rstrip("-")
+    )
     return f"{BRANCH_PREFIX}/{slug}" if slug else None
 
 
@@ -104,12 +104,7 @@ async def rename_temporary_worktree_branch(
 def schedule_worktree_branch_rename(
     *, worktree_path: str, messages: Sequence[BaseMessage], model: BaseChatModel
 ) -> None:
-    """Name the worktree's branch from the request, without blocking the run.
-
-    A thread running in the user's own checkout owns no branch to rename, and
-    one of theirs could happen to carry a placeholder name from an earlier
-    session, so only a worktree the app created is ever touched.
-    """
+    """Name an app-created worktree's branch without blocking the run."""
     request = _request_text(messages)
     if not request or worktree_path in _inflight_paths or not is_desktop_worktree(worktree_path):
         return

@@ -44,7 +44,6 @@ function git(
   });
 }
 
-/** The branch `origin/HEAD` points at, which is the repository's default. */
 async function defaultBranch(cwd) {
   try {
     return (
@@ -62,7 +61,6 @@ async function defaultBranch(cwd) {
   }
 }
 
-/** Branch name to the worktree that has it checked out, for every worktree. */
 async function worktreeBranches(cwd) {
   const paths = new Map<string, string>();
   try {
@@ -134,7 +132,6 @@ async function checkoutBranch(cwd, branch, create = false) {
   return name;
 }
 
-/** Check out `baseRef` into its own worktree on a new branch. */
 async function addWorktree(repo, worktreePath, branch, baseRef) {
   await git(
     repo,
@@ -161,7 +158,6 @@ async function restoreWorktree(repo, worktreePath, branch) {
   return worktreePath;
 }
 
-/** Discard a thread's worktree, including anything uncommitted in it. */
 async function removeWorktree(repo, worktreePath) {
   const removed = await ok(
     git(repo, ["worktree", "remove", "--force", worktreePath], null, 30_000),
@@ -270,7 +266,6 @@ async function pullRequest(repo, env, branch = null) {
   }
 }
 
-/** `repo` is the thread's own worktree, so its checkout is the thread's branch. */
 async function repositoryMetadata(repo, env) {
   const branch = await currentBranch(repo);
   return { branch, pr: branch ? await pullRequest(repo, env, branch) : null };
