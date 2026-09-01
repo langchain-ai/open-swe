@@ -106,15 +106,17 @@ to `desktop/dist/`.
 ## macOS releases
 
 `desktop/package.json` is the latest stable version. Every **Promote main to prod** run publishes a
-prerelease nightly from the promoted commit with a UTC timestamp, such as
-`desktop-v0.2.3-nightly.20260902080000`. Nightly releases never publish the stable version.
+prerelease nightly from the promoted commit for the next patch version with a UTC timestamp, such as
+`desktop-v0.2.4-nightly.20260902080000` when the stable version is `0.2.3`.
 
-To publish a stable release, bump `desktop/package.json` in a normal pull request. Merging that
-change to `main` automatically runs **Release Desktop** for the exact package version. The workflow
-remains manually runnable to retry a partial stable release.
+To publish a stable release, bump `desktop/package.json` to that patch version in a normal pull
+request. Merging it to `main` promotes the latest complete matching nightly built from the currently
+deployed `prod` commit, preserving its tested artifacts instead of rebuilding them. The workflow
+remains manually runnable to build a stable release when recovery is needed.
 
-Both paths build the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
-app and DMG, create the tag, and publish the DMG, macOS zip, and app zip to a GitHub release.
+Both build paths compile the current `ui/` bundle, sign and notarize the Electron app, verify the
+resulting app and DMG, create the tag, and publish the DMG, macOS zip, and app zip. Promotion retags
+an existing nightly release without modifying those artifacts.
 Desktop-prefixed tags keep this release stream separate from web and backend releases; the workflow
 packages the web UI but does not deploy or otherwise change the hosted web app.
 
