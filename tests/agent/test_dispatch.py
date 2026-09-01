@@ -1,6 +1,5 @@
 import importlib
 from typing import Any
-from xml.etree import ElementTree
 
 import pytest
 
@@ -161,51 +160,32 @@ def test_prepare_run_config_marks_every_run_as_protocol_v2() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dispatch_requires_prebuilt_input() -> None:
+    client = _FakeClient()
+
+    with pytest.raises(TypeError):
+        await dispatch.dispatch_agent_run(  # type: ignore[call-overload]
+            "thread-1",
+            "synthetic event",
+            {},
+            source="slack",
+            client=client,
+        )
+
+    assert client.runs.created == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_accepts_prebuilt_input() -> None:
     client = _FakeClient()
     run_input = {"messages": [{"role": "user", "content": "structured"}]}
 
     await dispatch.dispatch_agent_run(
         "thread-1",
-        None,
-        {},
+        configurable={},
         source="github",
         input=run_input,
         client=client,
     )
 
     assert client.runs.created[0]["input"] == run_input
-
-
-def test_dispatch_slack_identity_includes_verified_context() -> None:
-    run_input = dispatch._dispatch_input(
-        "hello",
-        "slack",
-        {
-            "github_login": "mason-gh",
-            "user_email": "mason@example.com",
-            "slack_thread": {
-                "triggering_user_id": "U123",
-                "triggering_user_name": "Mason",
-                "triggering_user_timezone": "America/New_York",
-                "channel_id": "C123",
-                "thread_ts": "123.45",
-                "channel_context": {
-                    "name": "eng",
-                    "topic": "Ship <safely>",
-                    "purpose": "Engineering work",
-                },
-            },
-        },
-    )
-
-    person = ElementTree.fromstring(run_input["messages"][0]["content"])
-    channel = ElementTree.fromstring(run_input["messages"][1]["content"])
-    assert person.findtext("display_name") == "Mason"
-    assert person.findtext("timezone") == "America/New_York"
-    assert channel.findtext("name") == "eng"
-    assert channel.findtext("topic") == "Ship <safely>"
-    topic = channel.find("topic")
-    assert topic is not None
-    assert topic.attrib["trust"] == "untrusted"
-    assert channel.findtext("purpose") == "Engineering work"

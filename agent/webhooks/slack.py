@@ -206,7 +206,6 @@ async def _dispatch_or_queue_slack_run(
     return as_json_object(
         await common.dispatch_agent_run(
             thread_id,
-            None,
             configurable,
             source="slack",
             input=run_input,

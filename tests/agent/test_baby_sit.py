@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
+from xml.etree import ElementTree
 
 import httpx
 import pytest
@@ -195,6 +196,14 @@ async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "dispatched"
     assert dispatch.await_args is not None
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
+    assert dispatch.await_args.args[0] == "thread-1"
+    run_input = dispatch.await_args.kwargs["input"]
+    envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
+    assert envelope.attrib == {
+        "sender": "system:baby-sit",
+        "surface": "automation",
+        "kind": "system",
+    }
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
     assert dispatch.await_count == 1
 
@@ -316,7 +325,14 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
     assert dispatch.await_args.args[0] == "thread-1"
-    assert "/baby-sit --terminal" in dispatch.await_args.args[1]
+    run_input = dispatch.await_args.kwargs["input"]
+    envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
+    assert envelope.attrib == {
+        "sender": "system:baby-sit",
+        "surface": "automation",
+        "kind": "system",
+    }
+    assert "/baby-sit --terminal" in envelope.findtext("content", "")
 
 
 async def test_record_retry_caps_attempts_and_deduplicates_flake_alert(

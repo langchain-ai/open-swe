@@ -1851,7 +1851,6 @@ async def cancel_dashboard_thread(
             configurable = await _build_dashboard_configurable(thread_id, login, metadata)
             run = await dispatch_agent_run(
                 thread_id,
-                None,
                 configurable,
                 source=_DASHBOARD_SOURCE,
                 input={"messages": []},
