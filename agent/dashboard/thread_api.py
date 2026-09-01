@@ -751,6 +751,11 @@ def _thread_updated_ms(thread: ThreadLike) -> int:
     return _thread_timestamp_ms(thread, "updated_at")
 
 
+def _search_matches(values: Sequence[object], query: str) -> bool:
+    needle = query.lower()
+    return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
+
+
 def _metadata_matches_filters(
     metadata: Mapping[str, Any],
     *,
@@ -780,9 +785,25 @@ def _metadata_matches_filters(
     if source and _thread_source(metadata) != source:
         return False
     if query:
-        title = metadata.get("title")
-        title = title if isinstance(title, str) else "Untitled agent"
-        if query.lower() not in title.lower():
+        pull_requests = metadata.get("pull_requests")
+        pull_requests = pull_requests if isinstance(pull_requests, list) else []
+        if not _search_matches(
+            [
+                metadata.get("title", "Untitled agent"),
+                *_metadata_repo(metadata),
+                metadata.get("branch_name"),
+                metadata.get("base_branch"),
+                metadata.get("pr_url"),
+                metadata.get("pr_number"),
+                *(
+                    value
+                    for record in pull_requests
+                    if isinstance(record, dict)
+                    for value in record.values()
+                ),
+            ],
+            query,
+        ):
             return False
     return True
 
@@ -805,8 +826,25 @@ def _summary_matches_filters(
     if status and summary.get("status") != status:
         return False
     if query:
-        title = summary.get("title")
-        if not isinstance(title, str) or query.lower() not in title.lower():
+        pull_requests = summary.get("pullRequests")
+        pull_requests = pull_requests if isinstance(pull_requests, list) else []
+        pr = summary.get("pr")
+        if not _search_matches(
+            [
+                summary.get("title"),
+                summary.get("repo"),
+                summary.get("repoFullName"),
+                summary.get("branch"),
+                *(pr.values() if isinstance(pr, dict) else ()),
+                *(
+                    value
+                    for record in pull_requests
+                    if isinstance(record, dict)
+                    for value in record.values()
+                ),
+            ],
+            query,
+        ):
             return False
     return True
 
