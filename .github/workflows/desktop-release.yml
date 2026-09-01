@@ -10,11 +10,6 @@ on:
         type: boolean
         default: false
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - desktop/package.json
 
 permissions:
   contents: write
