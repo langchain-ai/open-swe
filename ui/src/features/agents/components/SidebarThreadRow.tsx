@@ -446,14 +446,12 @@ export function SidebarThreadRow({
               )}
               {thread?.sourceUrl && (
                 <ContextMenu.LinkItem
-                  href={thread.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                  href={thread.sourceAppUrl ?? thread.sourceUrl}
                   closeOnClick
                   className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                 >
                   <IoLogoSlack className="size-3.5" />
-                  Open Slack thread
+                  Open in Slack
                 </ContextMenu.LinkItem>
               )}
               <ContextMenu.Item

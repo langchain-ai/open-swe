@@ -374,12 +374,23 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
 
 
 def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
-    if metadata.get("repo_private") is not True:
-        return None
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None:
         return None
     return slack_thread.permalink.strip() or None
+
+
+def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    team_id = SLACK_TEAM_ID.strip()
+    if (
+        slack_thread is None
+        or not team_id
+        or not slack_thread.channel_id
+        or not slack_thread.thread_ts
+    ):
+        return None
+    return f"slack://channel?{urlencode({'team': team_id, 'id': slack_thread.channel_id, 'message': slack_thread.thread_ts})}"
 
 
 def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
@@ -554,6 +565,7 @@ async def _thread_summary(
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
         "sourceUrl": _thread_source_url(metadata),
+        "sourceAppUrl": _thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
     }
@@ -747,8 +759,15 @@ def _metadata_matches_filters(
     query: str | None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    thread_repo = _metadata_repo(metadata)[2]
+    if repo and thread_repo.lower() != repo.lower():
+        return False
+    if ownerless and thread_repo:
+        return False
     is_automation = _is_automation_thread(metadata)
     if scope == "interactive" and is_automation:
         return False
@@ -852,6 +871,8 @@ async def _collect_thread_candidates(
     query: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
@@ -887,6 +908,8 @@ async def _collect_thread_candidates(
                     query=query,
                     scope=scope,
                     automation_id=automation_id,
+                    repo=repo,
+                    ownerless=ownerless,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -917,41 +940,6 @@ async def list_dashboard_threads(
     return page["items"]
 
 
-async def _sidebar_active_thread_summary(
-    client: Any,
-    active_thread_id: str | None,
-    *,
-    fallback_threads: Mapping[str, ThreadLike],
-    visible_thread_ids: set[str],
-    include_all: bool,
-) -> tuple[dict[str, Any], bool] | None:
-    if not active_thread_id or active_thread_id in visible_thread_ids:
-        return None
-    thread = fallback_threads.get(active_thread_id)
-    if thread is None:
-        try:
-            fetched = await client.threads.get(active_thread_id)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "Could not fetch active sidebar thread %s", active_thread_id, exc_info=True
-            )
-            return None
-        if not isinstance(fetched, Mapping):
-            return None
-        thread = fetched
-    metadata = _thread_metadata(thread)
-    if not include_all:
-        try:
-            _assert_thread_readable(metadata)
-        except HTTPException:
-            return None
-    summary = await _summarize_thread(
-        client,
-        thread,
-    )
-    return summary, _is_thread_resolved(metadata)
-
-
 async def _pinned_thread_summaries(
     client: Any,
     login: str,
@@ -973,133 +961,43 @@ async def _pinned_thread_summaries(
     return [summary for summary in summaries if summary is not None]
 
 
-async def list_dashboard_threads_sidebar(
+async def list_dashboard_pinned_threads(
     login: str,
     *,
     email: str | None = None,
-    active_limit: int = 50,
-    resolved_limit: int = 20,
-    active_thread_id: str | None = None,
+) -> list[dict[str, Any]]:
+    return await _pinned_thread_summaries(langgraph_client(), login, email)
+
+
+async def list_dashboard_thread_projects(
+    login: str,
+    *,
+    email: str | None = None,
+    include_resolved: bool = False,
     include_automations: bool = False,
     include_all: bool = False,
-    timings: dict[str, float] | None = None,
-    counts: dict[str, int] | None = None,
-) -> dict[str, Any]:
-    record = timings if timings is not None else {}
-    count_record = counts if counts is not None else {}
-    client = langgraph_client()
-    searches = _participant_search_filters(login, email=email, include_all=include_all)
-    safe_active_limit = min(max(active_limit, 1), _THREADS_PAGE_SCAN_CAP)
-    safe_resolved_limit = min(max(resolved_limit, 0), _THREADS_PAGE_SCAN_CAP)
-    active_target = safe_active_limit + 1
-    # A zero limit means the caller wants no resolved threads at all, so nothing
-    # should keep scanning for one after the active bucket fills.
-    resolved_target = safe_resolved_limit + 1 if safe_resolved_limit else 0
-    active: dict[str, ThreadLike] = {}
-    resolved_threads: dict[str, ThreadLike] = {}
-
-    with phase(record, "search"):
-        for search_filter in searches:
-            local_active = 0
-            local_resolved = 0
-            offset = 0
-            while offset < _THREADS_PAGE_SCAN_CAP and (
-                local_active < active_target or local_resolved < resolved_target
-            ):
-                batch = await _search_threads_batch(
-                    client,
-                    search_filter,
-                    limit=_THREADS_SEARCH_PAGE,
-                    offset=offset,
-                )
-                if not batch:
-                    break
-                for thread in batch:
-                    metadata = _thread_metadata(thread)
-                    if not include_automations and _is_automation_thread(metadata):
-                        continue
-                    thread_id = _thread_id(thread)
-                    if not thread_id or thread_id in active or thread_id in resolved_threads:
-                        continue
-                    if _is_thread_resolved(metadata):
-                        local_resolved += 1
-                        resolved_threads[thread_id] = thread
-                    else:
-                        local_active += 1
-                        active[thread_id] = thread
-                if len(batch) < _THREADS_SEARCH_PAGE:
-                    break
-                offset += _THREADS_SEARCH_PAGE
-
-    active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
-    resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
-    active_window = active_candidates[:safe_active_limit]
-    resolved_window = resolved_candidates[:safe_resolved_limit]
-    active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}
-    # The dominant cost when a user's threads have no cached run status: one
-    # `runs.list` per thread, eight at a time.
-    count_record["run_refreshes"] = sum(
-        _should_refresh_latest_run(thread) for thread in (*active_window, *resolved_window)
+) -> list[dict[str, Any]]:
+    candidates = await _collect_thread_candidates(
+        langgraph_client(),
+        _participant_search_filters(login, email=email, include_all=include_all),
+        resolved=None if include_resolved else False,
+        scope="all" if include_automations else "interactive",
     )
-    count_record["threads"] = len(active_window) + len(resolved_window)
-    with phase(record, "summarize"):
-        active_items, resolved_items, active_thread, pinned_items = await asyncio.gather(
-            _summarize_threads(
-                client,
-                active_window,
-            ),
-            _summarize_threads(
-                client,
-                resolved_window,
-            ),
-            _sidebar_active_thread_summary(
-                client,
-                active_thread_id,
-                fallback_threads={**active, **resolved_threads},
-                visible_thread_ids=active_ids,
-                include_all=include_all,
-            ),
-            _pinned_thread_summaries(client, login, email),
-        )
-    active_has_more = len(active_candidates) > safe_active_limit
-    resolved_has_more = len(resolved_candidates) > safe_resolved_limit
-    if active_thread:
-        active_thread_summary, is_resolved_active_thread = active_thread
-        if is_resolved_active_thread:
-            resolved_items = [
-                active_thread_summary,
-                *[item for item in resolved_items if item["id"] != active_thread_summary["id"]],
-            ]
-            active_items = [
-                item for item in active_items if item["id"] != active_thread_summary["id"]
-            ]
-            if len(resolved_items) > safe_resolved_limit:
-                resolved_items = resolved_items[:safe_resolved_limit]
-                resolved_has_more = True
-        else:
-            active_items = [
-                active_thread_summary,
-                *[item for item in active_items if item["id"] != active_thread_summary["id"]],
-            ]
-            resolved_items = [
-                item for item in resolved_items if item["id"] != active_thread_summary["id"]
-            ]
-            if len(active_items) > safe_active_limit:
-                active_items = active_items[:safe_active_limit]
-                active_has_more = True
-    return {
-        "active": {
-            "items": active_items,
-            "limit": safe_active_limit,
-            "hasMore": active_has_more,
-        },
-        "resolved": {
-            "items": resolved_items,
-            "limit": safe_resolved_limit,
-            "hasMore": resolved_has_more,
-        },
-        "pinned": pinned_items,
-    }
+    projects: dict[str, dict[str, Any]] = {}
+    for thread in candidates:
+        _, name, full_name = _metadata_repo(_thread_metadata(thread))
+        if not full_name:
+            continue
+        key = full_name.lower()
+        updated_at = _thread_updated_ms(thread)
+        current = projects.get(key)
+        if current is None or updated_at > current["updatedAt"]:
+            projects[key] = {
+                "repoFullName": full_name,
+                "name": name,
+                "updatedAt": updated_at,
+            }
+    return sorted(projects.values(), key=lambda project: project["updatedAt"], reverse=True)
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:
@@ -1132,6 +1030,8 @@ async def list_dashboard_threads_page(
     query: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
     filter_participant_login: str | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
@@ -1157,6 +1057,8 @@ async def list_dashboard_threads_page(
         query=query,
         scope=scope,
         automation_id=automation_id,
+        repo=repo,
+        ownerless=ownerless,
         target_per_search=target,
         surfaced_only=surfaced_only,
         sort_by=sort_by,

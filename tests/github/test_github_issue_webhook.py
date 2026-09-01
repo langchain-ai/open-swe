@@ -9,7 +9,6 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
 
 from agent.api.app import app
 from agent.thread_ids import github_issue_thread_id
@@ -48,9 +47,7 @@ def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(
-    client: TestClient, event_type: str, payload: dict[object, object]
-) -> Response:
+def _post_github_webhook(client: TestClient, event_type: str, payload: dict[object, object]):
     """Send a signed GitHub webhook POST request."""
     body = json.dumps(payload, separators=(",", ":")).encode()
     return client.post(
@@ -70,7 +67,7 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
-def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Response:
+def _post_slack_webhook(client: TestClient, payload: dict[object, object]):
     body = json.dumps(payload, separators=(",", ":")).encode()
     timestamp = "1700000000"
     return client.post(

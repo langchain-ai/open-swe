@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:f60ff5332327ac80c5a38dd561f25da937309b90fbd53e6b317ed2c78d3e4081",
+  "pageVersion": "sha256:6ea594025db09069873f1c725250cbd0931617392f0c250bb1f2899f9af8f168",
   "claims": [
     {
       "id": "claim_7e68d8872dad4c0389a1bc0c65b87801",
@@ -223,10 +223,56 @@
           "version": "repo-lines-v1:sha256:6e0e0cc79659b594ced04721f05d7d092402d35f304f058f67b9d5185ef05c1c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxODAwYWE1NWQxM2E4MTMzN2QzOTk3NTQxNjJkN2M1MzNkZWYyYjA5MjZiZDkxNDMwYzE3MWFmMDczZjhjN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyY2RjNDY5MzMyODhkNDUxMWJhZWY1OGRjYTViOWM3ZDNlYmQzM2M3OGI4NzQwNDMxZmUzYWEyMTg2NmQxNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE4YWNmMWZjNjQxZjQzYjNhZTdkNGI4ZjFiM2ZlZTc1MDdkMTY2ZGYzZTUwMzNmYmU1YWZkNDMyYjM5NzJlMjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwN2RjOGJhNDYzNmRmMjA2ZjI3NzY4YWFiOTBiMmM2YmVmMTQ3ZTEwNmY0YTkxOTdjODUyOGMwYTg5NDBjMzYifQ"
         }
       ]
+    },
+    {
+      "id": "claim_c5455364edc7432193aabbffb399f9c5",
+      "statement": "The dashboard router exposes authenticated API areas for profile and team settings, repository reviews and review chat, skills, schedules, and thread operations; schedule creation, changes, triggering, and deletion require the admin dependency, while listing schedules requires a session.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/routes.py#L1786-L1832",
+          "version": "repo-lines-v1:sha256:864cc8fe347d71c1efe03aff5c037945c130bffb31704035a081bc69bd51b6eb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiMWY1N2Y1ZTk3NTJkMTZkNjIwYzJhM2NiYjFjOTgxYTgwMTRlOWEzMzU0YzBjMjJlYzJiMmRiOTQ2MDE3MDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNmIzMzVkN2RkNmY5YTJjYjU5ZmJhMjY5MWY3NmEzODk5ZDFlMDY2MjY1YTQ0ODI2MzNkNjYwY2ViMmFiMTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAwY2FmMDBmZmMzZWYyMDY5Y2QxYzk4ODRlMGU0ZDNkZTFmM2VkMTgyY2Q4MmNjMDBhN2YwY2ExYWQ1NzViYWQifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L1835-L2339",
+          "version": "repo-lines-v1:sha256:b6174a36e771596b308fd69af496ffe308e7980a5aa031da5256d222e9c782c3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTA1LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiYTY2YTYyZWJlZmQzYjUzYjdjODRlOTgzNjI5MDBlODViODhkNzczZWE4NGUzYzcyZGM3ZTlhOGU0ODJkNDg4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MWYyZGNhNzE1NTMzMmMzOTJjYjgyYmU1NWJlNjMzMDEwNDMzNjE3NDUxYzE5YTVlZjVmOWQwZjEzOTMxMzFmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIwYWQ2OGQzMmU0MDk0MWEwYzVhNWUwM2ExMWUzYTBjYjljMmJmMGNlZTJmNWZkMjdjZDc1NWM3YTIyZmM2ODg0IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzOGE5YTNmZDFjYzg1YzFlMTBjZDg1MGFhMmQ2N2RkNWRhOWVjNmI2M2M5ZGMxZDhiMzY2MDdkNDI3OWZkZDY5In0"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L86-L200",
+          "version": "repo-lines-v1:sha256:e296229c959ca47f4edc0b85f0522d5aea6fcee6b0bd74d41e6adf33a17f80c2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE1LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3MjRhY2IyNGMyNDFmZjQ4NGQwMzA0NTRjMDlhYjBhOGMwZDUyZThjZmI4OTEzOGJmZTRiYWYxNTFlNmI1MDJlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyYTdmOTUwZmEzZjEyN2MwZTJhZjkyMWVjMDRiYzczYTNhMzJkNzMxMzhhMTgyY2Q4NDUwYTc0ODlhMGU2MGQ5IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI0NzA4OTE5ODIwMjhkY2RlYTBhOTBhOWE4OTgwNzA3MDQzYjdlNTYxM2I2MDc2M2MyNmZmNmU2ZWFiYzJkOGY2IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzZGE1NzZhMDgyNzAwMTI0ODkyMGQxYWIxMTQxNDU1Y2ViNDJkMWFlNDBiZjQ4ZDk0MjNhZDMxNDk1Mzk5MTIwIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_882b84696e8e4eec8797b42eacc8b20a",
+      "statement": "The shared pytest fixtures replace the agent store client with an in-memory implementation that preserves the production serialization path, clear the process-global TTL cache around each test, and default automatic review to enabled unless a test overrides the gate.",
+      "evidence": [
+        {
+          "resource": "repo://tests/conftest.py#L14-L97",
+          "version": "repo-lines-v1:sha256:d79485eed23822299198ce0ea8f10a368f57d87b11202b02aeb8f1e74f5414d6:eyJzZWxlY3RlZExpbmVDb3VudCI6ODQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3MzZjYmZhYjUxNjhkYzNhZmM3OTlkYzU3NTU5N2IwYzg5ZDQyODczZDM5Y2YxZGQxYmQ4Njg5YmEwYTk2NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiMjg4MDNlMzYyYWJhOGM3MzIwMGNhOWRiZjc1ZTg2N2Q3ZTU2Y2JkNjU5MTcyNThkNTBhYmUwYzI2Y2I5YjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwMGQwZDE5OTI5MWRhMWUzOGNjMTMzMjg0NDg5OTg2NGIyOWJlZjRmMTI5M2JiOTI2NTA2ZTQ1NjRkOGJmNjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cb29b7092f3b41d7b889218b54cf8950",
+      "statement": "The Playwright end-to-end harness runs the real agent code, local sandbox, and local git remote while faking the LLM and external SaaS HTTP boundaries; root pnpm scripts provide browser and Electron end-to-end commands.",
+      "evidence": [
+        {
+          "resource": "repo://package.json#L13-L16",
+          "version": "repo-lines-v1:sha256:736bae5dc4be9aded3eee5177bdb19df18d53ca1632f2a843c5c47b6ce6f5585:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGE4MmJlMjcxNmYzZDNmZmM4NjgwNjhhYjBlMGYwZmU2ZjczNDc1ZGEyNWU3ZGEzZmVjNDNlOGU2MDVlODQ5YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWNjNDM0M2I0YjNhYWE0YWI1ZDUwMzljNWZkZGYyNjIwYTI1NDg5NmFmM2NmMjE4MWM0NzgxOGRhNzMzZDUzNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGYwNTgxNWQwZWZmYzczMjU2ODNkZGE0MTQ4NWNlZGIyNmYzZTdkYTAwNzYzNjE0MGNmM2NiNjQzMDVmMDM2ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGZiZGEwMmQyYTgxNDgwNWNhNDllYjY5NWFmZjA2ZGMxYTUxNWI5YTk0NWVkZTEzMDUzNDY0NzEzMzRhN2U0MCJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/README.md#L1-L32",
+          "version": "repo-lines-v1:sha256:99c22dbd4519cdcc465e24392d19415b42de38448220716aac4a0f2da7786859:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkMjcyNDBhZmIzNzliZGU4NTg3MmNmYmY2ZGE5N2VmY2MyMjQyZTZhNmRlMWVjMTliMmRjM2M1ZWRkZjU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3MGRlOGEwOGI3Yjk2MGFiY2FiNDJhMzg3MDc2ZWU3NDk3NWFmOTIwZjkxNjM3OWY5YzcwMWFkMjA3NmIwZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyMWQxOTBkZWUwYzkwNDE1MmMwMmNlNWViMDUxOTk0ZjJkMTc0M2ExNmE3ZTZlMTMzYTE3NzM2MGI5YjUzZDAifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/README.md#L71-L101",
+          "version": "repo-lines-v1:sha256:126016b8dd629a6c758f1e50a25ea197408aa64749922cc2d099baa40cde2a87:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4MTE2M2FiMTc0NGE0OGFiODM0ZWQ5YzBkZDE0MmMyMDg2NGQ1ZmZiZjM0MTE3MjYzMmI1MzNkNjBjMTkxMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkMDUzOWQ1Mzk0ZGMyZmQwZmUxMTI0Yjc4NTE5YTljNzViNjNlNzUyYWJjMzdjYzRmMzg4ZWZiNGRhZGRmN2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwNmY2OTVlNmVlYjU4NDQ3MWQ5YzUyNTFjMTAyMDQzNDI3ZjQzMjE1YjAyMzQxNTYxNjlmMDc1ZDY1MTMzYmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2OGVkMTUyZTc5NjM1MDJhY2IyNDcxNTk4MmVmOTY1ZmVlMDZlZTE3ZDc0NTJlODE5YTVhODViYjMyMjg4ZjAifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-28T11:53:01.759Z"
+    "at": "2026-08-31T08:17:06.525Z"
   }
 }
