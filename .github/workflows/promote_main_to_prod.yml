@@ -23,3 +23,8 @@ jobs:
       - name: Force-push main to prod
         run: |
           git push --force origin HEAD:refs/heads/prod
+
+  release-desktop:
+    needs: promote
+    uses: ./.github/workflows/desktop-release.yml
+    secrets: inherit

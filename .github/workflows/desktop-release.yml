@@ -1,16 +1,8 @@
 name: Release Desktop
 
 on:
+  workflow_call:
   workflow_dispatch:
-    inputs:
-      version_bump:
-        description: "Version increment type"
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
 
 permissions:
   contents: write
@@ -30,7 +22,29 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Resolve desktop release
+        id: release
+        run: |
+          stable_version=$(node -p "require('./desktop/package.json').version")
+          if git rev-parse "refs/tags/desktop-v${stable_version}" >/dev/null 2>&1; then
+            timestamp=$(date -u +%Y%m%d%H%M%S)
+            version="${stable_version}-nightly.${timestamp}"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "label=Open SWE Desktop Nightly ${timestamp}" >> "$GITHUB_OUTPUT"
+          else
+            version="$stable_version"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "label=Open SWE Desktop v${version}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=desktop-v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set build version
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          node -e "const fs=require('fs'); const path='desktop/package.json'; const pkg=require('./'+path); pkg.version=process.env.VERSION; fs.writeFileSync(path, JSON.stringify(pkg, null, 2)+'\n')"
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -42,54 +56,6 @@ jobs:
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
         with:
           mode: firewall-free
-
-      - name: Bump desktop version
-        id: bump
-        env:
-          BUMP_TYPE: ${{ inputs.version_bump }}
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const path = 'desktop/package.json';
-          const bump = process.env.BUMP_TYPE;
-
-          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-          const current = pkg.version;
-          const parts = current.split('.').map(Number);
-
-          if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
-            throw new Error(`Invalid semver in ${path}: ${current}`);
-          }
-
-          let [major, minor, patch] = parts;
-          if (bump === 'major') {
-            major += 1;
-            minor = 0;
-            patch = 0;
-          } else if (bump === 'minor') {
-            minor += 1;
-            patch = 0;
-          } else if (bump === 'patch') {
-            patch += 1;
-          } else {
-            throw new Error(`Unsupported bump type: ${bump}`);
-          }
-
-          const next = `${major}.${minor}.${patch}`;
-          pkg.version = next;
-          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_version=${next}\n`);
-          NODE
-
-      - name: Commit desktop version
-        env:
-          VERSION: ${{ steps.bump.outputs.new_version }}
-        run: |
-          git add desktop/package.json
-          git -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "chore(desktop): release v${VERSION}"
-          git push origin HEAD:main
 
       - name: Install workspace dependencies
         env:
@@ -133,7 +99,7 @@ jobs:
       - name: Verify and package release assets
         id: assets
         env:
-          VERSION: ${{ steps.bump.outputs.new_version }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           shopt -s nullglob
           mac_zips=(desktop/dist/"Open SWE-${VERSION}"-*-mac.zip)
@@ -170,16 +136,17 @@ jobs:
 
       - name: Tag desktop version
         env:
-          VERSION: ${{ steps.bump.outputs.new_version }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
-          git tag "desktop-v${VERSION}"
-          git push origin "desktop-v${VERSION}"
+          git tag "$TAG"
+          git push origin "$TAG"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: desktop-v${{ steps.bump.outputs.new_version }}
-          name: Open SWE Desktop v${{ steps.bump.outputs.new_version }}
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.label }}
+          prerelease: ${{ steps.release.outputs.prerelease }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
