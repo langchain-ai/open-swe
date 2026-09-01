@@ -34,4 +34,5 @@ jobs:
     uses: ./.github/workflows/desktop-release.yml
     with:
       release_ref: ${{ needs.promote.outputs.promoted_sha }}
+      nightly: true
     secrets: inherit

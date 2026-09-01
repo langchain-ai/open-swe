@@ -6,6 +6,9 @@ on:
       release_ref:
         type: string
         default: main
+      nightly:
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -33,23 +36,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           stable_version=$(node -p "require('./desktop/package.json').version")
-          stable_tag="desktop-v${stable_version}"
-          if git rev-parse "refs/tags/${stable_tag}" >/dev/null 2>&1; then
-            if ! gh release view "$stable_tag" --json assets --jq '.assets | length >= 3' | grep -qx true; then
-              git checkout --detach "$stable_tag"
-              version="$stable_version"
-              prerelease=false
-              label="Open SWE Desktop v${version}"
-            else
-              timestamp=$(date -u +%Y%m%d%H%M%S)
-              version="${stable_version}-nightly.${timestamp}"
-              prerelease=true
-              label="Open SWE Desktop Nightly ${timestamp}"
-            fi
+          if [ "${{ inputs.nightly }}" = "true" ]; then
+            timestamp=$(date -u +%Y%m%d%H%M%S)
+            version="${stable_version}-nightly.${timestamp}"
+            prerelease=true
+            label="Open SWE Desktop Nightly ${timestamp}"
           else
+            stable_tag="desktop-v${stable_version}"
             version="$stable_version"
             prerelease=false
             label="Open SWE Desktop v${version}"
+            if git rev-parse "refs/tags/${stable_tag}" >/dev/null 2>&1; then
+              if gh release view "$stable_tag" --json assets --jq '.assets | length >= 3' | grep -qx true; then
+                echo "$stable_tag already has a complete release"
+                exit 1
+              fi
+              git checkout --detach "$stable_tag"
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=desktop-v${version}" >> "$GITHUB_OUTPUT"
