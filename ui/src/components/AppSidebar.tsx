@@ -29,16 +29,16 @@ interface NavItem {
 
 const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
   {
-    heading: "Personal",
+    heading: "User settings",
     items: [
-      { to: "/my-settings", label: "Settings", icon: IoOptionsOutline },
+      { to: "/my-settings", label: "Profile", icon: IoOptionsOutline },
+      { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
       { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
     ],
   },
   {
-    heading: "Workspace",
+    heading: "Workspace settings",
     items: [
-      { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
       {
         to: "/review",
         label: "Open SWE Review",
