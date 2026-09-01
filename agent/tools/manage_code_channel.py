@@ -388,11 +388,17 @@ async def _create(
                 is_private,
             )
         )
-        try:
-            channel_id, failure = await asyncio.shield(promotion)
-        except asyncio.CancelledError:
-            await promotion
-            raise
+        cancelled = False
+        while True:
+            try:
+                channel_id, failure = await asyncio.shield(promotion)
+                break
+            except asyncio.CancelledError:
+                if promotion.done():
+                    raise
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
     if failure:
         return failure
 
