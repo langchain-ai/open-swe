@@ -242,6 +242,28 @@ async function createThreadWorktree(thread, baseBranch) {
 }
 
 /**
+ * Two agents in one working tree overwrite each other's edits and fight over
+ * its branch, and the backend now runs local threads concurrently, so a tree an
+ * agent is working in is off limits to everything else.
+ */
+async function assertWorkspaceFree(root, exceptThreadId = null) {
+  const activity = await backendSupervisor.threadActivity();
+  if (!activity) throw new Error("Could not reach the local Open SWE backend");
+  const busy = localThreadStore
+    .list()
+    .find(
+      (thread) =>
+        thread.id !== exceptThreadId &&
+        activity[thread.id] === "running" &&
+        threadRoot(thread) === root,
+    );
+  if (busy)
+    throw new Error(
+      `“${busy.title}” is working in ${path.basename(root)}. Stop it, or use a worktree.`,
+    );
+}
+
+/**
  * A branch can only be checked out in one working tree, so a thread starting on
  * one that already has a worktree runs in that worktree rather than trying to
  * create a second checkout of it.
@@ -252,9 +274,9 @@ async function startThreadWorktree(thread, baseBranch) {
     ? (await localBranches(project)).find((ref) => ref.name === baseBranch)
         ?.worktreePath
     : null;
-  return existing
-    ? localThreadStore.setWorktree(thread.id, existing)
-    : createThreadWorktree(thread, baseBranch);
+  if (!existing) return createThreadWorktree(thread, baseBranch);
+  await assertWorkspaceFree(existing, thread.id);
+  return localThreadStore.setWorktree(thread.id, existing);
 }
 
 /**
@@ -312,6 +334,7 @@ function configureDesktopIpc() {
         ? registeredProject(input.cwd)
         : null;
     if (!project) throw new Error("Project is not registered");
+    await assertWorkspaceFree(project);
     return checkoutBranch(project, input.branch);
   });
 
@@ -400,6 +423,7 @@ function configureDesktopIpc() {
         "Add a valid project to Open SWE before starting a local agent",
       );
     await backendSupervisor.start();
+    if (input?.workspaceMode !== "worktree") await assertWorkspaceFree(cwd);
     let thread = localThreadStore.create({ ...input, cwd });
     try {
       if (input?.workspaceMode === "worktree")
@@ -496,9 +520,17 @@ function configureDesktopIpc() {
     const ref = (await localBranches(project)).find(
       (candidate) => candidate.name === branch,
     );
-    if (ref?.worktreePath) return moveThreadWorkspace(thread, ref.worktreePath);
-    if (ref?.current) return moveThreadWorkspace(thread, null);
-    await checkoutBranch(threadRoot(thread), branch);
+    if (ref?.worktreePath) {
+      await assertWorkspaceFree(ref.worktreePath, thread.id);
+      return moveThreadWorkspace(thread, ref.worktreePath);
+    }
+    if (ref?.current) {
+      await assertWorkspaceFree(project, thread.id);
+      return moveThreadWorkspace(thread, null);
+    }
+    const root = threadRoot(thread);
+    await assertWorkspaceFree(root, thread.id);
+    await checkoutBranch(root, branch);
     return syncThreadBranch(thread);
   });
 

@@ -31,6 +31,14 @@ def _allowed_projects() -> set[str]:
     }
 
 
+def is_desktop_worktree(path: str) -> bool:
+    """Whether the path is a worktree the desktop app created for a thread."""
+    worktrees_dir = os.environ.get("OPEN_SWE_LOCAL_WORKTREES_DIR")
+    if not worktrees_dir:
+        return False
+    return Path(os.path.realpath(worktrees_dir)) in Path(os.path.realpath(path)).parents
+
+
 def resolve_desktop_project(configurable: dict[str, Any]) -> str:
     """The directory a desktop run may work in.
 
@@ -43,9 +51,9 @@ def resolve_desktop_project(configurable: dict[str, Any]) -> str:
     if not isinstance(requested, str) or not requested:
         raise ValueError("Desktop runs require a local project path")
     project = Path(os.path.realpath(requested))
-    worktrees_dir = os.environ.get("OPEN_SWE_LOCAL_WORKTREES_DIR")
-    in_worktrees = bool(worktrees_dir) and Path(os.path.realpath(worktrees_dir)) in project.parents
-    if not project.is_dir() or not (in_worktrees or str(project) in _allowed_projects()):
+    if not project.is_dir() or not (
+        is_desktop_worktree(requested) or str(project) in _allowed_projects()
+    ):
         raise ValueError("local_project_path is not an allowed project directory")
     return str(project)
 

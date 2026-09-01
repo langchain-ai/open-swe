@@ -8,6 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from .desktop import is_desktop_worktree
 from .input_messages import dynamic_context_hash, input_message_text, wrap_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -103,9 +104,14 @@ async def rename_temporary_worktree_branch(
 def schedule_worktree_branch_rename(
     *, worktree_path: str, messages: Sequence[BaseMessage], model: BaseChatModel
 ) -> None:
-    """Name the worktree's branch from the request, without blocking the run."""
+    """Name the worktree's branch from the request, without blocking the run.
+
+    A thread running in the user's own checkout owns no branch to rename, and
+    one of theirs could happen to carry a placeholder name from an earlier
+    session, so only a worktree the app created is ever touched.
+    """
     request = _request_text(messages)
-    if not request or worktree_path in _inflight_paths:
+    if not request or worktree_path in _inflight_paths or not is_desktop_worktree(worktree_path):
         return
     _inflight_paths.add(worktree_path)
 
