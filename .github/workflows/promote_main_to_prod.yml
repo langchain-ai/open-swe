@@ -17,31 +17,22 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       promoted_sha: ${{ steps.promoted.outputs.sha }}
-      nightly: ${{ steps.promoted.outputs.nightly }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: main
           fetch-depth: 0
-      - name: Resolve desktop release type
+      - name: Record promoted commit
         id: promoted
-        run: |
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          previous_version=$(git show origin/prod:desktop/package.json 2>/dev/null | node -e "let data=''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => console.log(JSON.parse(data).version))" || true)
-          current_version=$(node -p "require('./desktop/package.json').version")
-          if [ "$current_version" = "$previous_version" ]; then
-            echo "nightly=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "nightly=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Force-push main to prod
         run: |
           git push --force origin HEAD:refs/heads/prod
 
-  release-desktop:
+  release-desktop-nightly:
     needs: promote
     uses: ./.github/workflows/desktop-release.yml
     with:
       release_ref: ${{ needs.promote.outputs.promoted_sha }}
-      nightly: ${{ needs.promote.outputs.nightly == 'true' }}
+      nightly: true
     secrets: inherit
