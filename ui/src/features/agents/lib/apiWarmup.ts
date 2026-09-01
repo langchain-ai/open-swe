@@ -23,9 +23,12 @@ function warmApiRequests(
   const targets = urls.slice()
   if (sidebarUrl) {
     let includeAutomations = false
+    let projectMode = true
     try {
       const raw = localStorage.getItem(prefsKey)
-      const filters = raw ? JSON.parse(raw).filters : null
+      const prefs = raw ? JSON.parse(raw) : null
+      const filters = prefs?.filters
+      projectMode = prefs?.organize !== "list"
       if (filters) {
         includeAutomations =
           filters.includeAutomations === true ||
@@ -36,10 +39,12 @@ function warmApiRequests(
       // An unreadable preference just means the default (false).
     }
     targets.push(
-      sidebarUrl.replace(
-        "__SIDEBAR_SCOPE__",
-        includeAutomations ? "all" : "interactive"
-      )
+      sidebarUrl
+        .replace(
+          "__SIDEBAR_SCOPE__",
+          includeAutomations ? "all" : "interactive"
+        )
+        .replace("__SIDEBAR_OWNERLESS__", String(projectMode))
     )
   }
 
@@ -100,6 +105,7 @@ function sidebarUrlTemplate(): string {
   search.set("offset", "0")
   search.set("resolved", "false")
   search.set("scope", "__SIDEBAR_SCOPE__")
+  search.set("ownerless", "__SIDEBAR_OWNERLESS__")
   return `${agentsLangGraphApiUrl}/threads/page?${search.toString()}`
 }
 
