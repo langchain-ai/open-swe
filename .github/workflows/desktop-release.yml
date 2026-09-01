@@ -10,11 +10,6 @@ on:
         type: boolean
         default: false
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - desktop/package.json
 
 permissions:
   contents: write
@@ -24,62 +19,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  promote-desktop:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Promote latest matching nightly
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          stable_version=$(node -p "require('./desktop/package.json').version")
-          [[ "$stable_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-          stable_tag="desktop-v${stable_version}"
-          prefix="${stable_tag}-nightly."
-          nightly_tag=""
-          while read -r candidate; do
-            if gh release view "$candidate" --json assets --jq '.assets | length >= 3' | grep -qx true; then
-              nightly_tag="$candidate"
-              break
-            fi
-          done < <(gh release list --limit 1000 --json tagName,isPrerelease \
-            --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"${prefix}\"))) | .tagName")
-
-          if [ -z "$nightly_tag" ]; then
-            echo "No complete prerelease found matching ${prefix}*"
-            exit 1
-          fi
-          if gh release view "$stable_tag" >/dev/null 2>&1; then
-            echo "$stable_tag already has a release"
-            exit 1
-          fi
-
-          nightly_sha=$(git rev-parse "${nightly_tag}^{commit}")
-          git fetch origin prod
-          if [ "$nightly_sha" != "$(git rev-parse FETCH_HEAD)" ]; then
-            echo "$nightly_tag was not built from the currently deployed prod commit"
-            exit 1
-          fi
-          if git rev-parse "refs/tags/${stable_tag}" >/dev/null 2>&1; then
-            test "$(git rev-parse "${stable_tag}^{commit}")" = "$nightly_sha"
-          else
-            git tag "$stable_tag" "$nightly_sha"
-            git push origin "$stable_tag"
-          fi
-          gh release edit "$nightly_tag" \
-            --tag "$stable_tag" \
-            --title "Open SWE Desktop v${stable_version}" \
-            --prerelease=false \
-            --latest
-
   release-desktop:
-    if: github.event_name != 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-latest
 
     steps:
@@ -99,22 +40,21 @@ jobs:
           [[ "$stable_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
           if [ "$NIGHTLY" = "true" ]; then
             timestamp=$(date -u +%Y%m%d%H%M%S)
-            version=$(node -p "const [major, minor, patch] = '${stable_version}'.split('.').map(Number); [major, minor, patch + 1].join('.')")
-            tag="desktop-v${version}-nightly.${timestamp}"
+            version="${stable_version}-nightly.${timestamp}"
+            tag="desktop-v${version}"
             prerelease=true
             label="Open SWE Desktop Nightly ${timestamp}"
           else
-            stable_tag="desktop-v${stable_version}"
+            tag="desktop-v${stable_version}"
             version="$stable_version"
-            tag="$stable_tag"
             prerelease=false
             label="Open SWE Desktop v${version}"
-            if git rev-parse "refs/tags/${stable_tag}" >/dev/null 2>&1; then
-              if gh release view "$stable_tag" --json assets --jq '.assets | length >= 3' | grep -qx true; then
-                echo "$stable_tag already has a complete release"
+            if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
+              if gh release view "$tag" --json assets --jq '.assets | length >= 3' | grep -qx true; then
+                echo "$tag already has a complete release"
                 exit 1
               fi
-              git checkout --detach "$stable_tag"
+              git checkout --detach "$tag"
             fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
