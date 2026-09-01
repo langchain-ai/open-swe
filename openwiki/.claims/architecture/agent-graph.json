@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:3cc8b4bedd550ff4b91e3d2ea2af60a26be145f77ead16d6122d1c78e2289ee5",
+  "pageVersion": "sha256:66ad98361341f791959da6deb970491c84a541d126333bd59188d10dd60532e6",
   "claims": [
     {
       "id": "claim_d5d2c884f05e48659e2047c261720386",
@@ -245,16 +245,6 @@
       ]
     },
     {
-      "id": "claim_febdb92f389c43e89e51cd19286363e4",
-      "statement": "Optional integration tools (Observability, Currents, Notion, Corridor) are registered as lazy groups in a DynamicToolMiddleware so their MCP handshake runs only when the agent asks for the group, rather than being placed in static_tools.",
-      "evidence": [
-        {
-          "resource": "repo://agent/server.py#L1680-L1698",
-          "version": "repo-lines-v1:sha256:e1e119a29000163eee3d8abf3d44db686c8073e5847510e840010a398eb0e180:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwY2U2Njc0NWQyYTQzMWExMGI2MzQyNzcxMTZkNjdkZmYwNTYxMGQxNWM3ZDJkMTljZTQyMWM3NmExMmM3MDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3MDdkNzY2YTFkZmYxZWJkNmZhMDg1MjdkNDEzNjIyNDY3ODljNmIxZDRlOWViODJkNzAyYjYzZDExMTI2NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVlYzZkZjQ0OGJjZTYxMDNiZDgwZWIyNWU2MzIxYWQ4ZjAyMjgwOTRlMzgzNmU5ZDRiZGFlNGZiYWM0YjM4ZTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJkNTJhYzJkOWZkNjY1ODEzMmJjZDdmNDdiMDMyZDAyMWI2MTI3ODNiZDEyMDI2NTVmZjI0NDEwMmE2OTE2ZTgifQ"
-        }
-      ]
-    },
-    {
       "id": "claim_d5f9d07cc033405ca7e8a84d39e777d6",
       "statement": "ExcludeToolsMiddleware removes tools that must never be exposed, using DEEP_AGENT_EXCLUDED_TOOLS (e.g. grep) or the broader STOP_SUMMARY_EXCLUDED_TOOLS in stop-summary mode.",
       "evidence": [
@@ -378,25 +368,89 @@
     },
     {
       "id": "claim_1bcd22d7b503408cb543922548af3e54",
-      "statement": "PlanModeMiddleware is installed unconditionally with an initial configurable plan_mode value and excludes PLAN_MODE_EXCLUDED_TOOLS statefully, so a mid-run enter_plan_mode call also restricts the tool surface.",
+      "statement": "PlanModeMiddleware is installed unconditionally with the factory's initial configurable plan_mode value, resets state to that value at run start, and filters each model request so a mid-run enter_plan_mode command restricts the next turn without leaking stale plan mode into a later run.",
       "evidence": [
         {
-          "resource": "repo://agent/server.py#L1585-L1596",
+          "resource": "repo://agent/middleware/plan_mode.py#L43-L79",
+          "version": "repo-lines-v1:sha256:c7014b525dfc14f82de888d40f0f515e24eb5c1f9788805d03e4ded9263f6702:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwNjE2ZjQyYjlmYzMzM2FlY2RkMGYyZjNmMjUxNWUzNDE4ZDE2NDUwZjJiZjc3Mjk5ZGY0NzZiZjE1YmY3ZWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMwNDczYzM0ZDBiYTZlN2JjNjhmYjhlMmRkMWZlZjdiM2UyODU5ODNiMDc1ZDI3NGJmYTMyODJjNWIwN2UyNjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1599-L1610",
           "version": "repo-lines-v1:sha256:4ea7c26198d03ad3a5964845a2359e148c3655b4c6e799e698baecc057fcf85f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxOWM1OTRkOWNkNGNkODE2N2Q1YmRjYjRjODY0NWJhZmE3OGIzNTgxODRjZmI5NzE3MmI5NmYzYjA2YjQxYjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjZTI1YjA4YTNhMzY3ZjI3ZDA3YjQyZTUyYThmYTc5Y2QwNGVjMGI1NmY0YmQwOGU2NzRiZTcwMDFjZDgwODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjYzIyNDgzMTRmODNlYjE0NjcxZGYwNDc1YmNjZjRmMDk0OThlYzRjY2Y4NDYzMGE2YjI1NWM0MTBiYjVlNDcifQ"
         },
         {
-          "resource": "repo://agent/server.py#L1810-L1818",
-          "version": "repo-lines-v1:sha256:7d08690159a2581159c4aa5a45fac120ce52bcab1157f8be69d3166319b00d7b:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmJhNWJjY2JjMjhkZjU3MWM0MjE1NjVmNDAwNWE2NDliYTJkZjcwMjI3YTg5NGJhNWQ0OTkxOGEyMzkwNjI1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjE5YzY5NDIyMjA0Y2MxMGUzY2NjMzE5MzkxYzlmMTdlOGU0ZTU0YzM4NjVkNzA0NTZmNWVkZDQyOWM0ODgwZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTBiZjMxNmIyYjYxMjUxYzY4YTA2ZDgyOGQ2YTM4ZGRmOTE2ZWY4ZjIzOWM4NTUwZGQxOTk3YjQxMjVlMWZjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDJmZWE4NTJlY2UyYmZiNTMwNDk0ZmM0OGY0NWI1YTliZjU0NTJhZTQwOTQzZGU1ZmRhMWRkNTExN2FiMzk4MyJ9"
+          "resource": "repo://agent/server.py#L1824-L1825",
+          "version": "repo-lines-v1:sha256:e3ba6be7ea1f42bb9c132d0e1221c9caf4b42fa72faa5ebbc02270f31507af99:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmJhNWJjY2JjMjhkZjU3MWM0MjE1NjVmNDAwNWE2NDliYTJkZjcwMjI3YTg5NGJhNWQ0OTkxOGEyMzkwNjI1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZWE0MjBmZWNjZDBkZjQyMWFmMWE1MDAyZDM2MDQ0ZGJlYjdhZGZmMTBiNGE0Yzc2YmI3MmI4MDk0MWY0N2ViMiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTBiZjMxNmIyYjYxMjUxYzY4YTA2ZDgyOGQ2YTM4ZGRmOTE2ZWY4ZjIzOWM4NTUwZGQxOTk3YjQxMjVlMWZjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTFlZmRiNjE3YzlmMDkxZTFlYmMzNTA0Y2I5OWM3OTA1ZDQyODA2MmRiNjhhZTcxYTc3NGVjY2ZiYzIyZDk3YSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_b8b69999971b4765aa4986d3b9d0a179",
+      "statement": "Observability, Currents, and Notion tools are loaded while get_agent assembles the graph and supplied as eager DynamicToolMiddleware groups, whereas Corridor supplies its static name catalog with a loader that defers the MCP load until the agent selects a tool.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/dynamic_tools.py#L238-L244",
+          "version": "repo-lines-v1:sha256:e532729466b66f1d61f5bc6060c7964c916bedc681f2c9fc9fa14460826aadc0:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGUwYzUwMTUxMzhhNTAwYWViNDFhMzQxZjUyMWEwOWZlNmUzMjlhMjVjNzg5ZDQxNzU5ZDdmNjE4MDI4NDZmNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmU3OTBkZDk3MTIxNDQ5N2UxMDUxOThjZjA2NmI2NjA5ZDYzYTNiN2UyNTU1NDM0YWE1Y2NiNzY2YWM5OGU1YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGE3M2I0MDZmNjc4YTQ0ZmM4NTkwZDdmNTNkNmM2YTBiNmZjNzA5NjUxYWIxNjRhYjQxZTVkMmU1N2IxZGNmYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
         },
         {
-          "resource": "repo://agent/server.py#L781-L807",
-          "version": "repo-lines-v1:sha256:1c3b81884726c8ef758568162a26566822ca173a66b631afbf0b1c36886fdc72:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwOWE2MzJiMWZkNzcxMjczNWMwMjk0Y2VjMmFhODIyZTc0YTdlYTU0ZjIxOGMzNTVkMzQ3NzZiZWUxYTRiNGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRjNjhjM2MyODBjNDg5MDA1ZGU2Nzg2NjdjNzg2ZWY1OGI2YWY3YTVlYjkyNjFkMTUyYjk0MjQ2OTc5ZGViOGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUifQ"
+          "resource": "repo://agent/middleware/dynamic_tools.py#L70-L81",
+          "version": "repo-lines-v1:sha256:ca9376ed7f3d50a7506367950ffe16e494448d2690187c48293c7fc1b1a8fa0a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1YmE3ZmYzZTFmMjY5NzUzOWM2ZDk5MTk4NjA1ZmU2MTUzZDgzZjNlMjQ5OTU1ZjM4MzVmOWVmMDdiYzNlY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzYzA0NzA2NThhMDA3NWVhODU0OThjYzY5NzgzMDJmY2FkNjM3OGZjNGQ3MDE5MGM1MjI0MTQ5ZDFmZDg4NTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0YzczYzQzMzAxNzU5MTMxOWEzYjAyZWQ1MTJlMTcyNGI0YTc4NWVhMWZmZTg2M2FjZDUyMGUxYjQ5NTU5OTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUxZDZiOTBmOGExNmNkNzY4MjQ3YjJkODc4YmQ0ODA3ZjIyN2I5ZjkxMmIxYTVkZTBiZTQyOGE4MWZkNTk5YTQifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1619-L1636",
+          "version": "repo-lines-v1:sha256:21c0d6cb9305416b74948deb510aa0e63375788bba4a163e38ee2b1b7b292b53:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0ZDU0YTdiZTgzNzUzYzAxNzNhMjMyNDI1YmVkNjMwNzE0NzYwY2ZhNzE2MzQyNmEyYTVkNzc1YjM4OWRmMDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwNzJjZGQ2ZTI4MjU3MWI4YmEyY2RjMWUyNGMxNGIxZjk2NDk4MjI5ZDc5MTMxMWEwZGJkNzVhOWJlMDU4YmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRmMDBiMmZhYTc5ZDg1Zjc0OTE3MmFhMTg1OGM4YWFiMDRlMDRmNTdhZjUyMWZlNjAxNzA1ZmY4ODNhNGJmZGMifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1699-L1718",
+          "version": "repo-lines-v1:sha256:27ef648702d33eb08e6f4492209cb7f2af7aab98dcf4a5e67f039e6d327eefbe:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5NDJmM2NiYzlkNzMyMTcwZmZlOTAxMWZmNWFmN2Y4M2ZmMWMyNGNjMjY3ZWE3YTBjMmE2ZTM3NGRkZTNlYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3MDdkNzY2YTFkZmYxZWJkNmZhMDg1MjdkNDEzNjIyNDY3ODljNmIxZDRlOWViODJkNzAyYjYzZDExMTI2NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMwOTZkNGM5ZDg3OGRlZjgyMzQwYjQ5ZjE3MTVkMzdiN2Y2ZDBjMTRmYjIxM2Y5NzNhM2Q2MzdmYjNmZjQxZGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJkNTJhYzJkOWZkNjY1ODEzMmJjZDdmNDdiMDMyZDAyMWI2MTI3ODNiZDEyMDI2NTVmZjI0NDEwMmE2OTE2ZTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1eb7592ab2c449d68b1729b737b3d7c1",
+      "statement": "DynamicToolMiddleware requires integration selection through load_integration_tools before adding a group's tools to a later model request; it serializes each group's load, logs loader failures as unavailable tools, and resets the loaded-name state before an agent run.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/dynamic_tools.py#L165-L230",
+          "version": "repo-lines-v1:sha256:d3536fd7727e3ea70d432149bc4fe7b2435fd7a02d3e330c06025c34020b6e13:eyJzZWxlY3RlZExpbmVDb3VudCI6NjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwZGVjZGFlZWM2ZmM2NTYxMjYxZjcyNGVhNWRlOGIyOGM1NTJkMWNjZDEyMGI3ZWRhMmRmZjQzODQwMDVlMDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5ODk4ZDA4NWM1YTY2NWEwNjIwNzE1OTBiMmZhNDQxYWE1MTA5NjJhYTk5YzA4ODQ0NGMxNGQ5YWJiZmNjZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ2N2M5YWZiNjNhZWIxMmFiYTgwMTc4MjZhODgyZjg0OWRlMmVkM2NiMjgzNjNmYTQ0ODgxZDY1YTgyZTFjZTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjllMDkwM2I1ZWM5YWRmMmI4NWUxNjQ1NGE4MWVhMDI5OWUwMTEzOTYyZjMwMWYwYjg1MTMxNGY4NjA1NTFmZTEifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/dynamic_tools.py#L90-L159",
+          "version": "repo-lines-v1:sha256:a6dd1219b9aff453e53d742ebee0de2dbd773a70bf1769d3837d7cd9aff276e6:eyJzZWxlY3RlZExpbmVDb3VudCI6NzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0MGYxMjBhNDdkYWE5MWY1Y2JkYTcyZmIxMGI1YWFlMjIzMWE2N2U3MWMyYjNiYThkZDE4MWRkMjJiZmQ1YzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhYWU4YTBjYTc2Zjk4ZjdiN2RjNzk4NDk1MWQ2M2U1N2RiM2M2NDU1NzljYTUxYmFkNmE1MzlkNjE0ZWRiYmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjcyNjQxMjkyNTBhOThjZWRjOTlhMjkxZGM4OTkxZjViYTIwYzcyNjdkYzU5ODc0MjU0NDNhNWIzMjVmYjMwOGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ4OTFlOGUyZDgyMGVjNjdhMTU4OTI5Njk4YTdhNTIyNDYwYjBkMDQwM2VmZTFhNGJkZGVjYTk0MDY5OTM4ZGQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_19c5b03e28df4ec89b4957eec33fe6d1",
+      "statement": "PLAN_MODE_EXCLUDED_TOOLS includes delegation and external mutation tools, including create_automation, update_automation, trigger_automation, and delete_automation; it deliberately does not exclude execute, so command read-only behavior is a prompt-level discipline.",
+      "evidence": [
+        {
+          "resource": "repo://agent/server.py#L779-L816",
+          "version": "repo-lines-v1:sha256:3d7ab8e39fe97a97036330cddd1a7e8028d8e8110cbd89e693bda49eb7adf995:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhNDMwZjdlZTdiM2RhMGM3MDdjNzY4ODA2YWY4NjVjNzM1Mjg2NGEwOGVkNmI4MmJiOGQ3M2FkMGZjZTdmMGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0NjYzNmUxZTllNWZkZTU0MmE2ZDA2OTkyOTY1M2MyMDdmYmFmNDI3MjJmZTlmZmFiYWY0MTc3NTBlNzAxNTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUifQ"
+        },
+        {
+          "resource": "repo://tests/agent/test_plan_mode.py#L40-L65",
+          "version": "repo-lines-v1:sha256:fab3eb20b8e9b1ec05549e35f1941ade2fed0b99935496b4acf96338b8c48baa:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1ZTY0MjIxOTUxYTIzMWRhY2ZiNTYyOTg0YjU0NDEzNWE5NWIyMDUzZDQxMjkxNWQzYjBjNzRkMTg1MzU5NDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2NjkzMjllODg0OGY3NTFjMDRhYzNjYTk0MGVhMWJlMzhjOGE1YmEwZGVhNzgxNTg1ZjRjMWU2ZWFiNTQxM2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVjMTgxMjBhYzI5YzAzYzYxMGU5MzI5MDMyNmNiNTdhNmJkYWNiNjlhN2M0MGVkOWQ2ZjkyZGUxMjhmNGE0NzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU0NzAwZjM3MTJlZDM0OWY4ZDY1MTFjYTk4NzY1YmQxNTc2M2EzN2E2MWQwZGZiNDkxNGEzYzAzNDMwMWY2NWYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e9b2ce2c0bb44644ac2768ef6ac582d2",
+      "statement": "enter_plan_mode persists planning status when a thread is available and returns a Command that sets plan_mode true, while approve_plan verifies active mode, persists approved status with plan_mode false, and returns a Command that clears run state.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/approve_plan.py#L32-L80",
+          "version": "repo-lines-v1:sha256:4ee75b301cb01d886ebc58452905e8b175dc46f83feaaa8c1cf61912f6bb5702:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ0YzdmNjZmNmVkOTc1YzZmNTUzMDFmM2MzODljNzhjNTFhNzQxZWYyYzcyZWM2ZDhhYzgyODA2YTVkYjE5YjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFhZTQyMWI3ZWE3ODU0MzRmZTc0Yjk5Y2NhMGI2YTIwY2RjNzRmZTA4YmI2OTM3Mzk5NGNhZWNiZTRjZDAwMWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlkYTNkOWE5NjIwYWM1MDI4ZTIxMTA0MzIwOTU0MzM2MzU5ZTY2N2I5MWY1YTM2NTY5MjZjNjA0NjZkMjk2NTEifQ"
+        },
+        {
+          "resource": "repo://agent/tools/enter_plan_mode.py#L24-L63",
+          "version": "repo-lines-v1:sha256:91f1bbeb6869fa5369f8153bfd123a999f74e5c1e0a16c51ff285c57cc00e133:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM4NDU5ZWNlZTA2Y2EyMjAxZjM3MjUwZTU2YzA3ZWExMzdhNDlmNzFkNDVmZGFmZDgwOWE4NTY5ZTJiMTExMmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwZWFjNGVkY2JiNmIzMDc4NTI1ZDc5ODdkOTBmN2Y0MTg5ZTEyZjUzODIzZmNiZDVlNTJmNTNkNTk1OTM2ZDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-28T11:53:01.759Z"
+    "at": "2026-08-31T08:17:06.525Z"
   }
 }

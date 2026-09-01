@@ -23,8 +23,8 @@ const stream = {
   disconnect: vi.fn(),
 }
 
-vi.mock("@langchain/react", () => ({
-  useStreamContext: () => stream,
+vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
+  useAgentThreadRuntime: () => stream,
 }))
 
 const cancelThread = vi.fn((threadId: string) =>
@@ -140,6 +140,19 @@ describe("ChatComposer stop button", () => {
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
+  })
+
+  it("shows stop while a run submission is dispatching", () => {
+    render(
+      <ComposerPrimaryActions
+        canSubmit={false}
+        onStop={vi.fn()}
+        onSubmit={vi.fn()}
+        submitting
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
   })
 
   it("stops a direct run on Escape while steer is shown", () => {

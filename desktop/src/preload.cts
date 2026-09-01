@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
   getLocalThread: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-thread", threadId),
+  setAppearance: (appearance) =>
+    ipcRenderer.invoke("desktop:set-appearance", appearance),
   listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
   localActivity: () => ipcRenderer.invoke("desktop:local-activity"),
   updateLocalThread: (input) =>
@@ -112,7 +114,7 @@ window.addEventListener("DOMContentLoaded", () => {
       pointer-events: none;
       position: fixed;
       top: 0;
-      left: 90px;
+      left: 118px;
       right: 0;
       height: ${DRAG_REGION_HEIGHT}px;
       z-index: 2147483647;
