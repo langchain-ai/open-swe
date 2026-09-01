@@ -25,6 +25,7 @@ import { Messages } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { useShowSenderContext } from "@/features/agents/lib/senderContext"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
@@ -84,6 +85,7 @@ export function AgentThreadView({
 }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadRuntime()
+  const showSenderContext = useShowSenderContext()
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -182,9 +184,10 @@ export function AgentThreadView({
     return streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
-      messageArrivalTimestamp
+      messageArrivalTimestamp,
+      showSenderContext
     )
-  }, [snapshotMessages, stream.messages, stream.toolCalls])
+  }, [snapshotMessages, stream.messages, stream.toolCalls, showSenderContext])
 
   const isStreaming =
     thread.status === "running" ||

@@ -72,6 +72,21 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("shows sender context when enabled", () => {
+    const messages = [
+      new HumanMessage({
+        content:
+          '<input-message sender="system:sender-context" surface="automation" kind="system"><content>Debug metadata</content></input-message>',
+      }),
+    ]
+
+    expect(streamMessagesToUi(messages)).toHaveLength(0)
+    expect(streamMessagesToUi(messages, [], undefined, true)[0]).toMatchObject({
+      author: "system",
+      chunks: [{ kind: "text", text: "Debug metadata" }],
+    })
+  })
+
   it("preserves structured message whitespace", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({

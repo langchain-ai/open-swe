@@ -42,6 +42,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { useShowSenderContext } from "@/features/agents/lib/senderContext"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
@@ -77,6 +78,7 @@ function errorMessage(error: unknown): string {
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
   const stream = useAgentThreadRuntime()
+  const showSenderContext = useShowSenderContext()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
@@ -177,7 +179,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     const live = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
-      messageArrivalTimestamp
+      messageArrivalTimestamp,
+      showSenderContext
     )
     if (live.length > 0 || !thread?.pending) return live
     const text = thread.pending.prompt.trim()
@@ -192,7 +195,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         ],
       } satisfies Message,
     ]
-  }, [sessionId, stream.messages, stream.toolCalls, thread])
+  }, [sessionId, showSenderContext, stream.messages, stream.toolCalls, thread])
 
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {

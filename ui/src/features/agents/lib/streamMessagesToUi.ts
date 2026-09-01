@@ -321,7 +321,8 @@ function outputIframeDisplay(
 export function streamMessagesToUi(
   messages: Array<BaseMessage>,
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
-  resolveCreatedAt?: (messageId: string) => string | undefined
+  resolveCreatedAt?: (messageId: string) => string | undefined,
+  showSenderContext = false
 ): Array<Message> {
   const toolCallsById = new Map<string, AssembledToolCall>()
   for (const toolCall of toolCalls) {
@@ -388,6 +389,7 @@ export function streamMessagesToUi(
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
       if (
+        !showSenderContext &&
         parsed.type === "message" &&
         parsed.sender === "system:sender-context"
       )

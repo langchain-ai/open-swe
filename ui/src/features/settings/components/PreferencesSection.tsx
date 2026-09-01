@@ -17,6 +17,10 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 import { useTheme } from "@/lib/theme"
+import {
+  setShowSenderContext,
+  useShowSenderContext,
+} from "@/features/agents/lib/senderContext"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -26,6 +30,7 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
+  const showSenderContext = useShowSenderContext()
   const supported = notificationsSupported()
   const [enabled, setEnabled] = useState(() => notificationsEnabled())
   const [denied, setDenied] = useState(
@@ -65,6 +70,16 @@ export function PreferencesSection() {
               ))}
             </SelectContent>
           </Select>
+        }
+      />
+      <SettingsRow
+        label="Show sender context"
+        description="Show internal sender metadata in agent chats for debugging."
+        control={
+          <Switch
+            checked={showSenderContext}
+            onCheckedChange={setShowSenderContext}
+          />
         }
       />
       <SettingsRow
