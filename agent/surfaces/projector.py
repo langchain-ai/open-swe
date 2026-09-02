@@ -87,32 +87,52 @@ def _basename(value: str) -> str:
     return PurePath(value).name if value else "file"
 
 
+def _one_line(value: str, limit: int = 120) -> str:
+    """A card title's worth of a tool argument."""
+    line = " ".join(value.split())
+    return f"{line[: limit - 1]}…" if len(line) > limit else line
+
+
 def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
+    """A step's title and detail — what it did, not which tool did it.
+
+    The title carries the argument that identifies the step, because that is
+    what a reader scans for: the command, the path, the query.
+    """
     if name in {"read_file", "write_file", "edit_file", "delete"}:
         action = {
-            "read_file": "Reading",
-            "write_file": "Writing",
-            "edit_file": "Editing",
-            "delete": "Removing",
+            "read_file": "Read",
+            "write_file": "Wrote",
+            "edit_file": "Edited",
+            "delete": "Removed",
         }[name]
-        return f"{action} {_basename(_text_arg(tool_input, 'file_path'))}", "Repository file"
-    if name in {"glob", "grep"}:
-        return "Searching repository files", "Search details hidden"
-    if name in {"web_search", "fetch_url"}:
-        return "Searching external documentation", "External source lookup"
+        return f"{action} {_basename(_text_arg(tool_input, 'file_path'))}", ""
     if name in {"execute", "background_execute"}:
-        return "Running a development command", _text_arg(tool_input, "command")
+        command = _one_line(_text_arg(tool_input, "command"))
+        return command or "Ran a command", ""
+    if name == "grep":
+        pattern = _one_line(_text_arg(tool_input, "pattern"), 80)
+        return f"Searched for {pattern}" if pattern else "Searched the repository", ""
+    if name == "glob":
+        pattern = _one_line(_text_arg(tool_input, "pattern"), 80)
+        return f"Looked for {pattern}" if pattern else "Listed matching files", ""
+    if name == "ls":
+        return f"Listed {_one_line(_text_arg(tool_input, 'path'), 80) or 'the checkout'}", ""
+    if name == "fetch_url":
+        return f"Read {_one_line(_text_arg(tool_input, 'url'), 100)}".strip(), ""
+    if name == "web_search":
+        query = _one_line(_text_arg(tool_input, "query"), 80)
+        return f"Searched the web for {query}" if query else "Searched the web", ""
     if name == "task":
         agent = _text_arg(tool_input, "subagent_type").replace("-", " ")
-        return f"Delegating to {agent or 'a specialist'}", "Specialized agent task"
+        return f"Delegated to {agent or 'a specialist'}", ""
     labels = {
-        "ls": ("Inspecting repository files", "Repository directory"),
-        "open_pull_request": ("Opening pull request", "GitHub operation"),
-        "request_pr_review": ("Starting pull request review", "GitHub operation"),
-        "save_plan": ("Publishing implementation plan", "Plan artifact"),
-        "analyzePlan": ("Checking implementation security", "Security analysis"),
+        "open_pull_request": "Opened a pull request",
+        "request_pr_review": "Started a pull request review",
+        "save_plan": "Published the plan",
+        "analyzePlan": "Checked the change for security issues",
     }
-    return labels.get(name, (f"Using {name.replace('_', ' ')}", "Tool call"))
+    return labels.get(name, f"Used {name.replace('_', ' ')}"), ""
 
 
 #: Tools whose whole effect lands in this Slack session — a card for them would
@@ -164,6 +184,7 @@ class SlackTranscript:
         self.pending: list[dict[str, Any]] = []
         self.pending_steps: dict[str, int] = {}
         self.roles: dict[tuple[str, ...], str] = {}
+        self.plan_named = False
         self.streamed_chars = 0
         self.last_flush = monotonic()
         self.retry_at = 0.0
@@ -197,8 +218,11 @@ class SlackTranscript:
     async def start(self) -> bool:
         """Open the message this turn is written into, with nothing in it yet.
 
-        The session's own status already shows the agent as working, so an
-        opening placeholder card would just repeat that once a turn.
+        Steps go into one plan block rather than a card per call interleaved
+        with the prose: a channel is read as a conversation, and a card for
+        every shell command buries the conversation in it. The session's own
+        status already says the agent is working, so there is no opening card
+        either.
         """
         try:
             self.message_ts = await start_slack_stream(
@@ -207,7 +231,7 @@ class SlackTranscript:
                 [],
                 recipient_user_id=self.recipient_user_id,
                 recipient_team_id=self.recipient_team_id,
-                task_display_mode="timeline",
+                task_display_mode="plan",
             )
         except SlackStreamError as exc:
             logger.info("Slack run projection unavailable for run %s: %s", self.run_id, exc.code)
@@ -234,6 +258,13 @@ class SlackTranscript:
         """Queue words the agent has committed to saying."""
         self._queue_text(text)
 
+    def name_plan(self, title: str) -> None:
+        """Title the plan block the steps collect into."""
+        if self.plan_named or not title.strip():
+            return
+        self.plan_named = True
+        self.pending.append({"type": "plan_update", "title": title.strip()[:256]})
+
     def tool_started(self, call_id: str, tool_name: str, tool_input: Any) -> None:
         title, details = _tool_step(tool_name, tool_input)
         step = Step(_step_id(self.run_id, (), call_id), title, "in_progress", details)
@@ -245,8 +276,9 @@ class SlackTranscript:
         if step is None:
             step = Step(_step_id(self.run_id, (), call_id), "Agent step", "complete")
             self.steps[((), call_id)] = step
+        # The status renders on its own; a "Completed" line under every step
+        # says it twice.
         step.status = "error" if failed else "complete"
-        step.output = "Failed" if failed else "Completed"
         self._queue_step(step)
 
     async def flush(self, *, force: bool = False) -> None:
@@ -307,7 +339,7 @@ class SlackTranscript:
                 [],
                 recipient_user_id=self.recipient_user_id,
                 recipient_team_id=self.recipient_team_id,
-                task_display_mode="timeline",
+                task_display_mode="plan",
             )
         except SlackStreamError as exc:
             logger.warning("Could not continue the transcript for %s: %s", self.run_id, exc.code)
@@ -321,7 +353,8 @@ class SlackTranscript:
         for step in self.steps.values():
             if step.status == "in_progress":
                 step.status = "complete" if status == "success" else "error"
-                step.output = "Completed" if status == "success" else "Interrupted"
+                if status != "success":
+                    step.output = "Interrupted"
                 self._queue_step(step)
         if self.message_ts:
             try:

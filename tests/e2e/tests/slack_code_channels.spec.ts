@@ -124,7 +124,8 @@ test.describe("Slack Code Channels", () => {
     // A code channel is one flowing session, so the transcript is a top-level
     // message with the run's tool activity interleaved into what it says.
     expect(stream.thread_ts).toBe("");
-    expect(stream.task_display_mode).toBe("timeline");
+    // Steps collapse into one plan block rather than a card per call.
+    expect(stream.task_display_mode).toBe("plan");
     expect(Object.values(stream.tasks).length).toBeGreaterThan(0);
     await expect
       .poll(async () => (await streams(page.request, channel.id))[0]?.state, {

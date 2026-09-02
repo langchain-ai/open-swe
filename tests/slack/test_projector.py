@@ -60,8 +60,10 @@ def test_a_tool_card_updates_in_place() -> None:
     stream.tool_finished("call-1")
 
     assert len(stream.pending) == 1
-    assert stream.pending[0]["title"] == "Reading auth.py"
+    assert stream.pending[0]["title"] == "Read auth.py"
     assert stream.pending[0]["status"] == "complete"
+    # The status carries it; a "Completed" line would say it twice.
+    assert "output" not in stream.pending[0]
 
 
 def test_a_failed_tool_shows_as_failed() -> None:
@@ -71,15 +73,32 @@ def test_a_failed_tool_shows_as_failed() -> None:
     stream.tool_finished("call-1", failed=True)
 
     assert stream.pending[0]["status"] == "error"
-    assert stream.pending[0]["output"] == "Failed"
 
 
-def test_a_tool_input_is_summarized_not_echoed() -> None:
+def test_a_step_is_titled_by_what_it_did() -> None:
+    """The argument that identifies the step is what a reader scans for."""
     stream = _stream()
 
-    stream.tool_started("call-1", "execute", {"command": "echo secret-token"})
+    stream.tool_started("call-1", "execute", {"command": "pytest tests/auth"})
+    stream.tool_started("call-2", "grep", {"pattern": "login_token"})
+    stream.tool_started("call-3", "read_file", {"file_path": "/workspace/app/auth.py"})
 
-    assert stream.pending[0]["title"] == "Running a development command"
+    assert [chunk["title"] for chunk in stream.pending] == [
+        "pytest tests/auth",
+        "Searched for login_token",
+        "Read auth.py",
+    ]
+    assert all("details" not in chunk for chunk in stream.pending)
+
+
+def test_a_long_command_is_cut_to_a_title() -> None:
+    stream = _stream()
+
+    stream.tool_started("call-1", "execute", {"command": "echo " + "x" * 300})
+
+    title = stream.pending[0]["title"]
+    assert len(title) == 120
+    assert title.endswith("…")
 
 
 async def test_a_turn_opens_its_message_with_nothing_in_it(monkeypatch) -> None:
@@ -109,7 +128,7 @@ async def test_stop_finishes_whatever_was_still_running(monkeypatch) -> None:
     assert stop.await_args is not None
     final = stop.await_args.args[2]
     assert final[-1]["status"] == "complete"
-    assert final[-1]["output"] == "Completed"
+    assert "output" not in final[-1]
     assert not stream.pending
 
 

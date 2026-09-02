@@ -47,6 +47,7 @@ class FakeTranscript:
         self.streamed_chars = 0
         self.pending: list[dict[str, Any]] = []
         self.said: list[str] = []
+        self.plan_title = ""
         self.cards: list[tuple[str, str]] = []
         self.stopped: str | None = None
         FakeTranscript.instances.append(self)
@@ -60,6 +61,9 @@ class FakeTranscript:
 
     def say(self, text: str) -> None:
         self.said.append(text)
+
+    def name_plan(self, title: str) -> None:
+        self.plan_title = self.plan_title or title
 
     def tool_started(self, call_id: str, name: str, _args: Any) -> None:
         self.cards.append((call_id, "started"))
@@ -314,3 +318,19 @@ async def test_a_tool_whose_effect_is_the_channel_gets_no_card(slack: FakeStore)
     await transcript.awrap_tool_call(request, handler)  # type: ignore[arg-type]
 
     assert [t.cards for t in FakeTranscript.instances] in ([], [[]])
+
+
+async def test_the_plan_block_is_named_from_the_turns_first_words(slack: FakeStore) -> None:
+    """Steps collect under one named block instead of a card per call."""
+    transcript = _middleware()
+    state = _state(HumanMessage(content="go", id="h1"))
+    await transcript.abefore_agent(state, None)  # type: ignore[arg-type]
+    said = _state(
+        *state["messages"],
+        AIMessage(content="Reading the failing test first.", id="a1"),
+        AIMessage(content="Now fixing it.", id="a2"),
+    )
+
+    await transcript.abefore_model(said, None)  # type: ignore[arg-type]
+
+    assert FakeTranscript.instances[0].plan_title == "Reading the failing test first."

@@ -100,6 +100,7 @@ def start_stream(
         # What arrived, in order, so tests can assert that the agent's words
         # reach the channel before the cards that explain them.
         "timeline": [],
+        "plan_title": "",
         "chunk_count": 0,
         "state": "streaming",
         "session_status": "",
@@ -120,6 +121,9 @@ def apply_stream_chunks(ts: str, chunks: list[dict[str, Any]]) -> dict[str, Any]
             text = str(chunk.get("text") or "")
             stream["text"] += text
             stream["timeline"].append({"kind": "text", "text": text})
+        elif kind == "plan_update":
+            stream["plan_title"] = str(chunk.get("title") or "")
+            stream["timeline"].append({"kind": "plan", "title": stream["plan_title"]})
         elif kind == "task_update":
             task_id = str(chunk.get("id") or "")
             if task_id and task_id not in stream["tasks"]:

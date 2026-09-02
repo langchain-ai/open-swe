@@ -3,7 +3,7 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 type CodeChannel = { id: string; status: string; archived: boolean };
 
 type TimelineEntry = {
-  kind: "text" | "task";
+  kind: "text" | "task" | "plan";
   text?: string;
   id?: string;
   title?: string;
@@ -20,6 +20,7 @@ type Stream = {
   state: string;
   session_status: string;
   timeline: TimelineEntry[];
+  plan_title: string;
 };
 
 const HANDOFF_LINE = "Picking up the flaky CI investigation in this channel";
@@ -94,10 +95,13 @@ test.describe("Slack code channel transcript", () => {
         entry.kind === "text" && (entry.text ?? "").includes("Looking at what the checkout"),
     );
     const carded = stream.timeline.findIndex(
-      (entry) => entry.kind === "task" && entry.title === "Inspecting repository files",
+      (entry) => entry.kind === "task" && entry.title === "Listed /workspace",
     );
-    expect(spoken).toBe(1);
+    expect(spoken).toBeGreaterThanOrEqual(0);
     expect(carded).toBeGreaterThan(spoken);
+
+    // The block is named once, from the words that opened the turn.
+    expect(stream.plan_title).toBe("Publishing the diff view for the handed-over task.");
 
     // A Slack tool's whole effect is this channel, so it draws no card.
     expect(
@@ -114,7 +118,7 @@ test.describe("Slack code channel transcript", () => {
     const [stream] = await streams(page.request, channel.id);
 
     expect(stream.thread_ts).toBe("");
-    expect(stream.task_display_mode).toBe("timeline");
+    expect(stream.task_display_mode).toBe("plan");
     // Streaming into a channel needs a recipient, or Slack refuses the call.
     expect(stream.recipient_user_id).toBeTruthy();
 

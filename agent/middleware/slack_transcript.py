@@ -182,6 +182,7 @@ class SlackTranscriptMiddleware(AgentMiddleware[Any, Any, Any]):
             return
         for _, text in unsent:
             transcript.say(text)
+        transcript.name_plan(unsent[0][1])
         record["sent"] = [*record.get("sent", []), *(message_id for message_id, _ in unsent)]
         await self._flush(transcript, record)
 
