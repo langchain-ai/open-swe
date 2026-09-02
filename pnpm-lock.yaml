@@ -150,7 +150,7 @@ importers:
         specifier: ^0.52.2
         version: 0.52.2
       nitro:
-        specifier: latest
+        specifier: 3.0.260610-beta
         version: 3.0.260610-beta(chokidar@5.0.0)(dotenv@17.4.2)(jiti@2.7.0)(lru-cache@11.5.2)(rollup@4.62.4)(vite@8.2.2(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.2))
       react:
         specifier: ^19.2.4

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:f60ff5332327ac80c5a38dd561f25da937309b90fbd53e6b317ed2c78d3e4081",
+  "pageVersion": "sha256:af15331bdf097aac26cf3cd8903aab69a75c17eee688dfddc91c523b318f07a1",
   "claims": [
     {
       "id": "claim_7e68d8872dad4c0389a1bc0c65b87801",
@@ -223,10 +223,56 @@
           "version": "repo-lines-v1:sha256:6e0e0cc79659b594ced04721f05d7d092402d35f304f058f67b9d5185ef05c1c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxODAwYWE1NWQxM2E4MTMzN2QzOTk3NTQxNjJkN2M1MzNkZWYyYjA5MjZiZDkxNDMwYzE3MWFmMDczZjhjN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyY2RjNDY5MzMyODhkNDUxMWJhZWY1OGRjYTViOWM3ZDNlYmQzM2M3OGI4NzQwNDMxZmUzYWEyMTg2NmQxNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE4YWNmMWZjNjQxZjQzYjNhZTdkNGI4ZjFiM2ZlZTc1MDdkMTY2ZGYzZTUwMzNmYmU1YWZkNDMyYjM5NzJlMjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwN2RjOGJhNDYzNmRmMjA2ZjI3NzY4YWFiOTBiMmM2YmVmMTQ3ZTEwNmY0YTkxOTdjODUyOGMwYTg5NDBjMzYifQ"
         }
       ]
+    },
+    {
+      "id": "claim_882b84696e8e4eec8797b42eacc8b20a",
+      "statement": "The shared pytest fixtures replace the agent store client with an in-memory implementation that preserves the production serialization path, clear the process-global TTL cache around each test, and default automatic review to enabled unless a test overrides the gate.",
+      "evidence": [
+        {
+          "resource": "repo://tests/conftest.py#L14-L97",
+          "version": "repo-lines-v1:sha256:d79485eed23822299198ce0ea8f10a368f57d87b11202b02aeb8f1e74f5414d6:eyJzZWxlY3RlZExpbmVDb3VudCI6ODQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3MzZjYmZhYjUxNjhkYzNhZmM3OTlkYzU3NTU5N2IwYzg5ZDQyODczZDM5Y2YxZGQxYmQ4Njg5YmEwYTk2NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiMjg4MDNlMzYyYWJhOGM3MzIwMGNhOWRiZjc1ZTg2N2Q3ZTU2Y2JkNjU5MTcyNThkNTBhYmUwYzI2Y2I5YjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwMGQwZDE5OTI5MWRhMWUzOGNjMTMzMjg0NDg5OTg2NGIyOWJlZjRmMTI5M2JiOTI2NTA2ZTQ1NjRkOGJmNjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cb29b7092f3b41d7b889218b54cf8950",
+      "statement": "The Playwright end-to-end harness runs the real agent code, local sandbox, and local git remote while faking the LLM and external SaaS HTTP boundaries; root pnpm scripts provide browser and Electron end-to-end commands.",
+      "evidence": [
+        {
+          "resource": "repo://package.json#L13-L16",
+          "version": "repo-lines-v1:sha256:736bae5dc4be9aded3eee5177bdb19df18d53ca1632f2a843c5c47b6ce6f5585:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGE4MmJlMjcxNmYzZDNmZmM4NjgwNjhhYjBlMGYwZmU2ZjczNDc1ZGEyNWU3ZGEzZmVjNDNlOGU2MDVlODQ5YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWNjNDM0M2I0YjNhYWE0YWI1ZDUwMzljNWZkZGYyNjIwYTI1NDg5NmFmM2NmMjE4MWM0NzgxOGRhNzMzZDUzNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGYwNTgxNWQwZWZmYzczMjU2ODNkZGE0MTQ4NWNlZGIyNmYzZTdkYTAwNzYzNjE0MGNmM2NiNjQzMDVmMDM2ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGZiZGEwMmQyYTgxNDgwNWNhNDllYjY5NWFmZjA2ZGMxYTUxNWI5YTk0NWVkZTEzMDUzNDY0NzEzMzRhN2U0MCJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/README.md#L1-L32",
+          "version": "repo-lines-v1:sha256:99c22dbd4519cdcc465e24392d19415b42de38448220716aac4a0f2da7786859:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkMjcyNDBhZmIzNzliZGU4NTg3MmNmYmY2ZGE5N2VmY2MyMjQyZTZhNmRlMWVjMTliMmRjM2M1ZWRkZjU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3MGRlOGEwOGI3Yjk2MGFiY2FiNDJhMzg3MDc2ZWU3NDk3NWFmOTIwZjkxNjM3OWY5YzcwMWFkMjA3NmIwZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyMWQxOTBkZWUwYzkwNDE1MmMwMmNlNWViMDUxOTk0ZjJkMTc0M2ExNmE3ZTZlMTMzYTE3NzM2MGI5YjUzZDAifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/README.md#L71-L101",
+          "version": "repo-lines-v1:sha256:4a73d0a2410b8f312d8dc54c4b81a84a4c6739aa6b2d923cb672e51ce495f57a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4MTE2M2FiMTc0NGE0OGFiODM0ZWQ5YzBkZDE0MmMyMDg2NGQ1ZmZiZjM0MTE3MjYzMmI1MzNkNjBjMTkxMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkMDUzOWQ1Mzk0ZGMyZmQwZmUxMTI0Yjc4NTE5YTljNzViNjNlNzUyYWJjMzdjYzRmMzg4ZWZiNGRhZGRmN2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwNmY2OTVlNmVlYjU4NDQ3MWQ5YzUyNTFjMTAyMDQzNDI3ZjQzMjE1YjAyMzQxNTYxNjlmMDc1ZDY1MTMzYmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2OGVkMTUyZTc5NjM1MDJhY2IyNDcxNTk4MmVmOTY1ZmVlMDZlZTE3ZDc0NTJlODE5YTVhODViYjMyMjg4ZjAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6d63a9daa63a422096292367759337dd",
+      "statement": "The root e2e setup command installs Chromium with Playwright dependencies, while browser tests run serially with one worker and the separate desktop configuration selects only the Electron spec.",
+      "evidence": [
+        {
+          "resource": "repo://package.json#L14-L16",
+          "version": "repo-lines-v1:sha256:5432b8a6bc0c644cbe23bd4208d8ad9f5bf128603a2c20f99f6ece41270fc99d:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWQ4MDQ0ODU5YjY3NDA3MWYwZTY1YzE0NDFiMWM5Y2Y5ZDI1ZWZkZjI0OWQ5Mzk1ZjU2NGQ1YWM3ZWE2YzgyZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWNjNDM0M2I0YjNhYWE0YWI1ZDUwMzljNWZkZGYyNjIwYTI1NDg5NmFmM2NmMjE4MWM0NzgxOGRhNzMzZDUzNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzgxYjkzNzBhOWY5ZjFjY2ZhN2I1M2UwYjZjZmUxMTg1ZWUxMzU4NzkyNjkwOTUyMTkzZWIyNzBkZjk4ZmZmOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGZiZGEwMmQyYTgxNDgwNWNhNDllYjY5NWFmZjA2ZGMxYTUxNWI5YTk0NWVkZTEzMDUzNDY0NzEzMzRhN2U0MCJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/playwright.config.ts#L9-L17",
+          "version": "repo-lines-v1:sha256:cf60541a44ec86cebcbe25cc57d2d156759c6b165b1768b3114dfe59473df956:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjJjZWNiMTQ0YTQ2ZjVkY2YxMmE2MTY5ZmNlZWQ3Njk1ZTgyOTRiMDkwZGU3NmYzNjYxY2RkMDI0OTMwMDE0NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWY1MWYyZGMzM2Q3YzRlMjkyNjY0ZTg2NDgzOWEyMTMwYjIwNTg1YjczYzMwYmFkN2YxNWIwNTkxODAyYTAzMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmZiZTMxZGRiMmRlNWJlYTEzZTBkMWQzNTE0MGZkOTE3MmIwMTRmNGY4NmI1MWViMjFlMjJlNWNmYzVkYjRiYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjliMzBhMGZmYmViNmNhMDU3ZjU4NTBhMzY5ODBiMjllY2FlYTY2ZDRiMmE3YjViNmU0MDBhZDY4OTk4ZDlmNyJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/playwright.desktop.config.ts#L5-L23",
+          "version": "repo-lines-v1:sha256:12a3bd3c40fb0c417716860491aae02a91ffa6737f20044492e73a9cf3a201c3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyY2VjYjE0NGE0NmY1ZGNmMTJhNjE2OWZjZWVkNzY5NWU4Mjk0YjA5MGRlNzZmMzY2MWNkZDAyNDkzMDAxNDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlY2E5YjNjZWNlMGFhNjVhZmZiNzkyOTEwNjE4ODAzZTI5NmJiNmY0MmRhYWExNzM5NmViOTQ1YWVjMWEzZmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRjMTQ1MjQ2ZWU4OTAwZTRjZjRhYWU0MGMwN2Y2NDliNDkxNTljMDRhZmIyOTNlOWIwYmI1YjVjOWFiZTlkMDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-28T11:53:01.759Z"
+    "at": "2026-09-01T08:16:00.848Z"
   }
 }

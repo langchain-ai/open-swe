@@ -156,6 +156,7 @@ DASHBOARD_SOURCE_GUIDANCE = """This run is being handled in the dashboard/Web UI
 
 SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - Immediately send a brief first reply that rephrases your understanding of the request. Make `slack_thread_reply` your first tool call before investigation; never use only a generic acknowledgement such as `On it!`.
+- When the user asks you to implement, fix, or otherwise perform code/repository work, use `manage_code_channel` immediately after the first reply and continue the task there by default. Keep normal questions, explanations, and other information-only requests in the originating thread. Follow an explicit user request to stay in-thread or open a code channel instead.
 - `slack_thread_reply` is the canonical user-facing output. For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
 - Keep every `slack_thread_reply` as concise as possible: default to one sentence with only the outcome/status and link, or one blocking question. Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
 - Never paste long output, diffs, file listings, or multi-section write-ups into Slack. Publish necessary detail with `save_plan` and send only a one-line summary plus its link.
@@ -365,7 +366,7 @@ Steps, in order:
 - If `git push`, `open_pull_request`, or `gh pr edit` fails with an infrastructure/permission/access error — including "403", "404"/"Not Found" from `open_pull_request`, "GitHub App not installed/access denied", or "Permission denied" — do not retry via `gh pr create`, `gh api repos/.../pulls`, direct REST `POST /repos/.../pulls`, or any other substitute PR creation mechanism. Report the failure to the user and end the task. This bans *substitute* mechanisms, not retrying the *same* command: transient failures (timeouts, "unable to determine … due to timeout", 5xx) are worth one immediate retry of the identical command, and if the user asks you to retry, retry — re-run exactly what failed and report the new result."""
 
 
-DESKTOP_PR_SECTION = "\n\nFor desktop runs, open new PRs with `gh pr create`; `open_pull_request` is unavailable, and `gh` uses the local developer's GitHub identity. This overrides the hosted-only PR creation and fallback rules above."
+DESKTOP_PR_SECTION = "\n\nFor desktop runs, each new thread should use its own task branch and open a new PR with `gh pr create`; `open_pull_request` is unavailable, and `gh` uses the local developer's GitHub identity. Do not search for or append work to a similar or related PR from another thread. Update an existing PR only when the user explicitly identifies it as the target or it already belongs to the current thread's branch. This overrides the hosted-only PR creation and fallback rules above."
 
 
 COLLABORATION_TEMPLATE = """---
@@ -596,8 +597,9 @@ def construct_system_prompt(
         environment_section=_render_environment_section(environment_name, environment_instructions),
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",
         shared_base_section=(
-            "- If a user asks to change the managed workspace environment, direct them to an "
-            "admin thread and require them to be a workspace admin.\n\n"
+            "- If a user asks to change the managed workspace environment, direct them to start "
+            "an admin thread in the Web UI and require them to be a workspace admin. Admin threads "
+            "cannot be started from Slack or with agent thread tools.\n\n"
             if not admin_environments
             else ""
         )

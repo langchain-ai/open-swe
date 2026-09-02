@@ -1,7 +1,6 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { LocalAgentThreadView } from "@/features/agents/components/LocalAgentThreadView"
-import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
 import { useReadyDesktopLocalThread } from "@/features/agents/lib/desktopLocal"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -25,9 +24,5 @@ function LocalAgentThreadPage() {
   if (threadQuery.isError || !threadQuery.data) {
     return <Navigate to="/agents" />
   }
-  return (
-    <AgentThreadStreamProvider threadId={sessionId} transport="local">
-      <LocalAgentThreadView sessionId={sessionId} />
-    </AgentThreadStreamProvider>
-  )
+  return <LocalAgentThreadView sessionId={sessionId} />
 }

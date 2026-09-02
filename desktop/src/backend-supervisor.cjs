@@ -23,12 +23,14 @@ const GATEWAY_KEYS = [
   "LANGSMITH_API_KEY",
 ];
 
-function devBackendTarget({ repoRoot, port, env = process.env }) {
+function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
+  const config = env.OPEN_SWE_LOCAL_BACKEND_CONFIG || "langgraph.desktop.json";
   return {
     command:
       env.OPEN_SWE_LOCAL_BACKEND_COMMAND || env.OPEN_SWE_UV_COMMAND || "uv",
     args: [
       "run",
+      ...(stateDir ? ["--project", repoRoot] : []),
       "langgraph",
       "dev",
       "--no-browser",
@@ -38,10 +40,9 @@ function devBackendTarget({ repoRoot, port, env = process.env }) {
       "--port",
       String(port),
       "--config",
-      env.OPEN_SWE_LOCAL_BACKEND_CONFIG ||
-        path.join(repoRoot, "langgraph.desktop.json"),
+      path.resolve(repoRoot, config),
     ],
-    cwd: repoRoot,
+    cwd: stateDir || repoRoot,
   };
 }
 

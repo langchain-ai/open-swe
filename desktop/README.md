@@ -105,16 +105,22 @@ to `desktop/dist/`.
 
 ## macOS releases
 
-Maintainers can run **Release Desktop** from the GitHub Actions page on `main` and choose a patch,
-minor, or major version bump. The workflow builds the current `ui/` bundle, signs and notarizes the
-Electron app, verifies the resulting app and DMG, bumps `desktop/package.json`, creates a
-`desktop-vX.Y.Z` tag, and publishes the DMG, macOS zip, and app zip to a GitHub release. The
-desktop-prefixed tags keep this release stream separate from web and backend releases; the workflow
-packages the web UI but does not deploy or otherwise change the hosted web app.
+`desktop/package.json` is the latest stable version. Every **Promote main to prod** run publishes a
+prerelease nightly from the promoted commit with a UTC timestamp, such as
+`desktop-v0.2.3-nightly.20260902080000`. Nightly releases never publish the stable version.
+
+Stable releases use a deliberate bump, test, release process: bump `desktop/package.json` in a normal
+pull request, merge it to `main`, test the resulting code as needed, then run **Release Desktop**
+manually. The workflow publishes the exact package version and fails if that stable release is
+already complete. A partial stable release remains manually retryable.
+
+Both paths compile the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
+app and DMG, create the tag, and publish the DMG, macOS zip, and app zip. Desktop-prefixed tags keep
+this release stream separate from web and backend releases; the workflow packages the web UI but
+does not deploy or otherwise change the hosted web app.
 
 The workflow requires these GitHub Actions secrets:
 
-- `RELEASE_PAT`: token allowed to push to `main` and create tags
 - `APPLE_SIGNING_CERT`: base64-encoded Developer ID Application `.p12` certificate
 - `APPLE_SIGNING_CERT_PASSWORD`: password for the certificate
 - `APPLE_API_KEY`: App Store Connect `.p8` key contents

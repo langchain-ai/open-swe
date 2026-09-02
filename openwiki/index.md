@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Quickstart & Wiki Map](quickstart.md) - Start here to orient yourself in the Open SWE LangGraph application, choose the right local command, and route an implementation task to its owning architecture, workflow, integration, operations, or testing guide.
+- [Open SWE Quickstart & Wiki Map](quickstart.md) - Entry point for choosing the Open SWE runtime, UI, integration, workflow, operations, or testing guide. It lists the supported local commands and the browser and desktop end-to-end test entrypoints.
 
 # Directories
 
