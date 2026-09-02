@@ -306,9 +306,7 @@ async function ensureThreadWorktree(thread) {
  */
 async function discardThreadWorktree(thread) {
   const others = localThreadStore.list().filter((it) => it.id !== thread.id);
-  const owned = [
-    ...new Set([...thread.ownedWorktrees, thread.worktreePath]),
-  ].filter(
+  const owned = thread.ownedWorktrees.filter(
     (worktree) =>
       managedWorktree(worktree) &&
       !others.some(

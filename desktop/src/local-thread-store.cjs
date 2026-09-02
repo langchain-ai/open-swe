@@ -110,7 +110,13 @@ function normalizeThread(value) {
       worktreePath && path.isAbsolute(worktreePath)
         ? path.normalize(worktreePath)
         : null,
-    ownedWorktrees: cleanPaths(value.ownedWorktrees),
+    // Threads written before ownership was tracked only ever ran in a worktree
+    // this app created for them.
+    ownedWorktrees: cleanPaths(
+      value.ownedWorktrees === undefined
+        ? [worktreePath]
+        : value.ownedWorktrees,
+    ),
     title: value.title.slice(0, 80) || "New local agent",
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
