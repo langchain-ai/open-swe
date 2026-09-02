@@ -39,7 +39,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.sandboxes.paths import aresolve_sandbox_work_dir
+from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from agent.sandboxes.state import SandboxUnreachableError
 
@@ -1021,7 +1021,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 self._config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
             )
             raise
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
 
         repo_owner = str(repo_config.get("owner", ""))
         repo_name = str(repo_config.get("name", ""))

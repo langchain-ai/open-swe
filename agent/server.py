@@ -43,10 +43,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 from agent.sandboxes.lifecycle import (
-    _get_cached_sandbox_backend,
     ensure_sandbox_for_thread,
+    get_cached_sandbox_backend,
 )
-from agent.sandboxes.paths import aresolve_sandbox_work_dir
+from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import (
     SandboxUnreachableError,
@@ -828,7 +828,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             async with aphase(self._thread_id, "prepare.work_dir"):
-                work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+                work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
                 "work_dir": work_dir,
                 "rendered_system_prompt": construct_system_prompt(
@@ -863,7 +863,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             raise
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
-            work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.environment"):
             environment = await resolve_environment(_environment_slug(configurable))
         async with aphase(self._thread_id, "prepare.sender_context"):
@@ -956,7 +956,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             environment_slug=_environment_slug(_configurable),
         )
 
-    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives

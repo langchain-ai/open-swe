@@ -45,7 +45,7 @@ async def test_reset_sandbox_hands_off_after_metadata_persists() -> None:
         ) as proxy_configure,
         patch("agent.sandboxes.lifecycle.record_proxy_token_expiry") as record_proxy,
         patch(
-            "agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock
+            "agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
         ) as configure,
         patch(
             "agent.sandboxes.lifecycle.client.threads.update",
@@ -104,7 +104,7 @@ async def test_reset_sandbox_clears_stale_proxy_metadata() -> None:
         ),
         patch("agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock) as update,
     ):
         await reset_sandbox_for_thread(thread_id, {})
@@ -142,7 +142,7 @@ async def test_reset_sandbox_does_not_record_proxy_before_metadata_persists() ->
         ),
         patch("agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.record_proxy_token_expiry") as record_proxy,
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,

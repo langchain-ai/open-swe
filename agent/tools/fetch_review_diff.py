@@ -5,7 +5,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.sandboxes.paths import aresolve_sandbox_work_dir
+from agent.sandboxes.paths import resolve_sandbox_work_dir
 
 from ..review.diff import changed_files, materialize_review_diff, review_diff_range
 from ..runtime import get_cached_sandbox_backend
@@ -37,7 +37,7 @@ async def fetch_review_diff() -> dict[str, Any]:
             re_review=bool(configurable.get("re_review")),
         )
         sandbox_backend = get_cached_sandbox_backend(thread_id)
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         materialized = await materialize_review_diff(
             sandbox_backend,
             work_dir=f"{work_dir}/{repo_name}",

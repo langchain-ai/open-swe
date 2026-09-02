@@ -101,4 +101,4 @@ async def test_server_uses_admin_base_snapshot() -> None:
     with patch.object(
         lifecycle, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
     ):
-        assert await lifecycle._resolve_snapshot_id() == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"

@@ -622,7 +622,7 @@ class TestRefreshProxyOnSandboxReuse:
                 "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch(
-                "agent.server.aresolve_sandbox_work_dir",
+                "agent.server.resolve_sandbox_work_dir",
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
@@ -693,7 +693,7 @@ class TestRefreshProxyOnSandboxReuse:
                 "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch(
-                "agent.server.aresolve_sandbox_work_dir",
+                "agent.server.resolve_sandbox_work_dir",
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),

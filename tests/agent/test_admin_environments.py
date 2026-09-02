@@ -32,7 +32,7 @@ async def test_default_environment_snapshot_wins_over_base() -> None:
             return_value="admin-snap",
         ),
     ):
-        assert await lifecycle._resolve_snapshot_id() == "env-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
 @pytest.mark.asyncio
@@ -49,7 +49,7 @@ async def test_environment_without_ready_snapshot_falls_back_to_base() -> None:
             return_value="admin-snap",
         ),
     ):
-        assert await lifecycle._resolve_snapshot_id() == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"
 
 
 @pytest.mark.asyncio
@@ -66,7 +66,7 @@ async def test_snapshot_resolution_passes_the_threads_environment() -> None:
             return_value="admin-snap",
         ),
     ):
-        snapshot_id = await lifecycle._resolve_snapshot_id("staging")
+        snapshot_id = (await lifecycle.SandboxCreateConfig.resolve("staging")).snapshot_id
 
     assert snapshot_id == "staging-snap"
     resolve.assert_awaited_once_with("staging")
@@ -85,9 +85,10 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
     with patch.object(
         lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=environment
     ):
-        snapshot_id, resources, create_params = await lifecycle._resolve_sandbox_create_config(
-            "base"
-        )
+        config = await lifecycle.SandboxCreateConfig.resolve("base")
+        snapshot_id = config.snapshot_id
+        resources = config.resources
+        create_params = config.create_params
 
     assert snapshot_id == "env-snap"
     assert resources == {

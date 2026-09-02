@@ -2342,7 +2342,7 @@ async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
-    from agent.sandboxes.paths import aresolve_sandbox_work_dir
+    from agent.sandboxes.paths import resolve_sandbox_work_dir
 
     from ..utils.turn_checkpoint import read_turn_diff
 
@@ -2357,7 +2357,7 @@ async def get_dashboard_thread_working_tree_diff(
             "Could not connect to sandbox %s for working tree diff", sandbox_id, exc_info=True
         )
         return _missing_diff()
-    work_dir = await aresolve_sandbox_work_dir(sandbox)
+    work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)
     repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)

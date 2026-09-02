@@ -52,7 +52,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
 
     client = _AsyncClient()
     monkeypatch.setattr(download_tool, "get_sandbox_backend", get_backend)
-    monkeypatch.setattr(download_tool, "aresolve_sandbox_work_dir", work_dir)
+    monkeypatch.setattr(download_tool, "resolve_sandbox_work_dir", work_dir)
     monkeypatch.setattr(download_tool, "unwrap_sandbox_backend", lambda value: value)
     monkeypatch.setattr(download_tool, "get_async_sandbox_client", lambda: client)
     return client

@@ -40,7 +40,7 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
@@ -93,7 +93,7 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
     ):
         result = await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
@@ -126,7 +126,7 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
             new_callable=AsyncMock,
             side_effect=RuntimeError("sandbox API outage"),
         ),
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError) as excinfo,
     ):
@@ -158,7 +158,7 @@ async def test_unreachable_sandbox_still_fails_by_default() -> None:
             "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
         ) as create_replacement,
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError),
     ):

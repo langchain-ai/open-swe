@@ -29,7 +29,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
             return_value=new_sandbox,
         ) as create,
         patch(
-            "agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock
+            "agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
         ) as configure,
         patch(
             "agent.sandboxes.lifecycle.client.threads.update",
@@ -75,7 +75,7 @@ async def test_recreate_sandbox_keeps_old_binding_when_metadata_update_fails() -
             new_callable=AsyncMock,
             return_value=new_sandbox,
         ),
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
@@ -109,7 +109,7 @@ async def test_recreate_sandbox_rejects_non_distinct_provider_result() -> None:
             return_value=MagicMock(id="sandbox-same"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock
+            "agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
         ) as configure,
         patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock) as update,
     ):

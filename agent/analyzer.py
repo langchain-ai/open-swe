@@ -30,7 +30,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.sandboxes.paths import aresolve_sandbox_work_dir
+from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.state import unwrap_sandbox_backend
 
 from .dashboard.team_settings import get_effective_gateway_enabled
@@ -136,7 +136,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         configurable = self._config.get("configurable") or {}
         full_name = str(configurable.get("review_style_full_name") or "owner/repo")
         owner, _, name = full_name.partition("/")

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.sandboxes.lifecycle import _create_sandbox_with_proxy
+from agent.sandboxes.lifecycle import SandboxCreateConfig, _create_sandbox_with_proxy
 
 
 def _backend(started: asyncio.Event) -> MagicMock:
@@ -34,10 +34,11 @@ async def test_identity_is_written_while_the_proxy_is_configured() -> None:
         patch(
             "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
         ),
-        patch(
-            "agent.sandboxes.lifecycle._resolve_sandbox_create_config",
+        patch.object(
+            SandboxCreateConfig,
+            "resolve",
             new_callable=AsyncMock,
-            return_value=("snap", {}, {}),
+            return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
             "agent.sandboxes.lifecycle._resolve_proxy_token",
@@ -62,10 +63,11 @@ async def test_identity_failure_fails_the_sandbox() -> None:
         patch(
             "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
         ),
-        patch(
-            "agent.sandboxes.lifecycle._resolve_sandbox_create_config",
+        patch.object(
+            SandboxCreateConfig,
+            "resolve",
             new_callable=AsyncMock,
-            return_value=("snap", {}, {}),
+            return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
             "agent.sandboxes.lifecycle._resolve_proxy_token",
@@ -93,10 +95,11 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
         patch(
             "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
         ),
-        patch(
-            "agent.sandboxes.lifecycle._resolve_sandbox_create_config",
+        patch.object(
+            SandboxCreateConfig,
+            "resolve",
             new_callable=AsyncMock,
-            return_value=("snap", {}, {}),
+            return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
             "agent.sandboxes.lifecycle._resolve_proxy_token",

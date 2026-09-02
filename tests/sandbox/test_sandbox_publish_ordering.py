@@ -74,7 +74,7 @@ async def test_new_sandbox_persists_its_base_proxy_config() -> None:
             "agent.sandboxes.lifecycle.get_recorded_proxy_base_config",
             return_value=base_proxy_config,
         ),
-        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.client.threads.update", update),
     ):
         await ensure_sandbox_for_thread(thread_id)
