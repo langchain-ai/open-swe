@@ -156,6 +156,7 @@ declare global {
       }) => Promise<string>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
+      getVersion: () => Promise<string>
       getUpdateState: () => Promise<DesktopUpdateState>
       installUpdate: () => Promise<boolean>
       onUpdateState: (

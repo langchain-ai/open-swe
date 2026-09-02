@@ -231,6 +231,10 @@ async function diffThread(threadId) {
 }
 
 function configureDesktopIpc() {
+  ipcMain.handle("desktop:version", (event) => {
+    requireTrustedDesktopIpc(event);
+    return app.getVersion();
+  });
   ipcMain.handle("desktop:update-state", (event) => {
     requireTrustedDesktopIpc(event);
     return updateState;
