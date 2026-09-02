@@ -299,11 +299,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         if (!updated) return
         queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
         setClaimedPrompt({ sessionId, prompt: pending })
-        try {
-          await submit(pending.prompt, pending.images, pending.skills)
-        } finally {
-          setClaimedPrompt(null)
-        }
+        const submitted = await submit(
+          pending.prompt,
+          pending.images,
+          pending.skills
+        )
+        if (submitted) setClaimedPrompt(null)
       })
       .catch((cause) => {
         initialPromptRef.current = null
