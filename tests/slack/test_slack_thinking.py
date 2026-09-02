@@ -61,6 +61,35 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     assert final_chunks[-1]["output"] == "Completed"
 
 
+async def test_successful_run_does_not_mark_failed_tool_as_error(monkeypatch) -> None:
+    stop = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "stop_slack_stream", stop)
+    stream = slack_thinking.SlackThinkingStream(
+        client=AsyncMock(),
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="0",
+        recipient_user_id="U1",
+        recipient_team_id="T1",
+        mapping_thread_ts="0",
+        original_message_ts="1.1",
+    )
+    stream.message_ts = "2.0"
+    stream.consume(
+        _Part(
+            "tools",
+            {"event": "tool-started", "tool_call_id": "call-1", "tool_name": "execute"},
+        )
+    )
+    stream.consume(_Part("tools", {"event": "tool-error", "tool_call_id": "call-1"}))
+
+    await stream.stop("success")
+
+    assert stop.await_args.args[2][-1]["status"] == "complete"
+    assert stop.await_args.args[2][-1]["output"] == "Failed"
+
+
 async def test_stop_sends_pending_updates_despite_append_backoff(monkeypatch) -> None:
     stop = AsyncMock()
     monkeypatch.setattr(slack_thinking, "stop_slack_stream", stop)
