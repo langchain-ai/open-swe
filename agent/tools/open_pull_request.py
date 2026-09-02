@@ -8,10 +8,11 @@ import httpx
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.auth.github_app import get_github_app_installation_token
+
 from ..dashboard.agent_usage import record_agent_pr_usage
 from ..dashboard.plan_store import get_plan_content
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
 from ..utils.slack_code_channels import (

@@ -32,6 +32,8 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from agent.auth.github_app import get_github_app_installation_token
+
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -68,7 +70,6 @@ from .tools import (
 )
 from .utils import ttl_cache
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 

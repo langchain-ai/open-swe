@@ -33,6 +33,7 @@ class Step:
     status: StepStatus
     details: str = ""
     output: str = ""
+    failed: bool = False
 
     def chunk(self) -> dict[str, Any]:
         chunk: dict[str, Any] = {
@@ -201,8 +202,9 @@ class SlackThinkingStream:
             if step is None:
                 step = Step(_step_id(self.run_id, namespace, call_id), "Agent step", "complete")
                 self.steps[key] = step
-            step.status = "error" if event == "tool-error" else "complete"
-            step.output = "Failed" if event == "tool-error" else "Completed"
+            step.failed = event == "tool-error"
+            step.status = "complete"
+            step.output = "Failed" if step.failed else "Completed"
             self.pending[step.task_id] = step
 
     async def flush(self, *, force: bool = False) -> None:
@@ -230,7 +232,10 @@ class SlackThinkingStream:
 
     async def stop(self, status: str) -> None:
         for step in self.steps.values():
-            if step.status == "in_progress":
+            if step.failed:
+                step.status = "complete" if status == "success" else "error"
+                self.pending[step.task_id] = step
+            elif step.status == "in_progress":
                 step.status = "complete" if status == "success" else "error"
                 step.output = "Completed" if status == "success" else "Interrupted"
                 self.pending[step.task_id] = step

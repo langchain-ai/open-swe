@@ -13,13 +13,13 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .github_app import (
+from agent.auth.github_app import (
     PermissionKey,
     PermissionMap,
     get_github_app_installation_token_with_expiry,
     normalize_permissions,
 )
-from .sandbox_state import SANDBOX_BACKENDS, unwrap_sandbox_backend
+from agent.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +152,7 @@ async def refresh_proxy_token(
         logger.warning("Proxy token refresh for thread %s failed: no installation token", thread_id)
         return False
 
-    from ..integrations.langsmith import _configure_github_proxy
+    from agent.integrations.langsmith import _configure_github_proxy
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     base_proxy_config = _PROXY_BASE_CONFIGS.get(thread_id)

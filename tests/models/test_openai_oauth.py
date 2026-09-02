@@ -11,7 +11,8 @@ from langchain_openai.chat_models.codex import (  # noqa: PLC2701
     _ChatOpenAICodex,
 )
 
-from agent.utils import model, openai_oauth
+from agent.auth import openai_oauth
+from agent.utils import model
 
 
 @contextmanager
