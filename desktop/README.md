@@ -93,6 +93,19 @@ pnpm --dir desktop run start -- --backend-url=https://open-swe-api.example.com
 environment variable, saved first-launch configuration, then the local development default.
 The original `--url` and `OPEN_SWE_DESKTOP_URL` names remain accepted for compatibility.
 
+Development builds hardcode the update UI to the ready state. The install action remains disabled
+because Electron updates require a packaged app. To exercise the full download and install flow,
+build two packaged versions and serve the newer build's update metadata and archive locally:
+
+```bash
+python3 -m http.server 8080 --directory /path/to/newer/desktop/dist
+OPEN_SWE_DESKTOP_UPDATE_URL=http://127.0.0.1:8080 \
+  "/path/to/older/Open SWE.app/Contents/MacOS/Open SWE"
+```
+
+The older app's version must be lower than the version in `latest-mac.yml`. It downloads the archive
+and enables **Update** when it is ready to install.
+
 ## Packaging
 
 ```bash
