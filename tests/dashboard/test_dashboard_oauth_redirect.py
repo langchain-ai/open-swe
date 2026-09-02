@@ -14,14 +14,10 @@ from agent.dashboard.oauth import COOKIE_NAME, decode_session, sanitize_redirect
 
 @pytest.fixture(autouse=True)
 def _stub_upsert_mapping(monkeypatch) -> None:
-    async def fake_get_mapping(login: str) -> dict[str, Any] | None:
+    async def fake_seed_mapping_if_absent(**kwargs: Any) -> None:
         return None
 
-    async def fake_upsert_mapping(**kwargs: Any) -> dict[str, Any]:
-        return dict(kwargs)
-
-    monkeypatch.setattr(routes, "get_mapping", fake_get_mapping)
-    monkeypatch.setattr(routes, "upsert_mapping", fake_upsert_mapping)
+    monkeypatch.setattr(routes, "seed_mapping_if_absent", fake_seed_mapping_if_absent)
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:

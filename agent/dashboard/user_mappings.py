@@ -21,6 +21,7 @@ call sites degrade to "unmapped" (the same conservative behavior as a missing
 dict entry).
 """
 
+import asyncio
 import logging
 import threading
 from typing import Any, Literal
@@ -33,6 +34,8 @@ USER_MAPPINGS_NAMESPACE: list[str] = ["user_mappings"]
 
 MappingSource = Literal["slack_oauth", "github_oauth"]
 MappingStatus = Literal["active", "pending"]
+
+_SEED_LOCK = asyncio.Lock()
 
 
 def _norm_login(login: str | None) -> str:
@@ -269,6 +272,22 @@ async def upsert_mapping(
     _deindex_login(login)
     _index_record(record)
     return record
+
+
+async def seed_mapping_if_absent(*, github_login: str, work_email: str) -> None:
+    """Create a ``github_oauth`` mapping only when the login has none yet.
+
+    The lock keeps a concurrent Slack link or admin edit in this process from
+    being clobbered by the check-then-write.
+    """
+    async with _SEED_LOCK:
+        if await get_mapping(github_login):
+            return
+        await upsert_mapping(
+            github_login=github_login,
+            work_email=work_email,
+            source="github_oauth",
+        )
 
 
 async def delete_mapping(github_login: str) -> bool:

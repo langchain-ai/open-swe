@@ -250,6 +250,7 @@ from .user_mappings import (
     delete_mapping,
     get_mapping,
     list_mappings,
+    seed_mapping_if_absent,
     upsert_mapping,
 )
 from .voice import transcribe_audio
@@ -524,13 +525,8 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     # GitHub-sourced webhook handlers resolve per-user tokens through this
     # mapping, so seed it at login instead of requiring Slack OAuth. Existing
     # mappings are left alone: their work_email is Slack-verified or curated.
-    if email and not await get_mapping(login):
-        await upsert_mapping(
-            github_login=login,
-            work_email=email,
-            source="github_oauth",
-            status="active",
-        )
+    if email:
+        await seed_mapping_if_absent(github_login=login, work_email=email)
 
     challenge = state_payload.get("handoff_challenge")
     port = state_payload.get("handoff_port")
