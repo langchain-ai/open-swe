@@ -1,21 +1,23 @@
+import logging
+import shlex
+import uuid
 from collections.abc import Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from langgraph.config import get_config
 
 from agent.source_context import SourceContext
+from agent.spawn import SpawnDestination, SpawnHandoff, SpawnOrigin, spawn_slack_session
+from agent.surfaces import SlackChannelSurface
 
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import (
-    bind_slack_thread_id,
-    delete_slack_thread_associations,
-    get_active_slack_thread,
-    slack_thread_mutation_lock,
-)
+from ..utils.sandbox_paths import aresolve_repo_dir
+from ..utils.sandbox_state import get_sandbox_backend
+from ..utils.slack import get_active_slack_thread, get_slack_permalink
 from ..utils.slack_code_channels import (
     CODE_CHANNEL_SESSION_TS,
-    DEFAULT_CODE_CHANNEL_COMMANDS,
     VIEW_CONTENT_MAX_BYTES,
     CanvasAccessLevel,
     SessionStatus,
@@ -29,7 +31,6 @@ from ..utils.slack_code_channels import (
     list_views,
     remove_view,
     rename_session,
-    repo_context_bar_items,
     set_agent_resource,
     set_canvas_content,
     set_commands,
@@ -41,6 +42,8 @@ from ..utils.slack_code_channels import (
 )
 from ..utils.thread_ops import langgraph_client
 from .create_sandbox_file_download_url import _resolve_sandbox_file
+
+logger = logging.getLogger(__name__)
 
 
 async def manage_code_channel(
@@ -60,6 +63,7 @@ async def manage_code_channel(
         "archive",
     ],
     title: str = "",
+    instructions: str = "",
     team_id: str = "",
     is_private: bool = False,
     status: SessionStatus = "active",
@@ -85,8 +89,17 @@ async def manage_code_channel(
 ) -> dict[str, Any]:
     """Manage the complete Slack code-channel surface for this session.
 
-    Use `create` to promote the current Slack thread using its generated title. Use
-    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
+    `create` opens a code channel and starts a **separate session** in it, which
+    takes the task over from here. That session begins with no history and its own
+    fresh sandbox, so `instructions` must describe the task on its own: what to do,
+    what has been decided, and anything learned so far that it would otherwise have
+    to rediscover. Push any local work before calling it — commit and push to a
+    branch, creating one if the work is still on the default branch — because the
+    new sandbox is a clean checkout and cannot see this one's working tree; `create`
+    refuses while this checkout holds unpushed work. After it succeeds, tell the
+    user which channel is handling the task and stop working on it here.
+
+    Use `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
     upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
     can be passed directly or read from `file_path`, while Block Kit uses `blocks`
     plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
@@ -124,6 +137,8 @@ async def manage_code_channel(
             active,
             await _code_channel_title(client, thread_id, title),
             repo if isinstance(repo, dict) else None,
+            configurable=dict(configurable),
+            instructions=instructions,
             team_id=team_id,
             is_private=is_private,
         )
@@ -279,6 +294,153 @@ async def _resolve_content(content: str, file_path: str) -> tuple[str, str | Non
         return "", "file_path must contain valid UTF-8 text"
 
 
+@dataclass(frozen=True)
+class _OriginRepoState:
+    """What the origin sandbox holds that a fresh sandbox would not."""
+
+    branch: str = ""
+    unshared: str = ""
+
+
+async def _origin_repo_state(thread_id: str, repo: dict[str, Any] | None) -> _OriginRepoState:
+    """The origin checkout's branch, and anything in it that GitHub has not seen.
+
+    Best effort: a sandbox that cannot answer is not a reason to refuse the
+    channel, so an unreachable sandbox or a missing checkout reads as clean.
+    """
+    repo_name = str((repo or {}).get("name") or "")
+    if not repo_name:
+        return _OriginRepoState()
+    try:
+        backend = await get_sandbox_backend(thread_id)
+        repo_dir = shlex.quote(await aresolve_repo_dir(backend, repo_name))
+        branch = await backend.aexecute(f"git -C {repo_dir} rev-parse --abbrev-ref HEAD")
+        dirty = await backend.aexecute(f"git -C {repo_dir} status --porcelain")
+        # Commits on no remote branch: committed to a local branch and never pushed.
+        unpushed = await backend.aexecute(
+            f"git -C {repo_dir} log --branches --not --remotes --format=%h"
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not read the origin checkout for %s", thread_id, exc_info=True)
+        return _OriginRepoState()
+    reasons: list[str] = []
+    if dirty.exit_code == 0 and dirty.output.strip():
+        reasons.append("uncommitted changes")
+    if unpushed.exit_code == 0 and unpushed.output.strip():
+        reasons.append("commits that were never pushed")
+    return _OriginRepoState(
+        branch=branch.output.strip() if branch.exit_code == 0 else "",
+        unshared=" and ".join(reasons),
+    )
+
+
+def _handoff_repo(repo: dict[str, Any] | None) -> dict[str, str] | None:
+    owner = str((repo or {}).get("owner") or "")
+    name = str((repo or {}).get("name") or "")
+    return {"owner": owner, "name": name} if owner and name else None
+
+
+def _pull_request_url(metadata: Mapping[str, Any] | None) -> str:
+    urls = (metadata or {}).get("pr_urls")
+    if not isinstance(urls, list):
+        return ""
+    return next(
+        (url for url in reversed(urls) if isinstance(url, str) and url.startswith("https://")), ""
+    )
+
+
+async def _handoff_content(
+    *,
+    title: str,
+    instructions: str,
+    repo: dict[str, Any] | None,
+    repo_state: _OriginRepoState,
+    pull_request_url: str,
+    origin: Mapping[str, Any],
+    origin_thread_id: str,
+    thread_id: str,
+) -> str:
+    owner = str((repo or {}).get("owner") or "")
+    name = str((repo or {}).get("name") or "")
+    repo_text = f"{owner}/{name}" if owner and name else "(no repository specified)"
+    started_by = str(origin.get("triggering_user_name") or "") or (
+        f"<@{origin.get('triggering_user_id')}>" if origin.get("triggering_user_id") else "unknown"
+    )
+    permalink = await get_slack_permalink(
+        str(origin.get("channel_id") or ""),
+        str(origin.get("triggering_event_ts") or origin.get("thread_ts") or ""),
+    )
+
+    checkout_lines = [
+        f"- Branch to continue from: `{repo_state.branch}`"
+        if repo_state.branch
+        else "- No branch was started yet.",
+        "- This session has its own fresh sandbox. The originating session's working "
+        "tree is not shared with it, so everything you need is on the branch above, "
+        "in the pull request, or in the task description.",
+    ]
+    if pull_request_url:
+        checkout_lines.insert(1, f"- Pull request: {pull_request_url}")
+
+    origin_lines = [f"- Started by {started_by}"]
+    if permalink:
+        origin_lines.append(f"- Originating Slack thread: {permalink}")
+    origin_dashboard = dashboard_thread_url(origin_thread_id)
+    if origin_dashboard:
+        origin_lines.append(f"- Originating session: {origin_dashboard}")
+    origin_lines.append(
+        "- That session handed this task over and is no longer working on it. Do not "
+        "post there; this channel is where the work and the conversation happen."
+    )
+
+    dashboard_url = dashboard_thread_url(thread_id)
+    return "\n\n".join(
+        section
+        for section in (
+            "You are the agent for a new Slack code channel, opened for this task by "
+            "another Open SWE session. The whole channel is one session with you.",
+            f"## Task\n{title}",
+            f"## Instructions\n{instructions}",
+            f"## Default Repository Hint\n{repo_text}\n"
+            "Use this repository unless the instructions clearly identify a different one.",
+            "## Checkout\n" + "\n".join(checkout_lines),
+            "## Origin\n" + "\n".join(origin_lines),
+            f"## Open SWE Links\n- Web: {dashboard_url}" if dashboard_url else "",
+        )
+        if section
+    )
+
+
+async def _record_spawn_on_origin(
+    client: Any, origin_thread_id: str, channel_id: str, session_thread_id: str
+) -> None:
+    """Append to the channels this thread has handed tasks to.
+
+    A thread can open as many code channels as it has tasks — each one is its own
+    disconnected session — so this is a list, not the latest one.
+    """
+    try:
+        thread = await client.threads.get(thread_id=origin_thread_id)
+        metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+        context = SourceContext.from_metadata(metadata).dump()
+        recorded = context.get("spawned_code_channels")
+        recorded = (
+            [entry for entry in recorded if isinstance(entry, dict)]
+            if isinstance(recorded, list)
+            else []
+        )
+        if not any(entry.get("channel_id") == channel_id for entry in recorded):
+            recorded.append({"channel_id": channel_id, "thread_id": session_thread_id})
+        merged = SourceContext.parse({**context, "spawned_code_channels": recorded})
+        await client.threads.update(
+            thread_id=origin_thread_id, metadata={"source_context": merged.dump()}
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not record the code channel on origin thread %s", origin_thread_id, exc_info=True
+        )
+
+
 async def _create(
     client: Any,
     thread_id: str,
@@ -286,18 +448,45 @@ async def _create(
     title: str,
     repo: dict[str, Any] | None,
     *,
+    configurable: dict[str, Any],
+    instructions: str,
     team_id: str = "",
     is_private: bool = False,
 ) -> dict[str, Any]:
     if not title.strip():
         return {"success": False, "error": "title is required"}
+    if not instructions.strip():
+        return {
+            "success": False,
+            "error": (
+                "instructions is required: the code channel session starts with no history, "
+                "so it needs a self-contained description of the task"
+            ),
+        }
     source_channel = str(active.get("channel_id") or "")
-    source_ts = str(active.get("thread_ts") or "")
-    origin_message_ts = str(active.get("triggering_event_ts") or "") or source_ts
+    origin_message_ts = str(active.get("triggering_event_ts") or "") or str(
+        active.get("thread_ts") or ""
+    )
 
+    repo_state = await _origin_repo_state(thread_id, repo)
+    if repo_state.unshared:
+        return {
+            "success": False,
+            "error": (
+                f"This session's checkout has {repo_state.unshared}. The code channel gets a "
+                "fresh sandbox and cannot see this working tree, so that work would be lost. "
+                "Push it first — create a branch for it if there is none yet — then open the "
+                "channel."
+            ),
+        }
+
+    # Slack takes the session id as an idempotency key, so the session it belongs
+    # to has to be named before the channel exists: a retry then returns the same
+    # channel instead of stranding a second one.
+    session_thread_id = str(uuid.uuid4())
     channel_id, error = await create_code_channel(
         name=title,
-        session_id=thread_id,
+        session_id=session_thread_id,
         origin_channel_id=source_channel,
         origin_message_ts=origin_message_ts,
         team_id=team_id,
@@ -306,80 +495,78 @@ async def _create(
     if not channel_id:
         return {"success": False, "error": error or "Slack could not create the code channel"}
 
-    new_slack = {
-        **{
-            key: active.get(key, "")
-            for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email")
-        },
-        "channel_id": channel_id,
-        "thread_ts": CODE_CHANNEL_SESSION_TS,
-        "triggering_event_ts": origin_message_ts,
-    }
-    bound = False
     try:
-        async with slack_thread_mutation_lock(
-            client, source_channel, source_ts, thread_id=thread_id
-        ) as locked_active:
-            if not locked_active or (
-                locked_active.get("channel_id"),
-                locked_active.get("thread_ts"),
-            ) != (source_channel, source_ts):
-                raise RuntimeError("Slack thread moved concurrently; retry")
-            await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
-            bound = True
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "source": "slack",
-                    "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
-                },
-            )
+        thread = await client.threads.get(thread_id=thread_id)
+        origin_metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+    except Exception:  # noqa: BLE001
+        origin_metadata = None
+
+    # Chrome before the run, not after: the run's completion is what returns the
+    # session to `active`, and a `processing` set after that would stick.
+    surface = SlackChannelSurface(channel_id)
+    warnings: list[str] = []
+    await surface.begin_turn()
+    try:
+        await surface.start_session(repo=repo, thread_id=session_thread_id)
     except Exception as exc:  # noqa: BLE001
-        if bound:
-            with suppress(Exception):
-                await delete_slack_thread_associations(
-                    client, channel_id, CODE_CHANNEL_SESSION_TS, expected_thread_id=thread_id
-                )
+        warnings.append(f"Could not set up the channel's context and commands: {exc}")
+
+    try:
+        session = await spawn_slack_session(
+            client,
+            destination=SpawnDestination(
+                channel_id=channel_id,
+                thread_ts=CODE_CHANNEL_SESSION_TS,
+                surface="slack_channel",
+            ),
+            origin=SpawnOrigin.from_config({**configurable, "thread_id": thread_id}, active),
+            handoff=SpawnHandoff(
+                title=title,
+                content=await _handoff_content(
+                    title=title,
+                    instructions=instructions,
+                    repo=repo,
+                    repo_state=repo_state,
+                    pull_request_url=_pull_request_url(origin_metadata),
+                    origin=active,
+                    origin_thread_id=thread_id,
+                    thread_id=session_thread_id,
+                ),
+                repo=_handoff_repo(repo),
+                source_context={
+                    "spawned_from": {
+                        "thread_id": thread_id,
+                        "channel_id": source_channel,
+                        "thread_ts": str(active.get("thread_ts") or ""),
+                        "message_ts": origin_message_ts,
+                    }
+                },
+            ),
+            thread_id=session_thread_id,
+        )
+    except Exception as exc:  # noqa: BLE001
         with suppress(Exception):
             await archive_code_channel(channel_id)
         return {
             "success": False,
-            "error": f"Could not bind the code channel to this session: {exc}",
+            "error": f"Could not start a session in the new code channel: {exc}",
             "retryable": True,
         }
 
-    try:
-        await delete_slack_thread_associations(
-            client, source_channel, source_ts, expected_thread_id=thread_id
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "success": False,
-            "error": f"Code channel created but the source thread was not detached: {exc}",
-            "channel_id": channel_id,
-            "retryable": True,
-        }
-
-    warnings: list[str] = []
-    _, status_error = await set_session_status_result(channel_id, "processing")
-    if status_error:
-        warnings.append(f"Could not set processing status: {status_error}")
-    context_items = repo_context_bar_items(
-        repo, dashboard_url=dashboard_thread_url(thread_id) or ""
-    )
-    if context_items:
-        _, context_error = await set_context_bar(channel_id, context_items)
-        if context_error:
-            warnings.append(f"Could not set repository context: {context_error}")
-    _, commands_error = await set_commands(channel_id, DEFAULT_CODE_CHANNEL_COMMANDS)
-    if commands_error:
-        warnings.append(f"Could not register default commands: {commands_error}")
+    await _record_spawn_on_origin(client, thread_id, channel_id, session.thread_id)
 
     result: dict[str, Any] = {
         "success": True,
         "action": "create",
         "channel_id": channel_id,
-        "dashboard_url": dashboard_thread_url(thread_id),
+        "mention": f"<#{channel_id}>",
+        "thread_id": session.thread_id,
+        "dashboard_url": session.dashboard_url,
+        "next_step": (
+            "The channel is a separate session that has already started on the instructions "
+            f"you gave it. Tell the user it is working in <#{channel_id}> and stop working on "
+            "this task here."
+        ),
     }
     if warnings:
         result["warnings"] = warnings
