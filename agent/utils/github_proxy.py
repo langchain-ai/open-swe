@@ -13,13 +13,14 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from agent.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
+
 from .github_app import (
     PermissionKey,
     PermissionMap,
     get_github_app_installation_token_with_expiry,
     normalize_permissions,
 )
-from .sandbox_state import SANDBOX_BACKENDS, unwrap_sandbox_backend
 
 logger = logging.getLogger(__name__)
 

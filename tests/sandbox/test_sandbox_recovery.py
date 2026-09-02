@@ -16,7 +16,7 @@ from agent.middleware.sandbox_circuit_breaker import (
     sandbox_unreachable_message,
 )
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_state import (
+from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     set_sandbox_backend,
 )

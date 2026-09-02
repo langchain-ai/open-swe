@@ -2438,7 +2438,7 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     sandbox = object()
     monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
     monkeypatch.setattr(
-        "agent.utils.sandbox_paths.aresolve_sandbox_work_dir",
+        "agent.sandboxes.paths.aresolve_sandbox_work_dir",
         AsyncMock(return_value="/work"),
     )
     read_diff = AsyncMock(return_value=live)

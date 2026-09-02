@@ -43,6 +43,20 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from agent.sandboxes.paths import aresolve_sandbox_work_dir
+from agent.sandboxes.providers import SandboxGoneError, create_sandbox
+from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.state import (
+    SANDBOX_BACKENDS,
+    SandboxBackendProxy,
+    SandboxUnreachableError,
+    get_or_create_sandbox_backend_proxy,
+    get_sandbox_id_from_metadata,
+    get_sandbox_metadata,
+    set_sandbox_backend,
+    unwrap_sandbox_backend,
+)
+
 from .dashboard.admin import is_admin, is_observability_authorized
 from .dashboard.agent_overrides import (
     load_profile,
@@ -209,19 +223,6 @@ from .utils.model import (
     fallback_model_id_for,
     make_model,
     provider_model_kwargs,
-)
-from .utils.read_only_backend import ReadOnlyBackend
-from .utils.sandbox import SandboxGoneError, create_sandbox
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import (
-    SANDBOX_BACKENDS,
-    SandboxBackendProxy,
-    SandboxUnreachableError,
-    get_or_create_sandbox_backend_proxy,
-    get_sandbox_id_from_metadata,
-    get_sandbox_metadata,
-    set_sandbox_backend,
-    unwrap_sandbox_backend,
 )
 from .utils.startup_trace import aphase
 from .utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins

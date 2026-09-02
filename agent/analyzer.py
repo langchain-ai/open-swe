@@ -30,6 +30,9 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from agent.sandboxes.paths import aresolve_sandbox_work_dir
+from agent.sandboxes.state import unwrap_sandbox_backend
+
 from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
@@ -56,8 +59,6 @@ from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import unwrap_sandbox_backend
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)

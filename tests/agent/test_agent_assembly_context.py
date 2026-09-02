@@ -15,9 +15,9 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.server import _registered_tool_name, get_agent
-from agent.utils.read_only_backend import ReadOnlyBackend
-from agent.utils.sandbox_state import SANDBOX_BACKENDS, SandboxBackendProxy
 
 
 class _DummyAgent:

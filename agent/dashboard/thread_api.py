@@ -113,7 +113,7 @@ _SANDBOX_CREATING_SENTINEL = "__creating__"
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
-    from ..utils.sandbox import create_sandbox as _create_sandbox
+    from agent.sandboxes.providers import create_sandbox as _create_sandbox
 
     return await _create_sandbox(*args, **kwargs)
 
@@ -2342,7 +2342,8 @@ async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
-    from ..utils.sandbox_paths import aresolve_sandbox_work_dir
+    from agent.sandboxes.paths import aresolve_sandbox_work_dir
+
     from ..utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)

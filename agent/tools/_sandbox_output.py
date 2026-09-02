@@ -6,8 +6,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_state import get_sandbox_backend
+from agent.sandboxes.paths import aresolve_sandbox_work_dir
+from agent.sandboxes.state import get_sandbox_backend
 
 OUTPUT_CHUNK_CHARS = 500
 

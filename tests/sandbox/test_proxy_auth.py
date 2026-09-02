@@ -17,7 +17,7 @@ from agent.integrations.langsmith import (
     _configure_github_proxy,
     _stagehand_proxy_rules,
 )
-from agent.utils.sandbox_state import SandboxBackendProxy
+from agent.sandboxes.state import SandboxBackendProxy
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -30,14 +30,14 @@ def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
 class TestSandboxFactoryLoading:
     async def test_create_sandbox_loads_only_selected_provider(self) -> None:
         with (
-            patch("agent.utils.sandbox.import_module") as mock_import_module,
+            patch("agent.sandboxes.providers.import_module") as mock_import_module,
             patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
         ):
             module = MagicMock()
             module.create_local_sandbox.return_value = MagicMock(id="local", aexecute=AsyncMock())
             mock_import_module.return_value = module
 
-            from agent.utils.sandbox import create_sandbox
+            from agent.sandboxes.providers import create_sandbox
 
             sandbox = await create_sandbox("existing")
 
@@ -47,7 +47,7 @@ class TestSandboxFactoryLoading:
 
     async def test_create_sandbox_passes_langsmith_resource_overrides(self) -> None:
         with (
-            patch("agent.utils.sandbox.import_module") as mock_import_module,
+            patch("agent.sandboxes.providers.import_module") as mock_import_module,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             module = MagicMock()
@@ -56,7 +56,7 @@ class TestSandboxFactoryLoading:
             )
             mock_import_module.return_value = module
 
-            from agent.utils.sandbox import create_sandbox
+            from agent.sandboxes.providers import create_sandbox
 
             await create_sandbox(
                 snapshot_id="env-snap",
