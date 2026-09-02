@@ -57,10 +57,12 @@ def _origin() -> SpawnOrigin:
 
 def _handoff(**overrides: Any) -> SpawnHandoff:
     return SpawnHandoff(
-        title="Migrate the billing cron",
-        content="Do the work",
-        repo={"owner": "acme", "name": "billing"},
-        **overrides,
+        **{
+            "title": "Migrate the billing cron",
+            "content": "Do the work",
+            "repo": {"owner": "acme", "name": "billing"},
+            **overrides,
+        }
     )
 
 
@@ -373,3 +375,20 @@ async def test_an_invite_slack_refuses_is_a_warning_not_a_failure(
     assert opened.session.thread_id == "thread-code"
     assert opened.invited == []
     assert "missing_scope" in opened.warnings[0]
+
+
+async def test_a_handed_over_title_is_marked_as_replaceable(
+    spawn_calls: dict[str, AsyncMock],
+) -> None:
+    """Title generation only replaces a title that still matches its seed."""
+    client = _Client()
+    await spawn_slack_session(
+        client,  # type: ignore[arg-type]
+        destination=SpawnDestination(channel_id="C-new", thread_ts="0", surface="slack_channel"),
+        origin=_origin(),
+        handoff=_handoff(title="fix the flaky login test"),
+    )
+
+    metadata = client.threads.updated[0]["metadata"]
+    assert metadata["title"] == "fix the flaky login test"
+    assert metadata["title_seed"] == metadata["title"]

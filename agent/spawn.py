@@ -112,9 +112,14 @@ def _new_location(destination: SpawnDestination, origin: SpawnOrigin) -> SlackTh
 def _metadata(
     location: SlackThreadRef, origin: SpawnOrigin, handoff: SpawnHandoff
 ) -> dict[str, Any]:
+    # The seed says this title is the one it was handed, not one generated from
+    # the conversation: title generation replaces a title that still matches its
+    # seed, and renames the code channel with it.
+    provisional_title = handoff.title[:80]
     metadata: dict[str, Any] = {
         "source": "slack",
-        "title": handoff.title[:80],
+        "title": provisional_title,
+        "title_seed": provisional_title,
         "source_context": SourceContext.parse(
             {"slack_thread": location.dump(), **handoff.source_context}
         ).dump(),
