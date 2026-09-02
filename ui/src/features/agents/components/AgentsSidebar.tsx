@@ -834,7 +834,7 @@ export function AgentsSidebar({
             }
             disabled={updateState.status !== "ready"}
             onClick={() => void window.openSweDesktop?.installUpdate()}
-            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:px-3 hover:bg-primary/90 disabled:opacity-60"
+            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60"
           >
             {updateState.status === "downloading" ? (
               <CircleNotchIcon className="size-4 animate-spin group-hover:hidden" />

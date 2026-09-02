@@ -29,7 +29,9 @@ function DesktopVersionSection() {
       <SettingsRow
         label="Open SWE Desktop"
         control={
-          <span className="text-xs text-muted-foreground">Version {version}</span>
+          <span className="text-xs text-muted-foreground">
+            Version {version}
+          </span>
         }
       />
     </SettingsSection>
