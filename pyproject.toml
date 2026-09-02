@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.11",
+    "deepagents==0.7.6",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx>=0.28.1",
@@ -48,7 +48,7 @@ dev = [
 # `deepagents<0.7.0`, but 0.7.6 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
-override-dependencies = ["deepagents==0.7.11", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.6", "wcmatch>=11.0"]
 # Each langgraph-api release pins its langgraph-runtime-inmem peer to a single
 # minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`), which
 # uv's default pre-release policy shies away from, so a plain resolve lands on the
