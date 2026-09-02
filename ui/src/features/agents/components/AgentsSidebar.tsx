@@ -114,7 +114,12 @@ interface HydratedProjectGroup extends SidebarProjectGroup {
 }
 
 const NAV = [
-  { to: "/agents/threads", label: "Kanban", icon: Kanban },
+  {
+    to: "/agents/threads",
+    label: "Kanban",
+    icon: Kanban,
+    badge: "Experimental",
+  },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
@@ -661,6 +666,11 @@ export function AgentsSidebar({
                     >
                       <Icon className="size-4" />
                       {item.label}
+                      {"badge" in item && (
+                        <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] leading-none font-medium text-muted-foreground">
+                          {item.badge}
+                        </span>
+                      )}
                     </Link>
                   )
                 })}
