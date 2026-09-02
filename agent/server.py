@@ -82,6 +82,7 @@ from .dashboard.team_settings import (
 )
 from .dashboard.user_mappings import email_for_login
 from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
+from .desktop_branch import schedule_worktree_branch_rename
 from .input_messages import (
     SystemIdentity,
     build_input_messages,
@@ -825,6 +826,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         if is_desktop_run(configurable):
+            local_path = configurable.get("local_project_path")
+            if isinstance(local_path, str) and local_path:
+                schedule_worktree_branch_rename(
+                    worktree_path=local_path,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             async with aphase(self._thread_id, "prepare.work_dir"):

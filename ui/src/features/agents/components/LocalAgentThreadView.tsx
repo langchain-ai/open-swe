@@ -37,6 +37,7 @@ import {
   ensureDesktopModelCredential,
   localThreadKeys,
   useDesktopLocalThread,
+  useLocalProjectRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
@@ -166,7 +167,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const terminals = useTerminalGroups(
     { kind: "local", sessionId },
-    thread?.cwd ?? ""
+    thread?.worktreePath ?? thread?.cwd ?? ""
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
@@ -184,6 +185,35 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange, openSurface, threadRef]
+  )
+
+  const worktreePath = thread?.worktreePath ?? null
+  const refsQuery = useLocalProjectRefs(thread?.cwd)
+  const projectRefs = refsQuery.data
+  const refetchProjectRefs = refsQuery.refetch
+  // The thread's branch is wherever its working tree is: the ref checked out in
+  // its worktree, or the project's own checkout when it has none.
+  const threadBranch =
+    projectRefs.find((candidate) =>
+      worktreePath ? candidate.worktreePath === worktreePath : candidate.current
+    )?.name ?? null
+
+  const selectBranch = useCallback(
+    async (branch: string) => {
+      setError(null)
+      try {
+        const updated = await window.openSweDesktop?.setLocalBranch({
+          threadId: sessionId,
+          branch,
+        })
+        if (updated)
+          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+        await refetchProjectRefs()
+      } catch (cause) {
+        setError(errorMessage(cause))
+      }
+    },
+    [queryClient, refetchProjectRefs, sessionId]
   )
 
   const activity = useLocalThreadActivity()[sessionId]
@@ -305,7 +335,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             config: {
               configurable: {
                 source: "desktop",
-                local_project_path: thread.cwd,
+                local_project_path: thread.worktreePath ?? thread.cwd,
                 ...(activeSelection && {
                   agent_model_id: activeSelection.modelId,
                   agent_effort: activeSelection.effort,
@@ -546,6 +576,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               }}
               placeholder="Add a follow up"
               skills={skills.data}
+              runTarget="local"
+              selectedLocalProjectPath={thread.cwd}
+              localProjectBranches={projectRefs}
+              selectedLocalProjectBranch={threadBranch}
+              onRefreshLocalProjectBranch={() => void refetchProjectRefs()}
+              onSelectLocalProjectBranch={(branch) => void selectBranch(branch)}
+              localWorkspaceMode={thread.worktreePath ? "worktree" : "local"}
+              localWorktreeLabel="Worktree"
             />
           </AgentComposerDock>
         </div>
@@ -554,7 +592,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         threadRef={threadRef}
         terminals={terminals}
         terminalTarget={{ kind: "local", sessionId: thread.id }}
-        cwd={thread.cwd}
+        cwd={thread.worktreePath ?? thread.cwd}
         terminalAvailable
         diffAvailable
         collapsed={panelCollapsed}
