@@ -167,7 +167,7 @@ async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.Monkey
         "agent.integrations.langsmith.LangSmithSandbox.aexecute", failing_base_execute
     )
     monkeypatch.setattr(sandbox, "run", flaky_run)
-    monkeypatch.setattr("agent.utils.sandbox_retry.asyncio.sleep", AsyncMock(), raising=True)
+    monkeypatch.setattr("agent.sandboxes.retry.asyncio.sleep", AsyncMock(), raising=True)
 
     resp = await sb.aexecute("git status", timeout=5)
 

@@ -17,6 +17,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
+from agent.auth.github_app import get_github_app_installation_token
 from agent.thread_ids import reviewer_thread_id
 
 from ..review.findings import (
@@ -25,7 +26,6 @@ from ..review.findings import (
     comment_ids_for_finding,
     is_thread_resolved,
 )
-from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
 from ..utils.thread_ops import langgraph_client
@@ -748,8 +748,9 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
     """Resolve a PR to its author coding-agent thread without running a review."""
     from dataclasses import asdict
 
+    from agent.auth.github_app import get_github_app_installation_token_with_expiry
+
     from ..review.trace_context import resolve_pr_trace
-    from ..utils.github_app import get_github_app_installation_token_with_expiry
     from ..utils.slack import GitHubPrRef
 
     pr_ref = GitHubPrRef(

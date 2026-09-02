@@ -9,7 +9,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..utils.sandbox_state import get_sandbox_backend
+from agent.sandboxes.state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 

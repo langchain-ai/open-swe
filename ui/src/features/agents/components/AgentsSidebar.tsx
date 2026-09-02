@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   CircleNotchIcon,
+  DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
@@ -16,6 +17,7 @@ import {
 import { Kanban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
 import type {
   PullRequestSnapshot,
@@ -204,6 +206,15 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
+    status: "idle",
+  })
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    if (!desktop) return
+    void desktop.getUpdateState().then(setUpdateState)
+    return desktop.onUpdateState(setUpdateState)
+  }, [])
   const projectMode = prefs.organize === "project"
   const includeAutomations =
     prefs.filters.includeAutomations ||
@@ -799,8 +810,8 @@ export function AgentsSidebar({
         </div>
       </TooltipProvider>
 
-      <div className="p-2">
-        <div className="min-w-0">
+      <div className="flex items-center gap-2 p-2">
+        <div className="min-w-0 flex-1">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
           ) : (
@@ -812,6 +823,29 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
+        {updateState.status !== "idle" && (
+          <button
+            type="button"
+            title={
+              updateState.status === "ready" ? "Update" : "Downloading update…"
+            }
+            aria-label={
+              updateState.status === "ready" ? "Update" : "Downloading update"
+            }
+            disabled={updateState.status !== "ready"}
+            onClick={() => void window.openSweDesktop?.installUpdate()}
+            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60"
+          >
+            {updateState.status === "downloading" ? (
+              <CircleNotchIcon className="size-4 animate-spin group-hover:hidden" />
+            ) : (
+              <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+            )}
+            <span className="hidden group-hover:inline">
+              {updateState.status === "ready" ? "Update" : "Downloading…"}
+            </span>
+          </button>
+        )}
       </div>
     </SidebarFrame>
   )
