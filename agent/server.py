@@ -109,6 +109,7 @@ from .middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
+    SlackTranscriptMiddleware,
     StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
@@ -1164,6 +1165,30 @@ def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) 
     )
 
 
+def _transcript_middleware(configurable: dict[str, Any], thread_id: str) -> list[Any]:
+    """Deliver the run's words to surfaces that have to be told about them."""
+    location = SlackThreadRef.parse(configurable.get("slack_thread"))
+    if location is None or not slack_surface(location).projects_transcript:
+        return []
+    # `prepare_run_id` is minted per dispatch and stored in the run's config, so a
+    # resumed run keeps writing into the message it already opened.
+    run_key = configurable.get("prepare_run_id")
+    if not isinstance(run_key, str) or not run_key:
+        return []
+    return [
+        SlackTranscriptMiddleware(
+            thread_id=thread_id,
+            run_key=run_key,
+            channel_id=location.channel_id,
+            reply_thread_ts=location.reply_thread_ts,
+            session_thread_ts=location.thread_ts,
+            triggering_user_id=location.triggering_user_id,
+            triggering_event_ts=location.triggering_event_ts,
+            team_id=location.team_id,
+        )
+    ]
+
+
 def _session_reply_tools(configurable: dict[str, Any]) -> list[Any]:
     """The posting tool that matches how this surface delivers what the agent says.
 
@@ -1814,6 +1839,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     admin_environments=admin_thread,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                *_transcript_middleware(configurable, thread_id or ""),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),

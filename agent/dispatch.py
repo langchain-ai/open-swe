@@ -28,15 +28,12 @@ busy-check and the custom store-queue) with one function that uses:
 import logging
 import os
 import uuid
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
-
-from agent.source_context import SlackThreadRef
-from agent.surfaces import SlackChannelSurface, slack_surface
 
 from .input_messages import (
     ChannelIdentity,
@@ -275,40 +272,7 @@ async def create_durable_run(
         source,
         run.get("run_id") if isinstance(run, dict) else None,
     )
-    _project_run(client, thread_id, run, run_config)
     return run
-
-
-def _project_run(client: LangGraphClient, thread_id: str, run: Run, run_config: RunConfig) -> None:
-    """Mirror the run into its chat surface, if that surface needs telling.
-
-    Every trigger funnels through here, so a run started from the dashboard, a
-    scheduled wake-up or another session reaches the surface the same way a
-    Slack message does. Surfaces that read the thread themselves need nothing.
-    """
-    run_id = run.get("run_id") if isinstance(run, dict) else None
-    if not isinstance(run_id, str) or not run_id:
-        return
-    configurable = run_config.get("configurable")
-    location = SlackThreadRef.parse(
-        configurable.get("slack_thread") if isinstance(configurable, dict) else None
-    )
-    surface = slack_surface(location)
-    if location is None or not surface.projects_transcript:
-        return
-    # Imported here: the projector reaches back into dispatch's own callers.
-    from agent.surfaces.projector import start_projection
-
-    try:
-        start_projection(
-            client,
-            thread_id=thread_id,
-            run_id=run_id,
-            surface=cast(SlackChannelSurface, surface),
-            location=location,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not project run %s into Slack", run_id, exc_info=True)
 
 
 async def dispatch_agent_run(
