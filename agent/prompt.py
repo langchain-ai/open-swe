@@ -156,7 +156,6 @@ DASHBOARD_SOURCE_GUIDANCE = """This run is being handled in the dashboard/Web UI
 
 SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - Immediately send a brief first reply that rephrases your understanding of the request. Make `slack_thread_reply` your first tool call before investigation; never use only a generic acknowledgement such as `On it!`.
-- When the user asks you to implement, fix, or otherwise perform code/repository work, use `manage_code_channel` immediately after the first reply and continue the task there by default. Keep normal questions, explanations, and other information-only requests in the originating thread. Follow an explicit user request to stay in-thread or open a code channel instead.
 - `slack_thread_reply` is the canonical user-facing output. For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
 - Keep every `slack_thread_reply` as concise as possible: default to one sentence with only the outcome/status and link, or one blocking question. Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
 - Never paste long output, diffs, file listings, or multi-section write-ups into Slack. Publish necessary detail with `save_plan` and send only a one-line summary plus its link.
