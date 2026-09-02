@@ -8,9 +8,9 @@
  * already styles itself with `bg-card` / `text-muted-foreground` / …, so one
  * block of values recolours the whole surface.
  *
- * The dark neutrals follow Codex's `.electron-dark` layer — the desktop app
- * re-points its surface at a darker step than the Codex *web* tokens do: black
- * chrome under a #181818 content surface, elevated at #212121 / #282828.
+ * The dark neutrals follow Codex's `.electron-dark` layer: the desktop shell
+ * paints one flat black canvas (`background-surface-under`) for both chrome and
+ * content, and only lifts cards, menus and the composer off it.
  *
  * Colour stops are written as literals rather than `var(--color-zinc-200)`
  * because Tailwind tree-shakes unreferenced theme colours out of the build.
@@ -75,7 +75,7 @@ html[data-agents-theme] {
 html.dark[data-agents-theme] {
   color-scheme: dark;
 
-  --background: #181818; /* background-surface */
+  --background: #000; /* background-surface-under */
   --app-chrome-background: var(--background);
   --foreground: #dfdfdf;
   --card: #212121; /* background-elevated-secondary-opaque */
@@ -105,7 +105,7 @@ html.dark[data-agents-theme] {
   --input: color-mix(in srgb, #fff 16%, transparent);
   --ring: oklch(0.588 0.217 264);
 
-  --sidebar: #000; /* background-surface-under: chrome sits below the content surface */
+  --sidebar: var(--background);
   --sidebar-control-surface: color-mix(in srgb, #fff 5%, transparent);
   --sidebar-row-hover: color-mix(in srgb, #fff 5%, transparent);
   --sidebar-row-active: color-mix(in srgb, #fff 8%, transparent);
