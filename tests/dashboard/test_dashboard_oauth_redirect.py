@@ -4,11 +4,20 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import jwt
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent.dashboard import routes
 from agent.dashboard.oauth import COOKIE_NAME, decode_session, sanitize_redirect_to
+
+
+@pytest.fixture(autouse=True)
+def _stub_upsert_mapping(monkeypatch) -> None:
+    async def fake_seed_mapping_if_absent(**kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(routes, "seed_mapping_if_absent", fake_seed_mapping_if_absent)
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:
