@@ -22,6 +22,7 @@ _TOOL_MODULES = {
     "linear_create_issue": ".linear_create_issue",
     "linear_delete_issue": ".linear_delete_issue",
     "linear_get_issue": ".linear_get_issue",
+    "ask_user_choice": ".ask_user_choice",
     "linear_get_issue_comments": ".linear_get_issue_comments",
     "linear_list_teams": ".linear_list_teams",
     "linear_search_issues": ".linear_search_issues",
@@ -58,6 +59,7 @@ _TOOL_MODULES = {
     "slack_add_reaction": ".slack_add_reaction",
     "slack_attach_html": ".slack_attach_html",
     "slack_move_thread": ".slack_move_thread",
+    "slack_reply_to_message": ".slack_reply_to_message",
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
     "slack_thread_reply": ".slack_thread_reply",
@@ -87,6 +89,7 @@ __all__ = [
     "linear_create_issue",
     "linear_delete_issue",
     "linear_get_issue",
+    "ask_user_choice",
     "linear_get_issue_comments",
     "linear_list_teams",
     "linear_search_issues",
@@ -124,6 +127,7 @@ __all__ = [
     "slack_attach_html",
     "slack_move_thread",
     "slack_read_thread_messages",
+    "slack_reply_to_message",
     "slack_start_new_thread",
     "slack_thread_reply",
     "trigger_automation",
@@ -135,6 +139,7 @@ __all__ = [
 if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
+    from .ask_user_choice import ask_user_choice
     from .automations import (
         create_automation,
         delete_automation,
@@ -188,6 +193,7 @@ if TYPE_CHECKING:
     from .slack_attach_html import slack_attach_html
     from .slack_move_thread import slack_move_thread
     from .slack_read_thread_messages import slack_read_thread_messages
+    from .slack_reply_to_message import slack_reply_to_message
     from .slack_start_new_thread import slack_start_new_thread
     from .slack_thread_reply import slack_thread_reply
     from .threads import get_thread, list_threads, manage_thread

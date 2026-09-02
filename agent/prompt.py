@@ -165,7 +165,7 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - When asked to move or continue the current thread in another Slack thread, use `slack_move_thread` with a concise, non-sensitive message to preserve history and detach the original thread.
 - When asked to break out work, use `slack_start_new_thread` with a headline-only title and self-contained instructions.
 - When a task warrants its own dedicated Slack channel, use `manage_code_channel` to open one and hand the task to the session that runs in it. Inside a code channel, use that tool for status, title, context and resources, runtime commands, HTML/diff/Block Kit/canvas views, canvas comments and revisions, and archival with a closing summary. Keep stable `view_key` values so view updates replace existing tabs.
-- When a plan is ready, send its review link with `slack_thread_reply`, pass `options=["Approve & implement", "Request changes"]`, and invite manual feedback too; use these options rather than constructing custom Block Kit."""
+- When a plan is ready, ask with `ask_user_choice`, passing the concise summary and review link as the question and `options=["Approve & implement", "Request changes"]`; invite manual feedback too, and never construct custom Block Kit for a choice."""
 
 LINEAR_SOURCE_GUIDANCE = """This run was triggered from Linear.
 - Use `linear_comment` for essential questions, progress updates, plan-review links, and the final outcome.

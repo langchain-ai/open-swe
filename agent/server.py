@@ -132,9 +132,12 @@ from .runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
 from .runtime.execution import graph_loaded_for_execution
+from .source_context import SlackThreadRef
+from .surfaces import slack_surface
 from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from .tools import (
     approve_plan,
+    ask_user_choice,
     background_execute,
     background_task,
     capture_environment_snapshot,
@@ -181,6 +184,7 @@ from .tools import (
     slack_attach_html,
     slack_move_thread,
     slack_read_thread_messages,
+    slack_reply_to_message,
     slack_start_new_thread,
     slack_thread_reply,
     trigger_automation,
@@ -1160,6 +1164,17 @@ def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) 
     )
 
 
+def _session_reply_tools(configurable: dict[str, Any]) -> list[Any]:
+    """The posting tool that matches how this surface delivers what the agent says.
+
+    In a code channel the agent's words are already streamed to the channel, so
+    posting is only ever a reply under one message. Anywhere else, a reply *is*
+    how the agent speaks.
+    """
+    surface = slack_surface(SlackThreadRef.parse(configurable.get("slack_thread")))
+    return [slack_reply_to_message] if surface.projects_transcript else [slack_thread_reply]
+
+
 def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
     """Return whether the run has trusted Slack source context."""
     if configurable.get("source") not in {"slack", "schedule"}:
@@ -1636,11 +1651,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     slack_tools = [
+        ask_user_choice,
         manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
         slack_read_thread_messages,
+        slack_reply_to_message,
         slack_start_new_thread,
         slack_thread_reply,
     ]
@@ -1680,13 +1697,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        ask_user_choice,
         manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
         slack_read_thread_messages,
+        *_session_reply_tools(configurable),
         slack_start_new_thread,
-        slack_thread_reply,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
     if local_run:
