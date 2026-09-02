@@ -226,8 +226,29 @@ export function AgentsHome() {
   }
 
   const handleRemoveLocalProject = async (cwd: string) => {
-    if (!(await removeProject(cwd))) return
-    if (localProjectPath === cwd) setLocalProjectPath(null)
+    const project = localProjects.find((candidate) => candidate.cwd === cwd)
+    if (!project) return
+    setLocalError(null)
+    try {
+      const terminals = await window.openSweDesktop?.terminal.list(
+        project.scopeId
+      )
+      await Promise.all(
+        (terminals ?? []).map(({ terminalId }) =>
+          window.openSweDesktop?.terminal.close({
+            localSessionId: project.scopeId,
+            terminalId,
+            deleteHistory: true,
+          })
+        )
+      )
+      if (!(await removeProject(cwd))) return
+      if (localProjectPath === cwd) setLocalProjectPath(null)
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : "Could not remove project"
+      )
+    }
   }
 
   const resetPendingSubmit = () => {
