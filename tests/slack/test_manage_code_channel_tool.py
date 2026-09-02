@@ -90,6 +90,9 @@ def creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "get_slack_permalink": AsyncMock(return_value="https://slack.example/p1"),
         "aresolve_repo_dir": AsyncMock(return_value="/workspace/open-swe"),
         "archive_code_channel": AsyncMock(return_value=(True, None)),
+        # The webhook may already have bound the new channel; both sides resolve
+        # to the same session id.
+        "resolve_slack_thread_id": AsyncMock(return_value="thread-channel"),
     }
     calls["spawn_slack_session"].side_effect = lambda _client, **kwargs: SimpleNamespace(
         thread_id=kwargs["thread_id"],
@@ -140,14 +143,14 @@ async def test_create_starts_a_separate_session_in_the_channel(creation: dict[st
     assert result["channel_id"] == "C-code"
     assert result["mention"] == "<#C-code>"
 
-    # Slack takes the session id as an idempotency key, so it is the id the new
-    # session is then created with.
-    session_id = creation["create_code_channel"].await_args_list[0].kwargs["session_id"]
-    assert result["thread_id"] == session_id
-    assert session_id != "thread-origin"
+    # The session id is the id the Slack webhook derives for the new channel, so
+    # whichever of the two binds it first binds the same one.
+    creation["resolve_slack_thread_id"].assert_awaited_once()
+    assert creation["resolve_slack_thread_id"].await_args.args[1:] == ("C-code", "0")
+    assert result["thread_id"] == "thread-channel"
 
     spawn_kwargs = creation["spawn_slack_session"].await_args_list[0].kwargs
-    assert spawn_kwargs["thread_id"] == session_id
+    assert spawn_kwargs["thread_id"] == "thread-channel"
     destination = spawn_kwargs["destination"]
     assert (destination.channel_id, destination.thread_ts, destination.surface) == (
         "C-code",
@@ -212,7 +215,8 @@ async def test_a_thread_can_hand_out_as_many_channels_as_it_has_tasks(
 
     assert (first["success"], second["success"]) == (True, True)
     assert first["channel_id"] != second["channel_id"]
-    assert first["thread_id"] != second["thread_id"]
+    # Each channel resolves its own session; the fixture answers with one id.
+    assert creation["resolve_slack_thread_id"].await_count == 2
     session_ids = [
         call.kwargs["session_id"] for call in creation["create_code_channel"].await_args_list
     ]

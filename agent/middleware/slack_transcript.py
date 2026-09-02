@@ -20,7 +20,7 @@ callback-scoped id, and unlike anything held in memory.
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -36,6 +36,10 @@ from agent.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 TRANSCRIPT_NAMESPACE = "slack_transcript"
+
+
+def _failed(result: Any) -> bool:
+    return isinstance(result, ToolMessage) and getattr(result, "status", "") == "error"
 
 
 def transcript_namespace(thread_id: str) -> tuple[str, str]:
@@ -193,11 +197,18 @@ class SlackTranscriptMiddleware(AgentMiddleware[Any, Any, Any]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Any]],
     ) -> ToolMessage | Any:
+        raw_state = getattr(request, "state", None)
+        state = cast(AgentState, raw_state if isinstance(raw_state, dict) else {"messages": []})
         call = getattr(request, "tool_call", None)
         call = call if isinstance(call, dict) else {}
         call_id = str(call.get("id") or "")
         name = str(call.get("name") or "")
-        prepared = await self._ensure() if call_id and name else None
+        if not call_id or not name:
+            return await handler(request)
+        # The message asking for this call is checkpointed by now, so saying it
+        # here puts the agent's words ahead of the card they explain.
+        await self._say_committed(state)
+        prepared = await self._ensure()
         if prepared is not None:
             prepared[0].tool_started(call_id, name, call.get("args"))
             await self._flush(*prepared)
@@ -209,7 +220,9 @@ class SlackTranscriptMiddleware(AgentMiddleware[Any, Any, Any]):
                 await self._flush(*prepared)
             raise
         if prepared is not None:
-            prepared[0].tool_finished(call_id)
+            # A tool that raised is turned into an error result before it reaches
+            # here, so the result is what says whether the call failed.
+            prepared[0].tool_finished(call_id, failed=_failed(result))
             await self._flush(*prepared)
         return result
 

@@ -678,36 +678,56 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_resolve_thread_step),
         StepSpec(content="Resolved the target thread through the thread tools."),
     ),
+    # The originating session opens the channel, hands the task over, and stops.
     "code_channel": (
         _tool_step(
             "This task warrants a dedicated Slack code channel.",
             "manage_code_channel",
-            {"action": "create", "title": "Investigate flaky CI failures"},
+            {
+                "action": "create",
+                "title": "Investigate flaky CI failures",
+                "instructions": (
+                    "Investigate the flaky CI failures on fakeorg/demo: find the failing "
+                    "test, work out why it is flaky, and fix it. Nothing has been changed "
+                    "yet and no branch has been pushed."
+                ),
+            },
             "call-code-channel-create",
         ),
         _tool_step(
-            "Continuing the task in its dedicated code channel.",
+            "Telling the user where the work moved.",
             "slack_thread_reply",
-            {
-                "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session."
-            },
+            {"message": "Opened a code channel for the investigation; the work continues there."},
             "call-code-channel-reply",
         ),
+    ),
+    # The session the channel handed the task to, running its first turn.
+    "code_channel_session": (
         _tool_step(
-            "Marking the code-channel session active.",
+            "Publishing the diff view for the handed-over task.",
             "manage_code_channel",
-            {"action": "status", "status": "active"},
-            "call-code-channel-active",
+            {"action": "status", "status": "processing"},
+            "call-code-channel-session-status",
+        ),
+        StepSpec(
+            content="Picking up the flaky CI investigation in this channel.",
         ),
     ),
-    "code_channel_followup": (
+    # A single message far past Slack's per-chunk text cap.
+    "code_channel_long": (StepSpec(content="Here is the long report. " + ("detail " * 2000)),),
+    # A tool call the agent gets wrong, so the card has to show the failure.
+    "code_channel_tool_failure": (
         _tool_step(
-            "Replying to the unmentioned code-channel follow-up.",
-            "slack_thread_reply",
-            {
-                "message": "Status: the investigation is active, and this unmentioned follow-up reached the same Open SWE session."
-            },
-            "call-code-channel-followup",
+            "Trying an action that does not exist.",
+            "manage_code_channel",
+            {"action": "not-a-real-action"},
+            "call-code-channel-bogus",
+        ),
+        StepSpec(content="That action was rejected."),
+    ),
+    "code_channel_followup": (
+        StepSpec(
+            content="Status: the investigation is active, and this follow-up reached the channel session.",
         ),
     ),
     "iframe": (
@@ -960,6 +980,10 @@ def _is_move_followup(text: str) -> bool:
     return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
 
 
+#: The first line of the prompt a code channel's own session is started with.
+CODE_CHANNEL_HANDOFF_MARKER = "You are the agent for a new Slack code channel"
+
+
 def _is_approval(text: str) -> bool:
     t = text.lower()
     return "the plan has been approved" in t or (
@@ -985,6 +1009,18 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "code_channel_followup",
         lambda ctx: "E2E_CODE_CHANNEL_FOLLOWUP" in ctx.last_text,
+    ),
+    ScriptRule(
+        "code_channel_long",
+        lambda ctx: "E2E_CODE_CHANNEL_LONG" in ctx.last_text,
+    ),
+    ScriptRule(
+        "code_channel_tool_failure",
+        lambda ctx: "E2E_CODE_CHANNEL_TOOL_FAILURE" in ctx.last_text,
+    ),
+    ScriptRule(
+        "code_channel_session",
+        lambda ctx: CODE_CHANNEL_HANDOFF_MARKER in ctx.first_text,
     ),
     ScriptRule(
         "code_channel",

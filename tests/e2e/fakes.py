@@ -68,6 +68,112 @@ def slack_thread(channel: str, thread_ts: str) -> list[dict[str, Any]]:
     return SLACK_MESSAGES.get((channel, thread_ts), [])
 
 
+# --- Slack streaming messages ----------------------------------------------
+# A streaming message is an ordinary message that keeps being appended to:
+# `chat.startStream` posts it, `chat.appendStream` adds chunks, `chat.stopStream`
+# closes it. `markdown_text` chunks accumulate into its text; `task_update`
+# chunks are cards the client renders beside that text, replaced in place by id.
+# Streaming into a channel without `thread_ts` posts at channel level, which
+# Slack allows only where the whole channel is one session.
+STREAMS: dict[str, dict[str, Any]] = {}
+
+
+def start_stream(
+    channel: str,
+    *,
+    thread_ts: str = "",
+    chunks: list[dict[str, Any]] | None = None,
+    task_display_mode: str = "timeline",
+    recipient_user_id: str = "",
+) -> dict[str, Any]:
+    # A channel-level stream (no `thread_ts`) posts its own top-level message.
+    ts = add_slack_message(channel, thread_ts, user="BOT", text="", is_bot=True)
+    stream = {
+        "ts": ts,
+        "channel": channel,
+        "thread_ts": thread_ts,
+        "task_display_mode": task_display_mode,
+        "recipient_user_id": recipient_user_id,
+        "text": "",
+        "tasks": {},
+        "task_order": [],
+        # What arrived, in order, so tests can assert that the agent's words
+        # reach the channel before the cards that explain them.
+        "timeline": [],
+        "chunk_count": 0,
+        "state": "streaming",
+        "session_status": "",
+    }
+    STREAMS[ts] = stream
+    apply_stream_chunks(ts, chunks or [])
+    return stream
+
+
+def apply_stream_chunks(ts: str, chunks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    stream = STREAMS.get(ts)
+    if stream is None:
+        return None
+    for chunk in chunks:
+        stream["chunk_count"] += 1
+        kind = chunk.get("type")
+        if kind == "markdown_text":
+            text = str(chunk.get("text") or "")
+            stream["text"] += text
+            stream["timeline"].append({"kind": "text", "text": text})
+        elif kind == "task_update":
+            task_id = str(chunk.get("id") or "")
+            if task_id and task_id not in stream["tasks"]:
+                stream["task_order"].append(task_id)
+            if task_id:
+                stream["tasks"][task_id] = chunk
+                stream["timeline"].append(
+                    {
+                        "kind": "task",
+                        "id": task_id,
+                        "title": chunk.get("title"),
+                        "status": chunk.get("status"),
+                    }
+                )
+    _render_stream(stream)
+    return stream
+
+
+def stop_stream(
+    ts: str, chunks: list[dict[str, Any]] | None = None, *, session_status: str = ""
+) -> dict[str, Any] | None:
+    stream = STREAMS.get(ts)
+    if stream is None:
+        return None
+    if stream["state"] != "streaming":
+        return {"error": "message_not_in_streaming_state"}
+    apply_stream_chunks(ts, chunks or [])
+    stream["state"] = "stopped"
+    stream["session_status"] = session_status
+    # Slack takes the session out of its loading state when the stream that put
+    # it there ends, without waiting for a separate status call.
+    if session_status:
+        update_code_channel(stream["channel"], status=session_status)
+    return stream
+
+
+def _render_stream(stream: dict[str, Any]) -> None:
+    """Write the stream's current content onto the message it is streaming into."""
+    cards = "\n".join(
+        f"[{stream['tasks'][task_id].get('status')}] {stream['tasks'][task_id].get('title')}"
+        for task_id in stream["task_order"]
+        if task_id in stream["tasks"]
+    )
+    update_slack_message(
+        stream["channel"],
+        str(stream["ts"]),
+        text="\n".join(part for part in (stream["text"], cards) if part),
+    )
+
+
+def streams(channel: str = "") -> list[dict[str, Any]]:
+    return [stream for stream in STREAMS.values() if not channel or stream["channel"] == channel]
+
+
 def slack_messages(channel: str) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     for (message_channel, _thread_ts), thread_messages in SLACK_MESSAGES.items():
@@ -104,8 +210,11 @@ def update_slack_message(
 
 
 def create_code_channel(payload: dict[str, Any]) -> dict[str, Any]:
+    # Globally unique, like `new_thread_ts`: a code channel's agent thread id is
+    # derived from its channel id, and the store outlives the server, so a reused
+    # id would hand a fresh channel someone else's session.
     _code_channel_seq[0] += 1
-    channel_id = f"C_CODE_{_code_channel_seq[0]}"
+    channel_id = f"C_CODE_{int(time.time())}_{_code_channel_seq[0]}"
     channel = {
         "id": channel_id,
         "name": str(payload.get("name") or "Open SWE task"),
@@ -407,6 +516,7 @@ def record_snapshot_delete(snapshot_id: str) -> None:
 def reset() -> None:
     SLACK_MESSAGES.clear()
     CODE_CHANNELS.clear()
+    STREAMS.clear()
     PULLS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()

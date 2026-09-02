@@ -15,7 +15,11 @@ from agent.surfaces import SlackChannelSurface
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.sandbox_paths import aresolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend
-from ..utils.slack import get_active_slack_thread, get_slack_permalink
+from ..utils.slack import (
+    get_active_slack_thread,
+    get_slack_permalink,
+    resolve_slack_thread_id,
+)
 from ..utils.slack_code_channels import (
     CODE_CHANNEL_SESSION_TS,
     VIEW_CONTENT_MAX_BYTES,
@@ -480,13 +484,9 @@ async def _create(
             ),
         }
 
-    # Slack takes the session id as an idempotency key, so the session it belongs
-    # to has to be named before the channel exists: a retry then returns the same
-    # channel instead of stranding a second one.
-    session_thread_id = str(uuid.uuid4())
     channel_id, error = await create_code_channel(
         name=title,
-        session_id=session_thread_id,
+        session_id=str(uuid.uuid4()),
         origin_channel_id=source_channel,
         origin_message_ts=origin_message_ts,
         team_id=team_id,
@@ -494,6 +494,23 @@ async def _create(
     )
     if not channel_id:
         return {"success": False, "error": error or "Slack could not create the code channel"}
+
+    # Slack lets the origin channel's members into the new one, and every event
+    # that produces reaches the Slack webhook, which binds a code channel it
+    # finds unbound. Claim the id it derives rather than racing it with a fresh
+    # one: whichever of the two gets there first binds the same id.
+    try:
+        session_thread_id = await resolve_slack_thread_id(
+            client, channel_id, CODE_CHANNEL_SESSION_TS
+        )
+    except Exception as exc:  # noqa: BLE001
+        with suppress(Exception):
+            await archive_code_channel(channel_id)
+        return {
+            "success": False,
+            "error": f"Could not claim a session for the new code channel: {exc}",
+            "retryable": True,
+        }
 
     try:
         thread = await client.threads.get(thread_id=thread_id)

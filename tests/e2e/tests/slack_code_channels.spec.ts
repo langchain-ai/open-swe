@@ -1,4 +1,76 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext } from "@playwright/test";
+
+type CodeChannel = {
+  id: string;
+  name: string;
+  status: string;
+  archived: boolean;
+  context_bar_items: { key: string; label: string }[];
+  commands: { name: string }[];
+};
+
+type Stream = {
+  ts: string;
+  channel: string;
+  thread_ts: string;
+  task_display_mode: string;
+  text: string;
+  state: string;
+  tasks: Record<string, { title?: string; status?: string }>;
+};
+
+const HANDOFF_LINE = "Picking up the flaky CI investigation in this channel";
+
+async function codeChannels(request: APIRequestContext): Promise<CodeChannel[]> {
+  const response = await request.get("/mock/slack/code-channels");
+  return ((await response.json()) as { channels?: CodeChannel[] }).channels ?? [];
+}
+
+async function streams(
+  request: APIRequestContext,
+  channel: string,
+): Promise<Stream[]> {
+  const response = await request.get(
+    `/mock/slack/streams?channel=${encodeURIComponent(channel)}`,
+  );
+  return ((await response.json()) as { streams?: Stream[] }).streams ?? [];
+}
+
+async function boundThread(
+  request: APIRequestContext,
+  channel: string,
+): Promise<string | null> {
+  const response = await request.get(
+    `/mock/slack/thread-map?channel=${encodeURIComponent(channel)}&ts=0`,
+  );
+  return ((await response.json()) as { thread_id?: string | null }).thread_id ?? null;
+}
+
+async function openCodeChannel(page: {
+  locator: (selector: string) => { click: () => Promise<void> };
+  waitForResponse: (predicate: (response: any) => boolean) => Promise<any>;
+  request: APIRequestContext;
+}): Promise<{ originThreadId: string; channel: CodeChannel }> {
+  const send = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/mock/slack/send") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#send").click();
+  const originThreadId = ((await (await send).json()) as { thread_id?: string })
+    .thread_id;
+  expect(originThreadId).toBeTruthy();
+
+  await expect
+    .poll(async () => (await codeChannels(page.request)).length, {
+      timeout: 30_000,
+    })
+    .toBe(1);
+  return {
+    originThreadId: originThreadId as string,
+    channel: (await codeChannels(page.request))[0],
+  };
+}
 
 test.describe("Slack Code Channels", () => {
   test.beforeEach(async ({ page }) => {
@@ -7,81 +79,57 @@ test.describe("Slack Code Channels", () => {
     await expect(page.locator("#thread")).toContainText("No messages yet");
   });
 
-  test("the agent promotes a task and keeps unmentioned follow-ups in one session", async ({
+  test("opening a channel hands the task to a session of its own", async ({
     page,
   }) => {
-    const initialSend = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/mock/slack/send") &&
-        response.request().method() === "POST",
-    );
-    await page.locator("#send").click();
-    const initialResult = (await (await initialSend).json()) as {
-      thread_id?: string;
-    };
+    const { originThreadId, channel } = await openCodeChannel(page);
+    expect(channel.name).toBe("Investigate flaky CI failures");
 
-    const codeChannel = page
-      .locator(".channel")
-      .filter({ hasText: "Investigate flaky CI failures" });
-    await expect(codeChannel).toBeVisible();
-    await expect(codeChannel).toHaveClass(/active/);
-    await expect(page.locator("#channel-title")).toHaveText(
-      "# Investigate flaky CI failures",
-    );
-    await expect(page.locator("#channel-subtitle")).toContainText(
-      "one task, one session",
-    );
-    await expect(page.locator("#status")).toBeVisible();
-    await expect(page.locator("#status-text")).toHaveText("active");
-    await expect(page.locator("#chrome")).toContainText("fakeorg/demo");
-    await expect(page.locator("#chrome")).toContainText("/create-pr");
-    await expect(page.locator("#thread")).toContainText(
-      "I created this code channel for the investigation",
-    );
+    // The session the channel was handed to picks the task up from its
+    // instructions, and says so in the channel.
+    await expect
+      .poll(
+        async () =>
+          (await streams(page.request, channel.id))
+            .map((stream) => stream.text)
+            .join("\n"),
+        { timeout: 60_000 },
+      )
+      .toContain(HANDOFF_LINE);
 
-    await expect(page.locator("#mention")).not.toBeChecked();
-    await expect(page.locator("#mention")).toBeDisabled();
-    await page
-      .locator("#text")
-      .fill("What is the current status? E2E_CODE_CHANNEL_FOLLOWUP");
-    const followupSend = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/mock/slack/send") &&
-        response.request().method() === "POST",
-    );
-    await page.locator("#send").click();
-    const followupResult = (await (await followupSend).json()) as {
-      thread_id?: string;
-    };
+    // It is a session of its own, and the channel stayed open for it.
+    const sessionThreadId = await boundThread(page.request, channel.id);
+    expect(sessionThreadId).toBeTruthy();
+    expect(sessionThreadId).not.toBe(originThreadId);
+    expect((await codeChannels(page.request))[0].archived).toBe(false);
+  });
 
-    expect(initialResult.thread_id).toBeTruthy();
-    expect(followupResult.thread_id).toBe(initialResult.thread_id);
-    await expect(page.locator("#thread")).toContainText(
-      "this unmentioned follow-up reached the same Open SWE session",
-    );
-    await expect(page.locator(".channel").filter({ hasText: "✦" })).toHaveCount(
-      1,
-    );
-    await page.screenshot({
-      path: "screenshots/slack-code-channel.png",
-      fullPage: true,
-    });
+  test("the channel session speaks without being asked to post", async ({
+    page,
+  }) => {
+    const { channel } = await openCodeChannel(page);
 
-    await page.request.post("/control/login", {
-      data: { login: "alice", email: "alice@example.com" },
-    });
-    await page.goto(`/agents/${initialResult.thread_id}`);
-    const codeChannelLink = page.getByRole("link", {
-      name: "Open code channel",
-    });
-    await expect(codeChannelLink).toBeVisible();
-    await expect(codeChannelLink).toHaveAttribute(
-      "href",
-      /https:\/\/slack\.com\/app_redirect\?channel=C_CODE_\d+&team=T_TEST/,
-    );
-    await page.screenshot({
-      path: "screenshots/web-code-channel-link.png",
-      fullPage: true,
-    });
+    // No posting tool is involved: the run itself is streamed into the channel.
+    await expect
+      .poll(
+        async () => {
+          const [stream] = await streams(page.request, channel.id);
+          return stream?.text ?? "";
+        },
+        { timeout: 60_000 },
+      )
+      .toContain(HANDOFF_LINE);
+
+    const [stream] = await streams(page.request, channel.id);
+    // A code channel is one flowing session, so the transcript is a top-level
+    // message with the run's tool activity interleaved into what it says.
+    expect(stream.thread_ts).toBe("");
+    expect(stream.task_display_mode).toBe("timeline");
+    expect(Object.values(stream.tasks).length).toBeGreaterThan(0);
+    await expect
+      .poll(async () => (await streams(page.request, channel.id))[0]?.state, {
+        timeout: 60_000,
+      })
+      .toBe("stopped");
   });
 });

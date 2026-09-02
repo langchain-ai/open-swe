@@ -940,10 +940,156 @@ async def slack_conversations_history(channel: str = "") -> JSONResponse:
     )
 
 
+@app.post("/fake-slack/chat.startStream")
+async def slack_start_stream(request: Request) -> JSONResponse:
+    """Open a streaming message.
+
+    ``thread_ts`` is optional only where the whole channel is one session, which
+    is what a code channel is; Slack rejects it elsewhere with
+    ``invalid_thread_ts``, and treats the legacy ``"0"`` as omitting it. Streaming
+    into a channel also requires a recipient.
+    """
+    body = await request.json()
+    channel = str(body.get("channel") or "")
+    thread_ts = str(body.get("thread_ts") or "")
+    if thread_ts == "0":
+        thread_ts = ""
+    if not channel:
+        return JSONResponse({"ok": False, "error": "channel_not_found"})
+    if not thread_ts and channel not in fakes.CODE_CHANNELS:
+        return JSONResponse({"ok": False, "error": "invalid_thread_ts"})
+    if not str(body.get("recipient_user_id") or ""):
+        return JSONResponse({"ok": False, "error": "missing_recipient"})
+    chunks = body.get("chunks")
+    stream = fakes.start_stream(
+        channel,
+        thread_ts=thread_ts,
+        chunks=chunks if isinstance(chunks, list) else [],
+        task_display_mode=str(body.get("task_display_mode") or "timeline"),
+        recipient_user_id=str(body.get("recipient_user_id") or ""),
+    )
+    return _ok({"channel": channel, "ts": stream["ts"]})
+
+
+@app.post("/fake-slack/chat.appendStream")
+async def slack_append_stream(request: Request) -> JSONResponse:
+    body = await request.json()
+    chunks = body.get("chunks")
+    stream = fakes.apply_stream_chunks(
+        str(body.get("ts") or ""), chunks if isinstance(chunks, list) else []
+    )
+    if stream is None:
+        return JSONResponse({"ok": False, "error": "message_not_found"})
+    if stream["state"] != "streaming":
+        return JSONResponse({"ok": False, "error": "message_not_in_streaming_state"})
+    return _ok({"channel": stream["channel"], "ts": stream["ts"]})
+
+
+@app.post("/fake-slack/chat.stopStream")
+async def slack_stop_stream(request: Request) -> JSONResponse:
+    body = await request.json()
+    chunks = body.get("chunks")
+    stream = fakes.stop_stream(
+        str(body.get("ts") or ""),
+        chunks if isinstance(chunks, list) else [],
+        session_status=str(body.get("session_status") or ""),
+    )
+    if stream is None:
+        return JSONResponse({"ok": False, "error": "message_not_found"})
+    if stream.get("error"):
+        return JSONResponse({"ok": False, "error": stream["error"]})
+    return _ok({"channel": stream["channel"], "ts": stream["ts"]})
+
+
+@app.get("/mock/slack/streams")
+async def mock_streams(channel: str = "") -> JSONResponse:
+    """Every streaming message the fake holds, for tests to assert against."""
+    return JSONResponse({"streams": fakes.streams(channel)})
+
+
 @app.post("/fake-slack/agents.conversations.create")
 async def slack_create_code_channel(request: Request) -> JSONResponse:
-    channel = fakes.create_code_channel(await request.json())
+    """Create a code channel, and deliver the join Slack posts in it.
+
+    Slack lets members of the origin channel into the new one, and a member
+    joining produces a message event in that channel like any other. Delivering
+    it is the point: it arrives while the caller is still setting the session up,
+    so anything that assumes it has the new channel to itself is exercised here.
+    """
+    payload = await request.json()
+    channel = fakes.create_code_channel(payload)
+    joining_user = str(payload.get("_joined_by") or TEST_USERS[0]["slack_id"])
+    join_event = {
+        "type": "message",
+        "subtype": "channel_join",
+        "channel": channel["id"],
+        "user": joining_user,
+        "text": f"<@{joining_user}> has joined the channel",
+        "ts": fakes.next_slack_ts(),
+    }
+    join_event["thread_ts"] = join_event["ts"]
+    await _deliver_slack_event(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev{EVENT_ID_SALT}join{join_event['ts']}",
+            "authorizations": [{"user_id": BOT_USER_ID}],
+            "event": join_event,
+        }
+    )
     return _ok({"channel": {"id": channel["id"]}})
+
+
+@app.get("/mock/slack/thread-map")
+async def mock_thread_map(channel: str = "", ts: str = "0") -> JSONResponse:
+    """Which Open SWE thread a Slack location is bound to, if any."""
+    from agent.utils.slack import lookup_slack_thread_id
+    from agent.utils.thread_ops import langgraph_client
+
+    try:
+        thread_id = await lookup_slack_thread_id(langgraph_client(), channel, ts)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"channel": channel, "ts": ts, "error": str(exc)})
+    return JSONResponse({"channel": channel, "ts": ts, "thread_id": thread_id})
+
+
+@app.get("/mock/slack/code-channels")
+async def mock_code_channels() -> JSONResponse:
+    """Every code channel the fake holds, for tests to assert against."""
+    return JSONResponse({"channels": list(fakes.CODE_CHANNELS.values())})
+
+
+@app.post("/mock/slack/code-channel/send")
+async def mock_code_channel_send(request: Request) -> JSONResponse:
+    """Post a message in a code channel, the way a user talks to the session."""
+    form = await request.json()
+    channel_id = str(form.get("channel") or "")
+    if channel_id not in fakes.CODE_CHANNELS:
+        raise HTTPException(status_code=404, detail="Unknown code channel")
+    user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
+    text = str(form.get("text") or "")
+    thread_ts = str(form.get("thread_ts") or "")
+    event_ts = fakes.add_slack_message(
+        channel_id, thread_ts or fakes.new_thread_ts(), user=user_id, text=text, is_bot=False
+    )
+    event: dict[str, Any] = {
+        "type": "message",
+        "channel": channel_id,
+        "user": user_id,
+        "text": text,
+        "ts": event_ts,
+    }
+    if thread_ts:
+        event["thread_ts"] = thread_ts
+    payload = {
+        "type": "event_callback",
+        "event_id": f"Ev{EVENT_ID_SALT}cc{event_ts}",
+        "authorizations": [{"user_id": BOT_USER_ID}],
+        "event": event,
+    }
+    response = await _deliver_slack_event(payload)
+    return JSONResponse(
+        {"ok": response.status_code < 400, "status": response.status_code, "ts": event_ts}
+    )
 
 
 @app.post("/fake-slack/agents.sessions.setStatus")

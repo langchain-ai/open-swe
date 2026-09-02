@@ -162,12 +162,21 @@ class SlackTranscript:
             self.pending[index] = step.chunk()
 
     def _queue_text(self, text: str) -> None:
+        """Queue words, split so no single chunk can exceed Slack's text cap.
+
+        A chunk over the cap is rejected outright, which would drop the whole
+        message rather than shorten it.
+        """
         if not text:
             return
         if self.pending and self.pending[-1].get("type") == "markdown_text":
-            self.pending[-1]["text"] += text
-        else:
-            self.pending.append({"type": "markdown_text", "text": text})
+            room = _STREAM_TEXT_LIMIT - len(self.pending[-1]["text"])
+            if room > 0:
+                self.pending[-1]["text"] += text[:room]
+                text = text[room:]
+        while text:
+            self.pending.append({"type": "markdown_text", "text": text[:_STREAM_TEXT_LIMIT]})
+            text = text[_STREAM_TEXT_LIMIT:]
 
     async def start(self) -> bool:
         initial = Step(
@@ -252,28 +261,45 @@ class SlackTranscript:
         now = monotonic()
         if now < self.retry_at or (not force and now - self.last_flush < _FLUSH_INTERVAL_SECONDS):
             return
-        chunks = list(self.pending)
-        text_chars = sum(
-            len(chunk.get("text", "")) for chunk in chunks if chunk.get("type") == "markdown_text"
-        )
-        if text_chars and self.streamed_chars + text_chars > _STREAM_TEXT_LIMIT:
-            if not await self._roll_over():
+        # Send as much as the message being written can still hold, roll over,
+        # and carry on with the rest: one flush can outgrow one Slack message.
+        while self.pending:
+            batch, remainder, text_chars = self._next_batch()
+            if not batch:
+                if not await self._roll_over():
+                    return
+                continue
+            try:
+                await append_slack_stream(self.channel_id, self.message_ts, batch)
+            except SlackStreamError as exc:
+                if exc.code == "rate_limited":
+                    delay = (
+                        exc.retry_after if exc.retry_after is not None else _DEFAULT_RETRY_SECONDS
+                    )
+                    self.retry_at = monotonic() + min(max(delay, 1.0), _MAX_RETRY_SECONDS)
+                else:
+                    logger.warning(
+                        "Disabling Slack run projection for %s: %s", self.run_id, exc.code
+                    )
+                    self.disabled = True
                 return
-        try:
-            await append_slack_stream(self.channel_id, self.message_ts, chunks)
-        except SlackStreamError as exc:
-            if exc.code == "rate_limited":
-                delay = exc.retry_after if exc.retry_after is not None else _DEFAULT_RETRY_SECONDS
-                self.retry_at = monotonic() + min(max(delay, 1.0), _MAX_RETRY_SECONDS)
-            else:
-                logger.warning("Disabling Slack run projection for %s: %s", self.run_id, exc.code)
-                self.disabled = True
-            return
-        self.pending.clear()
-        self.pending_steps.clear()
-        self.streamed_chars += text_chars
+            self.pending = remainder
+            self.pending_steps.clear()
+            self.streamed_chars += text_chars
         self.last_flush = monotonic()
         self.retry_at = 0.0
+
+    def _next_batch(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+        """The leading chunks that still fit the current message, and the rest."""
+        batch: list[dict[str, Any]] = []
+        text_chars = 0
+        for index, chunk in enumerate(self.pending):
+            length = len(chunk.get("text", "")) if chunk.get("type") == "markdown_text" else 0
+            if length and self.streamed_chars + text_chars + length > _STREAM_TEXT_LIMIT:
+                return batch, self.pending[index:], text_chars
+            batch.append(chunk)
+            text_chars += length
+        return batch, [], text_chars
 
     async def _roll_over(self) -> bool:
         """Continue a long transcript in a second streaming message."""

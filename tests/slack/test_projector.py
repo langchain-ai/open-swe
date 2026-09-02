@@ -210,3 +210,39 @@ def test_namespaced_tool_ids_stay_distinct() -> None:
 
     assert first != second
     assert isinstance(stream, projector.SlackTranscript)
+
+
+async def test_no_message_is_left_over_slacks_text_cap(monkeypatch) -> None:
+    """One flush can outgrow one Slack message, so it has to span several."""
+    appended: list[tuple[str, int]] = []
+
+    async def append(_channel: str, message_ts: str, chunks: list[dict[str, object]]) -> None:
+        appended.append(
+            (
+                message_ts,
+                sum(
+                    len(str(chunk.get("text", "")))
+                    for chunk in chunks
+                    if chunk.get("type") == "markdown_text"
+                ),
+            )
+        )
+
+    starts = iter(["3.0", "4.0"])
+    monkeypatch.setattr(projector, "append_slack_stream", append)
+    monkeypatch.setattr(
+        projector, "start_slack_stream", AsyncMock(side_effect=lambda *a, **k: next(starts))
+    )
+    monkeypatch.setattr(projector, "stop_slack_stream", AsyncMock())
+    monkeypatch.setattr(projector, "store_slack_run_mapping", AsyncMock())
+    monkeypatch.setattr(projector, "store_slack_message_run_mapping", AsyncMock())
+    stream = _stream()
+    stream.message_ts = "2.0"
+
+    stream.say("x" * (projector._STREAM_TEXT_LIMIT * 2 + 100))
+    await stream.flush(force=True)
+
+    assert [message_ts for message_ts, _ in appended] == ["2.0", "3.0", "4.0"]
+    assert all(chars <= projector._STREAM_TEXT_LIMIT for _, chars in appended)
+    assert sum(chars for _, chars in appended) == projector._STREAM_TEXT_LIMIT * 2 + 100
+    assert not stream.pending
