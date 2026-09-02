@@ -15,6 +15,20 @@ from . import slack as service
 router = APIRouter()
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
+#: Message subtypes Slack uses to narrate a channel's own housekeeping.
+_MEMBERSHIP_SUBTYPES = frozenset(
+    {
+        "channel_join",
+        "channel_leave",
+        "group_join",
+        "group_leave",
+        "channel_topic",
+        "channel_purpose",
+        "channel_name",
+        "channel_archive",
+        "channel_unarchive",
+    }
+)
 _EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external participants."
 
 
@@ -95,6 +109,36 @@ async def _queue_code_channel_turn(
         repo_config,
     )
     return {"status": "accepted", "message": "Code channel interaction queued"}
+
+
+async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
+    """Leave a note about who joined or left, for the session's next turn.
+
+    Nothing is being asked, so this must not start a run of its own; the queue
+    is drained before the next model call, whatever triggers it.
+    """
+    client = get_langgraph_client()
+    try:
+        thread_id = await common.lookup_slack_thread_id(
+            client, channel_id, common.CODE_CHANNEL_SESSION_TS
+        )
+    except common.SlackThreadMappingError:
+        return
+    if not thread_id or not text.strip():
+        return
+    await common.queue_message_for_thread(
+        thread_id,
+        [
+            {
+                "type": "text",
+                "text": (
+                    "This channel's membership changed while you were idle: "
+                    f"{text.strip()}\nNothing is being asked of you. Note who is here "
+                    "and carry on with whatever comes next."
+                ),
+            }
+        ],
+    )
 
 
 async def _lookup_delivered_message_update(
@@ -418,6 +462,15 @@ async def slack_webhook(
         or updated_message.get("bot_id")
     ):
         return {"status": "ignored", "reason": "Event from a bot"}
+
+    # Slack narrates joins, leaves and channel renames as messages, and a code
+    # channel treats every message as addressed to the agent — so without this
+    # an invite makes it greet the person it just invited. It is still worth
+    # knowing who is in the room, so it waits in the queue for the next turn.
+    if {event.get("subtype"), updated_message.get("subtype")} & _MEMBERSHIP_SUBTYPES:
+        if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
+            background_tasks.add_task(_queue_channel_housekeeping, channel_id, text)
+        return {"status": "ignored", "reason": "Slack channel housekeeping, not a request"}
 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
