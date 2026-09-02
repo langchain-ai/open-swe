@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 from html import escape
@@ -77,6 +78,17 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
 
 fakes.seed_bare_remotes()
+
+if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
+    # Playwright closes the webServer stdin pipe when its runner exits.
+    def _exit_when_orphaned() -> None:
+        try:
+            sys.stdin.buffer.read()
+        except Exception:
+            return
+        os._exit(0)
+
+    threading.Thread(target=_exit_when_orphaned, daemon=True).start()
 
 
 # --- control + Slack compose (the test driver) -----------------------------

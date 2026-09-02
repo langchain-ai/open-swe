@@ -125,6 +125,8 @@ export interface ThreadsPageParams {
   q?: string
   scope?: ThreadScope
   automationId?: string
+  repo?: string
+  ownerless?: boolean
   sortBy?: ThreadSortBy
 }
 
@@ -136,16 +138,10 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarThreadsGroup {
-  items: Array<AgentThread>
-  limit: number
-  hasMore: boolean
-}
-
-export interface SidebarThreads {
-  active: SidebarThreadsGroup
-  resolved: SidebarThreadsGroup
-  pinned?: Array<AgentThread>
+export interface SidebarProject {
+  repoFullName: string
+  name: string
+  updatedAt: number
 }
 
 const API_BASE = dashboardApiBase()
@@ -229,27 +225,21 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.q) search.set("q", params.q)
   if (params.scope) search.set("scope", params.scope)
   if (params.automationId) search.set("automation_id", params.automationId)
+  if (params.repo) search.set("repo", params.repo)
+  if (params.ownerless != null)
+    search.set("ownerless", String(params.ownerless))
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
 
-function buildSidebarThreadsQuery(params: {
-  activeLimit?: number
-  resolvedLimit?: number
-  activeThreadId?: string
+function buildProjectsQuery(params: {
+  includeResolved?: boolean
   includeAutomations?: boolean
 }): string {
   const search = new URLSearchParams()
-  if (params.activeLimit != null) {
-    search.set("active_limit", String(params.activeLimit))
-  }
-  if (params.resolvedLimit != null) {
-    search.set("resolved_limit", String(params.resolvedLimit))
-  }
-  if (params.activeThreadId) {
-    search.set("active_thread_id", params.activeThreadId)
-  }
+  if (params.includeResolved != null)
+    search.set("include_resolved", String(params.includeResolved))
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
   }
@@ -257,17 +247,32 @@ function buildSidebarThreadsQuery(params: {
   return query ? `?${query}` : ""
 }
 
+export type PullRequestCheckState =
+  | "failing"
+  | "passing"
+  | "pending"
+  | "unknown"
+
+export type PullRequestLiveState = "open" | "draft" | "merged" | "closed"
+
+/** Live GitHub truth for one PR, keyed `owner/repo#number`. */
+export interface PullRequestSnapshot {
+  checks: PullRequestCheckState
+  state: PullRequestLiveState | null
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
-  listSidebarThreads: (params: {
-    activeLimit?: number
-    resolvedLimit?: number
-    activeThreadId?: string
-    includeAutomations?: boolean
-  }) =>
-    agentsRequest<SidebarThreads>(
-      `/threads/sidebar${buildSidebarThreadsQuery(params)}`
+  listThreadProjects: (
+    params: {
+      includeResolved?: boolean
+      includeAutomations?: boolean
+    } = {}
+  ) =>
+    agentsRequest<Array<SidebarProject>>(
+      `/threads/projects${buildProjectsQuery(params)}`
     ),
+  listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   resolveThread: (threadId: string, resolved: boolean) =>
@@ -310,6 +315,13 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}${
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
+    ),
+  getPullRequestChecks: (
+    pullRequests: Array<{ repoFullName: string; number: number }>
+  ) =>
+    agentsRequest<Record<string, PullRequestSnapshot>>(
+      "/threads/pull-request-checks",
+      { method: "POST", body: JSON.stringify({ pullRequests }) }
     ),
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.9",
+    "deepagents==0.7.11",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.0",
     "httpx>=0.28.1",
@@ -18,7 +18,7 @@ dependencies = [
     "markdownify>=1.2.3",
     "langchain-anthropic>=1.5.4",
     "langgraph-cli[inmem]>=0.4.31",
-    "langsmith>=0.11.1",
+    "langsmith>=0.12.0",
     "langchain-openai>=1.4.1,<2.0.0",
     "langchain-fireworks>=1.5.2",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
@@ -45,10 +45,10 @@ dev = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.9 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.6 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
-override-dependencies = ["deepagents==0.7.9", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.11", "wcmatch>=11.0"]
 # Each langgraph-api release pins its langgraph-runtime-inmem peer to a single
 # minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`), which
 # uv's default pre-release policy shies away from, so a plain resolve lands on the

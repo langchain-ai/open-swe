@@ -37,6 +37,69 @@ def _async_client_cm(post_response: MagicMock) -> AsyncMock:
 
 
 @pytest.mark.asyncio
+async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+    chunks = [{"type": "task_update", "id": "step-1", "title": "Reading", "status": "in_progress"}]
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        started = await slack_utils.start_slack_stream(
+            "C1", "1.0", chunks, recipient_user_id="U1", recipient_team_id="T1"
+        )
+        appended = await slack_utils.append_slack_stream("C1", "1.0", chunks)
+        stopped = await slack_utils.stop_slack_stream("C1", "1.0", chunks)
+
+    assert started == "1.0"
+    assert appended is None
+    assert stopped is None
+    calls = client_cm.post.await_args_list
+    assert calls[0].args[0].endswith("/chat.startStream")
+    assert calls[0].kwargs["json"] == {
+        "channel": "C1",
+        "chunks": chunks,
+        "task_display_mode": "plan",
+        "thread_ts": "1.0",
+        "recipient_user_id": "U1",
+        "recipient_team_id": "T1",
+    }
+    assert calls[1].args[0].endswith("/chat.appendStream")
+    assert calls[2].kwargs["json"] == {
+        "channel": "C1",
+        "ts": "1.0",
+        "chunks": chunks,
+        "session_status": "active",
+    }
+
+
+@pytest.mark.asyncio
+async def test_code_channel_stream_is_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        await slack_utils.start_slack_stream("C1", "0", [])
+
+    assert "thread_ts" not in client_cm.post.await_args.kwargs["json"]
+
+
+@pytest.mark.asyncio
+async def test_slack_stream_rate_limit_preserves_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_rate_limited_response(retry_after="30"))
+
+    with (
+        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        pytest.raises(slack_utils.SlackStreamError) as raised,
+    ):
+        await slack_utils.append_slack_stream("C1", "1.0", [])
+
+    assert raised.value.code == "rate_limited"
+    assert raised.value.retry_after == 30
+
+
+@pytest.mark.asyncio
 async def test_update_slack_message_calls_chat_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -265,20 +328,28 @@ async def test_upload_slack_thread_file_completes_external_upload(
         )
 
     assert result == ("F1", None)
-    assert client_cm.post.call_args_list[0].args[0].endswith("/files.getUploadURLExternal")
-    assert client_cm.post.call_args_list[0].kwargs["json"] == {
+    ticket_call = client_cm.post.call_args_list[0]
+    assert ticket_call.args[0].endswith("/files.getUploadURLExternal")
+    assert ticket_call.kwargs["data"] == {
         "filename": "plan.html",
-        "length": 8,
+        "length": "8",
+    }
+    assert ticket_call.kwargs["headers"] == {
+        "Authorization": "Bearer xoxb-test",
     }
     safe_request.assert_awaited_once()
     assert safe_request.call_args.kwargs["content"] == b"<html />"
     assert safe_request.call_args.kwargs["validate_url"] is slack_utils._validate_slack_upload_url
-    assert client_cm.post.call_args_list[1].args[0].endswith("/files.completeUploadExternal")
-    assert client_cm.post.call_args_list[1].kwargs["json"] == {
-        "files": [{"id": "F1", "title": "Plan"}],
+    complete_call = client_cm.post.call_args_list[1]
+    assert complete_call.args[0].endswith("/files.completeUploadExternal")
+    assert complete_call.kwargs["data"] == {
+        "files": '[{"id": "F1", "title": "Plan"}]',
         "channel_id": "C1",
         "thread_ts": "1.0",
         "initial_comment": "Preview",
+    }
+    assert complete_call.kwargs["headers"] == {
+        "Authorization": "Bearer xoxb-test",
     }
 
 

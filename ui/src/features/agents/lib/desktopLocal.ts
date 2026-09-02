@@ -5,6 +5,7 @@ import type {
   DesktopLocalActivity,
   DesktopLocalDiff,
   DesktopLocalThreadSummary,
+  DesktopProjectRef,
 } from "@/desktop"
 
 const NO_ACTIVITY: DesktopLocalActivity = {}
@@ -22,6 +23,21 @@ export const localThreadKeys = {
   ready: (threadId: string) => ["local-thread-ready", threadId] as const,
   diff: (threadId: string) => ["local-thread-diff", threadId] as const,
   prDiff: (threadId: string) => ["local-thread-pr-diff", threadId] as const,
+  refs: (cwd: string | undefined) => ["local-project-refs", cwd ?? ""] as const,
+}
+
+const NO_REFS: Array<DesktopProjectRef> = []
+
+export function useLocalProjectRefs(cwd: string | undefined) {
+  return useQuery({
+    queryKey: localThreadKeys.refs(cwd),
+    enabled: Boolean(cwd),
+    queryFn: async () =>
+      (cwd ? await window.openSweDesktop?.getProjectBranches(cwd) : null)
+        ?.branches ?? NO_REFS,
+    initialData: NO_REFS,
+    initialDataUpdatedAt: 0,
+  })
 }
 
 export async function ensureDesktopModelCredential(
@@ -136,6 +152,22 @@ export function useLocalThreadPrDiff(
   }, [enabled, isRunning, refetch])
 
   return query
+}
+
+/**
+ * Clear a local thread's unread dot on click. Opening the thread is what marks
+ * it viewed for real; this only covers the poll interval until that lands.
+ */
+export function useMarkLocalThreadViewed() {
+  const queryClient = useQueryClient()
+  return (threadId: string) =>
+    queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+      localThreadKeys.all,
+      (prev) =>
+        prev?.map((thread) =>
+          thread.id === threadId ? { ...thread, viewed: true } : thread
+        )
+    )
 }
 
 export function useRefreshLocalThreads() {

@@ -41,6 +41,8 @@ html[data-agents-theme] {
   --destructive-foreground: oklch(50.5% 0.213 27.518); /* red-700 */
   --info: oklch(62.3% 0.214 259.815); /* blue-500 */
   --info-foreground: oklch(48.8% 0.243 264.376); /* blue-700 */
+  --merged: oklch(62.7% 0.265 303.9); /* purple-500 */
+  --merged-foreground: oklch(49.6% 0.265 301.9); /* purple-700 */
   --success: oklch(69.6% 0.17 162.48); /* emerald-500 */
   --success-foreground: oklch(50.8% 0.118 165.612); /* emerald-700 */
   --warning: oklch(76.9% 0.188 70.08); /* amber-500 */
@@ -53,7 +55,7 @@ html[data-agents-theme] {
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
   --sidebar-control-surface: oklch(94.2% 0.003 106);
-  --sidebar-row-hover: oklch(97.9% 0.002 106);
+  --sidebar-row-hover: oklch(93.8% 0.003 106);
   --sidebar-row-active: var(--card);
   --sidebar-row-selected: var(--card);
   --sidebar-border: var(--border);
@@ -89,6 +91,8 @@ html.dark[data-agents-theme] {
   --destructive-foreground: oklch(70.4% 0.191 22.216); /* red-400 */
   --info: oklch(62.3% 0.214 259.815);
   --info-foreground: oklch(70.7% 0.165 254.624); /* blue-400 */
+  --merged: oklch(62.7% 0.265 303.9);
+  --merged-foreground: oklch(71.4% 0.203 305.5); /* purple-400 */
   --success: oklch(69.6% 0.17 162.48);
   --success-foreground: oklch(76.5% 0.177 163.223); /* emerald-400 */
   --warning: oklch(76.9% 0.188 70.08);
@@ -156,5 +160,70 @@ html[data-agents-theme] .shimmer-text {
   }
   100% {
     background-position: -200% center;
+  }
+}
+
+/*
+ * Long sidebar titles slide far enough to read the tail on hover, then snap
+ * back. Distance and duration are both set per row from JS (`--marquee-shift`,
+ * `--marquee-duration`) because they depend on how far the text actually
+ * overflows: the duration is the distance divided by a fixed px/s speed, so
+ * every title travels at the same rate rather than every title taking the same
+ * time. Rows that fit never get the class and so never animate.
+ */
+.sidebar-title-viewport {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 0,
+    #000 calc(100% - 1.25rem),
+    transparent 100%
+  );
+}
+
+.sidebar-title-marquee {
+  animation: sidebar-title-marquee var(--marquee-duration, 3.5s) linear 0.15s
+    forwards;
+}
+
+/*
+ * Fades the leading edge in once the title is actually moving. A static
+ * two-sided mask would dim the first characters while the title still sits at
+ * rest, so the stops are tweened instead — both gradients carry the same four
+ * stops of the same types, which is what lets them interpolate. Its duration is
+ * fixed rather than shared with the travel: the fade covers the first moments of
+ * movement, not a proportion of a trip whose length varies by title.
+ */
+.sidebar-title-marquee-mask {
+  animation: sidebar-title-marquee-mask 0.4s ease-out 0.15s forwards;
+}
+
+@keyframes sidebar-title-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(var(--marquee-shift, 0px));
+  }
+}
+
+@keyframes sidebar-title-marquee-mask {
+  0% {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 0,
+      #000 calc(100% - 1.25rem),
+      transparent 100%
+    );
+  }
+  100% {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 1.25rem,
+      #000 calc(100% - 1.25rem),
+      transparent 100%
+    );
   }
 }

@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -169,15 +170,38 @@ def _allowed_login_orgs() -> frozenset[str]:
     )
 
 
+@cache
+def _warn_login_gate_disabled() -> None:
+    """Announce the fail-open login gate once per process.
+
+    Every other unset secret here says so in the log — see the
+    ``GITHUB_WEBHOOK_SECRET``/``SLACK_SIGNING_SECRET`` warnings and the one in
+    ``agent.completion``. Those all fail closed, so a missed warning costs a
+    rejected request. This gate fails open, so a missed warning costs an
+    unrestricted dashboard, which is the case that most needs saying out loud.
+
+    Cached rather than logged per call because ``enforce_org_login_gate`` also
+    runs from the thread tools, not only from the OAuth callback.
+    """
+    logger.warning(
+        "ALLOWED_GITHUB_ORGS is not configured — dashboard login is open to any GitHub "
+        "account, and every logged-in user can read all surfaced threads. Set it to "
+        "restrict logins to members of your organization(s)."
+    )
+
+
 async def enforce_org_login_gate(login: str) -> None:
     """Reject dashboard login for users outside the allowed GitHub org(s).
 
-    No-op when ``ALLOWED_GITHUB_ORGS`` is unset. Otherwise the user must be an
-    active member of at least one configured org; membership is checked with
-    the GitHub App installation token (fail-closed on any API error).
+    No-op when ``ALLOWED_GITHUB_ORGS`` is unset, which leaves login open to any
+    GitHub account; that case warns once per process rather than passing
+    silently. Otherwise the user must be an active member of at least one
+    configured org; membership is checked with the GitHub App installation
+    token (fail-closed on any API error).
     """
     orgs = _allowed_login_orgs()
     if not orgs:
+        _warn_login_gate_disabled()
         return
     for org in orgs:
         if await is_user_active_org_member(login, org):

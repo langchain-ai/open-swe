@@ -39,6 +39,18 @@ function applyTheme(resolved: ResolvedTheme) {
   root.style.colorScheme = resolved
 }
 
+/**
+ * Point the desktop window's native appearance at the app's own theme, so
+ * macOS draws the traffic lights to match the UI rather than the OS.
+ *
+ * Sends the preference, not the resolved value: pinning themeSource to
+ * light/dark while the user chose "system" would flip `prefers-color-scheme`
+ * underneath `resolveTheme`, which reads it back.
+ */
+function syncDesktopAppearance(theme: Theme) {
+  void window.openSweDesktop?.setAppearance(theme)
+}
+
 /** Theme state with system detection, persistence, and `.dark` class syncing. */
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>("system")
@@ -53,6 +65,7 @@ export function useTheme() {
       setThemeState(stored)
       setResolvedTheme(resolved)
       applyTheme(resolved)
+      syncDesktopAppearance(stored)
     }
     syncPreference()
 
@@ -81,6 +94,7 @@ export function useTheme() {
     setThemeState(next)
     setResolvedTheme(resolved)
     applyTheme(resolved)
+    syncDesktopAppearance(next)
   }, [])
 
   const toggleTheme = useCallback(() => {

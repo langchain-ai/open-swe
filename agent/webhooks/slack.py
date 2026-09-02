@@ -24,18 +24,21 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.slack_thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.thread_ops import (
+    langgraph_client as get_langgraph_client,
+)
+from agent.utils.thread_ops import queue_message_for_thread
 
-from ..utils.thread_ops import langgraph_client as get_langgraph_client
 from ..utils.user_messages import warning
 from . import common
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
-
 _MENTION_PREAMBLE = "You were mentioned in Slack.\n\n"
 
 _UNTAGGED_REPLY_PREAMBLE = (
@@ -359,6 +362,7 @@ def _slack_context_input(
     channel_id: str,
     bot_user_id: str,
     event_ts: str,
+    trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
     operational_context: str,
@@ -408,11 +412,17 @@ def _slack_context_input(
             },
         )
     )
-    trigger_id = next(
+    # An edit's `event_ts` matches no message, and the approve-button path passes
+    # the ts of Open SWE's own button message, so matching history attributes the
+    # run to nobody or to the bot. The caller already knows who triggered it.
+    trigger_id = trigger_user_id or next(
         (
             str(message.get("user"))
             for message in messages
-            if str(message.get("ts", "")) == str(event_ts) and message.get("user")
+            if str(message.get("ts", "")) == str(event_ts)
+            and message.get("user")
+            and not slack_utils.is_own_slack_message(message, bot_user_id)
+            and not slack_utils.slack_message_bot_id(message)
         ),
         "unknown",
     )
@@ -857,6 +867,16 @@ async def _process_slack_mention_impl(
         environment=environment_slug,
     )
 
+    # An edit corrects a request the agent already has, so it belongs in the
+    # thread's message queue rather than in a run of its own. Nothing drains that
+    # queue while the thread is idle; an edit made after the agent finished waits
+    # for the next message.
+    if message_update and await queue_message_for_thread(
+        thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE.strip()}, *content_blocks]
+    ):
+        common.logger.info("Queued Slack message edit for thread %s", thread_id)
+        return
+
     explicitly_tagged = _interrupts_active_run(
         text,
         bot_user_id,
@@ -872,6 +892,7 @@ async def _process_slack_mention_impl(
         channel_id=channel_id,
         bot_user_id=bot_user_id,
         event_ts=event_ts,
+        trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,
         operational_context=operational_context,
@@ -906,6 +927,19 @@ async def _process_slack_mention_impl(
         thread_id,
     )
     run_id = run.get("run_id")
+    if code_channel and isinstance(run_id, str) and run_id:
+        stream_thread_ts = reply_thread_ts or thread_ts
+        await stream_slack_thinking_steps(
+            client=langgraph_client,
+            thread_id=thread_id,
+            run_id=run_id,
+            channel_id=channel_id,
+            thread_ts=stream_thread_ts,
+            mapping_thread_ts=thread_ts,
+            original_message_ts=original_message_ts,
+            recipient_user_id=user_id,
+            recipient_team_id=str(event_data.get("team_id") or ""),
+        )
     if is_first_mention:
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(

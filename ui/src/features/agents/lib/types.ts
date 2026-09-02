@@ -203,6 +203,7 @@ export interface AgentSchedule {
   name: string
   prompt: string
   schedule: string
+  scope: "workspace"
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
@@ -374,6 +375,8 @@ export interface AgentThread {
   updatedAt: number
   traceUrl?: string | null
   sourceUrl?: string | null
+  sourceAppUrl?: string | null
+  codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>

@@ -93,5 +93,7 @@ describe("AutomationEditor", () => {
     )
 
     expect(memberMarkup).not.toContain("Run as admin thread")
+    expect(memberMarkup).toContain("This workspace automation is read-only")
+    expect(memberMarkup).not.toContain("Save changes")
   })
 })

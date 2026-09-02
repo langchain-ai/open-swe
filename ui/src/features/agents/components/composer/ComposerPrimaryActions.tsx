@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { LoaderCircle } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import {
@@ -10,6 +9,7 @@ import {
   useCancelAgentThread,
 } from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 export interface ActiveRun {
   threadId: string
@@ -23,7 +23,7 @@ export interface ComposerPrimaryActionsProps {
   onSubmit: () => void
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
-  /** Direct stop handler for non-LangGraph runtimes such as desktop ACP. */
+  /** Direct stop handler for desktop ACP or before LangGraph assigns a thread id. */
   onStop?: () => void | Promise<void>
   /** Set false while the composer owns Escape (an open command menu or model picker). */
   stopOnEscape?: boolean
@@ -88,8 +88,8 @@ function SendButton({
     <button
       aria-label={label}
       className={cn(
-        "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/90 text-primary-foreground shadow-xs shadow-primary/25 transition-all duration-150",
-        "hover:scale-105 hover:bg-primary active:shadow-none enabled:cursor-pointer",
+        "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-foreground text-background shadow-xs shadow-foreground/20 transition-all duration-150",
+        "hover:scale-105 hover:bg-foreground/85 active:shadow-none enabled:cursor-pointer",
         "disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none"
       )}
       disabled={!canSubmit}
@@ -120,8 +120,8 @@ function StopButton({
     <button
       aria-label="Stop run"
       className={cn(
-        "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/25 transition-all duration-150",
-        "hover:scale-105 hover:bg-destructive active:shadow-none",
+        "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background shadow-xs shadow-foreground/20 transition-all duration-150",
+        "hover:scale-105 hover:bg-foreground/85 active:shadow-none",
         "disabled:pointer-events-none disabled:opacity-40"
       )}
       disabled={disabled}
@@ -147,7 +147,7 @@ function StopButton({
 }
 
 function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const queryClient = useQueryClient()
   const [stopping, setStopping] = useState(false)
   const threadId = props.activeRun?.threadId ?? stream.threadId ?? ""
@@ -183,7 +183,8 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
     }
   }
 
-  const running = stream.isLoading || props.activeRun?.running
+  const running =
+    props.submitting || stream.isLoading || props.activeRun?.running
   useEscapeToStop(
     Boolean(running && props.canSubmit && props.stopOnEscape !== false),
     () => void handleStop()
@@ -207,7 +208,9 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
 
 function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   const [stopping, setStopping] = useState(false)
-  const running = Boolean(props.activeRun?.running && props.onStop)
+  const running = Boolean(
+    (props.submitting || props.activeRun?.running) && props.onStop
+  )
   const stop = async () => {
     if (stopping) return
     setStopping(true)
