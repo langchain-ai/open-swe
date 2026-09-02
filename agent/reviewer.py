@@ -39,6 +39,12 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from agent.auth.github_app import get_github_app_installation_token_with_expiry
+from agent.auth.thread_token import cache_github_token_for_thread
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
+from agent.sandboxes.state import SandboxUnreachableError
+
 from .dashboard.options import gate_fable_model
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -111,12 +117,7 @@ from .utils import ttl_cache
 from .utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token_with_expiry
-from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import SandboxUnreachableError
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review thread.** A
@@ -950,17 +951,11 @@ async def _ensure_reviewer_sandbox_for_thread(
         )
 
     repo_name_for_scope = str(repo_config.get("name") or "")
-    repo_for_snapshot = (
-        {"owner": str(repo_config["owner"]), "name": str(repo_config["name"])}
-        if repo_config.get("owner") and repo_config.get("name")
-        else None
-    )
     return (
         await ensure_sandbox_for_thread(
             thread_id,
             github_proxy_token=github_token,
             github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
-            repo=repo_for_snapshot,
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
@@ -1026,7 +1021,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 self._config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
             )
             raise
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
 
         repo_owner = str(repo_config.get("owner", ""))
         repo_name = str(repo_config.get("name", ""))

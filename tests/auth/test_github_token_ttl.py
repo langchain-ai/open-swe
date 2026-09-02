@@ -15,7 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.utils import github_comments, github_token
+from agent.auth import thread_token as github_token
+from agent.utils import github_comments
 from agent.webhooks import common as webhook_common
 from agent.webhooks import github as github_webhooks
 

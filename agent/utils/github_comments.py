@@ -10,7 +10,8 @@ from typing import Any
 
 import httpx
 
-from .github_token import GitHubAuthError
+from agent.auth.thread_token import GitHubAuthError
+
 from .http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,6 @@ __all__ = [
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
     "format_github_comment_body_for_prompt",
-    "get_thread_id_from_branch",
     "mentions_open_swe",
     "post_github_comment",
     "react_to_github_comment",
@@ -114,15 +114,6 @@ def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> str:
     if draft:
         return "draft"
     return "open"
-
-
-def get_thread_id_from_branch(branch_name: str) -> str | None:
-    match = re.search(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-        branch_name,
-        re.IGNORECASE,
-    )
-    return match.group(0) if match else None
 
 
 def sanitize_github_comment_body(body: str) -> str:

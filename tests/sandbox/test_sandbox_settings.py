@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.dashboard import sandbox_settings
+from agent import store as agent_store
 from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
     get_admin_base_snapshot_id,
@@ -32,8 +32,8 @@ def test_update_rejects_oversized_value() -> None:
 async def test_admin_value_wins_over_env() -> None:
     with (
         patch.object(
-            sandbox_settings,
-            "_client",
+            agent_store,
+            "store_client",
             return_value=_store({"value": {"base_snapshot_id": "admin-snap"}}),
         ),
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-snap"}, clear=True),
@@ -44,7 +44,7 @@ async def test_admin_value_wins_over_env() -> None:
 
 async def test_falls_back_to_env_without_record() -> None:
     with (
-        patch.object(sandbox_settings, "_client", return_value=_store(None)),
+        patch.object(agent_store, "store_client", return_value=_store(None)),
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-snap"}, clear=True),
     ):
         assert await get_admin_base_snapshot_id() is None
@@ -55,7 +55,7 @@ async def test_store_failure_falls_back_to_env() -> None:
     client = MagicMock()
     client.store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
     with (
-        patch.object(sandbox_settings, "_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-snap"}, clear=True),
     ):
         assert await resolve_base_snapshot_id() == "env-snap"
@@ -63,7 +63,7 @@ async def test_store_failure_falls_back_to_env() -> None:
 
 async def test_settings_report_source() -> None:
     with (
-        patch.object(sandbox_settings, "_client", return_value=_store(None)),
+        patch.object(agent_store, "store_client", return_value=_store(None)),
         patch.dict("os.environ", {}, clear=True),
     ):
         unset = await get_sandbox_settings()
@@ -71,7 +71,7 @@ async def test_settings_report_source() -> None:
     assert unset["effective_base_snapshot_id"] is None
 
     with (
-        patch.object(sandbox_settings, "_client", return_value=_store(None)),
+        patch.object(agent_store, "store_client", return_value=_store(None)),
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-snap"}, clear=True),
     ):
         from_env = await get_sandbox_settings()
@@ -82,7 +82,7 @@ async def test_settings_report_source() -> None:
 async def test_upsert_persists_and_returns_effective() -> None:
     client = _store({"value": {"base_snapshot_id": "admin-snap"}})
     with (
-        patch.object(sandbox_settings, "_client", return_value=client),
+        patch.object(agent_store, "store_client", return_value=client),
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-snap"}, clear=True),
     ):
         result = await upsert_sandbox_settings(
@@ -95,24 +95,10 @@ async def test_upsert_persists_and_returns_effective() -> None:
     assert result["effective_base_snapshot_id"] == "admin-snap"
 
 
-async def test_server_prefers_repo_snapshot_then_admin_base() -> None:
-    from agent import server
+async def test_server_uses_admin_base_snapshot() -> None:
+    from agent.sandboxes import lifecycle
 
-    with (
-        patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
-        patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
-        ),
+    with patch.object(
+        lifecycle, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
-
-    with (
-        patch.object(server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value=None),
-        patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
-        ),
-    ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "admin-snap"
-        assert await server._resolve_snapshot_id(None) == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"

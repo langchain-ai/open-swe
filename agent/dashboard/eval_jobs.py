@@ -13,8 +13,6 @@ import os
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict
 
-from langgraph_sdk import get_client
-
 from agent.review.eval_store import (
     _HEARTBEAT_STALE_SECONDS,
     DEFAULT_EVAL_PROJECT,
@@ -22,6 +20,7 @@ from agent.review.eval_store import (
     REVIEWER_EVAL_KEY,
 )
 from agent.review.findings import REVIEW_FINDING_CAP
+from agent.store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
 
@@ -51,20 +50,12 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
     "langsmith_project": DEFAULT_EVAL_PROJECT,
     "langgraph_url": "",
     "assistant_id": "reviewer",
-    "model_id": "google_genai:gemini-3.7-flash",
+    "model_id": "google_genai:gemini-3.8-flash",
     "reasoning_effort": "medium",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",
     "cap": REVIEW_FINDING_CAP,
 }
-
-
-def _client():
-    return get_client()
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _resolve_langgraph_url() -> str | None:
@@ -108,28 +99,17 @@ def _idle_record() -> dict[str, Any]:
         "progress": None,
         "github_run_url": None,
         "trigger": None,
-        "updated_at": _now_iso(),
+        "updated_at": now_iso(),
     }
 
 
 async def _get_record() -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(EVALS_NAMESPACE, REVIEWER_EVAL_KEY)
-    except Exception as e:
-        logger.debug("store get_item failed for reviewer eval: %s", e)
-        return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
+    return await get_value(EVALS_NAMESPACE, REVIEWER_EVAL_KEY)
 
 
 async def _put_record(record: dict[str, Any]) -> dict[str, Any]:
-    record = {**record, "updated_at": _now_iso()}
-    try:
-        await _client().store.put_item(EVALS_NAMESPACE, REVIEWER_EVAL_KEY, record)
-    except Exception:
-        logger.exception("Failed to persist reviewer eval status")
+    record = {**record, "updated_at": now_iso()}
+    await put_value(EVALS_NAMESPACE, REVIEWER_EVAL_KEY, record)
     return record
 
 
@@ -171,7 +151,7 @@ async def get_reviewer_eval_status() -> dict[str, Any]:
         {
             **record,
             "status": "failed",
-            "finished_at": record.get("finished_at") or _now_iso(),
+            "finished_at": record.get("finished_at") or now_iso(),
             "error": "Eval process is no longer tracked (GitHub Action stopped?).",
         }
     )

@@ -72,14 +72,12 @@ Configured in `agent/server.py:get_agent`, runs around every model call (in this
 3. `ToolErrorMiddleware` — catches tool exceptions and surfaces them as tool messages.
 4. `SubdirAgentsReadMiddleware` — appends applicable ancestor `AGENTS.md` instructions to `read_file` results once per run, so scoped rules are visible before edits.
 5. `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
-6. `ensure_no_empty_msg` — after-model hook; when the model emits a message with no tool call (and hasn't already messaged the user or confirmed completion) it re-injects a synthetic `no_op` / `confirming_completion` tool call so the run continues instead of ending prematurely.
-7. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
-8. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
-9. `ModelFallbackMiddleware` (optional) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
-10. `SanitizeThinkingBlocksMiddleware` — strips malformed empty Anthropic thinking blocks immediately before provider calls.
-11. `ModelCallTimeoutMiddleware` — innermost. Caps a single model call at `OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS` (default 15 min) so a stalled provider connection raises instead of parking the run; the timeout escalates outward to `ModelFallbackMiddleware`. Complements the per-request `timeout` `agent/utils/model.py` sets on every provider. Subagents compile into their own graphs, so each `SubAgent` spec carries its own instance (`_subagent_model_timeout_middleware`) — parent middleware never wraps a delegated `task`'s model calls, and a wedged one escalates via `ToolRetryMiddleware`'s `task` retry.
+6. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
+7. `ModelFallbackMiddleware` (optional) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+8. `SanitizeThinkingBlocksMiddleware` — strips malformed empty Anthropic thinking blocks immediately before provider calls.
+9. `ModelCallTimeoutMiddleware` — innermost. Caps a single model call at `OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS` (default 15 min) so a stalled provider connection raises instead of parking the run; the timeout escalates outward to `ModelFallbackMiddleware`. Complements the per-request `timeout` `agent/utils/model.py` sets on every provider. Subagents compile into their own graphs, so each `SubAgent` spec carries its own instance (`_subagent_model_timeout_middleware`) — parent middleware never wraps a delegated `task`'s model calls, and a wedged one escalates via `ToolRetryMiddleware`'s `task` retry.
 
-The system prompt instructs the agent to call a tool every turn, and `ensure_no_empty_msg` re-injects a tool call when it doesn't — together these keep runs from stopping partway through a task.
+The system prompt instructs the agent to call a tool every turn; nothing re-injects one, so a model turn with no tool call ends the run.
 
 Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SanitizeThinkingBlocksMiddleware`.
 
@@ -90,7 +88,7 @@ All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__
 Agent/UI parity is a product principle: anything users can do in the dashboard UI should generally also be possible through an agent tool, subject to the same authorization and safety boundaries. When adding a UI capability, add or extend the corresponding curated tool unless there is a documented reason not to.
 
 Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `manage_code_channel`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
 
 `list_threads`, `get_thread`, and `manage_thread` are parent-agent-only; `manage_thread` is unavailable during plan mode while the two read-only tools remain available.
 
@@ -120,9 +118,12 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 
 Webhooks compute deterministic thread ids so the same Linear issue / Slack thread / PR routes back to the same running agent. See `utils/github_comments.py:get_thread_id_from_branch` and the equivalents in `utils/linear.py` / `utils/slack.py`. Reviewer threads have their own deterministic ids and are tagged with `REVIEWER_THREAD_KIND` metadata so the FastAPI side can find them.
 
+Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task session. Open SWE keys Slack locations by `(channel_id, thread_ts)`, so a code channel uses the `CODE_CHANNEL_SESSION_TS` (`"0"`) sentinel as its timestamp: it satisfies the existing timestamp validation, can never collide with a real message ts, and makes default replies post top-level while preserving a real `reply_thread_ts` when the user starts a Slack thread. Channel context reads from `conversations.history`; user-started thread context reads from `conversations.replies`. Session status, runtime commands, properties, views, canvases, and archival go through `agents.sessions.*` / `agents.conversations.*`.
+
 ## Conventions
 
 - Tests are unit-only by default (`tests/`). Integration tests would go under `tests/integration_tests/` (currently empty — `make integration_tests` no-ops if missing).
+- Do not add tests that only assert or restate static prompt text. Prompt tests must verify rendering, composition, precedence, or another meaningful behavioral contract.
 - New sandbox providers: add a module under `agent/integrations/` and wire it into `SANDBOX_FACTORIES` in `agent/utils/sandbox.py`. See `docs/CUSTOMIZATION.md`.
 - New tools: add to `agent/tools/`, export from `agent/tools/__init__.py`, add to the `tools=[...]` list in `server.py:get_agent` (or `reviewer.py` for reviewer-only tools).
 - New middleware: add to `agent/middleware/`, export from `agent/middleware/__init__.py`, add to the `middleware=[...]` list in `server.py:get_agent` — order is significant (see the stack above).
@@ -130,12 +131,16 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 - New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+- Do not use parent-relative Python imports that start with `..`; use absolute imports instead. Same-package imports with a single dot, such as `.foo`, are allowed.
 
 <!-- OPENWIKI:START -->
 
 ## OpenWiki
 
-This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+This repository has a generated `openwiki/` evidence index. It is optional just-in-time context, not required startup reading.
+
+- Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
+- Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
 
 The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
 

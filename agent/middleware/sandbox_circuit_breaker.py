@@ -1,28 +1,21 @@
-"""Circuit breaker for runs stuck retrying an unreachable sandbox."""
+"""Telling the user, on the channel they triggered from, that their sandbox went quiet."""
 
 import logging
 import re
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
-from langgraph.config import get_config
-from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
-from ..utils.github_app import get_github_app_installation_token
+from agent.auth.github_app import get_github_app_installation_token
+from agent.auth.thread_token import get_github_token
+
 from ..utils.github_comments import post_github_comment
-from ..utils.github_token import get_github_token
 from ..utils.linear import comment_on_linear_issue
 from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
 from ..utils.user_messages import warning
-from .message_content import content_to_text
 
 logger = logging.getLogger(__name__)
-
-SANDBOX_CIRCUIT_BREAKER_THRESHOLD = 2
 
 
 def sandbox_unreachable_message(
@@ -63,54 +56,12 @@ def sandbox_unreachable_message(
     )
 
 
-_CIRCUIT_BREAKER_MARKER = "Sandbox circuit breaker triggered"
 _SANDBOX_ID_RE = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
-
-
-@dataclass(frozen=True)
-class SandboxErrorStreak:
-    sandbox_id: str | None
-    count: int
 
 
 def extract_sandbox_id(text: str) -> str | None:
     match = _SANDBOX_ID_RE.search(text)
     return match.group(0) if match else None
-
-
-def _last_message_has_circuit_breaker_marker(messages: Sequence[BaseMessage]) -> bool:
-    if not messages:
-        return False
-    content = content_to_text(getattr(messages[-1], "content", "") or "")
-    return _CIRCUIT_BREAKER_MARKER in content
-
-
-def _sandbox_error_streak(messages: Sequence[BaseMessage]) -> SandboxErrorStreak | None:
-    sandbox_id: str | None = None
-    count = 0
-
-    for message in reversed(messages):
-        if isinstance(message, ToolMessage):
-            text = content_to_text(message.content)
-            message_sandbox_id = extract_sandbox_id(text)
-            if "SandboxClientError" not in text or message_sandbox_id is None:
-                break
-            if sandbox_id is None:
-                sandbox_id = message_sandbox_id
-            elif message_sandbox_id != sandbox_id:
-                break
-            count += 1
-            continue
-
-        text = content_to_text(getattr(message, "content", "") or "")
-        if _CIRCUIT_BREAKER_MARKER in text:
-            return None
-        if getattr(message, "type", "") in {"human", "system"}:
-            break
-
-    if sandbox_id is None:
-        return None
-    return SandboxErrorStreak(sandbox_id=sandbox_id, count=count)
 
 
 async def _get_slack_target(configurable: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -191,7 +142,7 @@ async def post_sandbox_unreachable_notification(
 ) -> None:
     configurable = config.get("configurable", {})
     if not isinstance(configurable, Mapping):
-        logger.info("No runtime configurable found for sandbox circuit breaker notification")
+        logger.info("No runtime configurable found for sandbox unreachable notification")
         return
 
     message = sandbox_unreachable_message(
@@ -208,80 +159,24 @@ async def post_sandbox_unreachable_notification(
             await post_slack_thread_reply(channel_id, thread_ts, message, agent_thread_id=thread_id)
         else:
             await post_slack_thread_reply(channel_id, thread_ts, message)
-        logger.info("Sent sandbox circuit breaker notification to Slack thread %s", thread_ts)
+        logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
         return
 
     linear_issue_id = _get_linear_issue_id(configurable)
     if linear_issue_id is not None:
         await comment_on_linear_issue(linear_issue_id, message)
-        logger.info("Sent sandbox circuit breaker notification to Linear issue %s", linear_issue_id)
+        logger.info("Sent sandbox unreachable notification to Linear issue %s", linear_issue_id)
         return
 
     github_target = _get_github_target(configurable)
     if github_target is not None:
         token = get_github_token(config) or await get_github_app_installation_token()
         if not token:
-            logger.info("No GitHub token available for sandbox circuit breaker notification")
+            logger.info("No GitHub token available for sandbox unreachable notification")
             return
         repo, issue_number = github_target
         await post_github_comment(repo, issue_number, message, token=token)
-        logger.info("Sent sandbox circuit breaker notification to GitHub item #%s", issue_number)
+        logger.info("Sent sandbox unreachable notification to GitHub item #%s", issue_number)
         return
 
-    logger.info("No user-facing target found for sandbox circuit breaker notification")
-
-
-class SandboxCircuitBreakerMiddleware(AgentMiddleware[AgentState, Any]):
-    """Stop runs that repeatedly hit the same dead sandbox."""
-
-    state_schema = AgentState
-
-    def __init__(self, *, threshold: int = SANDBOX_CIRCUIT_BREAKER_THRESHOLD) -> None:
-        self.threshold = threshold
-
-    @hook_config(can_jump_to=["end"])
-    def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
-        messages = state.get("messages", [])
-        if _last_message_has_circuit_breaker_marker(messages):
-            return None
-
-        streak = _sandbox_error_streak(messages)
-        if streak is None or streak.count <= self.threshold:
-            return None
-
-        detail = f"{streak.count} consecutive sandbox tool failures against {streak.sandbox_id}"
-        message = sandbox_unreachable_message(sandbox_id=streak.sandbox_id)
-        content = f"{_CIRCUIT_BREAKER_MARKER}: {detail}. {message}"
-        return {"jump_to": "end", "messages": [AIMessage(content=content)]}
-
-    @hook_config(can_jump_to=["end"])
-    async def abefore_model(
-        self,
-        state: AgentState,
-        runtime: Runtime,
-    ) -> dict[str, Any] | None:
-        return self.before_model(state, runtime)
-
-    async def aafter_agent(
-        self,
-        state: AgentState,
-        runtime: Runtime,  # noqa: ARG002
-    ) -> dict[str, Any] | None:
-        messages = state.get("messages", [])
-        if not messages:
-            return None
-
-        last_msg = messages[-1]
-        content = content_to_text(getattr(last_msg, "content", "") or "")
-        if _CIRCUIT_BREAKER_MARKER not in content:
-            return None
-
-        try:
-            config = get_config()
-            await post_sandbox_unreachable_notification(
-                config, sandbox_id=extract_sandbox_id(content)
-            )
-        except Exception:
-            logger.exception("Failed to send sandbox circuit breaker notification")
-
-        return None
+    logger.info("No user-facing target found for sandbox unreachable notification")

@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from agent.utils import slack as slack_utils
@@ -33,6 +34,69 @@ def _async_client_cm(post_response: MagicMock) -> AsyncMock:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=post_response)
     return client_cm
+
+
+@pytest.mark.asyncio
+async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+    chunks = [{"type": "task_update", "id": "step-1", "title": "Reading", "status": "in_progress"}]
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        started = await slack_utils.start_slack_stream(
+            "C1", "1.0", chunks, recipient_user_id="U1", recipient_team_id="T1"
+        )
+        appended = await slack_utils.append_slack_stream("C1", "1.0", chunks)
+        stopped = await slack_utils.stop_slack_stream("C1", "1.0", chunks)
+
+    assert started == "1.0"
+    assert appended is None
+    assert stopped is None
+    calls = client_cm.post.await_args_list
+    assert calls[0].args[0].endswith("/chat.startStream")
+    assert calls[0].kwargs["json"] == {
+        "channel": "C1",
+        "chunks": chunks,
+        "task_display_mode": "plan",
+        "thread_ts": "1.0",
+        "recipient_user_id": "U1",
+        "recipient_team_id": "T1",
+    }
+    assert calls[1].args[0].endswith("/chat.appendStream")
+    assert calls[2].kwargs["json"] == {
+        "channel": "C1",
+        "ts": "1.0",
+        "chunks": chunks,
+        "session_status": "active",
+    }
+
+
+@pytest.mark.asyncio
+async def test_code_channel_stream_is_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        await slack_utils.start_slack_stream("C1", "0", [])
+
+    assert "thread_ts" not in client_cm.post.await_args.kwargs["json"]
+
+
+@pytest.mark.asyncio
+async def test_slack_stream_rate_limit_preserves_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_rate_limited_response(retry_after="30"))
+
+    with (
+        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        pytest.raises(slack_utils.SlackStreamError) as raised,
+    ):
+        await slack_utils.append_slack_stream("C1", "1.0", [])
+
+    assert raised.value.code == "rate_limited"
+    assert raised.value.retry_after == 30
 
 
 @pytest.mark.asyncio
@@ -214,3 +278,131 @@ async def test_post_slack_thread_reply_forwards_blocks(monkeypatch: pytest.Monke
 
     assert ok is True
     post_with_ts.assert_awaited_once_with("C1", "1.0", "Status", blocks=blocks)
+
+
+@pytest.mark.asyncio
+async def test_upload_slack_thread_file_rejects_content_over_16_mb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    result = await slack_utils.upload_slack_thread_file(
+        "C1",
+        "1.0",
+        "plan.html",
+        b"x" * (slack_utils.SLACK_FILE_UPLOAD_MAX_BYTES + 1),
+    )
+
+    assert result == (None, "file_too_large")
+
+
+@pytest.mark.asyncio
+async def test_upload_slack_thread_file_completes_external_upload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    ticket = MagicMock(status_code=200, headers={})
+    ticket.raise_for_status.return_value = None
+    ticket.json.return_value = {
+        "ok": True,
+        "upload_url": "https://files.slack.com/upload/v1/test",
+        "file_id": "F1",
+    }
+    complete = MagicMock(status_code=200, headers={})
+    complete.raise_for_status.return_value = None
+    complete.json.return_value = {"ok": True, "files": [{"id": "F1"}]}
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(side_effect=[ticket, complete])
+    uploaded = httpx.Response(
+        200,
+        request=httpx.Request("POST", "https://files.slack.com"),
+        text="OK - 8",
+    )
+    safe_request = AsyncMock(return_value=(uploaded, None))
+    monkeypatch.setattr(slack_utils, "request_with_safe_redirects", safe_request)
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.upload_slack_thread_file(
+            "C1", "1.0", "plan.html", b"<html />", title="Plan", initial_comment="Preview"
+        )
+
+    assert result == ("F1", None)
+    ticket_call = client_cm.post.call_args_list[0]
+    assert ticket_call.args[0].endswith("/files.getUploadURLExternal")
+    assert ticket_call.kwargs["data"] == {
+        "filename": "plan.html",
+        "length": "8",
+    }
+    assert ticket_call.kwargs["headers"] == {
+        "Authorization": "Bearer xoxb-test",
+    }
+    safe_request.assert_awaited_once()
+    assert safe_request.call_args.kwargs["content"] == b"<html />"
+    assert safe_request.call_args.kwargs["validate_url"] is slack_utils._validate_slack_upload_url
+    complete_call = client_cm.post.call_args_list[1]
+    assert complete_call.args[0].endswith("/files.completeUploadExternal")
+    assert complete_call.kwargs["data"] == {
+        "files": '[{"id": "F1", "title": "Plan"}]',
+        "channel_id": "C1",
+        "thread_ts": "1.0",
+        "initial_comment": "Preview",
+    }
+    assert complete_call.kwargs["headers"] == {
+        "Authorization": "Bearer xoxb-test",
+    }
+
+
+@pytest.mark.asyncio
+async def test_upload_slack_thread_file_handles_malformed_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    ticket = MagicMock(status_code=200, headers={})
+    ticket.raise_for_status.return_value = None
+    ticket.json.side_effect = ValueError("invalid JSON")
+    client_cm = _async_client_cm(ticket)
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
+
+    assert result == (None, "invalid_slack_response")
+
+
+@pytest.mark.asyncio
+async def test_upload_slack_thread_file_rejects_unsafe_upload_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    ticket = MagicMock(status_code=200, headers={})
+    ticket.raise_for_status.return_value = None
+    ticket.json.return_value = {
+        "ok": True,
+        "upload_url": "https://attacker.example/upload",
+        "file_id": "F1",
+    }
+    client_cm = _async_client_cm(ticket)
+    blocked = {"content": "blocked"}
+    safe_request = AsyncMock(return_value=(None, blocked))
+    monkeypatch.setattr(slack_utils, "request_with_safe_redirects", safe_request)
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
+
+    assert result == (None, "unsafe_upload_url")
+    assert client_cm.post.await_count == 1
+
+
+def test_validate_slack_upload_url() -> None:
+    assert slack_utils._validate_slack_upload_url("https://files.slack.com/upload/v1/test") == (
+        True,
+        "",
+    )
+    allowed, _ = slack_utils._validate_slack_upload_url("https://files.slack.com.evil.test/x")
+    assert allowed is False
+    allowed, _ = slack_utils._validate_slack_upload_url("https://edge.slack.com/x")
+    assert allowed is False
+    allowed, _ = slack_utils._validate_slack_upload_url("http://files.slack.com/x")
+    assert allowed is False
+    allowed, _ = slack_utils._validate_slack_upload_url("https://files.slack.com:8443/x")
+    assert allowed is False

@@ -80,24 +80,34 @@ pnpm run test:e2e:desktop    # Electron + pinned uv dcode ACP
 Watch it in human time:
 
 ```bash
-SLOW_MO=700 npx playwright test --headed
+SLOW_MO=700 pnpm exec playwright test --headed
+```
+
+The webServer is reused locally, so re-running a single spec against a warm
+`langgraph dev` is the fast iteration loop — prefer that over the whole suite:
+
+```bash
+pnpm exec playwright test tests/full_flow.spec.ts
 ```
 
 ## Artifacts (replay a run)
 
-Browser tests record a **trace** (DOM-snapshot timeline + network + console + source)
-and a **video**; failures also get a screenshot. The Desktop test records an Electron trace and a
-success screenshot. Artifacts land in `test-results/<test>/` and `playwright-report/`:
+Recording costs real time on every spec, so browser tests keep a **trace**
+(DOM-snapshot timeline + network + console + source) and a **video** only for a
+failed attempt; failures also get a screenshot. Set `E2E_ARTIFACTS=1` to capture
+both unconditionally, which is what you want when a spec passes but does the
+wrong thing. The Desktop test records an Electron trace and a success
+screenshot. Artifacts land in `test-results/<test>/` and `playwright-report/`:
 
 ```bash
-npx playwright show-report                       # browse runs; each has a Trace tab
-npx playwright show-trace test-results/<test>/trace.zip   # open one trace directly
+pnpm exec playwright show-report                       # browse runs; each has a Trace tab
+pnpm exec playwright show-trace test-results/<test>/trace.zip   # open one trace directly
 ```
 
 In CI the browser shards upload **playwright-report-1**, **playwright-report-2**,
 and **playwright-report-3**; Desktop uploads **playwright-report-desktop**. Each
 contains `playwright-report/` and `test-results/`. Download the relevant artifact,
-then `npx playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
+then `pnpm exec playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
 <https://trace.playwright.dev>) to replay.
 
 Poke at it by hand (from the repo root):

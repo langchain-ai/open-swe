@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run lint
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run format check
@@ -41,10 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      - uses: actions/setup-node@v7.0.0
-        with:
-          node-version: 22
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run typecheck
@@ -55,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run unit tests
@@ -68,7 +65,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 22
+          node-version: 24
       - run: corepack enable
       # oxfmt reads the files straight off disk, so only the root package's own
       # devDependencies are needed here.
@@ -84,7 +81,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 22
+          node-version: 24
       - run: corepack enable
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
@@ -98,12 +95,28 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 22
+          node-version: 24
       - run: corepack enable
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
       - name: Run tests
         run: pnpm --filter open-swe-dashboard run test
+
+  ui-typecheck:
+    name: UI typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      # `js-lint` is oxlint and `build` is Vite, which strips types via esbuild
+      # without checking them, so this is the only job that runs tsc over ui/.
+      - name: Run typecheck
+        run: pnpm --filter open-swe-dashboard run typecheck
 
   desktop:
     name: Desktop checks
@@ -112,7 +125,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 22
+          node-version: 24
       - run: corepack enable
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
         with:
@@ -172,23 +185,38 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 22
+          node-version: 24
       - name: Install Python deps (langgraph dev runtime)
         run: uv sync --locked
       - run: corepack enable
+      # Chromium and the dashboard build are identical across the three shards
+      # and change only with their own inputs, so all three restore them rather
+      # than each spending ~50s redoing the work. Both keys are computed before
+      # `pnpm install` writes ui/node_modules, which would otherwise dominate
+      # the ui/** hash and never hit.
+      - name: Cache Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/e2e/package.json', 'pnpm-lock.yaml') }}
+      - name: Cache dashboard build
+        uses: actions/cache@v6
+        with:
+          path: ui/.output
+          key: ui-output-${{ runner.os }}-${{ hashFiles('ui/**', 'pnpm-lock.yaml') }}
       - name: Install workspace dependencies
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
-      - name: Install Playwright + Chromium
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe --filter open-swe-e2e
+      - name: Install Chromium
         run: |
           sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
           pnpm run test:e2e:install
       - name: Run browser E2E
-        run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/3
+        run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -207,17 +235,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 22
+          node-version: 24
       - name: Install Python deps (langgraph dev runtime)
         run: uv sync --locked
       - run: corepack enable
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install Playwright
-        run: npm --prefix tests/e2e ci
       - name: Run Desktop E2E
         run: xvfb-run --auto-servernum pnpm run test:e2e:desktop
       - name: Upload Playwright report

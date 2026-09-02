@@ -7,17 +7,17 @@ stored value wins, and an unset record falls back to the env var.
 
 The value is an opaque provider-scoped identifier — for ``SANDBOX_TYPE=langsmith``
 it is a LangSmith snapshot id — so it is stored as free text with no format
-validation. Per-repo snapshots (:mod:`agent.dashboard.repo_snapshots`) still take
-precedence over this base for runs that target a repo with a ready snapshot.
+validation. An environment with a ready snapshot still takes precedence over this
+base.
 """
 
 import logging
 import os
-from datetime import UTC, datetime
 from typing import Any, Literal
 
-from langgraph_sdk import get_client
 from pydantic import BaseModel, field_validator
+
+from agent.store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
 
@@ -49,35 +49,29 @@ class SandboxSettingsUpdate(BaseModel):
         return text
 
 
-def _client():
-    return get_client()
-
-
 def env_base_snapshot_id() -> str | None:
     value = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID", "").strip()
     return value or None
 
 
+def _stored_base_snapshot_id(record: dict[str, Any] | None) -> str | None:
+    snapshot_id = record.get("base_snapshot_id") if record else None
+    return snapshot_id.strip() or None if isinstance(snapshot_id, str) else None
+
+
 async def get_admin_base_snapshot_id() -> str | None:
     """Return the admin-configured base snapshot, ignoring the env default.
 
-    Never raises: a store failure resolves to ``None`` so sandbox creation falls
-    back to ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
+    Fail-soft on purpose: this runs while a sandbox is being created, and a
+    store failure must fall back to ``DEFAULT_SANDBOX_SNAPSHOT_ID`` rather than
+    fail the run.
     """
     try:
-        item = await _client().store.get_item(SANDBOX_SETTINGS_NAMESPACE, SANDBOX_SETTINGS_KEY)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("sandbox settings lookup failed: %s", e)
+        record = await get_value(SANDBOX_SETTINGS_NAMESPACE, SANDBOX_SETTINGS_KEY)
+    except Exception:
+        logger.warning("sandbox settings lookup failed", exc_info=True)
         return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    if not isinstance(value, dict):
-        return None
-    snapshot_id = value.get("base_snapshot_id")
-    if not isinstance(snapshot_id, str):
-        return None
-    return snapshot_id.strip() or None
+    return _stored_base_snapshot_id(record)
 
 
 async def resolve_base_snapshot_id() -> str | None:
@@ -87,20 +81,8 @@ async def resolve_base_snapshot_id() -> str | None:
 
 async def get_sandbox_settings() -> dict[str, Any]:
     """Return the stored settings plus the resolved effective base snapshot."""
-    try:
-        item = await _client().store.get_item(SANDBOX_SETTINGS_NAMESPACE, SANDBOX_SETTINGS_KEY)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("sandbox settings lookup failed: %s", e)
-        item = None
-    value = {}
-    if item is not None:
-        stored = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-        if isinstance(stored, dict):
-            value = stored
-    admin_snapshot_id = value.get("base_snapshot_id")
-    admin_snapshot_id = (
-        admin_snapshot_id.strip() or None if isinstance(admin_snapshot_id, str) else None
-    )
+    value = await get_value(SANDBOX_SETTINGS_NAMESPACE, SANDBOX_SETTINGS_KEY) or {}
+    admin_snapshot_id = _stored_base_snapshot_id(value)
     env_snapshot_id = env_base_snapshot_id()
     source: BaseSnapshotSource = (
         "admin" if admin_snapshot_id else ("env" if env_snapshot_id else "unset")
@@ -118,12 +100,12 @@ async def get_sandbox_settings() -> dict[str, Any]:
 async def upsert_sandbox_settings(
     update: SandboxSettingsUpdate, updated_by: str | None = None
 ) -> dict[str, Any]:
-    await _client().store.put_item(
+    await put_value(
         SANDBOX_SETTINGS_NAMESPACE,
         SANDBOX_SETTINGS_KEY,
         {
             "base_snapshot_id": update.base_snapshot_id,
-            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_at": now_iso(),
             "updated_by": updated_by,
         },
     )

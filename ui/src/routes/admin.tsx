@@ -30,6 +30,7 @@ import {
 } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
+import { slackAppManifestJson } from "@/lib/slack-manifest"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -59,6 +60,8 @@ function AdminPage() {
       description="Workspace-wide defaults and user mappings."
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
+
+      <SlackIntegrationSection />
 
       <LLMGatewaySection />
 
@@ -94,6 +97,80 @@ function AdminPage() {
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
+  )
+}
+
+const SLACK_CODE_CHANNELS_STORAGE_KEY =
+  "open-swe.admin.slack-code-channels-enabled"
+
+export function SlackIntegrationSection() {
+  const [enabled, setEnabled] = useState(false)
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle"
+  )
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setEnabled(
+      window.localStorage.getItem(SLACK_CODE_CHANNELS_STORAGE_KEY) === "true"
+    )
+  }, [])
+
+  const setCodeChannelsEnabled = (next: boolean) => {
+    setEnabled(next)
+    setCopyState("idle")
+    window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
+  }
+
+  const copyManifest = async () => {
+    try {
+      await navigator.clipboard.writeText(slackAppManifestJson(enabled))
+      setCopyState("copied")
+    } catch {
+      setCopyState("failed")
+    }
+  }
+
+  return (
+    <SettingsSection
+      title="Slack integration"
+      description="Select the Slack app manifest for this installation. This browser-only setting does not change backend behavior."
+    >
+      <SettingsRow
+        htmlFor="slack-code-channels"
+        label="Slack Code Channels"
+        description={
+          enabled
+            ? "Early-access Code Channels manifest selected. Reinstall or re-authorize the Slack app after updating its manifest."
+            : "Legacy Slack manifest selected. Messages continue to use app mentions and Slack threads."
+        }
+        control={
+          <Switch
+            id="slack-code-channels"
+            checked={enabled}
+            onCheckedChange={setCodeChannelsEnabled}
+          />
+        }
+      />
+      <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm/none font-medium text-foreground">
+            App manifest
+          </span>
+          <span className="text-xs/relaxed text-muted-foreground">
+            Copy the selected manifest, replace its URL/provider placeholders,
+            then paste it into your Slack app settings and reinstall the app.
+          </span>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => void copyManifest()}>
+          {copyState === "copied"
+            ? "Copied"
+            : copyState === "failed"
+              ? "Copy failed"
+              : "Copy manifest"}
+        </Button>
+      </div>
+    </SettingsSection>
   )
 }
 

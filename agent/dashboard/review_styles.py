@@ -5,17 +5,20 @@ analysis metadata, and the status of the background style-analysis run.
 """
 
 import logging
-from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
-from langgraph_sdk import get_client
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from agent.store import TypedStore, now_iso
 
 logger = logging.getLogger(__name__)
 
 REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
 
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
+
+_TERMINAL_SUCCESS = frozenset({"success", "completed"})
+_TERMINAL_FAILURE = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
 
 
 def normalize_repo_full_name(raw: str) -> str:
@@ -53,127 +56,177 @@ class ReviewStylePromptUpdate(BaseModel):
         return v
 
 
-def _client():
-    return get_client()
+class ReviewStyle(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    full_name: str
+    owner: str = ""
+    name: str = ""
+    status: AnalysisStatus = "idle"
+    custom_prompt: str | None = None
+    analysis_summary: str | None = None
+    top_reviewers: list[str] = Field(default_factory=list)
+    prs_sampled: int = 0
+    reviews_sampled: int = 0
+    analysis_thread_id: str | None = None
+    analysis_run_id: str | None = None
+    continual_cron_id: str | None = None
+    error: str | None = None
+    created_by: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    @classmethod
+    def seed(cls, full_name: str, created_by: str = "") -> "ReviewStyle":
+        owner, _, name = full_name.partition("/")
+        now = now_iso()
+        return cls(
+            full_name=full_name,
+            owner=owner,
+            name=name,
+            created_by=created_by,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @property
+    def has_saved_prompt(self) -> bool:
+        return bool(self.custom_prompt and self.custom_prompt.strip())
 
 
-async def _get_value(key: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(REVIEW_STYLES_NAMESPACE, key)
-    except Exception as e:
-        logger.debug("store get_item failed for %s: %s", key, e)
-        return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
+class ReviewStyleStore(TypedStore[ReviewStyle]):
+    def __init__(self) -> None:
+        super().__init__(REVIEW_STYLES_NAMESPACE, ReviewStyle)
+
+    async def list_all(self) -> list[ReviewStyle]:
+        records = await self.search_all()
+        records.sort(key=lambda record: record.full_name)
+        return records
+
+    async def save(self, record: ReviewStyle) -> ReviewStyle:
+        record.updated_at = now_iso()
+        return await self.put(record.full_name, record)
+
+    async def get_or_seed(self, full_name: str, created_by: str = "") -> ReviewStyle:
+        return await self.get(full_name) or ReviewStyle.seed(full_name, created_by)
+
+    async def create(self, full_name: str, created_by: str) -> ReviewStyle:
+        existing = await self.get(full_name)
+        if existing:
+            return existing
+        return await self.put(full_name, ReviewStyle.seed(full_name, created_by))
+
+    async def set_custom_prompt(self, full_name: str, custom_prompt: str) -> ReviewStyle:
+        record = await self.get_or_seed(full_name)
+        record.custom_prompt = custom_prompt
+        if record.status == "running":
+            record.status = "completed"
+            record.error = None
+        return await self.save(record)
+
+    async def set_continual_cron(self, full_name: str, cron_id: str | None) -> ReviewStyle:
+        record = await self.get_or_seed(full_name)
+        record.continual_cron_id = cron_id
+        return await self.save(record)
+
+    async def record_run_started(
+        self, full_name: str, *, run_id: str | None, created_by: str
+    ) -> ReviewStyle:
+        record = await self.get_or_seed(full_name, created_by)
+        record.analysis_run_id = run_id
+        record.created_by = created_by
+        return await self.save(record)
+
+    async def mark_running(
+        self,
+        full_name: str,
+        *,
+        thread_id: str,
+        run_id: str | None,
+        top_reviewers: list[str],
+        prs_sampled: int,
+        reviews_sampled: int,
+    ) -> ReviewStyle:
+        record = await self.get_or_seed(full_name)
+        record.status = "running"
+        record.analysis_thread_id = thread_id
+        record.analysis_run_id = run_id
+        record.top_reviewers = top_reviewers
+        record.prs_sampled = prs_sampled
+        record.reviews_sampled = reviews_sampled
+        record.error = None
+        return await self.save(record)
+
+    async def mark_completed(
+        self,
+        full_name: str,
+        *,
+        custom_prompt: str | None = None,
+        analysis_summary: str | None = None,
+        top_reviewers: list[str] | None = None,
+        prs_sampled: int | None = None,
+        reviews_sampled: int | None = None,
+    ) -> ReviewStyle:
+        record = await self.get_or_seed(full_name)
+        record.status = "completed"
+        record.error = None
+        if custom_prompt is not None:
+            record.custom_prompt = custom_prompt
+        if analysis_summary is not None:
+            record.analysis_summary = analysis_summary
+        if top_reviewers is not None:
+            record.top_reviewers = top_reviewers
+        if prs_sampled is not None:
+            record.prs_sampled = prs_sampled
+        if reviews_sampled is not None:
+            record.reviews_sampled = reviews_sampled
+        return await self.save(record)
+
+    async def mark_failed(self, full_name: str, error: str) -> ReviewStyle:
+        record = await self.get_or_seed(full_name)
+        record.status = "failed"
+        record.error = error
+        return await self.save(record)
+
+    async def mark_idle(self, full_name: str) -> ReviewStyle:
+        record = await self.get_or_seed(full_name)
+        record.status = "idle"
+        record.error = None
+        record.analysis_run_id = None
+        return await self.save(record)
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
-    owner, name = full_name.split("/", 1)
-    return {
-        "full_name": full_name,
-        "owner": owner,
-        "name": name,
-        "status": "idle",
-        "custom_prompt": None,
-        "analysis_summary": None,
-        "top_reviewers": [],
-        "prs_sampled": 0,
-        "reviews_sampled": 0,
-        "analysis_thread_id": None,
-        "analysis_run_id": None,
-        "continual_cron_id": None,
-        "error": None,
-        "created_by": created_by,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
-    }
-
-
-async def get_review_style(full_name: str) -> dict[str, Any] | None:
-    return await _get_value(full_name)
-
-
-async def list_review_styles() -> list[dict[str, Any]]:
-    result = await _client().store.search_items(REVIEW_STYLES_NAMESPACE, limit=1000)
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    out: list[dict[str, Any]] = []
-    for item in items or []:
-        value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-        if isinstance(value, dict):
-            out.append(value)
-    out.sort(key=lambda r: r.get("full_name", ""))
-    return out
-
-
-async def create_review_style(full_name: str, created_by: str) -> dict[str, Any]:
-    existing = await get_review_style(full_name)
-    if existing:
-        return existing
-    value = _default_record(full_name, created_by)
-    await _client().store.put_item(REVIEW_STYLES_NAMESPACE, full_name, value)
-    return value
-
-
-async def update_review_style(full_name: str, patch: dict[str, Any]) -> dict[str, Any]:
-    existing = await get_review_style(full_name) or _default_record(
-        full_name, patch.get("created_by", "")
-    )
-    value = {**existing, **patch, "updated_at": _now_iso()}
-    await _client().store.put_item(REVIEW_STYLES_NAMESPACE, full_name, value)
-    return value
-
-
-def has_saved_prompt(record: dict[str, Any]) -> bool:
-    prompt = record.get("custom_prompt")
-    return isinstance(prompt, str) and bool(prompt.strip())
-
-
-async def set_custom_prompt(full_name: str, custom_prompt: str) -> dict[str, Any]:
-    existing = await get_review_style(full_name)
-    patch: dict[str, Any] = {"custom_prompt": custom_prompt}
-    if existing and existing.get("status") == "running":
-        patch["status"] = "completed"
-        patch["error"] = None
-    return await update_review_style(full_name, patch)
+REVIEW_STYLES = ReviewStyleStore()
 
 
 async def reconcile_running_status(
     full_name: str,
-    record: dict[str, Any],
+    record: ReviewStyle,
     *,
     run_status: str | None,
     run_missing: bool = False,
-) -> dict[str, Any]:
+) -> ReviewStyle:
     """Clear stale ``running`` when the analyzer run is done or unreachable."""
-    if record.get("status") != "running":
+    if record.status != "running":
         return record
 
-    terminal_success = frozenset({"success", "completed"})
-    terminal_failure = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
-
-    if run_status in terminal_success:
-        if has_saved_prompt(record):
-            return await update_review_style(full_name, {"status": "completed", "error": None})
-        return await mark_analysis_failed(
+    if run_status in _TERMINAL_SUCCESS:
+        if record.has_saved_prompt:
+            return await REVIEW_STYLES.mark_completed(full_name)
+        return await REVIEW_STYLES.mark_failed(
             full_name,
             "Analysis finished without saving a prompt. Please retry.",
         )
 
-    if run_status in terminal_failure:
-        if has_saved_prompt(record):
-            return await update_review_style(full_name, {"status": "completed", "error": None})
-        return await mark_analysis_failed(full_name, "Analysis run ended. Please retry.")
+    if run_status in _TERMINAL_FAILURE:
+        if record.has_saved_prompt:
+            return await REVIEW_STYLES.mark_completed(full_name)
+        return await REVIEW_STYLES.mark_failed(full_name, "Analysis run ended. Please retry.")
 
     if run_missing:
-        if has_saved_prompt(record):
-            return await update_review_style(full_name, {"status": "completed", "error": None})
-        return await mark_analysis_failed(
+        if record.has_saved_prompt:
+            return await REVIEW_STYLES.mark_completed(full_name)
+        return await REVIEW_STYLES.mark_failed(
             full_name,
             "Analysis was interrupted or the run is no longer available. Please retry.",
         )
@@ -181,67 +234,19 @@ async def reconcile_running_status(
     return record
 
 
-async def delete_review_style(full_name: str) -> None:
-    await _client().store.delete_item(REVIEW_STYLES_NAMESPACE, full_name)
-
-
-async def mark_analysis_running(
-    full_name: str,
-    *,
-    thread_id: str,
-    run_id: str | None,
-    top_reviewers: list[str],
-    prs_sampled: int,
-    reviews_sampled: int,
-) -> dict[str, Any]:
-    return await update_review_style(
-        full_name,
-        {
-            "status": "running",
-            "analysis_thread_id": thread_id,
-            "analysis_run_id": run_id,
-            "top_reviewers": top_reviewers,
-            "prs_sampled": prs_sampled,
-            "reviews_sampled": reviews_sampled,
-            "error": None,
-        },
-    )
-
-
-async def mark_analysis_completed(
-    full_name: str,
-    *,
-    custom_prompt: str,
-    analysis_summary: str,
-    top_reviewers: list[str],
-    prs_sampled: int,
-    reviews_sampled: int,
-) -> dict[str, Any]:
-    return await update_review_style(
-        full_name,
-        {
-            "status": "completed",
-            "custom_prompt": custom_prompt,
-            "analysis_summary": analysis_summary,
-            "top_reviewers": top_reviewers,
-            "prs_sampled": prs_sampled,
-            "reviews_sampled": reviews_sampled,
-            "error": None,
-        },
-    )
-
-
-async def mark_analysis_failed(full_name: str, error: str) -> dict[str, Any]:
-    return await update_review_style(full_name, {"status": "failed", "error": error})
-
-
 async def get_repo_custom_prompt(owner: str, repo: str) -> str | None:
-    """Return the custom prompt supplement for a repo, if configured."""
+    """Return the custom prompt supplement for a repo, if configured.
+
+    Fail-soft on purpose: this runs while the reviewer assembles its system
+    prompt, and a store blip should cost the run its style supplement, not the
+    whole review.
+    """
     full_name = f"{owner}/{repo}"
-    record = await get_review_style(full_name)
+    try:
+        record = await REVIEW_STYLES.get(full_name)
+    except Exception:
+        logger.warning("review style lookup failed for %s", full_name, exc_info=True)
+        return None
     if not record:
         return None
-    prompt = record.get("custom_prompt")
-    if isinstance(prompt, str) and prompt.strip():
-        return prompt.strip()
-    return None
+    return (record.custom_prompt or "").strip() or None

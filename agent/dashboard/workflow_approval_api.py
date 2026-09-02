@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_api import _dispatch_followup, _thread_metadata
-from .thread_api import _thread_is_readable, _user_owns_thread
+from .thread_api import _thread_is_readable
 from .workflow_approval import (
     decide_workflow_push_approval,
     get_workflow_push_approvals,
@@ -28,11 +28,9 @@ async def list_workflow_push_approvals(
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
-    is_owner = _user_owns_thread(metadata, session["sub"], session.get("email"))
     approvals = await get_workflow_push_approvals(thread_id)
     return {
         "threadId": thread_id,
-        "isOwner": is_owner,
         "approvals": workflow_push_approval_responses(approvals),
     }
 
@@ -42,8 +40,8 @@ async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
-        raise HTTPException(403, "only the thread owner can approve workflow pushes")
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
@@ -63,8 +61,8 @@ async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
-        raise HTTPException(403, "only the thread owner can reject workflow pushes")
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )

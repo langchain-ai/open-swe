@@ -60,9 +60,7 @@ def _run_process(
 
     with (
         patch.object(linear_webhook.common, "react_to_linear_comment", new_callable=AsyncMock),
-        patch.object(
-            linear_webhook.common, "generate_thread_id_from_issue", return_value="thread-1"
-        ),
+        patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
         patch.object(
             linear_webhook.common,
             "fetch_linear_issue_details",
@@ -75,7 +73,7 @@ def _run_process(
         ),
         patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
         patch.object(
-            linear_webhook.common, "upsert_agent_thread_owner_metadata", side_effect=fake_upsert
+            linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert
         ),
         patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
         patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),

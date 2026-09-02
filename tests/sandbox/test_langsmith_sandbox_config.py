@@ -24,7 +24,7 @@ from agent.integrations.langsmith import (
     create_langsmith_sandbox,
     create_langsmith_sandbox_from_params,
 )
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
 
 
 def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:

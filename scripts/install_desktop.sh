@@ -24,7 +24,7 @@ if command -v pnpm >/dev/null; then
 elif command -v corepack >/dev/null; then
   pnpm=(corepack pnpm)
 else
-  echo "Missing pnpm. Install it with 'npm install -g pnpm', then try again." >&2
+  echo "Missing pnpm. Install it from https://pnpm.io/installation, then try again." >&2
   exit 1
 fi
 

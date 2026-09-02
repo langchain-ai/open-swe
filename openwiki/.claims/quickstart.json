@@ -1,0 +1,284 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:1a6ad23c533ed121ab16bef0be90196fb07b519d96782fd130e7e2c42a3610d0",
+  "claims": [
+    {
+      "id": "claim_7e68d8872dad4c0389a1bc0c65b87801",
+      "statement": "Open SWE is an open-source framework for building an org's internal coding agent, composed on the Deep Agents framework (deepagents.create_deep_agent) and run as a LangGraph application.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L5-L9",
+          "version": "repo-lines-v1:sha256:0684dcd25a886324de9e73063ae687b00bd59ff808b69eee8ff3ede0a4252ff3:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjg1NmQ3ZDQ2ZjhlYWRmMjU1OTEzMzVjOTg3MWE3NTllMTAyYzRmNDc0NWNkODEwNDZiNTlhYzI1YTZlODU5MSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjY5M2Q2NzAwYzZhMWI3MGZiNWI1ZDFjMWU3OGE0N2Y0YWE1N2IyYzA0NWY1ZDMxMGRmM2NlZGQ3MGRkMzE5ZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTZjNGM2NjYwNzc0NjVlZDU2OWI0YWM4ZTZjNjQ2Njk2YTUyZTljMGM4ZWNkNzM1ZDVhNDgzMzhhOTVjMTRjNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGNkY2Q3ZWQyNWM4YWQ5YjQ3MDg4MTczMTk3Y2Y2OGU3M2I4ZTY1Y2Q3YTdjNmZjMDYxODYyNjAxZmJiM2JkYSJ9"
+        },
+        {
+          "resource": "repo://pyproject.toml#L8-L18",
+          "version": "repo-lines-v1:sha256:5908cf436bb54c04e10e1503e8d8cfeaf46e524b687473d976cd9ed7078e83f9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkOTVmNWU5ZWRlMDE4MTYwNDNjMDc5N2FjZThkYTJhYzRlOTlhOGE2YTYxMGZhOTg1NzBlZjM0YjkzNTYxMDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0MTcxOGMwMTg2MWZlNjMxNzEzOWRjYzlmYmI0ZGIzN2FlNDI1ZWRmMzNiNThhMTcyNjQ2ZDI3NmU5ZGM3YmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRlY2Y5OTczY2UyMmZmNzdkODE2M2Y0N2UxYzE4MWM4MDY3MzE4ODYwYjVlZDA0Y2QzYzU1ODgxMjY2YzFkNTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkZjJlNTY2NzBiY2M4ZTQwZDJiMmFkYjAzMDA3NzUyN2U0ODI5NmI4OGJhZjgyNDZjNzRlNDNkNmRiMjhmNGYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f5eda20b1e88414b97bbf051c97e27cf",
+      "statement": "langgraph.json declares five graph entrypoints (agent, reviewer, analyzer, chat, scheduler) plus a FastAPI HTTP app (agent.webapp:app), all served together by langgraph dev.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L10-L11",
+          "version": "repo-lines-v1:sha256:566e422023da2336fe5c10f17022564259558bca82a50901b218df77665633e9:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTAxZmFkY2FiMDRkNDgwYmFiMWY0Y2Y0Nzg0NzAyMmViMzNhMjhiM2E2ZmQ2YmJiMTg3ODMyYTY1Y2QxZmRlZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmVlMDVkNzUwYzcwMDA1NmNlYjQ0NWY4NzdiMTJiMDUzODc3YTAzOWRmMGQyYjNiN2NkY2M1NzFmZDhlNzI3MiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzdhOWNkZDZmNGEzNWRiZmU1MzU5ZTEwZGZlMTNmNmZkNWZjZDhiOGUzNGU1MjYyYTc3NTcxNWNmOGY1ZWFmYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWE5N2VhMDQ1MjgwOTkwYjJlNzM4NjQxNDFiYjg2ZjY3ZjZjYWNmZWIwNDUxZDQ1ODQ5MmNlZjM3ODRkZjZiMyJ9"
+        },
+        {
+          "resource": "repo://langgraph.json#L5-L17",
+          "version": "repo-lines-v1:sha256:7e312846c197633d824e8bebfc18829fce57cfdc688b280beb819a6d75a844d9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0MzAyNjQ2NDg1Mjc3NmNhZDJkMjc5YzE2MDMwYTNiMmM1N2I4M2MxMTIwNTkyZTZhZjgxYjY5YjY4NGJhYTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkNWNkMmZiNGYzZGY4ODQ1MTUyNTViMzk1MjNmMmY4YjU0NzJiZWVhOWY1NjZmZmNhMjA0ZGI4MDI1NjEwNDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI3ZWEwY2FjZDU0ZWFlODUyMGI0M2FiNTEyMDViZGQ2YjE0MTdjYzAyNTBiOTJjNjQxMTUxZGM0M2Y5MjkwZTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBhMGIyYzgwOTQ2YzdiNWY4Mjg4OTk4NmRjMTBjOTZhMmMwMDA1MzkzMWMyYjY3YTg0YWJjMzBhNDk5NmIzMmMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b778ac1d1b864c238782fdf66b9e68e5",
+      "statement": "Each langgraph.json graph key maps to a thin re-export module under agent/graphs/ that imports the underlying factory from its owning module (e.g. agent.graphs.agent:traced_agent re-exports agent.server:get_agent/traced_agent, and agent.graphs.scheduler:get_scheduler re-exports agent.scheduler:get_scheduler).",
+      "evidence": [
+        {
+          "resource": "repo://agent/graphs/agent.py",
+          "version": "repo-file-v1:sha256:22d489eba9206277c952b0725a7934230b3b4ac21229eed750a3d799b592a40d"
+        },
+        {
+          "resource": "repo://agent/graphs/chat.py",
+          "version": "repo-file-v1:sha256:0b08a3395a0c40f3f030bb02f2e9a0b69066a551e8f14e7264873a410df2af09"
+        },
+        {
+          "resource": "repo://agent/graphs/scheduler.py",
+          "version": "repo-file-v1:sha256:38f828039e6212641cf3ba7e13473711fbc24ea3c1d8e63de8f6722df7ec3ef2"
+        },
+        {
+          "resource": "repo://agent/scheduler.py#L57-L57",
+          "version": "repo-lines-v1:sha256:a1bcbae24d73feeabb789a6bd414997eab0f27ac2b371afb1e9bcfcf8a5ae4a2:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTFiY2JhZTI0ZDczZmVlYWJiNzg5YTZiZDQxNDk5N2VhYjBmMjdhYzJiMzcxYWZiMWU5YmNmY2Y4YTVhZTRhMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTFiY2JhZTI0ZDczZmVlYWJiNzg5YTZiZDQxNDk5N2VhYjBmMjdhYzJiMzcxYWZiMWU5YmNmY2Y4YTVhZTRhMiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmQwZjVlMWZkYTE0MTY0NzNlMzc2ZmI0MmMwOWFkZDI5ZWZlMDJmMzM5ZWE3MDU3ZWNmMDljOGFiNTMwODhmOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTYyMDI5ZmFiMTJmMjBmN2QyZWE3YTQ4MTY5YTMxOWExNWI0YTdiNWE2MTE2OTg5OGMzMWM3ZDZmNDU3ZTA1YSJ9"
+        },
+        {
+          "resource": "repo://langgraph.json#L5-L11",
+          "version": "repo-lines-v1:sha256:8937854c8ed7235e3289ebe6d1011930b7c87b8232a8c51bf6b63c5f46a8e130:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjdlYTBjYWNkNTRlYWU4NTIwYjQzYWI1MTIwNWJkZDZiMTQxN2NjMDI1MGI5MmM2NDExNTFkYzQzZjkyOTBlMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_d3a663de672a4fac9ee9401391c79095",
+      "statement": "The main coding-agent graph is stateless and rebuilt per thread by the get_agent factory, with all per-thread state living in the sandbox plus thread metadata.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L44-L44",
+          "version": "repo-lines-v1:sha256:1742e8b4f65cad039ea62e1dc0e3d8476ef4b73fd92b6f3ceb1db9dd7371fd78:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTc0MmU4YjRmNjVjYWQwMzllYTYyZTFkYzBlM2Q4NDc2ZWY0YjczZmQ5MmI2ZjNjZWIxZGI5ZGQ3MzcxZmQ3OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTc0MmU4YjRmNjVjYWQwMzllYTYyZTFkYzBlM2Q4NDc2ZWY0YjczZmQ5MmI2ZjNjZWIxZGI5ZGQ3MzcxZmQ3OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjJiZTVjYWEwZTQyMTcyZGNhOWU2N2ZmNjkxMzU0MDU2ZTI1Yzk2NjQ4ODhkZWEyYTc3MmI1YzU4OTQ2M2IzZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNWEzZTkzZmVjOTQxMDE4YTdhNmU3NjM2ZGUzNzgyMzIzYmUzYjQ2ZmZjYTgxOGYyNGJiYTI2MmEyYTE2MTFiZCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_b159f285b4ef4e87858e6d7164dfd391",
+      "statement": "agent.webapp:app is a compatibility shim that re-exports the FastAPI app built in agent/api/app.py, which at startup mounts the dashboard router plus plan, workflow-approval, Linear, Slack, health, and GitHub webhook routers.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L38-L64",
+          "version": "repo-lines-v1:sha256:5c89840205d5e1ad6f74e52d173ea3eada05b30a1c76cf3151a9924efa558f36:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        },
+        {
+          "resource": "repo://agent/webapp.py#L1-L5",
+          "version": "repo-lines-v1:sha256:6c2995eef985a1649902b9656feef841717a86f37131325362cb23082c5e3f18:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGY4YWRmYTNmNDg3NGUxM2VjYjFjZGZmODc0ZTI5NTkxOWQ3OTc1ZWFmNGMyNzAwNGQ4OTEwODdkMTJiYzA1ZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMmU5OTI3MzllZTgxNDg2MTkwMGIyYjU1ZTg0NGY4Y2EzZDA2NjYyOTIyN2U1MjIwNGE4YTUxNzc5NjM2ODFkYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_85a4b75bc56a42d080f4fe8aa8879c0f",
+      "statement": "The agent is invoked from Slack, Linear, and GitHub, and additionally auto-reviews PRs on opened / ready_for_review events when the repo and author opt in.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L47-L47",
+          "version": "repo-lines-v1:sha256:b5b0b9e9cb6041a08709be0507b4ac70181ccae84a17d850da32d811159383b7:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjViMGI5ZTljYjYwNDFhMDg3MDliZTA1MDdiNGFjNzAxODFjY2FlODRhMTdkODUwZGEzMmQ4MTExNTkzODNiNyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjViMGI5ZTljYjYwNDFhMDg3MDliZTA1MDdiNGFjNzAxODFjY2FlODRhMTdkODUwZGEzMmQ4MTExNTkzODNiNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2IzNmQ5N2U3OTg2NjEyNzk2N2Q4ZWUxYjYxZTM4NmYyMTM2YjQ1NDVjOTJjYzE4NTQ3NmE0YjQ0ZWI2OTg3MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmJjNjg2Yjk5NzkyMGRjMmIwY2E2OTM1YzE4YWExMzc0NDU0MDk0M2Y3ODc0MTE2OGI1ZTU0YjA2ZTk1MzdkOSJ9"
+        },
+        {
+          "resource": "repo://AGENTS.md#L7-L9",
+          "version": "repo-lines-v1:sha256:4ff4c4eeab2bbd93f4485d4f1b5f54a930e858856730573536bb91b6efe1efa0:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNThmYWUwNDg3NjdkN2ZiZWVlMjZiMmMxMjQxNDhhZTYxYzY2MjFmZmQzM2ZjYTg4NTg0YTY5NjljODgzYTBkNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjY5M2Q2NzAwYzZhMWI3MGZiNWI1ZDFjMWU3OGE0N2Y0YWE1N2IyYzA0NWY1ZDMxMGRmM2NlZGQ3MGRkMzE5ZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTcwOGZjMTBjNzFiZWZjYWEzMWRmNTYxNmJjYTQzODRjNGFlOWZiZjVkYjEwYmZmZTAwN2ExNzkyNzVkYzNjNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGNkY2Q3ZWQyNWM4YWQ5YjQ3MDg4MTczMTk3Y2Y2OGU3M2I4ZTY1Y2Q3YTdjNmZjMDYxODYyNjAxZmJiM2JkYSJ9"
+        },
+        {
+          "resource": "repo://agent/webhooks/common.py#L1050-L1065",
+          "version": "repo-lines-v1:sha256:fe277e1a19ce6887816288201c44df689ecae08bbe1d4a0c099a35b48e383151:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTAxY2Y0ZjI1MmNkZTFhY2ZlNzM1MmRhODM5YmUwYzZmZDdiZjRhYzVkOWVhMTZiYzg3NGYwNzExYzkzMTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjNTYzM2UzMDQ1NTcwYTYxYTg3YzQwZmJiOTNlMTIyNmNkN2E0YjJmNWY0NGMzZjlmYjExZGZiYzFiNGM1ZGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM5ZWUwYTdmYzc1MTlkNTIyNWZiODQzZjVhOTMzNjkwNDVlZDFlMGYyZGQzMzVlZjc1NjIzMDg2YzJjMzc3MzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBhNjYwNWI5ODYyNWJlODQ4OTNmZDY4NTIzZDQxMjlmNTJiYjAyNTNjZGVhOGViZmNmM2I3NzE0NTA4MDdmNDYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3ba298cd332f44f68ae66cb7b4fa02a7",
+      "statement": "Python dependencies are managed with uv, and make targets provide the developer loop: install (uv sync --extra dev), dev (langgraph dev serving all graphs + FastAPI), run (uvicorn FastAPI-only), test (pytest), lint/format (ruff), and typecheck (basedpyright).",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L13-L25",
+          "version": "repo-lines-v1:sha256:60290cf98d9b92c10059ad5b45a618d83c2bc24785eecab7317a7bb9163cfb2d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3YzczYzZlOGY3OTIzMzAyZTU3N2MzOTI2Y2ZlNWIyM2NmMzQ1NjYxMjJjODQ4M2IwZGI0NTNlYWQ0NmZkZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YzA2YzU2MWQ1YzMyNzM0MzY4NTI2OGE0NmIzMzkxZjM5OThlZWU4OTBkMmJlNTFmMGQyMWNjNGE1M2FlNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRjZGNkN2VkMjVjOGFkOWI0NzA4ODE3MzE5N2NmNjhlNzNiOGU2NWNkN2E3YzZmYzA2MTg2MjYwMWZiYjNiZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRjNWI0ZmRjNjY1ZDY2ZTIzMTZhN2IwMmY4ZDg1Y2UzOWVlNGE1YjdkOWFhYTkzOWE4NWQxZjE3NGY5MDIxZjkifQ"
+        },
+        {
+          "resource": "repo://Makefile#L10-L72",
+          "version": "repo-lines-v1:sha256:f103e090875fe08c2160596b8c555560b0882fe8f68f7df98064e76a8c59fc97:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwMWZhZGNhYjA0ZDQ4MGJhYjFmNGNmNDc4NDcwMjJlYjMzYTI4YjNhNmZkNmJiYjE4NzgzMmE2NWNkMWZkZWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyZmJjZDlhYjc2ZmQyNTMzNWI2MzQ3ZDZkMGI2ZjA4ODlkZmJlMjU4MzdlZDQ3YzAyZTU0Y2VjZTU3YmIxMmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM3YTljZGQ2ZjRhMzVkYmZlNTM1OWUxMGRmZTEzZjZmZDVmY2Q4YjhlMzRlNTI2MmE3NzU3MTVjZjhmNWVhZmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYWI5YzQ3MzQ2NGI2ZGQ3YThmMzBlMTNlYzYzMzlkNzk5MWFmNDNkNjc5NTZlM2NiYmQ4NTE4NjA5ZjJhZWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_85b934efb299406a97b3a55fe9b0db8b",
+      "statement": "requires-python is >=3.11 while langgraph.json pins the served runtime to Python 3.12, ruff uses line-length 100, and pytest runs with asyncio_mode auto.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L13-L13",
+          "version": "repo-lines-v1:sha256:97c73c6e8f7923302e577c3926cfe5b23cf34566122c8483b0db453ead46fdf5:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTdjNzNjNmU4Zjc5MjMzMDJlNTc3YzM5MjZjZmU1YjIzY2YzNDU2NjEyMmM4NDgzYjBkYjQ1M2VhZDQ2ZmRmNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOTdjNzNjNmU4Zjc5MjMzMDJlNTc3YzM5MjZjZmU1YjIzY2YzNDU2NjEyMmM4NDgzYjBkYjQ1M2VhZDQ2ZmRmNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGNkY2Q3ZWQyNWM4YWQ5YjQ3MDg4MTczMTk3Y2Y2OGU3M2I4ZTY1Y2Q3YTdjNmZjMDYxODYyNjAxZmJiM2JkYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYWQ1NGIzMjMwNWQ1MWY1NTU4OWM5NTYzMDdhOWIyZTk3OTU0MDIwZWM5NTk3YzgyZWVlNjA5YWQzMTFiNzIwMiJ9"
+        },
+        {
+          "resource": "repo://langgraph.json#L3-L3",
+          "version": "repo-lines-v1:sha256:9908ecef9c31910f809ede683044c160f903730426401cc7d480630d4871641d:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTkwOGVjZWY5YzMxOTEwZjgwOWVkZTY4MzA0NGMxNjBmOTAzNzMwNDI2NDAxY2M3ZDQ4MDYzMGQ0ODcxNjQxZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOTkwOGVjZWY5YzMxOTEwZjgwOWVkZTY4MzA0NGMxNjBmOTAzNzMwNDI2NDAxY2M3ZDQ4MDYzMGQ0ODcxNjQxZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjIsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGFkMDhhYmQ1MWI4ZjIwMTQ0OGI0NzA3YmRiYzYyNWMyMjQ0NzJlODUyYmViMDM4ZWI2Y2FhMDY0Y2MyMTQ5NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODY2OGVjZWM3OTYzM2I5ZDQwNDIzZTA0MzcxZWM3NWY5ZmFmMjhhZDc1NWYyZjRkZjEwMTIwODBkMjQ4MjhmZiJ9"
+        },
+        {
+          "resource": "repo://pyproject.toml#L6-L6",
+          "version": "repo-lines-v1:sha256:baae3b1ff1baf861ce10a5212ecf3c6a1eaf5c45d84edb4ff32070e5cae394cc:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmFhZTNiMWZmMWJhZjg2MWNlMTBhNTIxMmVjZjNjNmExZWFmNWM0NWQ4NGVkYjRmZjMyMDcwZTVjYWUzOTRjYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmFhZTNiMWZmMWJhZjg2MWNlMTBhNTIxMmVjZjNjNmExZWFmNWM0NWQ4NGVkYjRmZjMyMDcwZTVjYWUzOTRjYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTMwYTk1ZjkxNTY2MzMyYjNjNzAxYjM5OGYwODVhNjM3MTNhMTZmMjcyNGU4NzZlZjNkMmY3NjMzNjczNzg2ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2E3MmIzOTE4YjM4NzQyMzhkMDQ1MjFiNWVjYWI3ZDc4NTRjMzU2ZmUzNmYyYjIxYjFlNjhmMzY1ZDVkMTg5OSJ9"
+        },
+        {
+          "resource": "repo://pyproject.toml#L69-L71",
+          "version": "repo-lines-v1:sha256:ee7e6680425c1b68c3876847bf935e78748dc57b3e93b662a9574d41b3572c75:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzc0NWZhYjg2YjEyMWRjODViNGY3ODY3MzM5YTEzZmVlODA0YzhhMDJmNDcxMDY1NzJmMmJmMDY2NGQ1OTUxZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjc4YzljNzliZmE0OWE4Y2IwODkyMDIyMmZjNzA4NzJhM2MyMzUzNzA0NWIwMTRlOGM2NDU5Njg4MTBhNjc4YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjM2OTcyZWU5OTIzNDA4M2Y3NDYwMDdhNzljMWE5NzA4Y2E5M2NkMWUwZGE1ZDE1ZTAxM2JjOGVjY2ZlNTRlYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGFkOTQzNDlkMzM2NmQ0NWIyZTI4YWQ0ZThhNGFiZDZkMWE0ZmIxNzUyMTUyYzNhOWI1MjJiYjE0OTgwYjU5YyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_47bf40dcca44410eae182a1ebc8408f2",
+      "statement": "The JavaScript dashboard and desktop app use pnpm, with make web (pnpm run dev) running the ui/ dashboard and dev:desktop running the Electron wrapper.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L13-L21",
+          "version": "repo-lines-v1:sha256:2bd6590966b28383a3c6944d8609a90c34e945ca1f0a8396649edada1b850a9f:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTNlMGEzMTA5ZTc0NjEyNjFmNjQxY2EyZjMxNGY2YTRhODY3ODMzMmMzZWEzOWUyNWQ2MDJjMWJmNmVmMTIyZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzA0ZTc3ZmQ4ZjM3Nzk5YWY0NTU5NjY3ODU3ZDJlN2M2MTRhNjZhMjEyODAxMjY2MDVkMjk0MzM2ZDRhN2QzNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTI1YjVmOWJhNTI4YmVjNGMxNTY0Y2VkMzU0ZjQ0MzMwYmUwZWU5YTYxOTFhYTkyMjM0ZTJmZWFmMmZjMTNmOSJ9"
+        },
+        {
+          "resource": "repo://package.json#L3-L18",
+          "version": "repo-lines-v1:sha256:945c52b5fa1e4544e9e546cd16d1771e4ea30c97ee2aed43004f471125deeb63:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwZmE2YjdjN2FkYzExY2UwOThhNGE5Y2Y3NTJlYmQ4NWRkM2U1OGFjMGY4ZTgwNGQ5MzI5Y2FmOWI0YWJmZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2N2I1YzdmOGI2ZTdkYWNhODhjZjMzMjBkNTJiZTQ1MGM4MzQ4MGVlZDJhYzk1OTRhMmYxYThmMGI2NmNiOWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ2NDc2NDlmYWYwZWMxMTU5MmE5NTlmMTFiYTUxYzMwNGJiZWIxOWFlOGZjYjZmNTYzODIzZDczOTE5NmUxZjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwNzg5MTA1NDRhMmViNDY1ZWUxMTc1ZDU2MTIxYTg1NTY1ZGUzMjYzODAzMmQwODZkZjc1M2UwYzhmMTQzMzUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_968c61e7bac34b5eac902ad2e98b7314",
+      "statement": "The application is async-only by convention: contributors must not add sync/async dual implementations and should implement only the async variant.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L130-L130",
+          "version": "repo-lines-v1:sha256:4876fd3a33f82d1c8cc962acd1c71e3c94bb48acb124c5188107b2f0ddf475dd:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg3NmZkM2EzM2Y4MmQxYzhjYzk2MmFjZDFjNzFlM2M5NGJiNDhhY2IxMjRjNTE4ODEwN2IyZjBkZGY0NzVkZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg3NmZkM2EzM2Y4MmQxYzhjYzk2MmFjZDFjNzFlM2M5NGJiNDhhY2IxMjRjNTE4ODEwN2IyZjBkZGY0NzVkZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGUxMWVmYzc2ZmExOWQ3Zjg5ZjFkZTFlYmJjYjRiNGIwMjIwNjU1NTIwZGFjZjRiNzYwYTZmNzg1YmQzODJjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjZlMjI0MTJjYmJmYTE3NWYyZGU3MTg4MTEwNjc1ZjM4ZDJjODZkOTZmMzA2OWI5YTZhNDNjODM4YWRiZmJhNiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_e02267cc18034c609eb07b2c1a3a1fcb",
+      "statement": "The FastAPI lifespan pins a single event loop, validates sandbox and local-development LLM configuration before serving, and closes cached models at shutdown; credentialed CORS is installed only for configured dashboard origins and rejects a wildcard origin.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L19-L35",
+          "version": "repo-lines-v1:sha256:1663ed6beed19e5d22fa8807bc3110baeac02b06058292d32c044316291b60b0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmZDA2MWRjOTFiNDQyMzJjY2RhMjI4YzBiZDQzZWEyYTRjMmNhZjhjZjRlNWY0NjhjYzc1MDNkZTU1OGM2NjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzZTIwNWU5ODg2OGI2YzkyMTlmNWJmOTQ5MzhiYWNkZTM2ODk2MjgxYjQzZjZjOTYyMGM3NWNjZWYzY2UxYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJlNjEzMDMyZWUyNWEzNWI1NmFjYmUxYmFkYWIzMDE1OTMxMzk2YjA0YzBkZWUzY2Q5YmE1ODk3MDc5NzZkNDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU3MDYzZDc5YWEzZTVhN2MzMzdmNThjZDc4YzE2NTc1M2JjNzRiMDEyNDM4M2M2YWEyYTg2NmY0OGFmMGEzOGEifQ"
+        },
+        {
+          "resource": "repo://agent/api/app.py#L38-L64",
+          "version": "repo-lines-v1:sha256:5c89840205d5e1ad6f74e52d173ea3eada05b30a1c76cf3151a9924efa558f36:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b184e87b43cd4f56a75606fa9ee2df9d",
+      "statement": "All Slack, Linear, GitHub, and dashboard triggers share dispatch_agent_run, which creates a durable LangGraph run for the selected agent or reviewer graph using a configurable thread id and defaults to an interrupt multitask strategy.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L233-L275",
+          "version": "repo-lines-v1:sha256:56575550a72d35c06537dec5660b85729bc6eb0eac8ed5ccd0931e2cb6499546:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1Y2FiY2JkOGFkOTJhYTM0MGYyNjcyM2I2Yjk2YjlhNzEzOWIzYTMzNWU3MDM4ZTdhMDAwYTE0OTJkMmRjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhOTc0YWU0ZjQyYzhkYzRmYzhjOGQyNWMxOTYwZDM1YmJiMzQ3MGRiZmVkZmVkMzE5ZWY4NGRjYTcxYzAzMGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0Y2Q4ZjY1MWJkZGMyNDJkMzhjYWQyZjc2YjJjZTlmNmI2OWQ1ZTU0NWMyNzEyZWIwOWNkNWFiMWNlYTY5M2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMwNWUzMmI3YTA2Mzg3OWMyMmM5YTJiYzMyZjdhMWY4MDUwOTkwOTNlMjJlZWU0ZGVkYmE5M2M5NTM3MmRhNDQifQ"
+        },
+        {
+          "resource": "repo://agent/dispatch.py#L278-L327",
+          "version": "repo-lines-v1:sha256:c435a1e830c1e2792545f4c82f88e89c6a9a02ae98de7f1d13deaba10d6f9404:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MGNlNzc2OGIwZmMzMDA2ZmQ0MWYzZjUxOTU2M2FhZWFjYjc3OGQ3NDEwODM3YjM2NDcxYzJlNDgwZjJiM2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3NGRlNjBlNmIxYzBkNjA1OTlmMWI3NTU5YzA0M2ZiODBlOTFkYTdlZGNlODdjZjM1Y2JmM2U1NzNkY2FlYzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c6c02955e2c24f73bf9f69b77796dc30",
+      "statement": "The reviewer is a non-mutating PR-review graph with finding tools, whereas the dashboard PR chat graph is sandbox-less and answers from seeded PR virtual files plus read-only GitHub-backed repository access.",
+      "evidence": [
+        {
+          "resource": "repo://agent/chat.py#L3-L13",
+          "version": "repo-lines-v1:sha256:e979cd6f41fe87310b9da978795c61b1807ab75b99fd080afebb76a5016b72d3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM4Zjk0ODY4ZDcxNjUwYjk1OWRhNDE3MmU2MzRhZjg5MzQ3NDY3NWU1YmIwNjkxZGI3MGI1MGU1NzBhYTBhMWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzZWMyM2I5MjYwMmIzMmQ4NDg4YjgyYmMxYzFhZTlmN2RhYjAzNDEzZjkyN2Q0YTQxM2MwNGVkOGU1NTk3ZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwNzk1NGJmOGI2ZjEyZTM1NDdjN2VhNDM1YzIyYWE0NWZhOGNmMTE1NWE2NDk5M2NlOTZjNWIyOGU3Njc3NTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjZWRhY2RkNjFmNzQ0ZWY2ZWUyMmQ0OTRhNDMwYjY2NjMyZTczOTc5ZDQzZjQyNDVkYjVkMjZkMzFmZWM0YmIifQ"
+        },
+        {
+          "resource": "repo://agent/reviewer.py#L3-L14",
+          "version": "repo-lines-v1:sha256:8ab4351bcfbf8f8d25b6358289292090903989967a7bd7fba4240f7dae715fb9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1MWEyNzZmMmY1ZmZlMWI2NzExMDBkYjc0YjQ5MjA3MjgwOTE0OGZiMWNhNzAwYWI5ZDAyZTgwYjM3NzYxZTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY4OTY3M2MxYTM2YzZjNWRkZThjYWU3N2NmMWJkMTFkYjVhYmFjZmI3MzlmMDRjMjQwYWUzN2ZjZmExYTRjZjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAzOTBlOWIwNjk0ODVkNDhlY2E3MGIwMmY3OGExYTFhNWEyZGViYjEyZTU3YTViNTA3NWEwMzZkMzZlM2YyZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjZWRhY2RkNjFmNzQ0ZWY2ZWUyMmQ0OTRhNDMwYjY2NjMyZTczOTc5ZDQzZjQyNDVkYjVkMjZkMzFmZWM0YmIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_20e1690afd5b4dafba2bc02f581603c7",
+      "statement": "The scheduler graph has one launch node that routes cron state to reconciliation, baby-sit watch evaluation, background-task monitoring, session-cost refresh, or a scheduled agent run, and reports missing required identifiers as result statuses.",
+      "evidence": [
+        {
+          "resource": "repo://agent/scheduler.py#L19-L62",
+          "version": "repo-lines-v1:sha256:1a45f20d0792238b0eb0106b31b68e88eb1b954de27acd1b0329033940152266:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViYzk3ODQzNDlhMmE0NDMyMTdjYmM1ZTgzMTBlMGRiYjQwOWM3ODhiMTUwODk1YzUzYmIxZWFhMGQ5OTMzN2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwMGM2YjYzMzk1NDBjOGFhN2M2ZTZmMjkyNDIwNzVmYjRkYjY4ZWIzN2VmYTBiZDE1MWVkZGRlMDdhOTIyYjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7228596a429e4420b2547aac6ac6b19d",
+      "statement": "A pre-existing unreachable main-agent sandbox is not automatically replaced because replacement could discard uncommitted work; only the reviewer opts into replacement because its checkout is recreated each run.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L50-L60",
+          "version": "repo-lines-v1:sha256:6e0e0cc79659b594ced04721f05d7d092402d35f304f058f67b9d5185ef05c1c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxODAwYWE1NWQxM2E4MTMzN2QzOTk3NTQxNjJkN2M1MzNkZWYyYjA5MjZiZDkxNDMwYzE3MWFmMDczZjhjN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyY2RjNDY5MzMyODhkNDUxMWJhZWY1OGRjYTViOWM3ZDNlYmQzM2M3OGI4NzQwNDMxZmUzYWEyMTg2NmQxNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE4YWNmMWZjNjQxZjQzYjNhZTdkNGI4ZjFiM2ZlZTc1MDdkMTY2ZGYzZTUwMzNmYmU1YWZkNDMyYjM5NzJlMjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwN2RjOGJhNDYzNmRmMjA2ZjI3NzY4YWFiOTBiMmM2YmVmMTQ3ZTEwNmY0YTkxOTdjODUyOGMwYTg5NDBjMzYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_882b84696e8e4eec8797b42eacc8b20a",
+      "statement": "The shared pytest fixtures replace the agent store client with an in-memory implementation that preserves the production serialization path, clear the process-global TTL cache around each test, and default automatic review to enabled unless a test overrides the gate.",
+      "evidence": [
+        {
+          "resource": "repo://tests/conftest.py#L14-L97",
+          "version": "repo-lines-v1:sha256:d79485eed23822299198ce0ea8f10a368f57d87b11202b02aeb8f1e74f5414d6:eyJzZWxlY3RlZExpbmVDb3VudCI6ODQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3MzZjYmZhYjUxNjhkYzNhZmM3OTlkYzU3NTU5N2IwYzg5ZDQyODczZDM5Y2YxZGQxYmQ4Njg5YmEwYTk2NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiMjg4MDNlMzYyYWJhOGM3MzIwMGNhOWRiZjc1ZTg2N2Q3ZTU2Y2JkNjU5MTcyNThkNTBhYmUwYzI2Y2I5YjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwMGQwZDE5OTI5MWRhMWUzOGNjMTMzMjg0NDg5OTg2NGIyOWJlZjRmMTI5M2JiOTI2NTA2ZTQ1NjRkOGJmNjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cb29b7092f3b41d7b889218b54cf8950",
+      "statement": "The Playwright end-to-end harness runs the real agent code, local sandbox, and local git remote while faking the LLM and external SaaS HTTP boundaries; root pnpm scripts provide browser and Electron end-to-end commands.",
+      "evidence": [
+        {
+          "resource": "repo://package.json#L13-L16",
+          "version": "repo-lines-v1:sha256:736bae5dc4be9aded3eee5177bdb19df18d53ca1632f2a843c5c47b6ce6f5585:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGE4MmJlMjcxNmYzZDNmZmM4NjgwNjhhYjBlMGYwZmU2ZjczNDc1ZGEyNWU3ZGEzZmVjNDNlOGU2MDVlODQ5YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWNjNDM0M2I0YjNhYWE0YWI1ZDUwMzljNWZkZGYyNjIwYTI1NDg5NmFmM2NmMjE4MWM0NzgxOGRhNzMzZDUzNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGYwNTgxNWQwZWZmYzczMjU2ODNkZGE0MTQ4NWNlZGIyNmYzZTdkYTAwNzYzNjE0MGNmM2NiNjQzMDVmMDM2ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGZiZGEwMmQyYTgxNDgwNWNhNDllYjY5NWFmZjA2ZGMxYTUxNWI5YTk0NWVkZTEzMDUzNDY0NzEzMzRhN2U0MCJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/README.md#L1-L32",
+          "version": "repo-lines-v1:sha256:99c22dbd4519cdcc465e24392d19415b42de38448220716aac4a0f2da7786859:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkMjcyNDBhZmIzNzliZGU4NTg3MmNmYmY2ZGE5N2VmY2MyMjQyZTZhNmRlMWVjMTliMmRjM2M1ZWRkZjU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3MGRlOGEwOGI3Yjk2MGFiY2FiNDJhMzg3MDc2ZWU3NDk3NWFmOTIwZjkxNjM3OWY5YzcwMWFkMjA3NmIwZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyMWQxOTBkZWUwYzkwNDE1MmMwMmNlNWViMDUxOTk0ZjJkMTc0M2ExNmE3ZTZlMTMzYTE3NzM2MGI5YjUzZDAifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/README.md#L71-L101",
+          "version": "repo-lines-v1:sha256:4a73d0a2410b8f312d8dc54c4b81a84a4c6739aa6b2d923cb672e51ce495f57a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4MTE2M2FiMTc0NGE0OGFiODM0ZWQ5YzBkZDE0MmMyMDg2NGQ1ZmZiZjM0MTE3MjYzMmI1MzNkNjBjMTkxMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkMDUzOWQ1Mzk0ZGMyZmQwZmUxMTI0Yjc4NTE5YTljNzViNjNlNzUyYWJjMzdjYzRmMzg4ZWZiNGRhZGRmN2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwNmY2OTVlNmVlYjU4NDQ3MWQ5YzUyNTFjMTAyMDQzNDI3ZjQzMjE1YjAyMzQxNTYxNjlmMDc1ZDY1MTMzYmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2OGVkMTUyZTc5NjM1MDJhY2IyNDcxNTk4MmVmOTY1ZmVlMDZlZTE3ZDc0NTJlODE5YTVhODViYjMyMjg4ZjAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6d63a9daa63a422096292367759337dd",
+      "statement": "The root e2e setup command installs Chromium with Playwright dependencies, while browser tests run serially with one worker and the separate desktop configuration selects only the Electron spec.",
+      "evidence": [
+        {
+          "resource": "repo://package.json#L14-L16",
+          "version": "repo-lines-v1:sha256:5432b8a6bc0c644cbe23bd4208d8ad9f5bf128603a2c20f99f6ece41270fc99d:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWQ4MDQ0ODU5YjY3NDA3MWYwZTY1YzE0NDFiMWM5Y2Y5ZDI1ZWZkZjI0OWQ5Mzk1ZjU2NGQ1YWM3ZWE2YzgyZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWNjNDM0M2I0YjNhYWE0YWI1ZDUwMzljNWZkZGYyNjIwYTI1NDg5NmFmM2NmMjE4MWM0NzgxOGRhNzMzZDUzNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzgxYjkzNzBhOWY5ZjFjY2ZhN2I1M2UwYjZjZmUxMTg1ZWUxMzU4NzkyNjkwOTUyMTkzZWIyNzBkZjk4ZmZmOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGZiZGEwMmQyYTgxNDgwNWNhNDllYjY5NWFmZjA2ZGMxYTUxNWI5YTk0NWVkZTEzMDUzNDY0NzEzMzRhN2U0MCJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/playwright.config.ts#L9-L17",
+          "version": "repo-lines-v1:sha256:cf60541a44ec86cebcbe25cc57d2d156759c6b165b1768b3114dfe59473df956:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjJjZWNiMTQ0YTQ2ZjVkY2YxMmE2MTY5ZmNlZWQ3Njk1ZTgyOTRiMDkwZGU3NmYzNjYxY2RkMDI0OTMwMDE0NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWY1MWYyZGMzM2Q3YzRlMjkyNjY0ZTg2NDgzOWEyMTMwYjIwNTg1YjczYzMwYmFkN2YxNWIwNTkxODAyYTAzMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmZiZTMxZGRiMmRlNWJlYTEzZTBkMWQzNTE0MGZkOTE3MmIwMTRmNGY4NmI1MWViMjFlMjJlNWNmYzVkYjRiYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjliMzBhMGZmYmViNmNhMDU3ZjU4NTBhMzY5ODBiMjllY2FlYTY2ZDRiMmE3YjViNmU0MDBhZDY4OTk4ZDlmNyJ9"
+        },
+        {
+          "resource": "repo://tests/e2e/playwright.desktop.config.ts#L5-L23",
+          "version": "repo-lines-v1:sha256:12a3bd3c40fb0c417716860491aae02a91ffa6737f20044492e73a9cf3a201c3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyY2VjYjE0NGE0NmY1ZGNmMTJhNjE2OWZjZWVkNzY5NWU4Mjk0YjA5MGRlNzZmMzY2MWNkZDAyNDkzMDAxNDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlY2E5YjNjZWNlMGFhNjVhZmZiNzkyOTEwNjE4ODAzZTI5NmJiNmY0MmRhYWExNzM5NmViOTQ1YWVjMWEzZmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRjMTQ1MjQ2ZWU4OTAwZTRjZjRhYWU0MGMwN2Y2NDliNDkxNTljMDRhZmIyOTNlOWIwYmI1YjVjOWFiZTlkMDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a7a2f1cfb9814588b8bcae80b4a5981a",
+      "statement": "dispatch_agent_run rejects a prebuilt run input when content, context, or source identity inputs are also provided, so callers must choose exactly one input-construction path.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dispatch.py#L300-L317",
+          "version": "repo-lines-v1:sha256:4de36374bd4c70c33cf88cdbf7e1931638538c776e35cf983d9ca649f4910a04:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNzI5MDQ0NzZhM2E3NDA3NzE0Y2JiZTUyNjFmMjYwMTY3YmJhMTBhOTM2MjdmZDllZDU0NWJhYjQ2YWZkYjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmNjU4Y2EyYzdiMWNhMDIwYzAzYjBkZjc5M2ZmZTAxM2FmNTkzNjY4OGZjM2NiNGVlYzg3MjgwNDI4YzRiZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiZDJiNzVmZTczMDUxN2U4NzkyYjgwY2VjYTM4ZTUwNjVhOTQ0NjJlNTRkYmVmYTcwMTMzZGVlNGIxYjk3NGYifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-09-02T08:15:43.727Z"
+  }
+}

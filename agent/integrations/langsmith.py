@@ -19,7 +19,8 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
+from agent.sandboxes.retry import retry_transient_sandbox_errors
 
 logger = logging.getLogger(__name__)
 
@@ -642,6 +643,17 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
 
     async def aexecute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,  # noqa: ASYNC109 - forwarded semantic timeout, not an asyncio contract
+    ) -> ExecuteResponse:
+        return await retry_transient_sandbox_errors(
+            lambda: self._aexecute_once(command, timeout=timeout),
+            description="Sandbox command",
+        )
+
+    async def _aexecute_once(
         self,
         command: str,
         *,

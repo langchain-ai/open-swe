@@ -1,5 +1,4 @@
 import importlib
-from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,13 +33,10 @@ async def test_manage_baby_sit_starts_watch_from_current_thread(
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-1", "ref": "feature"}}),
     )
     start = AsyncMock(
-        return_value=cast(
-            BabySitWatch,
-            {
-                "key": "acme/repo#7",
-                "pr_url": "https://github.com/acme/repo/pull/7",
-                "head_sha": "head-1",
-            },
+        return_value=BabySitWatch(
+            key="acme/repo#7",
+            pr_url="https://github.com/acme/repo/pull/7",
+            head_sha="head-1",
         )
     )
     monkeypatch.setattr(manage_tool, "start_watch", start)
@@ -52,7 +48,7 @@ async def test_manage_baby_sit_starts_watch_from_current_thread(
     assert start.await_args is not None
     assert start.await_args.kwargs["thread_id"] == "thread-1"
     assert start.await_args.kwargs["installation_id"] == 42
-    assert start.await_args.kwargs["source_context"] == {
+    assert start.await_args.kwargs["source_context"].dump() == {
         "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}
     }
 

@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
@@ -8,6 +7,7 @@ import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 /**
  * Construct the message content for the LangGraph run.
@@ -72,7 +72,7 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
  */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {

@@ -1,6 +1,7 @@
 packages:
   - ui
   - desktop
+  - tests/e2e
 
 allowBuilds:
   electron: true

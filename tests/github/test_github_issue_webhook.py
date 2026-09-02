@@ -9,9 +9,9 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
 
 from agent.api.app import app
+from agent.thread_ids import github_issue_thread_id
 from agent.tools import request_pr_review as request_pr_review_tool
 from agent.utils import slack as slack_utils
 from agent.utils.slack import GitHubPrRef
@@ -33,12 +33,12 @@ def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     async def lookup(*args: object, **kwargs: object) -> None:
         return None
 
-    async def increment_version(*args: object, **kwargs: object) -> int:
-        return 1
+    async def channel_context(*args: object, **kwargs: object) -> dict[str, bool]:
+        return {"is_ext_shared": False, "is_pending_ext_shared": False}
 
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
-    monkeypatch.setattr(webhook_common, "increment_slack_thread_version", increment_version)
+    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -47,9 +47,7 @@ def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(
-    client: TestClient, event_type: str, payload: dict[object, object]
-) -> Response:
+def _post_github_webhook(client: TestClient, event_type: str, payload: dict[object, object]):
     """Send a signed GitHub webhook POST request."""
     body = json.dumps(payload, separators=(",", ":")).encode()
     return client.post(
@@ -69,7 +67,7 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
-def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Response:
+def _post_slack_webhook(client: TestClient, payload: dict[object, object]):
     body = json.dumps(payload, separators=(",", ":")).encode()
     timestamp = "1700000000"
     return client.post(
@@ -83,9 +81,9 @@ def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Re
     )
 
 
-def test_generate_thread_id_from_github_issue_is_deterministic() -> None:
-    first = webhook_common.generate_thread_id_from_github_issue("12345")
-    second = webhook_common.generate_thread_id_from_github_issue("12345")
+def test_github_issue_thread_id_is_deterministic() -> None:
+    first = github_issue_thread_id("12345")
+    second = github_issue_thread_id("12345")
 
     assert first == second
     assert len(first) == 36
@@ -598,7 +596,9 @@ def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
 def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
+    async def fake_get_slack_channel_context(
+        channel_id: str, *, use_cache: bool = True
+    ) -> dict[str, str | bool]:
         captured["checked_channel_id"] = channel_id
         return {
             "id": channel_id,
@@ -607,6 +607,8 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
             "topic": "",
             "purpose": "",
             "description": "",
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
         }
 
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
@@ -669,9 +671,13 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         "topic": "Coordinate work",
         "purpose": "repo:langchain-ai/open-swe",
         "description": "Coordinate work\nrepo:langchain-ai/open-swe",
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
     }
 
-    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
+    async def fake_get_slack_channel_context(
+        channel_id: str, *, use_cache: bool = True
+    ) -> dict[str, str | bool]:
         captured["channel_context_request"] = channel_id
         return channel_context
 

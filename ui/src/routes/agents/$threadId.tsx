@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { Skeleton } from "@/components/ui/skeleton"
-import { RecentAgentThreads } from "@/features/agents/components/RecentAgentThreads"
+import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 
 export const Route = createFileRoute("/agents/$threadId")({
   validateSearch: (
@@ -10,26 +9,11 @@ export const Route = createFileRoute("/agents/$threadId")({
     feedback:
       search.feedback === true || search.feedback === "true" ? true : undefined,
   }),
-  pendingMs: 0,
-  pendingComponent: AgentThreadPending,
   component: AgentThreadRoute,
 })
-
-function AgentThreadPending() {
-  return (
-    <main className="flex min-w-0 flex-1 items-center justify-center p-6">
-      <Skeleton className="h-40 w-full max-w-md" />
-    </main>
-  )
-}
 
 function AgentThreadRoute() {
   const { threadId } = Route.useParams()
   const { feedback } = Route.useSearch()
-  return (
-    <RecentAgentThreads
-      activeThreadId={threadId}
-      autoFocusComposer={feedback}
-    />
-  )
+  return <AgentThreadPage threadId={threadId} autoFocusComposer={feedback} />
 }

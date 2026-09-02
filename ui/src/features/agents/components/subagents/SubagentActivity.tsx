@@ -1,10 +1,8 @@
-import {
-  useStreamContext as useAgentThreadStream,
-  useToolCalls,
-} from "@langchain/react"
+import { useToolCalls } from "@langchain/react"
 import { Check, Loader2, X } from "lucide-react"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 /**
  * Live status for a single subagent, read straight from the SDK's scoped
@@ -19,11 +17,11 @@ import { humanizeToolName } from "@/features/agents/lib/toolNames"
  *
  * Mounting opens a ref-counted subscription scoped to `namespace`; unmounting
  * closes it. Only mounted from {@link SubagentCard} when
- * `useIsInAgentThreadStream()` is true, so the `useStreamContext` read is
- * always inside a `StreamProvider`.
+ * `useIsInAgentThreadStream()` is true, so the runtime read is always inside
+ * the agents layout provider.
  */
 export function SubagentActivity({ namespace }: { namespace: Array<string> }) {
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const toolCalls = useToolCalls(stream, { namespace })
 
   const current = toolCalls[toolCalls.length - 1]

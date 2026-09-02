@@ -16,19 +16,18 @@ is ready, so an environment resolves to exactly one live snapshot.
 A run uses the environment it selected — from the dashboard picker, or an
 ``env:<name>`` tag on the Slack message that opened the thread — and otherwise
 the one named ``default``. Nothing here is required: with no environment, or one
-whose snapshot is not ready, runs fall back to the per-repo snapshot and then to
-the configured base snapshot.
+whose snapshot is not ready, runs fall back to the configured base snapshot.
 """
 
 import json
 import logging
 import os
 import re
-from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict
 
-from langgraph_sdk import get_client
-from pydantic import BaseModel, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+
+from agent.store import TypedStore, now_iso
 
 from .review_styles import normalize_repo_full_name
 
@@ -276,117 +275,193 @@ class EnvironmentUpdate(BaseModel):
         return None if v is None else _validate_create_params(v)
 
 
-def _client():
-    return get_client()
+class Environment(BaseModel):
+    # Assignment is validated because the store mutates records in place, and an
+    # unvalidated write here is only caught on the next read — by which point the
+    # record is already unreadable.
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
+    slug: str
+    name: str = ""
+    prompt: str = ""
+    repos: list[str] = Field(default_factory=list)
+    mem_bytes: int | None = None
+    vcpus: int | None = None
+    fs_capacity_bytes: int | None = None
+    create_params: dict[str, JsonValue] = Field(default_factory=dict)
+    snapshot_id: str | None = None
+    snapshot_name: str | None = None
+    snapshot_status: SnapshotStatus = "none"
+    status_message: str | None = None
+    source_sandbox_id: str | None = None
+    last_captured_at: str | None = None
+    created_by: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    @field_validator("create_params", mode="before")
+    @classmethod
+    def _null_create_params_are_empty(cls, v: Any) -> Any:
+        """``EnvironmentUpdate`` clears create params with an explicit null."""
+        return {} if v is None else v
+
+    @classmethod
+    def seed(cls, create: EnvironmentCreate, created_by: str) -> "Environment":
+        now = now_iso()
+        return cls(
+            slug=slugify(create.name),
+            name=create.name.strip(),
+            prompt=create.prompt,
+            repos=create.repos,
+            mem_bytes=create.mem_bytes,
+            vcpus=create.vcpus,
+            fs_capacity_bytes=create.fs_capacity_bytes,
+            create_params=create.create_params,
+            created_by=created_by,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @property
+    def ready_snapshot_id(self) -> str | None:
+        """The snapshot new sandboxes boot from, or ``None`` when not captured yet."""
+        if self.snapshot_status != "ready":
+            return None
+        return self.snapshot_id or None
+
+    @property
+    def instructions(self) -> str | None:
+        return self.prompt.strip() or None
+
+    def sandbox_resources(self) -> SandboxResources:
+        """VM sizing as sandbox-create kwargs, omitting anything unset."""
+        resources: SandboxResources = {}
+        for field in ("mem_bytes", "vcpus", "fs_capacity_bytes"):
+            value = getattr(self, field)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                resources[field] = value
+        return resources
+
+    def sandbox_create_params(self) -> dict[str, JsonValue]:
+        """Validated passthrough create-body fields.
+
+        Re-validated on read, not just on write: the rules (size cap, no
+        secrets) can tighten after a record was stored, and shipping a stale
+        record's params to the platform would bypass the newer rule.
+        """
+        try:
+            return _validate_create_params(self.create_params)
+        except ValueError:
+            logger.warning("Ignoring invalid sandbox create params for environment %s", self.slug)
+            return {}
+
+    def option(self) -> dict[str, Any]:
+        """Name/slug/snapshot-state only, for the non-admin environment picker."""
+        return {
+            "slug": self.slug,
+            "name": self.name,
+            "has_snapshot": self.snapshot_status == "ready",
+        }
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+class EnvironmentStore(TypedStore[Environment]):
+    def __init__(self) -> None:
+        super().__init__(ENVIRONMENTS_NAMESPACE, Environment)
+
+    async def list_all(self) -> list[Environment]:
+        records = await self.search_all()
+        records.sort(key=lambda record: record.name)
+        return records
+
+    async def save(self, record: Environment) -> Environment:
+        record.updated_at = now_iso()
+        return await self.put(record.slug, record)
+
+    async def create(self, create: EnvironmentCreate, created_by: str) -> Environment:
+        record = Environment.seed(create, created_by)
+        if await self.get(record.slug) is not None:
+            raise ValueError(f"environment {create.name!r} already exists")
+        return await self.put(record.slug, record)
+
+    async def apply_update(self, slug: str, update: EnvironmentUpdate) -> Environment:
+        record = await self.get(slug)
+        if record is None:
+            raise ValueError(f"no environment named {slug!r}")
+        if update.name is not None and slugify(update.name) != slug:
+            raise ValueError(
+                "renaming an environment across slugs is not supported; create a new one"
+            )
+        if update.name is not None:
+            record.name = update.name.strip()
+        if update.prompt is not None:
+            record.prompt = update.prompt
+        if update.repos is not None:
+            record.repos = update.repos
+        for field in ("mem_bytes", "vcpus", "fs_capacity_bytes", "create_params"):
+            if field in update.model_fields_set:
+                setattr(record, field, getattr(update, field))
+        return await self.save(record)
+
+    async def remove(self, slug: str) -> bool:
+        record = await self.get(slug)
+        if record is None:
+            return False
+        await self.delete(slug)
+        await _delete_snapshot(record.snapshot_id)
+        return True
+
+    async def mark_capturing(self, slug: str) -> Environment | None:
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.snapshot_status = "capturing"
+        record.status_message = None
+        return await self.save(record)
+
+    async def mark_capture_settled(
+        self, slug: str, status: SnapshotStatus, message: str
+    ) -> Environment | None:
+        """Land a failed capture on ``status``, keeping a previously ready snapshot."""
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.snapshot_status = status
+        record.status_message = message
+        return await self.save(record)
+
+    async def mark_captured(
+        self, slug: str, *, snapshot_id: str, snapshot_name: str, source_sandbox_id: str
+    ) -> Environment | None:
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.snapshot_status = "ready"
+        record.status_message = None
+        record.snapshot_id = snapshot_id
+        record.snapshot_name = snapshot_name
+        record.source_sandbox_id = source_sandbox_id
+        record.last_captured_at = now_iso()
+        return await self.save(record)
 
 
-def _item_value(item: Any) -> dict[str, Any] | None:
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
+ENVIRONMENTS = EnvironmentStore()
 
 
-async def get_environment(slug: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(ENVIRONMENTS_NAMESPACE, slug)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("environment lookup failed for %s: %s", slug, e)
-        return None
-    return _item_value(item)
-
-
-async def list_environments() -> list[dict[str, Any]]:
-    try:
-        result = await _client().store.search_items(ENVIRONMENTS_NAMESPACE, limit=1000)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("environment search failed: %s", e)
-        return []
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    out = [value for item in items or [] if (value := _item_value(item)) is not None]
-    out.sort(key=lambda record: record.get("name", ""))
-    return out
-
-
-async def create_environment(create: EnvironmentCreate, created_by: str) -> dict[str, Any]:
-    slug = slugify(create.name)
-    existing = await get_environment(slug)
-    if existing is not None:
-        raise ValueError(f"environment {create.name!r} already exists")
-    record = {
-        "slug": slug,
-        "name": create.name.strip(),
-        "prompt": create.prompt,
-        "repos": create.repos,
-        "mem_bytes": create.mem_bytes,
-        "vcpus": create.vcpus,
-        "fs_capacity_bytes": create.fs_capacity_bytes,
-        "create_params": create.create_params,
-        "snapshot_id": None,
-        "snapshot_name": None,
-        "snapshot_status": "none",
-        "status_message": None,
-        "source_sandbox_id": None,
-        "last_captured_at": None,
-        "created_by": created_by,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
-    }
-    await _client().store.put_item(ENVIRONMENTS_NAMESPACE, slug, record)
-    return record
-
-
-async def update_environment(slug: str, update: EnvironmentUpdate) -> dict[str, Any]:
-    existing = await get_environment(slug)
-    if existing is None:
-        raise ValueError(f"no environment named {slug!r}")
-    if update.name is not None and slugify(update.name) != slug:
-        raise ValueError("renaming an environment across slugs is not supported; create a new one")
-    record = {**existing, "updated_at": _now_iso()}
-    if update.name is not None:
-        record["name"] = update.name.strip()
-    if update.prompt is not None:
-        record["prompt"] = update.prompt
-    if update.repos is not None:
-        record["repos"] = update.repos
-    for field in ("mem_bytes", "vcpus", "fs_capacity_bytes", "create_params"):
-        if field in update.model_fields_set:
-            record[field] = getattr(update, field)
-    await _client().store.put_item(ENVIRONMENTS_NAMESPACE, slug, record)
-    return record
-
-
-async def delete_environment(slug: str) -> bool:
-    existing = await get_environment(slug)
-    if existing is None:
-        return False
-    try:
-        await _client().store.delete_item(ENVIRONMENTS_NAMESPACE, slug)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("failed to delete environment %s: %s", slug, e)
-        return False
-    await _delete_snapshot(existing.get("snapshot_id"))
-    return True
-
-
-async def resolve_default_environment() -> dict[str, Any] | None:
+async def resolve_default_environment() -> Environment | None:
     """Return the environment named ``default``, or ``None``.
 
-    Never raises: a store failure resolves to ``None`` so runs fall back to the
-    per-repo and base snapshots with no environment prompt.
+    Fail-soft on purpose: this runs while a sandbox is being created, and a
+    store failure must fall back to the base snapshot with no environment
+    prompt rather than fail the run.
     """
     try:
-        return await get_environment(DEFAULT_ENVIRONMENT_SLUG)
-    except Exception:  # noqa: BLE001
-        logger.debug("default environment resolution failed", exc_info=True)
+        return await ENVIRONMENTS.get(DEFAULT_ENVIRONMENT_SLUG)
+    except Exception:
+        logger.warning("default environment resolution failed", exc_info=True)
         return None
 
 
-async def resolve_environment(slug: str | None) -> dict[str, Any] | None:
+async def resolve_environment(slug: str | None) -> Environment | None:
     """Return the environment a run uses: the one it selected, else ``default``.
 
     Never raises, and a selection that no longer exists falls back to ``default``
@@ -395,9 +470,9 @@ async def resolve_environment(slug: str | None) -> dict[str, Any] | None:
     if not slug or slug == DEFAULT_ENVIRONMENT_SLUG:
         return await resolve_default_environment()
     try:
-        record = await get_environment(slug)
-    except Exception:  # noqa: BLE001
-        logger.debug("environment resolution failed for %s", slug, exc_info=True)
+        record = await ENVIRONMENTS.get(slug)
+    except Exception:
+        logger.warning("environment resolution failed for %s", slug, exc_info=True)
         record = None
     if record is None:
         logger.info("Environment %s is not configured; falling back to the default", slug)
@@ -411,15 +486,7 @@ async def list_environment_options() -> list[dict[str, Any]]:
     Prompts and snapshot ids stay admin-only; picking an environment needs
     neither.
     """
-    return [
-        {
-            "slug": record.get("slug"),
-            "name": record.get("name"),
-            "has_snapshot": record.get("snapshot_status") == "ready",
-        }
-        for record in await list_environments()
-        if isinstance(record.get("slug"), str)
-    ]
+    return [record.option() for record in await ENVIRONMENTS.list_all()]
 
 
 def parse_environment_tag(text: str) -> tuple[str | None, str]:
@@ -438,70 +505,6 @@ def parse_environment_tag(text: str) -> tuple[str | None, str]:
         return None, text
     before, after = text[: match.start()].rstrip(), text[match.end() :].lstrip()
     return slug, f"{before} {after}".strip() if before and after else f"{before}{after}".strip()
-
-
-def environment_snapshot_id(record: dict[str, Any] | None) -> str | None:
-    """The snapshot new sandboxes boot from, or ``None`` when not captured yet."""
-    if not record or record.get("snapshot_status") != "ready":
-        return None
-    snapshot_id = record.get("snapshot_id")
-    return snapshot_id if isinstance(snapshot_id, str) and snapshot_id else None
-
-
-def environment_prompt(record: dict[str, Any] | None) -> str | None:
-    if not record:
-        return None
-    prompt = record.get("prompt")
-    return prompt.strip() or None if isinstance(prompt, str) else None
-
-
-def environment_sandbox_resources(record: dict[str, Any] | None) -> SandboxResources:
-    if not record:
-        return {}
-    resources: SandboxResources = {}
-    for field in ("mem_bytes", "vcpus", "fs_capacity_bytes"):
-        value = record.get(field)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            resources[field] = value
-    return resources
-
-
-def environment_sandbox_create_params(
-    record: dict[str, Any] | None,
-) -> dict[str, JsonValue]:
-    if not record:
-        return {}
-    value = record.get("create_params")
-    if not isinstance(value, dict):
-        return {}
-    try:
-        return _validate_create_params(value)
-    except ValueError:
-        logger.warning(
-            "Ignoring invalid sandbox create params for environment %s", record.get("slug")
-        )
-        return {}
-
-
-async def _set_snapshot_state(
-    slug: str,
-    status: SnapshotStatus,
-    *,
-    status_message: str | None = None,
-    extra: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    existing = await get_environment(slug)
-    if existing is None:
-        return None
-    record = {
-        **existing,
-        "snapshot_status": status,
-        "status_message": status_message,
-        "updated_at": _now_iso(),
-        **(extra or {}),
-    }
-    await _client().store.put_item(ENVIRONMENTS_NAMESPACE, slug, record)
-    return record
 
 
 def _require_capture_support() -> None:
@@ -560,7 +563,7 @@ async def capture_environment_snapshot(
     sandbox_id: str,
     *,
     timeout: int = 600,
-) -> dict[str, Any]:
+) -> Environment:
     """Capture ``sandbox_id``'s filesystem as this environment's snapshot.
 
     The previous snapshot survives a failed capture, in both senses: it is deleted
@@ -574,13 +577,13 @@ async def capture_environment_snapshot(
 
     _require_capture_support()
 
-    record = await get_environment(slug)
+    record = await ENVIRONMENTS.get(slug)
     if record is None:
         raise ValueError(f"no environment named {slug!r}")
 
-    previous_snapshot_id = record.get("snapshot_id")
-    previous_was_ready = bool(previous_snapshot_id) and record.get("snapshot_status") == "ready"
-    await _set_snapshot_state(slug, "capturing")
+    previous_snapshot_id = record.snapshot_id
+    previous_was_ready = record.ready_snapshot_id is not None
+    await ENVIRONMENTS.mark_capturing(slug)
     try:
         async with get_async_sandbox_client() as client:
             snapshot, snapshot_name = await _capture_with_name_retry(
@@ -588,22 +591,18 @@ async def capture_environment_snapshot(
             )
     except Exception as exc:
         logger.warning("snapshot capture failed for environment %s", slug, exc_info=True)
-        await _set_snapshot_state(
+        await ENVIRONMENTS.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
-            status_message=str(exc)[:1000],
+            str(exc)[:1000],
         )
         raise
 
-    updated = await _set_snapshot_state(
+    updated = await ENVIRONMENTS.mark_captured(
         slug,
-        "ready",
-        extra={
-            "snapshot_id": snapshot.id,
-            "snapshot_name": snapshot_name,
-            "source_sandbox_id": sandbox_id,
-            "last_captured_at": _now_iso(),
-        },
+        snapshot_id=snapshot.id,
+        snapshot_name=snapshot_name,
+        source_sandbox_id=sandbox_id,
     )
     if previous_snapshot_id != snapshot.id:
         await _delete_snapshot(previous_snapshot_id)

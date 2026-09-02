@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.server import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.utils.sandbox_state import get_or_create_sandbox_backend_proxy
+from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+from agent.sandboxes.state import get_or_create_sandbox_backend_proxy
 
 
 @pytest.mark.asyncio
@@ -21,17 +21,19 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=sandbox_backend,
         ) as create_sandbox,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock) as update_thread,
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id)
 
@@ -57,28 +59,30 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
         _thread_id,
         _github_proxy_token=None,
         _github_proxy_repositories=None,
-        _repo=None,
+        _base_proxy_config=None,
     ):
         return sandbox_backend
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-existing",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
         patch(
-            "agent.server._refresh_github_proxy_or_fail",
+            "agent.sandboxes.lifecycle._refresh_github_proxy_or_fail",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock) as update_thread,
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id)
 
@@ -103,28 +107,30 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
         _thread_id,
         _github_proxy_token=None,
         _github_proxy_repositories=None,
-        _repo=None,
+        _base_proxy_config=None,
     ):
         return sandbox_backend
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-existing",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
         patch(
-            "agent.server._refresh_github_proxy_or_fail",
+            "agent.sandboxes.lifecycle._refresh_github_proxy_or_fail",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock) as update_thread,
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id)
 

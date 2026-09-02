@@ -9,8 +9,6 @@ from agent.utils.slack import (
     SlackThreadMappingError,
     bind_slack_thread_id,
     delete_slack_thread_associations,
-    get_slack_thread_version,
-    increment_slack_thread_version,
     lookup_slack_run_message_mapping,
     lookup_slack_thread_id,
     resolve_slack_thread_id,
@@ -71,6 +69,9 @@ class _Threads:
     async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self.matches
 
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        return next(match for match in self.matches if match.get("thread_id") == thread_id)
+
 
 class _Client:
     def __init__(self, matches: list[dict[str, Any]] | None = None) -> None:
@@ -90,14 +91,11 @@ def _legacy_thread(
 
 
 @pytest.mark.asyncio
-async def test_thread_version_counts_distinct_inbound_messages() -> None:
-    client: Any = _Client()
+async def test_thread_mutation_lock_returns_active_thread() -> None:
+    client: Any = _Client(matches=[_legacy_thread("agent-thread")])
 
-    assert await increment_slack_thread_version(client, "C1", "1.0", "1.1") == 1
-    assert await increment_slack_thread_version(client, "C1", "1.0", "1.1") == 1
-    assert await increment_slack_thread_version(client, "C1", "1.0", "1.2") == 2
-    assert await get_slack_thread_version(client, "C1", "1.0") == 2
-    assert await get_slack_thread_version(client, "C1", "2.0") == 0
+    async with slack_thread_mutation_lock(client, "C1", "1.0", thread_id="agent-thread") as active:
+        assert active == {"channel_id": "C1", "thread_ts": "1.0"}
 
 
 @pytest.mark.asyncio

@@ -40,13 +40,6 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-_THREAD_VERSION_RE = re.compile(r'(?:Thread version: |"thread_version"\s*:\s*)(\d+)')
-
-
-def _thread_version_args(messages: list[BaseMessage]) -> dict[str, int]:
-    matches = _THREAD_VERSION_RE.findall("\n".join(_text(message.content) for message in messages))
-    return {"thread_version": int(matches[-1]) if matches else 0}
-
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
     matches = re.findall(r"Thread TS: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
@@ -243,9 +236,7 @@ def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
         )
     )
     for call in message.tool_calls:
-        if call["name"] == "slack_thread_reply":
-            call["args"].update(_thread_version_args(messages))
-        elif call["name"] == "slack_read_thread_messages":
+        if call["name"] == "slack_read_thread_messages":
             call["args"].update(
                 {"channel_id": DEMO_CHANNEL, "message_ts": _slack_thread_ts(messages)}
             )
@@ -558,7 +549,7 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
         isinstance(msg, HumanMessage) and "Please queue this follow-up" in _text(msg.content)
         for msg in messages
     ):
-        time.sleep(2)
+        time.sleep(0.5)
     attribution = _latest_attribution(messages)
     suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
@@ -664,13 +655,13 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Both subagents finished their investigation."),
     ),
-    # Subagent turn: a slow shell step first so a spec that opens the thread
-    # right after the run starts can watch the nested activity live.
+    # Subagent turn: a briefly slow shell step first so a spec that opens the
+    # thread right after the run starts can watch the nested activity live.
     "subagent_task": (
         _tool_step(
             "Looking around the workspace.",
             "execute",
-            {"command": "sleep 12 && ls"},
+            {"command": "sleep 3 && ls"},
             "call-subagent-ls",
         ),
         _tool_step(
@@ -686,6 +677,38 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_get_thread_step),
         _dynamic_step(_resolve_thread_step),
         StepSpec(content="Resolved the target thread through the thread tools."),
+    ),
+    "code_channel": (
+        _tool_step(
+            "This task warrants a dedicated Slack code channel.",
+            "manage_code_channel",
+            {"action": "create", "title": "Investigate flaky CI failures"},
+            "call-code-channel-create",
+        ),
+        _tool_step(
+            "Continuing the task in its dedicated code channel.",
+            "slack_thread_reply",
+            {
+                "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session."
+            },
+            "call-code-channel-reply",
+        ),
+        _tool_step(
+            "Marking the code-channel session active.",
+            "manage_code_channel",
+            {"action": "status", "status": "active"},
+            "call-code-channel-active",
+        ),
+    ),
+    "code_channel_followup": (
+        _tool_step(
+            "Replying to the unmentioned code-channel follow-up.",
+            "slack_thread_reply",
+            {
+                "message": "Status: the investigation is active, and this unmentioned follow-up reached the same Open SWE session."
+            },
+            "call-code-channel-followup",
+        ),
     ),
     "iframe": (
         _tool_step(
@@ -904,50 +927,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
-    "optimistic_lock": (
-        _tool_step(
-            "Acknowledging before testing the optimistic lock.",
-            "slack_thread_reply",
-            {"message": "Optimistic lock flow started."},
-            "call-lock-ack",
-        ),
-        _tool_step(
-            "Waiting for a reaction that must not invalidate the thread version.",
-            "execute",
-            {"command": "sleep 3"},
-            "call-lock-reaction-wait",
-        ),
-        _tool_step(
-            "Confirming a reaction did not invalidate the thread version.",
-            "slack_thread_reply",
-            {"message": "A reaction did not invalidate the thread version."},
-            "call-lock-reaction-reply",
-        ),
-        _tool_step(
-            "Waiting for a newer Slack message.",
-            "execute",
-            {"command": "sleep 5"},
-            "call-lock-wait",
-        ),
-        _tool_step(
-            "Trying to post with the version from the triggering context.",
-            "slack_thread_reply",
-            {"message": "This stale reply must not be posted."},
-            "call-lock-stale",
-        ),
-        _tool_step(
-            "Re-reading the Slack thread after the version mismatch.",
-            "slack_read_thread_messages",
-            {},
-            "call-lock-read",
-        ),
-        _tool_step(
-            "Retrying with the refreshed Slack thread version.",
-            "slack_thread_reply",
-            {"message": "Re-read the thread and posted with the updated version."},
-            "call-lock-retry",
-        ),
-    ),
     "followup": (_dynamic_step(_followup_step),),
 }
 
@@ -1004,8 +983,12 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
     ),
     ScriptRule(
-        "optimistic_lock",
-        lambda ctx: ctx.human_count <= 1 and "E2E_OPTIMISTIC_LOCK" in ctx.first_text,
+        "code_channel_followup",
+        lambda ctx: "E2E_CODE_CHANNEL_FOLLOWUP" in ctx.last_text,
+    ),
+    ScriptRule(
+        "code_channel",
+        lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(

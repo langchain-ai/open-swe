@@ -7,6 +7,12 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from agent.auth.thread_token import (
+    GitHubAuthError,
+    get_github_token,
+    invalidate_cached_github_token,
+)
+
 from ..dashboard.agent_usage import record_reviewer_publication
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
@@ -55,11 +61,6 @@ from ..review.publish import (
 from ..review.reconcile import reconcile_findings_with_review_threads
 from ..utils.dashboard_links import dashboard_review_url
 from ..utils.github_checks import review_check_conclusion
-from ..utils.github_token import (
-    GitHubAuthError,
-    get_github_token,
-    invalidate_cached_github_token,
-)
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT

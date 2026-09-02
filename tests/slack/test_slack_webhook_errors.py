@@ -38,7 +38,7 @@ async def test_slack_processing_error_posts_dashboard_link(
     monkeypatch.setattr(
         slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text
     )
-    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", upsert)
+    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", upsert)
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
         slack_webhook.common, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
@@ -470,8 +470,10 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     )
     monkeypatch.setattr(slack_webhook.common, "_get_thread_plan_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "_upsert_slack_thread_repo_metadata", AsyncMock())
-    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", AsyncMock())
+    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
+    thinking = AsyncMock()
+    monkeypatch.setattr(slack_webhook, "stream_slack_thinking_steps", thinking)
     monkeypatch.setattr(slack_webhook.common, "store_slack_run_mapping", store_mapping)
 
     await slack_webhook._process_slack_mention_impl(
@@ -486,7 +488,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
             "bot_user_id": "BOT",
             "thread_id": "t1",
             "message_update": True,
-            "thread_version": 1,
         },
         {"owner": "langchain-ai", "name": "open-swe"},
     )
@@ -500,6 +501,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert "old text" not in serialized
     assert "## Conversation Context" not in serialized
     assert await_args.kwargs["explicitly_tagged"] is False
+    thinking.assert_not_awaited()
     store_args = store_mapping.await_args
     assert store_args is not None
     assert store_args.kwargs["message_ts"] == "1.0"
@@ -510,7 +512,7 @@ def test_untagged_prompt_tells_the_agent_it_was_not_tagged() -> None:
     preamble = slack_webhook._slack_prompt_preamble(untagged_reply=True)
 
     assert "You were NOT tagged" in preamble
-    assert "call `no_op` and post nothing" in preamble
+    assert "end your turn without calling any tool and post nothing" in preamble
     assert "Staying silent is the right" in preamble
     assert slack_webhook._slack_request_heading(untagged_reply=True) == "## Untagged Message"
 
