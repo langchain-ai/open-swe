@@ -114,7 +114,6 @@
     --ring: oklch(0.708 0 0);
     --app-chrome-background: var(--background);
     --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-    --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: 0.5rem;
@@ -200,17 +199,6 @@
 
   .dark .dropdown-glass {
     box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
-  }
-
-  /*
-   * App-chrome grain, baked into the surface's own background rather than laid
-   * over the page: a fixed full-viewport overlay makes the compositor re-blend
-   * on every frame any animation produces. The 3.5% opacity lives in the SVG.
-   */
-  .surface-grain {
-    background-image: var(--surface-grain);
-    background-repeat: repeat;
-    background-size: 256px 256px;
   }
 }
 
