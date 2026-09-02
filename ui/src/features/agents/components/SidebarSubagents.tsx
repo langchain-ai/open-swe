@@ -12,15 +12,27 @@ import {
   useAgentThreadRuntime,
 } from "@/features/agents/lib/AgentThreadStreamProvider"
 
-export function SidebarSubagents({ threadId }: { threadId: string }) {
+export function SidebarSubagents({
+  threadId,
+  onNavigate,
+}: {
+  threadId: string
+  onNavigate: () => void
+}) {
   return (
     <AgentThreadStreamProvider threadId={threadId}>
-      <SubagentRows threadId={threadId} />
+      <SubagentRows threadId={threadId} onNavigate={onNavigate} />
     </AgentThreadStreamProvider>
   )
 }
 
-function SubagentRows({ threadId }: { threadId: string }) {
+function SubagentRows({
+  threadId,
+  onNavigate,
+}: {
+  threadId: string
+  onNavigate: () => void
+}) {
   const stream = useAgentThreadRuntime()
   const subagents = [...stream.subagents.values()].sort(
     (left, right) => left.startedAt.getTime() - right.startedAt.getTime()
@@ -57,6 +69,7 @@ function SubagentRows({ threadId }: { threadId: string }) {
         to="/agents/$threadId"
         params={{ threadId }}
         hash={`subagent-${subagent.id}`}
+        onClick={onNavigate}
         className="group/subagent mb-0.5 flex h-7 min-w-0 items-center gap-1.5 rounded-lg pr-2.5 text-[12px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
         style={{ paddingLeft: `${32 + subagent.depth * 12}px` }}
         title={label}

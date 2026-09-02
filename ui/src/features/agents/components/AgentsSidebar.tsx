@@ -447,7 +447,10 @@ export function AgentsSidebar({
     <div key={item.key}>
       <SidebarThreadRow {...rowProps(item, live)} indent={indent} />
       {item.location === "cloud" && expandedSubagentThreadIds.has(item.id) && (
-        <SidebarSubagents threadId={item.id} />
+        <SidebarSubagents
+          threadId={item.id}
+          onNavigate={layout.closeOnMobile}
+        />
       )}
     </div>
   )
