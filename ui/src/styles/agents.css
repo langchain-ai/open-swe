@@ -8,8 +8,9 @@
  * already styles itself with `bg-card` / `text-muted-foreground` / …, so one
  * block of values recolours the whole surface.
  *
- * The dark neutrals follow Codex's grey ramp (#181818 chrome / #212121 content
- * surface / #303030 elevated) so the two apps read the same side by side.
+ * The dark neutrals follow Codex's `.electron-dark` layer — the desktop app
+ * re-points its surface at a darker step than the Codex *web* tokens do: black
+ * chrome under a #181818 content surface, elevated at #212121 / #282828.
  *
  * Colour stops are written as literals rather than `var(--color-zinc-200)`
  * because Tailwind tree-shakes unreferenced theme colours out of the build.
@@ -74,20 +75,20 @@ html[data-agents-theme] {
 html.dark[data-agents-theme] {
   color-scheme: dark;
 
-  --background: #212121; /* surface */
+  --background: #181818; /* background-surface */
   --app-chrome-background: var(--background);
-  --foreground: #fff;
-  --card: #303030; /* surface-elevated */
+  --foreground: #dfdfdf;
+  --card: #212121; /* background-elevated-secondary-opaque */
   --card-foreground: var(--foreground);
   --surface-raised: var(--secondary);
-  --popover: #303030;
+  --popover: #282828; /* background-elevated-primary-opaque */
   --popover-foreground: var(--foreground);
   --primary: oklch(0.588 0.217 264);
   --primary-foreground: #fff;
-  --secondary: color-mix(in srgb, #fff 8%, transparent);
+  --secondary: color-mix(in srgb, #fff 5%, transparent);
   --secondary-foreground: var(--foreground);
-  --muted: color-mix(in srgb, #fff 8%, transparent);
-  --muted-foreground: oklch(78.6% 0 0);
+  --muted: color-mix(in srgb, #fff 5%, transparent);
+  --muted-foreground: color-mix(in srgb, #fff 70%, transparent);
   --accent: color-mix(in srgb, #fff 8%, transparent);
   --accent-foreground: var(--foreground);
   --destructive: color-mix(in srgb, oklch(63.7% 0.237 25.331) 90%, #fff);
@@ -100,13 +101,13 @@ html.dark[data-agents-theme] {
   --success-foreground: oklch(76.5% 0.177 163.223); /* emerald-400 */
   --warning: oklch(76.9% 0.188 70.08);
   --warning-foreground: oklch(82.8% 0.189 84.429); /* amber-400 */
-  --border: color-mix(in srgb, #fff 12%, transparent);
+  --border: color-mix(in srgb, #fff 8%, transparent);
   --input: color-mix(in srgb, #fff 16%, transparent);
   --ring: oklch(0.588 0.217 264);
 
-  --sidebar: #181818; /* surface-secondary: chrome sits below the content surface */
-  --sidebar-control-surface: color-mix(in srgb, #fff 6%, transparent);
-  --sidebar-row-hover: color-mix(in srgb, #fff 6%, transparent);
+  --sidebar: #000; /* background-surface-under: chrome sits below the content surface */
+  --sidebar-control-surface: color-mix(in srgb, #fff 5%, transparent);
+  --sidebar-row-hover: color-mix(in srgb, #fff 5%, transparent);
   --sidebar-row-active: color-mix(in srgb, #fff 8%, transparent);
   --sidebar-row-selected: color-mix(in srgb, #fff 10%, transparent);
   --sidebar-border: var(--border);

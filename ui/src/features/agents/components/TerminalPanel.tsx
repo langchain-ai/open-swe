@@ -44,7 +44,7 @@ function terminalTheme() {
   const dark = document.documentElement.classList.contains("dark")
   return dark
     ? {
-        background: { r: 33, g: 33, b: 33 },
+        background: { r: 24, g: 24, b: 24 },
         foreground: { r: 229, g: 231, b: 235 },
         cursor: { r: 229, g: 231, b: 235 },
         selectionBackground: "rgba(147, 197, 253, 0.25)",
@@ -195,7 +195,7 @@ function TerminalViewport({
 
   return (
     <div
-      className="relative h-full min-h-0 min-w-0 bg-[#212121] dark:bg-[#212121]"
+      className="relative h-full min-h-0 min-w-0 bg-[#181818] dark:bg-[#181818]"
       onMouseDown={onFocus}
     >
       <div ref={mountRef} className="h-full w-full overflow-hidden" />

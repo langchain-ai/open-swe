@@ -32,7 +32,7 @@ export const Route = createRootRouteWithContext<{
         name: "viewport",
         content: "width=device-width, initial-scale=1, maximum-scale=1",
       },
-      { name: "theme-color", content: "#212121" },
+      { name: "theme-color", content: "#181818" },
       { title: "Open SWE" },
     ],
     links: [
