@@ -5,8 +5,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.dashboard.analyzer_cron import ensure_continual_cron
-from agent.dashboard.review_styles import REVIEW_STYLES, ReviewStyle
+from agent.review.analyzer_cron import ensure_continual_cron
+from agent.review.styles import REVIEW_STYLES, ReviewStyle
 
 logger = logging.getLogger(__name__)
 

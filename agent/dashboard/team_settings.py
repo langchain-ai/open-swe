@@ -2,7 +2,7 @@
 
 A single record keyed ``"default"`` keeps all instance-wide reviewer
 configuration in one place. Per-repo style prompts live in
-:mod:`agent.dashboard.review_styles`.
+:mod:`agent.review.styles`.
 """
 
 import logging

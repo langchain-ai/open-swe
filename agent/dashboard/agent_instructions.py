@@ -6,7 +6,7 @@ that is appended to the main agent's system prompt for runs targeting that repo.
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent.dashboard.review_styles import normalize_repo_full_name
+from agent.review.styles import normalize_repo_full_name
 from agent.store import TypedStore, now_iso
 
 AGENT_INSTRUCTIONS_NAMESPACE: list[str] = ["agent_instructions"]

@@ -1143,7 +1143,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
-            from agent.dashboard.review_styles import get_repo_custom_prompt
+            from agent.review.styles import get_repo_custom_prompt
 
             return await get_repo_custom_prompt(repo_owner, repo_name)
 

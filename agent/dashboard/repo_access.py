@@ -4,7 +4,7 @@ import httpx
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.dashboard.review_styles import normalize_repo_full_name
+from agent.review.styles import normalize_repo_full_name
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 

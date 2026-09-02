@@ -32,7 +32,6 @@ from agent.dashboard.agent_instructions import (
     AgentInstructionsUpdate,
 )
 from agent.dashboard.agent_usage import list_agent_usage_leaderboard
-from agent.dashboard.analyzer_cron import remove_continual_cron
 from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
@@ -45,9 +44,6 @@ from agent.dashboard.environments import (
     EnvironmentUpdate,
     list_environment_options,
     slugify,
-)
-from agent.dashboard.eval_jobs import (
-    get_reviewer_eval_status,
 )
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
@@ -94,7 +90,6 @@ from agent.dashboard.profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
-from agent.dashboard.pull_request_checks import PullRequestState
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dashboard.repo_cache import (
     REPO_LIST_FRESH_MS,
@@ -121,18 +116,6 @@ from agent.dashboard.review_chat_api import (
     proxy_review_chat_history,
     proxy_review_chat_state,
     proxy_review_chat_stream_events,
-)
-from agent.dashboard.review_style_jobs import (
-    cancel_review_style_analysis,
-    start_bootstrap_analysis,
-    sync_review_style_run_status,
-)
-from agent.dashboard.review_styles import (
-    REVIEW_STYLES,
-    ReviewStyle,
-    ReviewStyleCreate,
-    ReviewStylePromptUpdate,
-    normalize_repo_full_name,
 )
 from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
@@ -242,7 +225,24 @@ from agent.dashboard.user_mappings import (
     upsert_mapping,
 )
 from agent.dashboard.voice import transcribe_audio
+from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.eval_jobs import (
+    get_reviewer_eval_status,
+)
+from agent.review.style_jobs import (
+    cancel_review_style_analysis,
+    start_bootstrap_analysis,
+    sync_review_style_run_status,
+)
+from agent.review.styles import (
+    REVIEW_STYLES,
+    ReviewStyle,
+    ReviewStyleCreate,
+    ReviewStylePromptUpdate,
+    normalize_repo_full_name,
+)
 from agent.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
     build_authorize_url,

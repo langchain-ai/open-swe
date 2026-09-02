@@ -75,7 +75,8 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import profiles, pull_request_context, pull_request_status, thread_api
+    from agent.dashboard import profiles, thread_api
+    from agent.github import pull_request_context, pull_request_status
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"

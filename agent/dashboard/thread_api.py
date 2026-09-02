@@ -30,16 +30,16 @@ from agent.dashboard.options import (
     model_supports_images,
     normalize_model_choice,
 )
-from agent.dashboard.pr_diff import build_compare_diff_files, build_pr_diff_files
 from agent.dashboard.profiles import get_profile, get_valid_access_token
-from agent.dashboard.pull_request_checks import PullRequestState, get_pull_request_check_states
-from agent.dashboard.pull_request_context import get_pull_request_context
-from agent.dashboard.pull_request_status import get_pull_request_statuses
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from agent.dashboard.thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from agent.dashboard.user_mappings import email_for_login
 from agent.dispatch import dispatch_agent_run
+from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
+from agent.github.pull_request_context import get_pull_request_context
+from agent.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
+from agent.github.pull_request_status import get_pull_request_statuses
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
