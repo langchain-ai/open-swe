@@ -5,10 +5,11 @@ from typing import Any, Literal
 
 from langgraph.config import get_config
 
+from agent.auth.github_app import get_github_app_installation_id_for_repo
+from agent.auth.resolve import resolve_github_token
+
 from ..baby_sit import record_retry, start_watch, stop_watch, watch_key
 from ..source_context import SourceContext
-from ..utils.auth import resolve_github_token
-from ..utils.github_app import get_github_app_installation_id_for_repo
 from ..utils.github_ci import fetch_pr
 from ..utils.slack import parse_github_pr_url
 

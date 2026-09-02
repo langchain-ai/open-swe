@@ -14,16 +14,16 @@ _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
 _PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox")
 
 
-async def aresolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
+async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
     """Resolve the repository directory for a sandbox backend."""
     if not repo_name:
         raise ValueError("repo_name must be a non-empty string")
 
-    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    work_dir = await resolve_sandbox_work_dir(sandbox_backend)
     return posixpath.join(work_dir, repo_name)
 
 
-async def aresolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
+async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
     """Resolve a writable base directory for repository operations."""
     cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
     if isinstance(cached_work_dir, str) and cached_work_dir:

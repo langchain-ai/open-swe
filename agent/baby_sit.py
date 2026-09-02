@@ -11,12 +11,12 @@ from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.auth.github_app import get_github_app_installation_token
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
 from agent.thread_ids import baby_sit_lock_thread_id
 
 from .dispatch import dispatch_agent_run
-from .utils.github_app import get_github_app_installation_token
 from .utils.github_ci import (
     FAILING_CONCLUSIONS,
     branch_from_check_payload,
