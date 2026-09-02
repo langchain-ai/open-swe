@@ -52,7 +52,8 @@ function RepositoriesOwnerPage() {
     [autoReview.data?.repos]
   )
 
-  const [search, setSearch] = useState("")
+  const [searchPosition, setSearchPosition] = useState({ owner, search: "" })
+  const search = searchPosition.owner === owner ? searchPosition.search : ""
   const query = search.trim().toLowerCase()
   const filteredRepos = query
     ? ownerRepos.filter((r) => r.full_name.toLowerCase().includes(query))
@@ -109,7 +110,9 @@ function RepositoriesOwnerPage() {
         <Input
           type="search"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) =>
+            setSearchPosition({ owner, search: event.target.value })
+          }
           placeholder="Search repositories…"
           aria-label="Search repositories"
         />
