@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import delete_issue
+from agent.platforms.linear.client import delete_issue
 
 
 async def linear_delete_issue(issue_id: str) -> dict[str, Any]:

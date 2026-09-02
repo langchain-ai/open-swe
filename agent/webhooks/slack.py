@@ -24,9 +24,9 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.platforms.slack import client as slack_utils
 from agent.slack_thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
-from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import (

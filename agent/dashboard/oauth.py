@@ -18,7 +18,7 @@ import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
-from agent.utils.github_org_membership import is_user_active_org_member
+from agent.platforms.github.org_membership import is_user_active_org_member
 
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from .github_token_auth import bearer_github_token

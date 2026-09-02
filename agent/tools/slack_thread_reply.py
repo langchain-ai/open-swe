@@ -5,14 +5,15 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..utils.run_usage import RunUsageSummary, summarize_run_usage
-from ..utils.slack import (
+from agent.platforms.slack.client import (
     convert_mentions_to_slack_format,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+
+from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.thread_ops import langgraph_client as get_langgraph_client
 
 
@@ -80,7 +81,7 @@ async def slack_thread_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    from ..utils.slack_code_channels import is_code_channel_session
+    from agent.platforms.slack.code_channels import is_code_channel_session
 
     reply_thread_ts = active.get("reply_thread_ts")
     post_thread_ts = (

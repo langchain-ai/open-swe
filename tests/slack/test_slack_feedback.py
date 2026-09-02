@@ -6,8 +6,8 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack_feedback
-from agent.utils.slack_feedback import (
+from agent.platforms.slack import feedback as slack_feedback
+from agent.platforms.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )

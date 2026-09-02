@@ -23,12 +23,11 @@ from langgraph_sdk.errors import ConflictError
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.run_usage import RunUsageSummary
-
-from .http import DEFAULT_HTTP_TIMEOUT
-from .url_safety import request_with_safe_redirects
-from .user_messages import WARNING_ICON
+from agent.utils.url_safety import request_with_safe_redirects
+from agent.utils.user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +401,7 @@ async def _post_slack_message_with_ts(
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
 
-    from .slack_code_channels import is_code_channel_session
+    from agent.platforms.slack.code_channels import is_code_channel_session
 
     payload: dict[str, Any] = {
         "channel": channel_id,
@@ -634,7 +633,7 @@ async def post_slack_thread_reply_with_ts(
     agent_thread_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
-    from .slack_code_channels import is_code_channel_session
+    from agent.platforms.slack.code_channels import is_code_channel_session
 
     if is_code_channel_session(thread_ts):
         agent_thread_id = None
@@ -715,7 +714,7 @@ async def start_slack_stream(
     recipient_team_id: str = "",
 ) -> str:
     """Start a Slack Thinking Steps stream and return its message timestamp."""
-    from .slack_code_channels import is_code_channel_session
+    from agent.platforms.slack.code_channels import is_code_channel_session
 
     payload: dict[str, Any] = {
         "channel": channel_id,
@@ -1220,7 +1219,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     if not SLACK_BOT_TOKEN:
         return []
 
-    from .slack_code_channels import is_code_channel_session
+    from agent.platforms.slack.code_channels import is_code_channel_session
 
     # A code channel session spans the whole channel rather than one thread.
     session_channel = is_code_channel_session(thread_ts)
@@ -1328,7 +1327,7 @@ async def fetch_slack_thread_message_by_ts(
     if not SLACK_BOT_TOKEN:
         return None
 
-    from .slack_code_channels import is_code_channel_session
+    from agent.platforms.slack.code_channels import is_code_channel_session
 
     session_channel = is_code_channel_session(thread_ts)
     method = "conversations.history" if session_channel else "conversations.replies"
@@ -1458,7 +1457,7 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
 
 async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     """Return the public permalink for a Slack message, or None if unavailable."""
-    from .slack_code_channels import is_code_channel_session
+    from agent.platforms.slack.code_channels import is_code_channel_session
 
     # A code channel session has no anchor message to permalink to.
     if not SLACK_BOT_TOKEN or not channel_id or not message_ts:

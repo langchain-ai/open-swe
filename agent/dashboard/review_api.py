@@ -18,6 +18,7 @@ import httpx
 from fastapi import HTTPException, Response
 
 from agent.auth.github_app import get_github_app_installation_token
+from agent.platforms.github.checks import github_headers
 from agent.thread_ids import reviewer_thread_id
 
 from ..review.findings import (
@@ -26,7 +27,6 @@ from ..review.findings import (
     comment_ids_for_finding,
     is_thread_resolved,
 )
-from ..utils.github_checks import github_headers
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
 from ..utils.thread_ops import langgraph_client
 from ..webhooks.common import fetch_github_pr_metadata
@@ -730,7 +730,7 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
-    from ..utils.slack import GitHubPrRef
+    from agent.platforms.slack.client import GitHubPrRef
 
     pr_ref = GitHubPrRef(
         owner=owner,
@@ -749,9 +749,9 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
     from dataclasses import asdict
 
     from agent.auth.github_app import get_github_app_installation_token_with_expiry
+    from agent.platforms.slack.client import GitHubPrRef
 
     from ..review.trace_context import resolve_pr_trace
-    from ..utils.slack import GitHubPrRef
 
     pr_ref = GitHubPrRef(
         owner=owner,

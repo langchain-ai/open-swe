@@ -20,7 +20,7 @@ from typing import Any, Literal
 import httpx
 from typing_extensions import TypedDict
 
-from ..utils.github_http import GITHUB_GRAPHQL, github_client, github_request
+from agent.platforms.github.http import GITHUB_GRAPHQL, github_client, github_request
 
 CheckState = Literal["failing", "passing", "pending", "unknown"]
 PrState = Literal["open", "draft", "merged", "closed"]

@@ -4,7 +4,7 @@ import importlib
 
 import pytest
 
-from agent.utils import github_comments
+from agent.platforms.github import comments as github_comments
 
 
 @pytest.fixture

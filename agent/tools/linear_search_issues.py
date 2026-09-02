@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import search_issues
+from agent.platforms.linear.client import search_issues
 
 
 async def linear_search_issues(

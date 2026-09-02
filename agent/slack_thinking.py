@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from langgraph_sdk.client import LangGraphClient
 
-from .utils.slack import (
+from agent.platforms.slack.client import (
     SlackStreamError,
     append_slack_stream,
     start_slack_stream,

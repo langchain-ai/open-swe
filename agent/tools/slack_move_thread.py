@@ -4,10 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.source_context import SourceContext
-
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import (
+from agent.platforms.slack.client import (
     append_slack_web_link_footer,
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -17,6 +14,9 @@ from ..utils.slack import (
     slack_thread_mutation_lock,
     store_slack_run_mapping,
 )
+from agent.source_context import SourceContext
+
+from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.thread_ops import langgraph_client
 
 _MESSAGE_MAX_CHARS = 2800

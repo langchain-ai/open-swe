@@ -43,6 +43,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 from agent.auth.resolve import resolve_github_token
+from agent.platforms.github.org_membership import is_user_active_org_member
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -200,7 +201,6 @@ from .utils.authorship import (
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
 from .utils.gateway import gateway_env_default
-from .utils.github_org_membership import is_user_active_org_member
 from .utils.json_types import as_json_object, thread_metadata
 from .utils.model import (
     DEFAULT_LLM_REASONING,

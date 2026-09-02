@@ -4,8 +4,8 @@ from typing import Any, cast
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.utils import github_feedback
-from agent.utils.github_feedback import (
+from agent.platforms.github import feedback as github_feedback
+from agent.platforms.github.feedback import (
     process_github_reaction_added,
     process_github_reaction_removed,
 )

@@ -10,11 +10,14 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import dispatch_agent_run
+from agent.platforms.slack.client import (
+    lookup_slack_run_mapping,
+    lookup_slack_thread_id,
+    store_slack_run_mapping,
+)
+from agent.platforms.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
+from agent.platforms.slack.events import claim_slack_event
 from agent.source_context import SourceContext
-
-from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
-from .slack_code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
-from .slack_events import claim_slack_event
 
 logger = logging.getLogger(__name__)
 

@@ -28,6 +28,76 @@ from agent.auth.thread_token import (
     github_token_principal,
     invalidate_cached_github_token,
 )
+from agent.platforms.github.checks import (  # noqa: F401
+    complete_review_check_run,
+    create_review_check_run,
+)
+from agent.platforms.github.comments import (
+    OPEN_SWE_TAGS,
+    build_pr_prompt,  # noqa: F401
+    derive_pr_state,
+    describe_open_swe_tags,  # noqa: F401
+    extract_pr_context,  # noqa: F401
+    fetch_issue_comments,  # noqa: F401
+    fetch_pr_comments_since_last_tag,  # noqa: F401
+    format_github_comment_body_for_prompt,
+    mentions_open_swe,  # noqa: F401
+    react_to_github_comment,  # noqa: F401
+    sanitize_github_comment_body,  # noqa: F401
+    verify_github_signature,
+)
+from agent.platforms.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
+from agent.platforms.linear.client import post_linear_trace_comment  # noqa: F401
+from agent.platforms.linear.comments import get_recent_comments  # noqa: F401
+from agent.platforms.linear.team_repo_map import LINEAR_TEAM_TO_REPO
+from agent.platforms.slack.client import (
+    GitHubPrRef,
+    SlackThreadMappingError,  # noqa: F401
+    _parse_ts,  # noqa: F401
+    fetch_slack_thread_messages,  # noqa: F401
+    format_slack_messages_for_prompt,  # noqa: F401
+    get_slack_channel_context,
+    get_slack_channel_context_description,
+    get_slack_channel_description,
+    get_slack_channel_info,
+    get_slack_permalink,
+    get_slack_user_info,
+    get_slack_user_names,  # noqa: F401
+    is_slack_channel_named,
+    lookup_slack_run_mapping,  # noqa: F401
+    lookup_slack_thread_id,  # noqa: F401
+    normalize_slack_channel_context,  # noqa: F401
+    post_slack_thread_reply,
+    post_slack_trace_reply,  # noqa: F401
+    resolve_slack_links_in_context,  # noqa: F401
+    resolve_slack_thread_id,  # noqa: F401
+    select_slack_context_messages,  # noqa: F401
+    slack_channel_allows_operations,  # noqa: F401
+    store_slack_run_mapping,  # noqa: F401
+    strip_bot_mention,  # noqa: F401
+    update_slack_message,
+    verify_slack_signature,
+)
+from agent.platforms.slack.code_channels import (  # noqa: F401
+    CODE_CHANNEL_SESSION_TS,
+    DEFAULT_CODE_CHANNEL_COMMANDS,
+    get_block_suggestions,
+    is_code_channel,
+    repo_context_bar_items,
+    set_commands,
+    set_context_bar,
+    set_session_status,
+)
+from agent.platforms.slack.events import (
+    claim_slack_event,
+    slack_event_already_seen,
+)
+from agent.platforms.slack.feedback import (
+    FEEDBACK_REACTIONS,
+    process_slack_reaction_added,
+    process_slack_reaction_removed,
+)
+from agent.platforms.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
 
 from ..dashboard.agent_overrides import (
@@ -69,28 +139,9 @@ from ..review.findings import (
 )
 from ..review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from ..review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
-from ..utils.comments import get_recent_comments  # noqa: F401
 from ..utils.dashboard_links import dashboard_thread_url  # noqa: F401
-from ..utils.github_checks import complete_review_check_run, create_review_check_run  # noqa: F401
-from ..utils.github_comments import (
-    OPEN_SWE_TAGS,
-    build_pr_prompt,  # noqa: F401
-    derive_pr_state,
-    describe_open_swe_tags,  # noqa: F401
-    extract_pr_context,  # noqa: F401
-    fetch_issue_comments,  # noqa: F401
-    fetch_pr_comments_since_last_tag,  # noqa: F401
-    format_github_comment_body_for_prompt,
-    mentions_open_swe,  # noqa: F401
-    react_to_github_comment,  # noqa: F401
-    sanitize_github_comment_body,  # noqa: F401
-    verify_github_signature,
-)
-from ..utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.json_types import ThreadLike, as_thread_dict
-from ..utils.linear import post_linear_trace_comment  # noqa: F401
-from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from ..utils.multimodal import (
     dedupe_urls,  # noqa: F401
     extract_image_urls,  # noqa: F401
@@ -98,54 +149,6 @@ from ..utils.multimodal import (
     vision_not_supported_warning,  # noqa: F401
 )
 from ..utils.repo import extract_repo_from_text
-from ..utils.slack import (
-    GitHubPrRef,
-    SlackThreadMappingError,  # noqa: F401
-    _parse_ts,  # noqa: F401
-    fetch_slack_thread_messages,  # noqa: F401
-    format_slack_messages_for_prompt,  # noqa: F401
-    get_slack_channel_context,
-    get_slack_channel_context_description,
-    get_slack_channel_description,
-    get_slack_channel_info,
-    get_slack_permalink,
-    get_slack_user_info,
-    get_slack_user_names,  # noqa: F401
-    is_slack_channel_named,
-    lookup_slack_run_mapping,  # noqa: F401
-    lookup_slack_thread_id,  # noqa: F401
-    normalize_slack_channel_context,  # noqa: F401
-    post_slack_thread_reply,
-    post_slack_trace_reply,  # noqa: F401
-    resolve_slack_links_in_context,  # noqa: F401
-    resolve_slack_thread_id,  # noqa: F401
-    select_slack_context_messages,  # noqa: F401
-    slack_channel_allows_operations,  # noqa: F401
-    store_slack_run_mapping,  # noqa: F401
-    strip_bot_mention,  # noqa: F401
-    update_slack_message,
-    verify_slack_signature,
-)
-from ..utils.slack_code_channels import (  # noqa: F401
-    CODE_CHANNEL_SESSION_TS,
-    DEFAULT_CODE_CHANNEL_COMMANDS,
-    get_block_suggestions,
-    is_code_channel,
-    repo_context_bar_items,
-    set_commands,
-    set_context_bar,
-    set_session_status,
-)
-from ..utils.slack_events import (
-    claim_slack_event,
-    slack_event_already_seen,
-)
-from ..utils.slack_feedback import (
-    FEEDBACK_REACTIONS,
-    process_slack_reaction_added,
-    process_slack_reaction_removed,
-)
-from ..utils.slack_stop import process_agent_session_stopped, process_slack_stop_reaction
 from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
 from ..utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,

@@ -6,19 +6,19 @@ from typing import Any
 from fastapi import HTTPException
 from langgraph.config import get_config
 
-from agent.source_context import SourceContext
-
-from ..dashboard.repo_access import require_repo_access_for_user
-from ..dispatch import dispatch_agent_run
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import (
+from agent.platforms.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
+from agent.source_context import SourceContext
+
+from ..dashboard.repo_access import require_repo_access_for_user
+from ..dispatch import dispatch_agent_run
+from ..utils.dashboard_links import dashboard_thread_url
+from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.thread_ops import langgraph_client
 from ..webhooks.common import _is_repo_allowed
 

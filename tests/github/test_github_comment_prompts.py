@@ -7,8 +7,8 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from agent.dashboard.agent_overrides import profile_draft_prs
+from agent.platforms.github import comments as github_comments
 from agent.prompt import construct_sender_context, construct_system_prompt
-from agent.utils import github_comments
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,

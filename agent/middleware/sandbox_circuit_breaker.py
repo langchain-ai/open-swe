@@ -9,10 +9,14 @@ from langgraph_sdk import get_client
 
 from agent.auth.github_app import get_github_app_installation_token
 from agent.auth.thread_token import get_github_token
+from agent.platforms.github.comments import post_github_comment
+from agent.platforms.linear.client import comment_on_linear_issue
+from agent.platforms.slack.client import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply,
+)
 
-from ..utils.github_comments import post_github_comment
-from ..utils.linear import comment_on_linear_issue
-from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
 from ..utils.user_messages import warning
 
 logger = logging.getLogger(__name__)

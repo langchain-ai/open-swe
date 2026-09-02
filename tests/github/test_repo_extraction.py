@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.platforms.slack.client import extract_channel_description_text
 from agent.utils.repo import extract_repo_from_text
-from agent.utils.slack import extract_channel_description_text
 
 
 class TestExtractRepoFromText:

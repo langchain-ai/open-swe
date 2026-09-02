@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import get_issue_comments
+from agent.platforms.linear.client import get_issue_comments
 
 
 async def linear_get_issue_comments(issue_id: str) -> dict[str, Any]:

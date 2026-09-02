@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from agent.utils import linear
+from agent.platforms.linear import client as linear
 
 linear_search_tool = importlib.import_module("agent.tools.linear_search_issues")
 

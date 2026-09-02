@@ -7,8 +7,9 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack as slack_utils
-from agent.utils import slack_code_channels, slack_events
+from agent.platforms.slack import client as slack_utils
+from agent.platforms.slack import code_channels as slack_code_channels
+from agent.platforms.slack import events as slack_events
 from agent.webhooks import common as webhook_common
 from agent.webhooks import slack as slack_service
 from agent.webhooks import slack_routes

@@ -19,16 +19,16 @@ from typing import Any
 from langgraph_sdk.client import LangGraphClient
 
 from agent.auth.github_app import get_github_app_installation_token
+from agent.platforms.github.comments import post_github_comment
+from agent.platforms.linear.client import comment_on_linear_issue
+from agent.platforms.slack.client import post_slack_thread_reply
+from agent.platforms.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
 from .session_cost import schedule_session_cost_refresh
 from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_comments import post_github_comment
-from .utils.linear import comment_on_linear_issue
-from .utils.slack import post_slack_thread_reply
-from .utils.slack_code_channels import is_code_channel_session, set_session_status
 from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
 

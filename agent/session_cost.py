@@ -6,14 +6,15 @@ from typing import Any, Literal, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
-from .utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
-from .utils.slack import (
+from agent.platforms.slack.client import (
     fetch_slack_thread_message_by_ts,
     format_slack_session_cost,
     lookup_slack_run_message_mapping,
     update_slack_message,
     with_slack_session_cost,
 )
+
+from .utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from .utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)

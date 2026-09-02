@@ -6,12 +6,13 @@ from typing import Any
 
 import httpx
 
-from ..utils.github_comments import (
+from agent.platforms.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
     sanitize_github_comment_body,
 )
-from ..utils.github_http import GITHUB_GRAPHQL, github_client, github_request
+from agent.platforms.github.http import GITHUB_GRAPHQL, github_client, github_request
+
 from .pull_request_status import _pull_request_identity
 
 _CONTEXT_LIMIT = 100

@@ -6,6 +6,8 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from typing import Any
 
+from agent.platforms.github.comments import GitHubAuthError
+from agent.platforms.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 from agent.thread_ids import (
     github_issue_thread_id,
@@ -25,8 +27,6 @@ from ..input_messages import (
     system_introduction,
 )
 from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
-from ..utils.github_comments import GitHubAuthError
-from ..utils.slack import GitHubPrRef
 from . import common
 
 

@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import create_issue
+from agent.platforms.linear.client import create_issue
 
 
 async def linear_create_issue(

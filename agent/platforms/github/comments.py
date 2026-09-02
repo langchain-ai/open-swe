@@ -11,8 +11,7 @@ from typing import Any
 import httpx
 
 from agent.auth.thread_token import GitHubAuthError
-
-from .http import DEFAULT_HTTP_TIMEOUT
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +132,7 @@ def sanitize_github_comment_body(body: str) -> str:
 def format_github_comment_body_for_prompt(author: str, body: str) -> str:
     """Format a GitHub comment body for prompt inclusion."""
     sanitized_body = sanitize_github_comment_body(body)
-    from ..dashboard.user_mappings import is_login_mapped
+    from agent.dashboard.user_mappings import is_login_mapped
 
     if is_login_mapped(author):
         return sanitized_body

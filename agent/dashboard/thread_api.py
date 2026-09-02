@@ -18,6 +18,12 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.platforms.slack.client import (
+    lookup_slack_thread_run_mapping,
+    parse_github_pr_url,
+    update_slack_trace_reply_for_web_handoff,
+)
+from agent.platforms.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.source_context import SourceContext
 
 from ..dispatch import dispatch_agent_run
@@ -36,12 +42,6 @@ from ..utils.json_types import (
     thread_metadata,
 )
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import (
-    lookup_slack_thread_run_mapping,
-    parse_github_pr_url,
-    update_slack_trace_reply_for_web_handoff,
-)
-from ..utils.slack_code_channels import CODE_CHANNEL_SESSION_TS
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,

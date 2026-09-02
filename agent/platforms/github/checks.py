@@ -15,7 +15,7 @@ from typing import Literal
 
 import httpx
 
-from .github_http import (
+from agent.platforms.github.http import (
     GITHUB_API_BASE,
     github_client,
     github_headers,  # re-exported for backward compatibility

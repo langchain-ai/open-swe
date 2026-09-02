@@ -6,9 +6,8 @@ from typing import Any
 
 import httpx
 
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
-
-from .http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

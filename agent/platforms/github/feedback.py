@@ -7,11 +7,10 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.review.findings import comment_ids_for_finding, list_findings
 from agent.thread_ids import reviewer_thread_id
-
-from ..review.findings import comment_ids_for_finding, list_findings
-from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
-from .reviewer_outcomes import outcome_from_score, upsert_finding_outcome
+from agent.utils.langsmith import create_langsmith_feedback, delete_langsmith_feedback
+from agent.utils.reviewer_outcomes import outcome_from_score, upsert_finding_outcome
 
 logger = logging.getLogger(__name__)
 

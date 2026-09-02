@@ -6,11 +6,12 @@ from typing import Any
 from deepagents.backends.protocol import FileDownloadResponse
 from langgraph.config import get_config
 
-from ..utils.slack import (
+from agent.platforms.slack.client import (
     get_active_slack_thread,
     slack_thread_mutation_lock,
     upload_slack_thread_file,
 )
+
 from ..utils.thread_ops import langgraph_client
 from .create_sandbox_file_download_url import _resolve_sandbox_file
 

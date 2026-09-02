@@ -29,8 +29,9 @@ def apply() -> None:
 
     from agent import server
     from agent.auth import resolve as auth
-    from agent.utils import authorship, slack_code_channels
-    from agent.utils import slack as slack_utils
+    from agent.platforms.slack import client as slack_utils
+    from agent.platforms.slack import code_channels as slack_code_channels
+    from agent.utils import authorship
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
     # *function* (the tools package __init__ shadows the submodule), so patch the

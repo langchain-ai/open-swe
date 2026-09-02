@@ -12,12 +12,7 @@ from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.auth.github_app import get_github_app_installation_token
-from agent.source_context import SourceContext
-from agent.store import TypedStore, now_iso
-from agent.thread_ids import baby_sit_lock_thread_id
-
-from .dispatch import dispatch_agent_run
-from .utils.github_ci import (
+from agent.platforms.github.ci import (
     FAILING_CONCLUSIONS,
     branch_from_check_payload,
     fetch_pr,
@@ -26,9 +21,14 @@ from .utils.github_ci import (
     list_check_runs,
     list_commit_statuses,
 )
-from .utils.github_comments import post_github_comment
-from .utils.linear import comment_on_linear_issue
-from .utils.slack import GitHubPrRef, post_slack_thread_reply
+from agent.platforms.github.comments import post_github_comment
+from agent.platforms.linear.client import comment_on_linear_issue
+from agent.platforms.slack.client import GitHubPrRef, post_slack_thread_reply
+from agent.source_context import SourceContext
+from agent.store import TypedStore, now_iso
+from agent.thread_ids import baby_sit_lock_thread_id
+
+from .dispatch import dispatch_agent_run
 
 logger = logging.getLogger(__name__)
 

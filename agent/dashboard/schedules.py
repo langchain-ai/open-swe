@@ -9,16 +9,16 @@ from fastapi import HTTPException
 from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
+from agent.platforms.slack.client import (
+    bind_slack_thread_id,
+    post_slack_top_level_message_with_ts,
+    store_slack_run_mapping,
+)
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 
 from ..dispatch import create_durable_run
 from ..input_messages import InputMessageContext, build_run_input
-from ..utils.slack import (
-    bind_slack_thread_id,
-    post_slack_top_level_message_with_ts,
-    store_slack_run_mapping,
-)
 from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 from .admin import is_admin

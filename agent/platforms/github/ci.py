@@ -14,8 +14,8 @@ from typing import Any
 
 import httpx
 
-from .github_checks import REVIEW_CHECK_RUN_NAME
-from .github_http import GITHUB_API_BASE, github_client, github_request
+from agent.platforms.github.checks import REVIEW_CHECK_RUN_NAME
+from agent.platforms.github.http import GITHUB_API_BASE, github_client, github_request
 
 logger = logging.getLogger(__name__)
 

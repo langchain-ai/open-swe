@@ -7,10 +7,13 @@ from weakref import WeakValueDictionary
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.platforms.slack.client import (
+    append_slack_web_link_footer,
+    post_slack_top_level_message_with_ts,
+)
 from agent.store import delete_value, get_value, now_iso, put_value
 
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import append_slack_web_link_footer, post_slack_top_level_message_with_ts
 
 logger = logging.getLogger(__name__)
 

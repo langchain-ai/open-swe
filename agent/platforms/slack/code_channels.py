@@ -10,13 +10,13 @@ from urllib.parse import quote
 import httpx
 from langgraph_sdk.client import LangGraphClient
 
-from .http import DEFAULT_HTTP_TIMEOUT
-from .slack import (
+from agent.platforms.slack.client import (
     SLACK_API_BASE_URL,
     SLACK_BOT_TOKEN,
     _slack_headers,
     get_slack_channel_info,
 )
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

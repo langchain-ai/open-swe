@@ -8,7 +8,12 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
-from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
+from agent.platforms.slack.client import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply,
+)
+
 from ..utils.user_messages import warning
 from .message_content import content_to_text
 

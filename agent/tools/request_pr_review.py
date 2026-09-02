@@ -3,7 +3,7 @@ from typing import Any
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.utils.slack import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
+from agent.platforms.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
 
 
 async def trigger_pr_review_from_ref(

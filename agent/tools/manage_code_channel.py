@@ -4,16 +4,13 @@ from typing import Any, Literal
 
 from langgraph.config import get_config
 
-from agent.source_context import SourceContext
-
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import (
+from agent.platforms.slack.client import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     get_active_slack_thread,
     slack_thread_mutation_lock,
 )
-from ..utils.slack_code_channels import (
+from agent.platforms.slack.code_channels import (
     CODE_CHANNEL_SESSION_TS,
     DEFAULT_CODE_CHANNEL_COMMANDS,
     VIEW_CONTENT_MAX_BYTES,
@@ -39,6 +36,9 @@ from ..utils.slack_code_channels import (
     set_view,
     store_block_suggestions,
 )
+from agent.source_context import SourceContext
+
+from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.thread_ops import langgraph_client
 from .create_sandbox_file_download_url import _resolve_sandbox_file
 

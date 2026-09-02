@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.slack import (
+from agent.platforms.slack.client import (
     SLACK_THREAD_MAX_MESSAGES,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,

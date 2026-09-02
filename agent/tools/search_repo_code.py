@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from langgraph.config import get_config
 
-from ..utils.github_checks import github_headers
+from agent.platforms.github.checks import github_headers
 
 _GITHUB_API = "https://api.github.com"
 

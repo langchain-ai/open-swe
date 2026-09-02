@@ -7,7 +7,12 @@ from typing import Any
 
 import httpx
 
-from ..utils.github_http import GITHUB_API_BASE, GITHUB_GRAPHQL, github_client, github_request
+from agent.platforms.github.http import (
+    GITHUB_API_BASE,
+    GITHUB_GRAPHQL,
+    github_client,
+    github_request,
+)
 
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")

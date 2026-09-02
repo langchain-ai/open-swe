@@ -16,6 +16,11 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
+from agent.platforms.slack.client import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply_with_ts,
+)
 from agent.sandboxes.state import SANDBOX_BACKENDS
 
 from ..dashboard.workflow_approval import (
@@ -25,11 +30,6 @@ from ..dashboard.workflow_approval import (
 )
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
 from ..utils.dashboard_links import dashboard_workflow_approval_url
-from ..utils.slack import (
-    LANGGRAPH_URL,
-    get_active_slack_thread,
-    post_slack_thread_reply_with_ts,
-)
 
 logger = logging.getLogger(__name__)
 
