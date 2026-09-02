@@ -36,6 +36,8 @@ from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
+from deepagents.graph import DeepAgentState
+from deepagents.middleware.filesystem import FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
@@ -900,6 +902,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
 
+class DesktopAgentState(FilesystemState, DeepAgentState):
+    """Desktop agent state including snapshotted skill files."""
+
+
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
@@ -1279,6 +1285,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ],
         skills=skill_sources,
         backend=agent_backend,
+        state_schema=DesktopAgentState if local_run else None,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
