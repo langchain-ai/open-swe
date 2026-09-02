@@ -7,6 +7,7 @@ from langgraph.graph.state import RunnableConfig
 from agent import server
 from agent.dashboard.environments import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.sandboxes import lifecycle
 from agent.tools import admin_gate
 from agent.tools import environments as env_tools
 
@@ -23,24 +24,32 @@ def _config(**configurable: object) -> RunnableConfig:
 @pytest.mark.asyncio
 async def test_default_environment_snapshot_wins_over_base() -> None:
     with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
+        patch.object(lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            lifecycle,
+            "get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="admin-snap",
         ),
     ):
-        assert await server._resolve_snapshot_id() == "env-snap"
+        assert await lifecycle._resolve_snapshot_id() == "env-snap"
 
 
 @pytest.mark.asyncio
 async def test_environment_without_ready_snapshot_falls_back_to_base() -> None:
     capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
     with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=capturing),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=capturing
+        ),
+        patch.object(
+            lifecycle,
+            "get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="admin-snap",
         ),
     ):
-        assert await server._resolve_snapshot_id() == "admin-snap"
+        assert await lifecycle._resolve_snapshot_id() == "admin-snap"
 
 
 @pytest.mark.asyncio
@@ -49,12 +58,15 @@ async def test_snapshot_resolution_passes_the_threads_environment() -> None:
         return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
     )
     with (
-        patch.object(server, "resolve_environment", resolve),
+        patch.object(lifecycle, "resolve_environment", resolve),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            lifecycle,
+            "get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="admin-snap",
         ),
     ):
-        snapshot_id = await server._resolve_snapshot_id("staging")
+        snapshot_id = await lifecycle._resolve_snapshot_id("staging")
 
     assert snapshot_id == "staging-snap"
     resolve.assert_awaited_once_with("staging")
@@ -71,9 +83,11 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
         }
     )
     with patch.object(
-        server, "resolve_environment", new_callable=AsyncMock, return_value=environment
+        lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=environment
     ):
-        snapshot_id, resources, create_params = await server._resolve_sandbox_create_config("base")
+        snapshot_id, resources, create_params = await lifecycle._resolve_sandbox_create_config(
+            "base"
+        )
 
     assert snapshot_id == "env-snap"
     assert resources == {

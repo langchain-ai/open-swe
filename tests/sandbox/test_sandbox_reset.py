@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.sandboxes.lifecycle import reset_sandbox_for_thread
 from agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
-from agent.server import reset_sandbox_for_thread
 
 
 @pytest.mark.asyncio
@@ -26,25 +26,29 @@ async def test_reset_sandbox_hands_off_after_metadata_persists() -> None:
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-old",
         ),
         patch(
-            "agent.server.create_langsmith_sandbox_from_params",
+            "agent.sandboxes.lifecycle.create_langsmith_sandbox_from_params",
             new_callable=AsyncMock,
             return_value=new_sandbox,
         ) as create,
         patch(
-            "agent.server._resolve_proxy_token",
+            "agent.sandboxes.lifecycle._resolve_proxy_token",
             new_callable=AsyncMock,
             return_value=("ghs_install", "expiry", None),
         ),
-        patch("agent.server._configure_github_proxy", new_callable=AsyncMock) as proxy_configure,
-        patch("agent.server.record_proxy_token_expiry") as record_proxy,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock) as configure,
         patch(
-            "agent.server.client.threads.update",
+            "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
+        ) as proxy_configure,
+        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry") as record_proxy,
+        patch(
+            "agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock
+        ) as configure,
+        patch(
+            "agent.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
             side_effect=persist_metadata,
         ) as update,
@@ -84,24 +88,24 @@ async def test_reset_sandbox_clears_stale_proxy_metadata() -> None:
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-old",
         ),
         patch(
-            "agent.server.create_langsmith_sandbox_from_params",
+            "agent.sandboxes.lifecycle.create_langsmith_sandbox_from_params",
             new_callable=AsyncMock,
             return_value=new_sandbox,
         ),
         patch(
-            "agent.server._resolve_proxy_token",
+            "agent.sandboxes.lifecycle._resolve_proxy_token",
             new_callable=AsyncMock,
             return_value=("ghs_install", "expiry", None),
         ),
-        patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
-        patch("agent.server.record_proxy_token_expiry"),
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock) as update,
+        patch("agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
+        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock) as update,
     ):
         await reset_sandbox_for_thread(thread_id, {})
 
@@ -122,25 +126,25 @@ async def test_reset_sandbox_does_not_record_proxy_before_metadata_persists() ->
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-old",
         ),
         patch(
-            "agent.server.create_langsmith_sandbox_from_params",
+            "agent.sandboxes.lifecycle.create_langsmith_sandbox_from_params",
             new_callable=AsyncMock,
             return_value=new_sandbox,
         ),
         patch(
-            "agent.server._resolve_proxy_token",
+            "agent.sandboxes.lifecycle._resolve_proxy_token",
             new_callable=AsyncMock,
             return_value=("ghs_install", "expiry", None),
         ),
-        patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
-        patch("agent.server.record_proxy_token_expiry") as record_proxy,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry") as record_proxy,
+        patch("agent.sandboxes.lifecycle._configure_git_identity", new_callable=AsyncMock),
         patch(
-            "agent.server.client.threads.update",
+            "agent.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
             side_effect=RuntimeError("metadata unavailable"),
         ),
