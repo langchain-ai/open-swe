@@ -37,7 +37,7 @@ def apply() -> None:
     # actual module object by name instead.
     opr = importlib.import_module("agent.tools.open_pull_request")
 
-    from e2e_env import FAKE_GITHUB_API, FAKE_SLACK_API
+    from e2e_env import BASE_URL, FAKE_GITHUB_API, FAKE_SLACK_API
 
     # The LLM is the only agent-internal piece we fake, and only by default.
     # Set E2E_REAL_LLM=1 to drive the harness (mock Slack/GitHub, real agent)
@@ -66,6 +66,8 @@ def apply() -> None:
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
     slack_code_channels.SLACK_API_BASE_URL = FAKE_SLACK_API
+    # A slash command's delayed answer goes to the harness, not to Slack.
+    slack_utils.SLACK_RESPONSE_URL_PREFIX = BASE_URL
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.

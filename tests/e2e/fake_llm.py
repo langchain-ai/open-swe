@@ -686,6 +686,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             {
                 "action": "create",
                 "title": "Investigate flaky CI failures",
+                "invite": ["U_ALICE"],
                 "instructions": (
                     "Investigate the flaky CI failures on fakeorg/demo: find the failing "
                     "test, work out why it is flaky, and fix it. Nothing has been changed "

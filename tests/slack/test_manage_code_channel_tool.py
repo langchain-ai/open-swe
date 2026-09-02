@@ -76,6 +76,21 @@ def _exec(output: str = "", exit_code: int = 0) -> SimpleNamespace:
     return SimpleNamespace(output=output, exit_code=exit_code)
 
 
+def _opened(channel_id: str = "C-code") -> SimpleNamespace:
+    """What `open_code_channel` hands back once the session is running."""
+    return SimpleNamespace(
+        channel_id=channel_id,
+        session=SimpleNamespace(
+            thread_id=f"thread-{channel_id}",
+            slack_thread=None,
+            run_id="run-1",
+            dashboard_url=f"https://web.example/{channel_id}",
+        ),
+        invited=["U1"],
+        warnings=[],
+    )
+
+
 @pytest.fixture
 def creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """A clean origin checkout and a code channel Slack agrees to create."""
@@ -84,22 +99,12 @@ def creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         _exec("agent/fix-flaky") if "rev-parse" in command else _exec()
     )
     calls: dict[str, Any] = {
-        "create_code_channel": AsyncMock(return_value=("C-code", None)),
+        "open_code_channel": AsyncMock(),
         "get_sandbox_backend": AsyncMock(return_value=backend),
-        "spawn_slack_session": AsyncMock(),
         "get_slack_permalink": AsyncMock(return_value="https://slack.example/p1"),
         "resolve_repo_dir": AsyncMock(return_value="/workspace/open-swe"),
-        "archive_code_channel": AsyncMock(return_value=(True, None)),
-        # The webhook may already have bound the new channel; both sides resolve
-        # to the same session id.
-        "resolve_slack_thread_id": AsyncMock(return_value="thread-channel"),
     }
-    calls["spawn_slack_session"].side_effect = lambda _client, **kwargs: SimpleNamespace(
-        thread_id=kwargs["thread_id"],
-        slack_thread=None,
-        run_id="run-1",
-        dashboard_url=f"https://web.example/{kwargs['thread_id']}",
-    )
+    calls["open_code_channel"].side_effect = lambda _client, **_kwargs: _opened()
     for name, mock in calls.items():
         monkeypatch.setattr(manage_tool, name, mock)
 
@@ -132,7 +137,11 @@ async def _create(client: Any = None, **overrides: Any) -> dict[str, Any]:
         "Fix flaky tests",
         {"owner": "langchain-ai", "name": "open-swe"},
         configurable={"github_login": "octocat"},
-        **{"instructions": "Fix the flaky login test on the pushed branch.", **overrides},
+        **{
+            "instructions": "Fix the flaky login test on the pushed branch.",
+            "invite": ["U1"],
+            **overrides,
+        },
     )
 
 
@@ -143,20 +152,12 @@ async def test_create_starts_a_separate_session_in_the_channel(creation: dict[st
     assert result["channel_id"] == "C-code"
     assert result["mention"] == "<#C-code>"
 
-    # The session id is the id the Slack webhook derives for the new channel, so
-    # whichever of the two binds it first binds the same one.
-    creation["resolve_slack_thread_id"].assert_awaited_once()
-    assert creation["resolve_slack_thread_id"].await_args.args[1:] == ("C-code", "0")
-    assert result["thread_id"] == "thread-channel"
+    assert result["thread_id"] == "thread-C-code"
 
-    spawn_kwargs = creation["spawn_slack_session"].await_args_list[0].kwargs
-    assert spawn_kwargs["thread_id"] == "thread-channel"
-    destination = spawn_kwargs["destination"]
-    assert (destination.channel_id, destination.thread_ts, destination.surface) == (
-        "C-code",
-        manage_tool.CODE_CHANNEL_SESSION_TS,
-        "slack_channel",
-    )
+    # The channel is opened against the message that asked for it, so Slack lets
+    # the origin channel's members in and invites whoever asked.
+    opened = creation["open_code_channel"].await_args_list[0].kwargs
+    assert (opened["origin_channel_id"], opened["origin_message_ts"]) == ("C-origin", "1.000")
 
 
 async def test_create_leaves_the_originating_thread_bound(creation: dict[str, Any]) -> None:
@@ -168,16 +169,16 @@ async def test_create_leaves_the_originating_thread_bound(creation: dict[str, An
 async def test_create_hands_over_a_self_contained_task(creation: dict[str, Any]) -> None:
     await _create()
 
-    handoff = creation["spawn_slack_session"].await_args_list[0].kwargs["handoff"]
-    assert handoff.title == "Fix flaky tests"
-    assert handoff.repo == {"owner": "langchain-ai", "name": "open-swe"}
-    assert handoff.source_context["spawned_from"] == {
+    opened = creation["open_code_channel"].await_args_list[0].kwargs
+    assert opened["title"] == "Fix flaky tests"
+    assert opened["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
+    assert opened["source_context"]["spawned_from"] == {
         "thread_id": "thread-origin",
         "channel_id": "C-origin",
         "thread_ts": "1.000",
         "message_ts": "1.000",
     }
-    content = handoff.content
+    content = opened["content"]
     assert "Fix the flaky login test on the pushed branch." in content
     assert "langchain-ai/open-swe" in content
     assert "`agent/fix-flaky`" in content
@@ -208,37 +209,19 @@ async def test_a_thread_can_hand_out_as_many_channels_as_it_has_tasks(
             update=AsyncMock(side_effect=lambda *, thread_id, metadata: recorded.update(metadata)),
         )
     )
-    creation["create_code_channel"].side_effect = [("C-one", None), ("C-two", None)]
+    channels = iter(("C-one", "C-two"))
+    creation["open_code_channel"].side_effect = lambda _client, **_kwargs: _opened(next(channels))
 
     first = await _create(client, instructions="First task, self-contained.")
     second = await _create(client, instructions="Second task, also self-contained.")
 
     assert (first["success"], second["success"]) == (True, True)
     assert first["channel_id"] != second["channel_id"]
-    # Each channel resolves its own session; the fixture answers with one id.
-    assert creation["resolve_slack_thread_id"].await_count == 2
-    session_ids = [
-        call.kwargs["session_id"] for call in creation["create_code_channel"].await_args_list
-    ]
-    assert len(set(session_ids)) == 2
+    assert first["thread_id"] != second["thread_id"]
     assert recorded["source_context"]["spawned_code_channels"] == [
         {"channel_id": "C-one", "thread_id": first["thread_id"]},
         {"channel_id": "C-two", "thread_id": second["thread_id"]},
     ]
-
-
-async def test_create_sets_up_the_channel_chrome(creation: dict[str, Any]) -> None:
-    result = await _create()
-
-    creation["set_session_status"].assert_awaited_once_with("C-code", "processing")
-    context_channel, items = creation["set_context_bar"].await_args_list[0].args
-    assert context_channel == "C-code"
-    assert items[0]["label"] == "langchain-ai/open-swe"
-    assert creation["set_commands"].await_args_list[0].args == (
-        "C-code",
-        surfaces_slack.DEFAULT_CODE_CHANNEL_COMMANDS,
-    )
-    assert "warnings" not in result
 
 
 async def test_create_needs_instructions_for_a_session_with_no_history(
@@ -248,7 +231,7 @@ async def test_create_needs_instructions_for_a_session_with_no_history(
 
     assert result["success"] is False
     assert "instructions is required" in result["error"]
-    creation["create_code_channel"].assert_not_awaited()
+    creation["open_code_channel"].assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -276,7 +259,7 @@ async def test_create_refuses_to_abandon_work_the_new_sandbox_cannot_see(
     assert result["success"] is False
     assert expected in result["error"]
     assert "Push it first" in result["error"]
-    creation["create_code_channel"].assert_not_awaited()
+    creation["open_code_channel"].assert_not_awaited()
 
 
 async def test_create_allows_a_checkout_it_cannot_inspect(creation: dict[str, Any]) -> None:
@@ -286,28 +269,22 @@ async def test_create_allows_a_checkout_it_cannot_inspect(creation: dict[str, An
     result = await _create()
 
     assert result["success"] is True
-    assert "No branch was started yet." in (
-        creation["spawn_slack_session"].await_args_list[0].kwargs["handoff"].content
+    assert (
+        "No branch was started yet."
+        in (creation["open_code_channel"].await_args_list[0].kwargs["content"])
     )
 
 
-async def test_create_archives_the_channel_when_the_session_never_starts(
-    creation: dict[str, Any],
+@pytest.mark.parametrize("retryable", [True, False])
+async def test_create_reports_a_channel_that_could_not_be_opened(
+    creation: dict[str, Any], retryable: bool
 ) -> None:
-    creation["spawn_slack_session"].side_effect = RuntimeError("dispatch exploded")
+    creation["open_code_channel"].side_effect = manage_tool.CodeChannelError(
+        "name_taken", retryable=retryable
+    )
 
     result = await _create()
 
     assert result["success"] is False
-    assert result["retryable"] is True
-    assert "dispatch exploded" in result["error"]
-    creation["archive_code_channel"].assert_awaited_once_with("C-code")
-
-
-async def test_create_reports_a_channel_slack_refuses(creation: dict[str, Any]) -> None:
-    creation["create_code_channel"].return_value = (None, "name_taken")
-
-    result = await _create()
-
-    assert result == {"success": False, "error": "name_taken"}
-    creation["spawn_slack_session"].assert_not_awaited()
+    assert result["error"] == "name_taken"
+    assert result.get("retryable") is (True if retryable else None)

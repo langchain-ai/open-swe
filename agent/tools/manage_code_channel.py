@@ -1,6 +1,5 @@
 import logging
 import shlex
-import uuid
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
@@ -11,24 +10,21 @@ from langgraph.config import get_config
 from agent.sandboxes.paths import resolve_repo_dir
 from agent.sandboxes.state import get_sandbox_backend
 from agent.source_context import SourceContext
-from agent.spawn import SpawnDestination, SpawnHandoff, SpawnOrigin, spawn_slack_session
-from agent.surfaces import SlackChannelSurface
+from agent.spawn import CodeChannelError, SpawnOrigin, open_code_channel
 
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.slack import (
     get_active_slack_thread,
     get_slack_permalink,
-    resolve_slack_thread_id,
+    slack_user_ids,
 )
 from ..utils.slack_code_channels import (
-    CODE_CHANNEL_SESSION_TS,
     VIEW_CONTENT_MAX_BYTES,
     CanvasAccessLevel,
     SessionStatus,
     ViewType,
     archive_code_channel,
     block_suggestions_error,
-    create_code_channel,
     delete_block_suggestions,
     get_canvas,
     is_code_channel_session,
@@ -68,6 +64,7 @@ async def manage_code_channel(
     ],
     title: str = "",
     instructions: str = "",
+    invite: list[str] | None = None,
     team_id: str = "",
     is_private: bool = False,
     status: SessionStatus = "active",
@@ -102,6 +99,12 @@ async def manage_code_channel(
     new sandbox is a clean checkout and cannot see this one's working tree; `create`
     refuses while this checkout holds unpushed work. After it succeeds, tell the
     user which channel is handling the task and stop working on it here.
+
+    `invite` is who starts out in that channel, as Slack user ids, and it needs at
+    least one person — a channel nobody is in is a channel nobody reads. Include
+    whoever asked for the work, plus anyone they named or anyone already taking
+    part in this conversation. User ids appear in the conversation context (e.g.
+    @Name(U06KD8BFY95)).
 
     Use `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
     upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
@@ -143,6 +146,7 @@ async def manage_code_channel(
             repo if isinstance(repo, dict) else None,
             configurable=dict(configurable),
             instructions=instructions,
+            invite=invite or [],
             team_id=team_id,
             is_private=is_private,
         )
@@ -362,7 +366,6 @@ async def _handoff_content(
     pull_request_url: str,
     origin: Mapping[str, Any],
     origin_thread_id: str,
-    thread_id: str,
 ) -> str:
     owner = str((repo or {}).get("owner") or "")
     name = str((repo or {}).get("name") or "")
@@ -397,7 +400,6 @@ async def _handoff_content(
         "post there; this channel is where the work and the conversation happen."
     )
 
-    dashboard_url = dashboard_thread_url(thread_id)
     return "\n\n".join(
         section
         for section in (
@@ -409,7 +411,6 @@ async def _handoff_content(
             "Use this repository unless the instructions clearly identify a different one.",
             "## Checkout\n" + "\n".join(checkout_lines),
             "## Origin\n" + "\n".join(origin_lines),
-            f"## Open SWE Links\n- Web: {dashboard_url}" if dashboard_url else "",
         )
         if section
     )
@@ -454,6 +455,7 @@ async def _create(
     *,
     configurable: dict[str, Any],
     instructions: str,
+    invite: list[str],
     team_id: str = "",
     is_private: bool = False,
 ) -> dict[str, Any]:
@@ -465,6 +467,18 @@ async def _create(
             "error": (
                 "instructions is required: the code channel session starts with no history, "
                 "so it needs a self-contained description of the task"
+            ),
+        }
+    # Falling back to whoever triggered this would put the wrong person in a
+    # channel as easily as the right one, so the caller has to name them.
+    invitees = slack_user_ids(invite)
+    if not invitees:
+        triggering_user = str(active.get("triggering_user_id") or "")
+        return {
+            "success": False,
+            "error": (
+                "invite is required: name the Slack user ids who should be in the channel"
+                + (f", starting with <@{triggering_user}>" if triggering_user else "")
             ),
         }
     source_channel = str(active.get("channel_id") or "")
@@ -484,91 +498,49 @@ async def _create(
             ),
         }
 
-    channel_id, error = await create_code_channel(
-        name=title,
-        session_id=str(uuid.uuid4()),
-        origin_channel_id=source_channel,
-        origin_message_ts=origin_message_ts,
-        team_id=team_id,
-        is_private=is_private,
-    )
-    if not channel_id:
-        return {"success": False, "error": error or "Slack could not create the code channel"}
-
-    # Slack lets the origin channel's members into the new one, and every event
-    # that produces reaches the Slack webhook, which binds a code channel it
-    # finds unbound. Claim the id it derives rather than racing it with a fresh
-    # one: whichever of the two gets there first binds the same id.
-    try:
-        session_thread_id = await resolve_slack_thread_id(
-            client, channel_id, CODE_CHANNEL_SESSION_TS
-        )
-    except Exception as exc:  # noqa: BLE001
-        with suppress(Exception):
-            await archive_code_channel(channel_id)
-        return {
-            "success": False,
-            "error": f"Could not claim a session for the new code channel: {exc}",
-            "retryable": True,
-        }
-
     try:
         thread = await client.threads.get(thread_id=thread_id)
         origin_metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
     except Exception:  # noqa: BLE001
         origin_metadata = None
 
-    # Chrome before the run, not after: the run's completion is what returns the
-    # session to `active`, and a `processing` set after that would stick.
-    surface = SlackChannelSurface(channel_id)
-    warnings: list[str] = []
-    await surface.begin_turn()
     try:
-        await surface.start_session(repo=repo, thread_id=session_thread_id)
-    except Exception as exc:  # noqa: BLE001
-        warnings.append(f"Could not set up the channel's context and commands: {exc}")
-
-    try:
-        session = await spawn_slack_session(
+        opened = await open_code_channel(
             client,
-            destination=SpawnDestination(
-                channel_id=channel_id,
-                thread_ts=CODE_CHANNEL_SESSION_TS,
-                surface="slack_channel",
-            ),
-            origin=SpawnOrigin.from_config({**configurable, "thread_id": thread_id}, active),
-            handoff=SpawnHandoff(
+            title=title,
+            content=await _handoff_content(
                 title=title,
-                content=await _handoff_content(
-                    title=title,
-                    instructions=instructions,
-                    repo=repo,
-                    repo_state=repo_state,
-                    pull_request_url=_pull_request_url(origin_metadata),
-                    origin=active,
-                    origin_thread_id=thread_id,
-                    thread_id=session_thread_id,
-                ),
-                repo=_handoff_repo(repo),
-                source_context={
-                    "spawned_from": {
-                        "thread_id": thread_id,
-                        "channel_id": source_channel,
-                        "thread_ts": str(active.get("thread_ts") or ""),
-                        "message_ts": origin_message_ts,
-                    }
-                },
+                instructions=instructions,
+                repo=repo,
+                repo_state=repo_state,
+                pull_request_url=_pull_request_url(origin_metadata),
+                origin=active,
+                origin_thread_id=thread_id,
             ),
-            thread_id=session_thread_id,
+            repo=_handoff_repo(repo),
+            origin=SpawnOrigin.from_config({**configurable, "thread_id": thread_id}, active),
+            invite=invitees,
+            source_context={
+                "spawned_from": {
+                    "thread_id": thread_id,
+                    "channel_id": source_channel,
+                    "thread_ts": str(active.get("thread_ts") or ""),
+                    "message_ts": origin_message_ts,
+                }
+            },
+            origin_channel_id=source_channel,
+            origin_message_ts=origin_message_ts,
+            team_id=team_id,
+            is_private=is_private,
         )
-    except Exception as exc:  # noqa: BLE001
-        with suppress(Exception):
-            await archive_code_channel(channel_id)
-        return {
-            "success": False,
-            "error": f"Could not start a session in the new code channel: {exc}",
-            "retryable": True,
-        }
+    except CodeChannelError as exc:
+        failure: dict[str, Any] = {"success": False, "error": exc.message}
+        if exc.retryable:
+            failure["retryable"] = True
+        return failure
+    channel_id = opened.channel_id
+    session = opened.session
+    warnings = list(opened.warnings)
 
     await _record_spawn_on_origin(client, thread_id, channel_id, session.thread_id)
 
@@ -578,6 +550,7 @@ async def _create(
         "channel_id": channel_id,
         "mention": f"<#{channel_id}>",
         "thread_id": session.thread_id,
+        "invited": opened.invited,
         "dashboard_url": session.dashboard_url,
         "next_step": (
             "The channel is a separate session that has already started on the instructions "

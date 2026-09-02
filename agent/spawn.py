@@ -14,7 +14,7 @@ destination it created itself.
 
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,11 +23,20 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import ContentBlocks, dispatch_agent_run
 from agent.source_context import SlackSurface, SlackThreadRef, SourceContext
+from agent.surfaces.slack import SlackChannelSurface
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.slack import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
+    invite_to_slack_channel,
+    resolve_slack_thread_id,
+    slack_user_ids,
     store_slack_run_mapping,
+)
+from agent.utils.slack_code_channels import (
+    CODE_CHANNEL_SESSION_TS,
+    archive_code_channel,
+    create_code_channel,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,6 +141,120 @@ def _configurable(location: SlackThreadRef, origin: SpawnOrigin, handoff: SpawnH
         if value:
             configurable[key] = value
     return configurable
+
+
+class CodeChannelError(Exception):
+    """A code channel could not be opened, with a message for the caller."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.message = message
+        self.retryable = retryable
+
+
+@dataclass(frozen=True)
+class OpenedCodeChannel:
+    channel_id: str
+    session: SpawnedSession
+    invited: list[str]
+    warnings: list[str]
+
+
+async def open_code_channel(
+    client: LangGraphClient,
+    *,
+    title: str,
+    content: ContentBlocks,
+    repo: dict[str, str] | None,
+    origin: SpawnOrigin,
+    invite: Sequence[str],
+    source_context: dict[str, Any] | None = None,
+    origin_channel_id: str = "",
+    origin_message_ts: str = "",
+    team_id: str = "",
+    is_private: bool = False,
+) -> OpenedCodeChannel:
+    """Open a code channel, put people in it, and start the session that works there.
+
+    A new channel holds nobody but the bot: joining it is up to the people named
+    in `invite`, and a channel nobody is in is a channel nobody reads, so at
+    least one person is required. The origin pair is separate and optional, and
+    goes in together or not at all: with it Slack inherits the origin channel's
+    privacy and lets its members join too.
+    """
+    invitees = slack_user_ids(invite)
+    if not invitees:
+        raise CodeChannelError(
+            "invite must name at least one Slack user id (for example the person who asked)"
+        )
+    origin_pair = origin_channel_id and origin_message_ts
+    channel_id, error = await create_code_channel(
+        name=title,
+        session_id=str(uuid.uuid4()),
+        origin_channel_id=origin_channel_id if origin_pair else "",
+        origin_message_ts=origin_message_ts if origin_pair else "",
+        team_id=team_id,
+        is_private=is_private,
+    )
+    if not channel_id:
+        raise CodeChannelError(error or "Slack could not create the code channel")
+
+    # Slack lets the origin channel's members into the new one, and every event
+    # that produces reaches the Slack webhook, which binds a code channel it
+    # finds unbound. Claim the id it derives rather than racing it with a fresh
+    # one: whichever of the two gets there first binds the same id.
+    try:
+        thread_id = await resolve_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS)
+    except Exception as exc:
+        with suppress(Exception):
+            await archive_code_channel(channel_id)
+        raise CodeChannelError(
+            f"Could not claim a session for the new code channel: {exc}", retryable=True
+        ) from exc
+
+    warnings: list[str] = []
+    # People before the work: the channel is where the conversation happens, and
+    # nobody sees it start unless they are in it.
+    invited_count, invite_error = await invite_to_slack_channel(channel_id, invitees)
+    invited = invitees if invited_count else []
+    if invite_error:
+        warnings.append(f"Could not invite {', '.join(invitees)}: {invite_error}")
+
+    # Chrome before the run, not after: the run's completion is what returns the
+    # session to `active`, and a `processing` set after that would stick.
+    surface = SlackChannelSurface(channel_id)
+    await surface.begin_turn()
+    try:
+        await surface.start_session(repo=repo, thread_id=thread_id)
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"Could not set up the channel's context and commands: {exc}")
+
+    try:
+        session = await spawn_slack_session(
+            client,
+            destination=SpawnDestination(
+                channel_id=channel_id,
+                thread_ts=CODE_CHANNEL_SESSION_TS,
+                surface="slack_channel",
+            ),
+            origin=origin,
+            handoff=SpawnHandoff(
+                title=title,
+                content=content,
+                repo=repo,
+                source_context=source_context or {},
+            ),
+            thread_id=thread_id,
+        )
+    except Exception as exc:
+        with suppress(Exception):
+            await archive_code_channel(channel_id)
+        raise CodeChannelError(
+            f"Could not start a session in the new code channel: {exc}", retryable=True
+        ) from exc
+    return OpenedCodeChannel(
+        channel_id=channel_id, session=session, invited=list(invited), warnings=warnings
+    )
 
 
 async def spawn_slack_session(

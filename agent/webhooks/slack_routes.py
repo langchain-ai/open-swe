@@ -559,6 +559,69 @@ async def slack_code_channel_command(
     return {"response_type": "ephemeral", "text": f"Working on /{command}…"}
 
 
+@router.post("/webhooks/slack/code-channel-open")
+async def slack_open_code_channel_command(
+    request: common.Request, background_tasks: common.BackgroundTasks
+) -> dict[str, str]:
+    """Open a code channel for the prompt a workspace slash command carried.
+
+    Nothing is posted in the channel the command was typed in: the answer is
+    ephemeral, and the work happens in the new channel.
+    """
+    body = await request.body()
+    if not common.verify_slack_signature(
+        body=body,
+        timestamp=request.headers.get("X-Slack-Request-Timestamp", ""),
+        signature=request.headers.get("X-Slack-Signature", ""),
+        secret=common.SLACK_SIGNING_SECRET,
+    ):
+        common.logger.warning("Invalid Slack code channel open signature")
+        raise common.HTTPException(status_code=401, detail="Invalid signature")
+
+    form = common.parse_qs(body.decode("utf-8"))
+    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    channel_id = value("channel_id")
+    user_id = value("user_id")
+    prompt = value("text")
+    response_url = value("response_url")
+    if not channel_id or not user_id:
+        return {"response_type": "ephemeral", "text": "That command was missing its context."}
+    if not prompt:
+        return {
+            "response_type": "ephemeral",
+            "text": "Say what the channel should work on: `/code fix the flaky login test`.",
+        }
+    if len(prompt) > 4000:
+        return {"response_type": "ephemeral", "text": "That prompt is too long for one command."}
+
+    channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+    if not common.slack_channel_allows_operations(channel_context):
+        common.logger.warning("Blocked a code channel command from channel=%s", channel_id)
+        return {
+            "response_type": "ephemeral",
+            "text": "Open SWE does not operate in this channel.",
+        }
+
+    repo_config = await common.get_slack_repo_config(
+        channel_id,
+        common.CODE_CHANNEL_SESSION_TS,
+        slack_user_id=user_id,
+        channel_context=channel_context,
+    )
+    background_tasks.add_task(
+        service.process_code_channel_command,
+        {
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "text": prompt,
+            "response_url": response_url,
+            "team_id": value("team_id"),
+            "repo": repo_config,
+        },
+    )
+    return {"response_type": "ephemeral", "text": "Opening a code channel…"}
+
+
 @router.post("/webhooks/slack/interactivity")
 async def slack_interactivity(
     request: common.Request, background_tasks: common.BackgroundTasks

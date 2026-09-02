@@ -70,6 +70,10 @@ SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
 
 CURRENT_THREAD: dict[str, str | None] = {"channel": DEMO_CHANNEL, "thread_ts": None}
+
+#: What commands answered on their `response_url`, and who was invited where.
+COMMAND_RESPONSES: list[dict[str, Any]] = []
+INVITES: list[dict[str, str]] = []
 LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 
 # Message timestamps restart from a fixed base on every boot, but the store the
@@ -98,6 +102,8 @@ async def control_reset() -> JSONResponse:
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
+    COMMAND_RESPONSES.clear()
+    INVITES.clear()
     return JSONResponse({"ok": True})
 
 
@@ -186,6 +192,23 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
         return await client.post("/webhooks/slack", content=raw, headers=headers)
+
+
+async def _post_signed(path: str, body: bytes, timestamp: str) -> httpx.Response:
+    """POST a signed form-encoded delivery, the way Slack posts a command."""
+    base = f"v0:{timestamp}:{body.decode()}".encode()
+    signature = "v0=" + hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+        return await client.post(
+            path,
+            content=body,
+            headers={
+                "X-Slack-Signature": signature,
+                "X-Slack-Request-Timestamp": timestamp,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
 
 
 async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
@@ -1005,6 +1028,62 @@ async def slack_stop_stream(request: Request) -> JSONResponse:
 async def mock_streams(channel: str = "") -> JSONResponse:
     """Every streaming message the fake holds, for tests to assert against."""
     return JSONResponse({"streams": fakes.streams(channel)})
+
+
+@app.post("/mock/slack/command")
+async def mock_slack_command(request: Request) -> JSONResponse:
+    """Run a workspace slash command, the way Slack posts one.
+
+    Form-encoded and signed like the real thing, including the `response_url`
+    the command answers on out of band — captured here so tests can read what
+    the caller was told.
+    """
+    form = await request.json()
+    fields = {
+        "command": str(form.get("command") or "/code"),
+        "text": str(form.get("text") or ""),
+        "channel_id": str(form.get("channel") or DEMO_CHANNEL),
+        "channel_name": "demo",
+        "user_id": str(form.get("user") or TEST_USERS[0]["slack_id"]),
+        "user_name": "alice",
+        "team_id": "T_TEST",
+        "trigger_id": f"trigger-{fakes.next_slack_ts()}",
+        "response_url": f"{BASE_URL}/mock/slack/command-response",
+    }
+    body = urlencode(fields).encode()
+    timestamp = str(int(time.time()))
+    response = await _post_signed(
+        str(form.get("path") or "/webhooks/slack/code-channel-open"), body, timestamp
+    )
+    return JSONResponse(
+        {"status": response.status_code, "body": response.json() if response.content else None}
+    )
+
+
+@app.post("/mock/slack/command-response")
+async def mock_slack_command_response(request: Request) -> JSONResponse:
+    """Stand in for Slack's `response_url`, keeping what the command answered."""
+    COMMAND_RESPONSES.append(await request.json())
+    return JSONResponse({"ok": True})
+
+
+@app.get("/mock/slack/command-responses")
+async def mock_slack_command_responses() -> JSONResponse:
+    return JSONResponse({"responses": list(COMMAND_RESPONSES)})
+
+
+@app.post("/fake-slack/conversations.invite")
+async def slack_conversations_invite(request: Request) -> JSONResponse:
+    body = await request.json()
+    INVITES.append(
+        {"channel": str(body.get("channel") or ""), "users": str(body.get("users") or "")}
+    )
+    return _ok()
+
+
+@app.get("/mock/slack/invites")
+async def mock_slack_invites() -> JSONResponse:
+    return JSONResponse({"invites": list(INVITES)})
 
 
 @app.post("/fake-slack/agents.conversations.create")

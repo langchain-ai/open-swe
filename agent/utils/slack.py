@@ -10,7 +10,7 @@ import os
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -934,6 +934,75 @@ async def post_slack_thread_reply(
         kwargs["agent_thread_id"] = agent_thread_id
     message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
     return message_ts is not None
+
+
+async def respond_to_slack_command(response_url: str, text: str) -> bool:
+    """Answer a slash command out of band, privately to whoever ran it.
+
+    A command's own HTTP response has three seconds; `response_url` is how Slack
+    takes an answer after that, for up to thirty minutes.
+    """
+    if not response_url.startswith(SLACK_RESPONSE_URL_PREFIX):
+        logger.warning("Refusing to answer a slash command at an unexpected URL")
+        return False
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                response_url, json={"response_type": "ephemeral", "text": text}
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception("Could not answer a Slack slash command")
+            return False
+    return True
+
+
+SLACK_USER_ID_RE = re.compile(r"^[UW][A-Z0-9_]+$")
+#: Where Slack takes a slash command's delayed answer. Overridden in tests.
+SLACK_RESPONSE_URL_PREFIX = "https://hooks.slack.com/"
+
+
+def slack_user_ids(values: Iterable[str]) -> list[str]:
+    """The Slack user ids in `values`, de-duplicated, mentions unwrapped."""
+    ids: list[str] = []
+    for value in values:
+        candidate = value.strip().removeprefix("<@").removesuffix(">").split("|")[0].strip()
+        candidate = candidate.upper()
+        if SLACK_USER_ID_RE.fullmatch(candidate) and candidate not in ids:
+            ids.append(candidate)
+    return ids
+
+
+async def invite_to_slack_channel(channel_id: str, user_ids: Iterable[str]) -> tuple[int, str]:
+    """Invite people to a channel, returning how many are in and any error.
+
+    A code channel invites nobody on its own unless it was opened from a
+    message, so whoever should be in it has to be put there. Failure is not
+    fatal — the channel link still works for a public channel — so the caller
+    decides what to do with the error.
+    """
+    users = slack_user_ids(user_ids)
+    if not SLACK_BOT_TOKEN or not channel_id or not users:
+        return 0, "" if users else "no_users"
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/conversations.invite",
+                headers=_slack_headers(),
+                json={"channel": channel_id, "users": ",".join(users)},
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Slack conversations.invite request failed", exc_info=True)
+            return 0, f"http_error: {type(exc).__name__}"
+    if not isinstance(data, dict):
+        return 0, "invalid_response"
+    error = str(data.get("error") or "")
+    if data.get("ok") or error == "already_in_channel":
+        return len(users), ""
+    logger.info("Could not invite %s to %s: %s", users, channel_id, error)
+    return 0, error
 
 
 async def post_slack_ephemeral_message(

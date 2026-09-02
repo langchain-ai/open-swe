@@ -25,6 +25,7 @@ from agent.input_messages import (
     system_introduction,
 )
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.spawn import CodeChannelError, SpawnOrigin, open_code_channel
 from agent.surfaces import slack_surface
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
@@ -456,6 +457,103 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     except Exception:  # noqa: BLE001
         common.logger.exception("Unexpected error while processing Slack mention")
         await _notify_slack_processing_error(event_data, repo_config)
+
+
+_CODE_CHANNEL_COMMAND_TITLE_CHARS = 120
+
+
+def _command_title(prompt: str) -> str:
+    """A provisional channel name from the prompt, until the session titles itself."""
+    first = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
+    sentence = first.split(". ")[0].strip(" .") or first
+    title = sentence[:_CODE_CHANNEL_COMMAND_TITLE_CHARS].strip()
+    return title or "Open SWE task"
+
+
+async def _command_handoff(*, prompt: str, repo: dict[str, str], channel_id: str, user: str) -> str:
+    owner, name = repo.get("owner", ""), repo.get("name", "")
+    repo_text = f"{owner}/{name}" if owner and name else "(no repository specified)"
+    return "\n\n".join(
+        (
+            "You are the agent for a new Slack code channel, opened by a command in "
+            f"<#{channel_id}>. The whole channel is one session with you.",
+            f"## Task\n{prompt}",
+            f"## Default Repository Hint\n{repo_text}\n"
+            "Use this repository unless the task clearly identifies a different one.",
+            "## Checkout\n- Nothing has been started yet: this session has its own fresh "
+            "sandbox and a clean checkout.",
+            f"## Origin\n- Asked for by {user}\n"
+            "- Nothing was posted in the channel it was asked from, so this channel is "
+            "where the work and the conversation happen.",
+        )
+    )
+
+
+async def process_code_channel_command(command: dict[str, Any]) -> None:
+    """Open a code channel for a slash command, and tell the caller where it is.
+
+    The command leaves no message behind in the channel it was typed in, so
+    there is no origin pair to inherit privacy or invite anyone: the caller is
+    invited directly, and the ephemeral reply carries the link either way.
+    """
+    channel_id = str(command.get("channel_id") or "")
+    user_id = str(command.get("user_id") or "")
+    prompt = str(command.get("text") or "").strip()
+    response_url = str(command.get("response_url") or "")
+    repo_config = command.get("repo") if isinstance(command.get("repo"), dict) else {}
+    title = _command_title(prompt)
+
+    try:
+        user_name = ""
+        slack_user = await common.get_slack_user_info(user_id) if user_id else None
+        if isinstance(slack_user, dict):
+            profile = slack_user.get("profile")
+            profile = profile if isinstance(profile, dict) else {}
+            user_name = str(
+                profile.get("display_name")
+                or profile.get("real_name")
+                or slack_user.get("name")
+                or ""
+            )
+        login = await common.login_for_slack_id(user_id)
+        opened = await open_code_channel(
+            get_langgraph_client(),
+            title=title,
+            content=await _command_handoff(
+                prompt=prompt,
+                repo=cast(dict[str, str], repo_config),
+                channel_id=channel_id,
+                user=user_name or f"<@{user_id}>",
+            ),
+            repo=cast(dict[str, str], repo_config) or None,
+            # Whoever ran the command, plus anyone they named in it.
+            invite=[user_id, *re.findall(r"<@([A-Z0-9]+)", prompt)],
+            origin=SpawnOrigin.from_config(
+                {"github_login": login or "", "user_email": ""},
+                SlackThreadRef(
+                    channel_id=channel_id,
+                    triggering_user_id=user_id,
+                    triggering_user_name=user_name,
+                ),
+            ),
+            source_context={"opened_by_command": {"channel_id": channel_id, "user_id": user_id}},
+            team_id=str(command.get("team_id") or ""),
+        )
+    except CodeChannelError as exc:
+        await common.respond_to_slack_command(
+            response_url, f"Could not open a code channel: {exc.message}"
+        )
+        return
+    except Exception:
+        common.logger.exception("Unexpected error while opening a code channel by command")
+        await common.respond_to_slack_command(
+            response_url, "Could not open a code channel. The failure is in the Open SWE logs."
+        )
+        return
+
+    # Opening the channel is what puts people in it; the link is what gets the
+    # caller there if that failed.
+    await common.respond_to_slack_command(response_url, f"Working on it in <#{opened.channel_id}>.")
 
 
 async def process_slack_plan_approval(

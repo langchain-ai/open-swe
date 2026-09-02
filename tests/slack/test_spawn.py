@@ -11,6 +11,7 @@ from agent.spawn import (
     SpawnOrigin,
     spawn_slack_session,
 )
+from agent.surfaces import slack as surfaces_slack
 
 
 class _Threads:
@@ -217,3 +218,158 @@ async def test_spawn_leaves_an_unbound_destination_alone(
         )
 
     spawn_calls["delete_slack_thread_associations"].assert_not_awaited()
+
+
+@pytest.fixture
+def opening(monkeypatch: pytest.MonkeyPatch, spawn_calls: dict[str, AsyncMock]) -> dict[str, Any]:
+    """Slack agrees to make the channel, and the webhook has not bound it yet."""
+    calls: dict[str, Any] = {
+        "create_code_channel": AsyncMock(return_value=("C-code", None)),
+        "resolve_slack_thread_id": AsyncMock(return_value="thread-code"),
+        "archive_code_channel": AsyncMock(return_value=(True, None)),
+        "invite_to_slack_channel": AsyncMock(return_value=(1, "")),
+    }
+    for name, mock in calls.items():
+        monkeypatch.setattr(spawn, name, mock)
+    chrome = {
+        "set_session_status": AsyncMock(return_value=True),
+        "set_context_bar": AsyncMock(return_value=(True, None)),
+        "set_commands": AsyncMock(return_value=({"ok": True}, None)),
+    }
+    for name, mock in chrome.items():
+        monkeypatch.setattr(surfaces_slack, name, mock)
+    return {**calls, **chrome, **spawn_calls}
+
+
+async def _open(**overrides: Any) -> Any:
+    return await spawn.open_code_channel(
+        _Client(),  # type: ignore[arg-type]
+        **{
+            "title": "Migrate the billing cron",
+            "content": "Do the work",
+            "repo": {"owner": "acme", "name": "billing"},
+            "origin": _origin(),
+            "invite": ["U1"],
+            **overrides,
+        },
+    )
+
+
+async def test_opening_a_channel_claims_the_id_the_webhook_derives(
+    opening: dict[str, Any],
+) -> None:
+    """Slack's first event in the new channel binds it; both sides land on one id."""
+    opened = await _open()
+
+    assert opened.channel_id == "C-code"
+    assert opened.session.thread_id == "thread-code"
+    assert opening["resolve_slack_thread_id"].await_args.args[1:] == ("C-code", "0")
+    assert opening["dispatch_agent_run"].await_args.args[0] == "thread-code"
+
+
+async def test_opening_a_channel_dresses_it_before_the_run_starts(
+    opening: dict[str, Any],
+) -> None:
+    """The run's completion returns the session to idle, so `processing` goes first."""
+    opened = await _open()
+
+    opening["set_session_status"].assert_awaited_once_with("C-code", "processing")
+    channel, items = opening["set_context_bar"].await_args.args
+    assert (channel, items[0]["label"]) == ("C-code", "acme/billing")
+    assert opening["set_commands"].await_args.args == (
+        "C-code",
+        surfaces_slack.DEFAULT_CODE_CHANNEL_COMMANDS,
+    )
+    assert opened.warnings == []
+
+
+async def test_chrome_that_will_not_apply_does_not_stop_the_session(
+    opening: dict[str, Any],
+) -> None:
+    opening["set_context_bar"].side_effect = RuntimeError("slack said no")
+
+    opened = await _open()
+
+    assert opened.session.thread_id == "thread-code"
+    assert "slack said no" in opened.warnings[0]
+
+
+@pytest.mark.parametrize(
+    ("origin_channel_id", "origin_message_ts", "expected"),
+    [
+        ("C-origin", "1717171717.000200", ("C-origin", "1717171717.000200")),
+        # The pair goes in together or not at all.
+        ("C-origin", "", ("", "")),
+        ("", "1717171717.000200", ("", "")),
+        ("", "", ("", "")),
+    ],
+    ids=["both", "no message", "no channel", "neither"],
+)
+async def test_the_origin_pair_is_passed_only_when_it_is_a_pair(
+    opening: dict[str, Any],
+    origin_channel_id: str,
+    origin_message_ts: str,
+    expected: tuple[str, str],
+) -> None:
+    await _open(origin_channel_id=origin_channel_id, origin_message_ts=origin_message_ts)
+
+    kwargs = opening["create_code_channel"].await_args.kwargs
+    assert (kwargs["origin_channel_id"], kwargs["origin_message_ts"]) == expected
+
+
+async def test_a_channel_slack_refuses_is_reported_not_raised(opening: dict[str, Any]) -> None:
+    opening["create_code_channel"].return_value = (None, "name_taken")
+
+    with pytest.raises(spawn.CodeChannelError, match="name_taken") as failure:
+        await _open()
+
+    assert failure.value.retryable is False
+    opening["dispatch_agent_run"].assert_not_awaited()
+
+
+@pytest.mark.parametrize("failing", ["resolve_slack_thread_id", "dispatch_agent_run"])
+async def test_a_channel_with_no_session_is_archived_rather_than_left_open(
+    opening: dict[str, Any], failing: str
+) -> None:
+    opening[failing].side_effect = RuntimeError("it exploded")
+
+    with pytest.raises(spawn.CodeChannelError, match="it exploded") as failure:
+        await _open()
+
+    assert failure.value.retryable is True
+    opening["archive_code_channel"].assert_awaited_once_with("C-code")
+
+
+async def test_opening_a_channel_puts_the_named_people_in_it(opening: dict[str, Any]) -> None:
+    """A channel nobody is in is a channel nobody reads."""
+    opened = await _open(invite=["U1", "<@U2>", "u3", "U1"])
+
+    # Mentions unwrapped, case normalized, duplicates dropped.
+    assert opening["invite_to_slack_channel"].await_args.args == ("C-code", ["U1", "U2", "U3"])
+    assert opened.invited == ["U1", "U2", "U3"]
+    assert opened.warnings == []
+
+
+@pytest.mark.parametrize("invite", [[], [""], ["not-an-id"], ["<@>"]])
+async def test_a_channel_needs_at_least_one_person(
+    opening: dict[str, Any], invite: list[str]
+) -> None:
+    with pytest.raises(spawn.CodeChannelError, match="at least one Slack user"):
+        await _open(invite=invite)
+
+    opening["create_code_channel"].assert_not_awaited()
+
+
+async def test_an_invite_slack_refuses_is_a_warning_not_a_failure(
+    opening: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The work still starts; a public channel is reachable by its link."""
+    monkeypatch.setattr(
+        spawn, "invite_to_slack_channel", AsyncMock(return_value=(0, "missing_scope"))
+    )
+
+    opened = await _open()
+
+    assert opened.session.thread_id == "thread-code"
+    assert opened.invited == []
+    assert "missing_scope" in opened.warnings[0]
