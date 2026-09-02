@@ -318,7 +318,13 @@ class BackendSupervisor {
             authorization: `Bearer ${this.token}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ limit: 1_000 }),
+          // Polled every second: without `select` the backend serializes every
+          // thread's whole state — the full message history — on the same event
+          // loop that is streaming the running agent's output.
+          body: JSON.stringify({
+            limit: 1_000,
+            select: ["thread_id", "status"],
+          }),
           signal: AbortSignal.timeout(2_000),
         },
       );
