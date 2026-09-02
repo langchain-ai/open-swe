@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 slack_breakout_tool = importlib.import_module("agent.tools.slack_start_new_thread")
+spawn = importlib.import_module("agent.spawn")
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -144,7 +145,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
 
     fake_client = _FakeClient(captured)
     monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
-    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
+    monkeypatch.setattr(spawn, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: fake_client)
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
@@ -152,14 +153,15 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_thread_reply_with_ts", fake_post_thread_reply
     )
-    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
-    monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", fake_store_mapping)
+    monkeypatch.setattr(spawn, "dispatch_agent_run", fake_dispatch_agent_run)
+    monkeypatch.setattr(spawn, "store_slack_run_mapping", fake_store_mapping)
     monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
-    monkeypatch.setattr(
-        slack_breakout_tool,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
-    )
+    for module in (slack_breakout_tool, spawn):
+        monkeypatch.setattr(
+            module,
+            "dashboard_thread_url",
+            lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
+        )
 
     result = await slack_breakout_tool.slack_start_new_thread(
         "Investigate follow-up",
@@ -295,7 +297,7 @@ async def test_slack_start_new_thread_returns_slack_failure_without_dispatch(
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
     )
-    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
+    monkeypatch.setattr(spawn, "dispatch_agent_run", fake_dispatch_agent_run)
 
     result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
 
@@ -332,7 +334,7 @@ async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_thread_reply_with_ts", fake_post_thread_reply
     )
-    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
+    monkeypatch.setattr(spawn, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool.asyncio, "sleep", fake_sleep)
 
     result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
