@@ -19,6 +19,7 @@ from typing import Any
 
 from langgraph_sdk.client import LangGraphClient
 
+from agent.auth.github_app import get_github_app_installation_token
 from agent.source_context import SourceContext
 from agent.surfaces import surface_from_metadata
 from agent.surfaces.projector import close_projection
@@ -27,7 +28,6 @@ from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
 from .session_cost import schedule_session_cost_refresh
 from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
 from .utils.slack import post_slack_thread_reply

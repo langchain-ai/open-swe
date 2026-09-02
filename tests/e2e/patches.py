@@ -28,7 +28,8 @@ def apply() -> None:
     import importlib
 
     from agent import server
-    from agent.utils import auth, authorship, slack_code_channels
+    from agent.auth import resolve as auth
+    from agent.utils import authorship, slack_code_channels
     from agent.utils import slack as slack_utils
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported

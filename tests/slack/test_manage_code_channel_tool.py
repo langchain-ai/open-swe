@@ -88,7 +88,7 @@ def creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "get_sandbox_backend": AsyncMock(return_value=backend),
         "spawn_slack_session": AsyncMock(),
         "get_slack_permalink": AsyncMock(return_value="https://slack.example/p1"),
-        "aresolve_repo_dir": AsyncMock(return_value="/workspace/open-swe"),
+        "resolve_repo_dir": AsyncMock(return_value="/workspace/open-swe"),
         "archive_code_channel": AsyncMock(return_value=(True, None)),
         # The webhook may already have bound the new channel; both sides resolve
         # to the same session id.

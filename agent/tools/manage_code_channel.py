@@ -8,13 +8,13 @@ from typing import Any, Literal
 
 from langgraph.config import get_config
 
+from agent.sandboxes.paths import resolve_repo_dir
+from agent.sandboxes.state import get_sandbox_backend
 from agent.source_context import SourceContext
 from agent.spawn import SpawnDestination, SpawnHandoff, SpawnOrigin, spawn_slack_session
 from agent.surfaces import SlackChannelSurface
 
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.sandbox_paths import aresolve_repo_dir
-from ..utils.sandbox_state import get_sandbox_backend
 from ..utils.slack import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -317,7 +317,7 @@ async def _origin_repo_state(thread_id: str, repo: dict[str, Any] | None) -> _Or
         return _OriginRepoState()
     try:
         backend = await get_sandbox_backend(thread_id)
-        repo_dir = shlex.quote(await aresolve_repo_dir(backend, repo_name))
+        repo_dir = shlex.quote(await resolve_repo_dir(backend, repo_name))
         branch = await backend.aexecute(f"git -C {repo_dir} rev-parse --abbrev-ref HEAD")
         dirty = await backend.aexecute(f"git -C {repo_dir} status --porcelain")
         # Commits on no remote branch: committed to a local branch and never pushed.

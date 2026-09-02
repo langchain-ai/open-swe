@@ -10,7 +10,8 @@ from typing import Any
 
 import httpx
 
-from .github_token import GitHubAuthError
+from agent.auth.thread_token import GitHubAuthError
+
 from .http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
