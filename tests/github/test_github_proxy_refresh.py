@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain.agents.middleware import AgentState
 
-from agent.utils import github_proxy
-from agent.utils.github_proxy import (
+from agent.auth import proxy as github_proxy
+from agent.auth.proxy import (
     PROXY_TOKEN_FALLBACK_TTL,
     clear_proxy_token_expiry,
     maybe_refresh_proxy_token,
@@ -99,7 +99,7 @@ class TestMaybeRefreshProxyToken:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
             patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
                 new=AsyncMock(return_value=("ghs_new", new_expiry)),
             ),
             patch(
@@ -130,7 +130,7 @@ class TestMaybeRefreshProxyToken:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
             patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
                 new=AsyncMock(return_value=("ghs_new", "2025-01-01T13:00:00Z")),
             ),
             patch(
@@ -159,7 +159,7 @@ class TestMaybeRefreshProxyToken:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
             patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
                 new=token_mock,
             ),
             patch(
@@ -185,7 +185,7 @@ class TestMaybeRefreshProxyToken:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
             patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
                 new=AsyncMock(return_value=(None, None)),
             ),
             patch("agent.integrations.langsmith._configure_github_proxy") as mock_configure,

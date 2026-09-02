@@ -23,8 +23,9 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from agent.sandboxes.providers import validate_sandbox_startup_config
+
     from ..utils.model import close_cached_models, validate_local_dev_llm_config
-    from ..utils.sandbox import validate_sandbox_startup_config
 
     pin_single_event_loop()
     validate_sandbox_startup_config()
