@@ -281,23 +281,6 @@ wheels = [
 ]
 
 [[package]]
-name = "browserbase"
-version = "1.18.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anyio" },
-    { name = "distro" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "sniffio" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/23/81/508db26f051bd343555a4150cf18f1af35592cc89c6352daf9e2ac369691/browserbase-1.18.0.tar.gz", hash = "sha256:b0fc42a60e2ce9ac5151029ccad133a1e57bfacbeabbb52f1145f64717a37d4b", size = 287822, upload-time = "2026-08-25T22:57:42.126Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/65/1571e910eae6045899ef6c4b0281446171039dc5eee0f879d8f1bf66aa66/browserbase-1.18.0-py3-none-any.whl", hash = "sha256:cfd03f118c64fd159e79d019b7dd403e4d4faaec736ac7c9040f7117c0c27c58", size = 146749, upload-time = "2026-08-25T22:57:43.292Z" },
-]
-
-[[package]]
 name = "cbor2"
 version = "6.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2167,7 +2150,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.1" },
-    { name = "stagehand", specifier = ">=3.22.0" },
+    { name = "stagehand", specifier = ">=3.22.0,<4.0.0" },
     { name = "uvicorn", specifier = ">=0.52.0" },
     { name = "websockets", specifier = ">=15.0.1" },
 ]
@@ -3267,17 +3250,22 @@ wheels = [
 
 [[package]]
 name = "stagehand"
-version = "4.0.2"
+version = "3.23.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "browserbase" },
-    { name = "opentelemetry-api" },
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
     { name = "pydantic" },
-    { name = "websockets" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/bc/ff6340f0e8cf730fc073cbc8aa159d646677313bdd8c818bb9ed66c1bf70/stagehand-4.0.2.tar.gz", hash = "sha256:2f8fc843a6c28a52480ac18c55e5129b3e990dbafd3fcc92cf75e22daa4e1674", size = 483387, upload-time = "2026-08-20T01:41:03.65Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/ce/66ee1591c4bc8a2a4615d986e166d5ff40c96f2e4d6ed94906680c31f259/stagehand-3.23.0.tar.gz", hash = "sha256:1a26631de1291f3b21238bf0c14fcd95083d419632ff9da64a0a20c87ea79c71", size = 290300, upload-time = "2026-08-20T01:11:19.881Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2d/f5/4f3be91655b064d9ebd80de53bf7d5b48c9bffda1afdda70f2c28a216384/stagehand-4.0.2-py3-none-any.whl", hash = "sha256:d57a28f967f1961aeadf31c3d737872879d54cf6efce05e718a644549a61d338", size = 495604, upload-time = "2026-08-20T01:41:02.331Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/0b/be3e7328eded67ba123e908802238948def272c428358405b07d3a464c26/stagehand-3.23.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:6aac8ae3aee9174cf9d6a0d278d666401436664cb76e069cc107c6efd90bff1c", size = 34611667, upload-time = "2026-08-20T01:11:23.423Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/97/350624cca9cfde181d66a53aaf1e42dd7edb0f5df8e74f313cab4b03923e/stagehand-3.23.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:bc159bac0c55c8b4bf5d91f81e944cfb1dd16b922ec01a4bbaa3bc925c7116bb", size = 33309376, upload-time = "2026-08-20T01:11:28.212Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/c6/74393018f8b5300471caeb94f6fdbf587dca9e98b4ff62f14e364f9712a4/stagehand-3.23.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:914fbd51263763981950db472e8148f58d75301e50a192524538ae50390a6bd1", size = 37386395, upload-time = "2026-08-20T01:11:33.855Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/47/cbe9c82abb29ceb4f817dcb509a2a2e6ea403c3affd9a1eb07a61618bc1c/stagehand-3.23.0-py3-none-win_amd64.whl", hash = "sha256:c4855c8f604898a4b5778a1013cfde143699732c50eaaf2df70854394fdaf2ad", size = 30875778, upload-time = "2026-08-20T01:11:17.378Z" },
 ]
 
 [[package]]
