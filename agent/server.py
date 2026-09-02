@@ -337,6 +337,11 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
+        "browser_act",
+        "browser_close",
+        "browser_extract",
+        "browser_navigate",
+        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -418,49 +423,6 @@ def _general_purpose_subagent(
     if skills:
         subagent["skills"] = skills
     return subagent
-
-
-BROWSER_SUBAGENT_DESCRIPTION = (
-    "Drives sandbox-local Chromium with Stagehand to "
-    "accomplish tasks that require interacting with live web pages: logging "
-    "into dashboards, clicking through flows, filling forms, reading "
-    "JS-rendered content, reproducing UI bugs, and extracting structured data. "
-    "Prefer the `fetch_url` tool for static page reads; delegate here only when "
-    "the task needs interaction or JavaScript-rendered content."
-)
-
-BROWSER_SUBAGENT_SYSTEM_PROMPT = """You are a browser automation specialist. You control a real Chromium \
-browser via Stagehand tools.
-
-Workflow:
-1. Call `browser_navigate` to open the browser and go to the starting URL.
-2. Use `browser_observe` to find actionable elements before acting when the \
-page is unfamiliar.
-3. Use `browser_act` for clicks/typing/navigation with concise \
-natural-language instructions (one action per call).
-4. Use `browser_extract` to pull the specific data the caller asked for, \
-passing a JSON schema when you need a precise shape.
-5. Always call `browser_close` when finished to release the session.
-
-Guidance:
-- Take one concrete step at a time and verify the result before the next.
-- Keep instructions specific and grounded in what `browser_observe`/\
-`browser_extract` returned.
-- Do not exfiltrate credentials or secrets. Only act on the task you were \
-delegated.
-- Return a concise summary of what you did and the data you extracted; include \
-the session replay URL if one was returned."""
-
-
-def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
-    return {
-        "name": "browser",
-        "description": BROWSER_SUBAGENT_DESCRIPTION,
-        "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
-        "tools": tools,
-        "model": model,
-        "middleware": _subagent_model_middleware(),
-    }
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -1151,11 +1113,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = configurable.get("stop_summary") is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
     observability_tools: list[Any] = []
-    browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
         observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1236,6 +1196,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
+    if not stop_summary_mode and not local_run:
+        browser_tools = load_browser_tools()
+        if browser_tools:
+            integration_tool_groups["Browser"] = browser_tools
     # Corridor's catalog is a static allowlist, so the MCP handshake that used to
     # run before every first model call now waits until the agent asks for it.
     if not stop_summary_mode and not local_run and corridor_configured():
@@ -1305,7 +1269,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
-            *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         skills=skill_sources,
         backend=agent_backend,

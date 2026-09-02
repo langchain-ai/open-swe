@@ -7,6 +7,7 @@ import os
 import shlex
 from typing import Any
 
+from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
 
 from agent.sandboxes.state import get_sandbox_backend
@@ -114,9 +115,18 @@ async def browser_close() -> dict[str, Any]:
     return await _request("close")
 
 
-def load_browser_tools() -> list[Any]:
+def load_browser_tools() -> list[BaseTool]:
     """Return sandbox-local Stagehand tools when securely configured."""
     if not browser_tools_enabled():
         return []
     logger.info("Sandbox-local Stagehand tools enabled (model=%s)", _model_name())
-    return [browser_navigate, browser_act, browser_observe, browser_extract, browser_close]
+    return [
+        StructuredTool.from_function(coroutine=tool)
+        for tool in (
+            browser_navigate,
+            browser_act,
+            browser_observe,
+            browser_extract,
+            browser_close,
+        )
+    ]
