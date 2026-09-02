@@ -7,12 +7,12 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.platforms.slack import client as slack_utils
-from agent.platforms.slack import code_channels as slack_code_channels
-from agent.platforms.slack import events as slack_events
+from agent.slack import client as slack_utils
+from agent.slack import code_channels as slack_code_channels
+from agent.slack import events as slack_events
+from agent.slack import routes as slack_routes
+from agent.slack import webhook as slack_service
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack as slack_service
-from agent.webhooks import slack_routes
 
 
 class _FakeRequest:

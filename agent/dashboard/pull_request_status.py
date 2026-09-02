@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from agent.platforms.github.http import (
+from agent.github.http import (
     GITHUB_API_BASE,
     GITHUB_GRAPHQL,
     github_client,

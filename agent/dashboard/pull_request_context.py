@@ -7,12 +7,12 @@ from typing import Any
 import httpx
 
 from agent.dashboard.pull_request_status import _pull_request_identity
-from agent.platforms.github.comments import (
+from agent.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
     sanitize_github_comment_body,
 )
-from agent.platforms.github.http import GITHUB_GRAPHQL, github_client, github_request
+from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
 
 _CONTEXT_LIMIT = 100
 _FIELD_LIMIT = 4_000

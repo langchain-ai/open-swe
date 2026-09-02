@@ -14,7 +14,7 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
-from agent.auth.thread_token import get_github_token
+from agent.github.thread_token import get_github_token
 from agent.review.findings import get_thread_metadata
 from agent.review.publish import settle_review_check_run
 

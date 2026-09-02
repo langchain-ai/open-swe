@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.platforms.slack import client as slack_utils
+from agent.slack import client as slack_utils
 from agent.utils.user_messages import warning
 
 

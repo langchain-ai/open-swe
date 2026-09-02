@@ -3,9 +3,9 @@ from typing import Any
 
 import pytest
 
-from agent.platforms.linear import client as linear
+from agent.linear import client as linear
 
-linear_search_tool = importlib.import_module("agent.tools.linear_search_issues")
+linear_search_tool = importlib.import_module("agent.linear.tools.search_issues")
 
 
 async def test_search_issues_returns_results_and_pagination(

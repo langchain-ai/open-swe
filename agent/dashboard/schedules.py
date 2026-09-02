@@ -18,7 +18,7 @@ from agent.dashboard.thread_api import _agent_version_metadata, _resolve_run_ema
 from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
-from agent.platforms.slack.client import (
+from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,

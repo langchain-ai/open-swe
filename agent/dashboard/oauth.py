@@ -18,8 +18,8 @@ import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
-from agent.dashboard.github_token_auth import bearer_github_token
-from agent.platforms.github.org_membership import is_user_active_org_member
+from agent.github.org_membership import is_user_active_org_member
+from agent.github.token_auth import bearer_github_token
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)

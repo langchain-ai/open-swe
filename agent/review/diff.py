@@ -226,7 +226,7 @@ async def fetch_pr_diff(
     """
     import httpx
 
-    from agent.platforms.github.http import github_client, github_request
+    from agent.github.http import github_client, github_request
 
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
     try:
@@ -262,7 +262,7 @@ async def fetch_pr_metadata(
     """
     import httpx
 
-    from agent.platforms.github.http import github_client, github_request
+    from agent.github.http import github_client, github_request
 
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
     try:

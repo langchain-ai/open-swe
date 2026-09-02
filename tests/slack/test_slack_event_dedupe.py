@@ -7,10 +7,10 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.platforms.slack import events as slack_events
+from agent.slack import events as slack_events
+from agent.slack import routes as slack_routes
+from agent.slack import webhook as slack_service
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack as slack_service
-from agent.webhooks import slack_routes
 
 
 class _ConflictError(Exception):

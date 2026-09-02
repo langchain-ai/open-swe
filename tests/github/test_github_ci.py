@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.platforms.github import ci as github_ci
+from agent.github import ci as github_ci
 
 
 class _FakeResponse:

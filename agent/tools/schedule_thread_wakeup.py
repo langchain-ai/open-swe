@@ -14,7 +14,7 @@ from langgraph_sdk import get_client
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from agent.input_messages import build_run_input
-from agent.platforms.slack.client import get_active_slack_thread
+from agent.slack.client import get_active_slack_thread
 from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.platforms.slack.client import extract_channel_description_text
+from agent.slack.client import extract_channel_description_text
 from agent.utils.repo import extract_repo_from_text
 
 
@@ -105,7 +105,7 @@ class TestLinearWebhookRepoOverride:
 
     @pytest.mark.asyncio
     async def test_comment_repo_overrides_team_mapping(self, _base_payload: dict) -> None:
-        from agent.webhooks.linear_routes import linear_webhook
+        from agent.linear.routes import linear_webhook
 
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
@@ -141,7 +141,7 @@ class TestLinearWebhookRepoOverride:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_team_mapping_when_no_repo_in_comment(self) -> None:
-        from agent.webhooks.linear_routes import linear_webhook
+        from agent.linear.routes import linear_webhook
 
         payload = {
             "type": "Comment",

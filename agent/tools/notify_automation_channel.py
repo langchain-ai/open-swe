@@ -7,7 +7,7 @@ from weakref import WeakValueDictionary
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.platforms.slack.client import (
+from agent.slack.client import (
     append_slack_web_link_footer,
     post_slack_top_level_message_with_ts,
 )

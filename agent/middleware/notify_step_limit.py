@@ -9,7 +9,7 @@ from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
 from agent.middleware.message_content import content_to_text
-from agent.platforms.slack.client import (
+from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
     post_slack_thread_reply,

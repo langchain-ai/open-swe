@@ -21,13 +21,13 @@ from agent.dashboard.workflow_approval import (
     mark_workflow_push_notified,
     workflow_push_approved,
 )
-from agent.platforms.slack.client import (
+from agent.sandboxes.state import SANDBOX_BACKENDS
+from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
 )
-from agent.sandboxes.state import SANDBOX_BACKENDS
-from agent.tools.slack_thread_reply import build_workflow_approval_blocks
+from agent.slack.tools.thread_reply import build_workflow_approval_blocks
 from agent.utils.dashboard_links import dashboard_workflow_approval_url
 
 logger = logging.getLogger(__name__)

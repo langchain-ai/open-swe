@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from agent.auth import resolve as auth
+from agent.github import token as auth
 
 
 def test_leave_failure_comment_posts_generic_token_free_slack_notice(

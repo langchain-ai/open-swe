@@ -18,14 +18,14 @@ from typing import Any
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.auth.github_app import get_github_app_installation_token
-from agent.platforms.github.comments import post_github_comment
-from agent.platforms.linear.client import comment_on_linear_issue
-from agent.platforms.slack.client import post_slack_thread_reply
-from agent.platforms.slack.code_channels import is_code_channel_session, set_session_status
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import post_github_comment
+from agent.linear.client import comment_on_linear_issue
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
+from agent.slack.client import post_slack_thread_reply
+from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client

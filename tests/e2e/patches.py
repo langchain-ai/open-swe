@@ -28,9 +28,9 @@ def apply() -> None:
     import importlib
 
     from agent import server
-    from agent.auth import resolve as auth
-    from agent.platforms.slack import client as slack_utils
-    from agent.platforms.slack import code_channels as slack_code_channels
+    from agent.github import token as auth
+    from agent.slack import client as slack_utils
+    from agent.slack import code_channels as slack_code_channels
     from agent.utils import authorship
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
@@ -91,7 +91,7 @@ def apply() -> None:
     # fake store instead. The environment tools, store writes, name/tag scheme
     # and status transitions all still run for real.
     from agent.dashboard import environments as environments_store
-    from agent.integrations import langsmith as langsmith_integration
+    from agent.sandboxes.providers import langsmith as langsmith_integration
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that

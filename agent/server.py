@@ -42,7 +42,6 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.auth.resolve import resolve_github_token
 from agent.dashboard.admin import is_admin, is_observability_authorized
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -71,6 +70,8 @@ from agent.dashboard.team_settings import (
 )
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
+from agent.github.org_membership import is_user_active_org_member
+from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
     build_input_messages,
@@ -79,16 +80,6 @@ from agent.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from agent.integrations.corridor_mcp import (
-    CORRIDOR_TOOL_NAMES,
-    corridor_configured,
-    load_corridor_tools,
-)
-from agent.integrations.currents_tools import load_currents_tools
-from agent.integrations.datadog_mcp import load_datadog_tools
-from agent.integrations.langsmith_tools import load_langsmith_tools
-from agent.integrations.notion_mcp import load_notion_tools
-from agent.integrations.stagehand_browser import load_browser_tools
 from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -115,7 +106,6 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from agent.platforms.github.org_membership import is_user_active_org_member
 from agent.prompt import (
     construct_sender_context,
     construct_system_prompt,
@@ -141,6 +131,16 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.tool_loaders.corridor_mcp import (
+    CORRIDOR_TOOL_NAMES,
+    corridor_configured,
+    load_corridor_tools,
+)
+from agent.tool_loaders.currents import load_currents_tools
+from agent.tool_loaders.datadog_mcp import load_datadog_tools
+from agent.tool_loaders.langsmith import load_langsmith_tools
+from agent.tool_loaders.notion_mcp import load_notion_tools
+from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
     background_execute,

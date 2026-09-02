@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from agent.integrations import stagehand_browser
+from agent.tool_loaders import stagehand_browser
 
 
 class Result:

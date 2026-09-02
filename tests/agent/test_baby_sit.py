@@ -9,7 +9,7 @@ from langgraph_sdk.errors import ConflictError
 
 from agent import baby_sit, scheduler
 from agent import store as agent_store
-from agent.platforms.slack.client import GitHubPrRef
+from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 
 

@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
-from agent.platforms.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,

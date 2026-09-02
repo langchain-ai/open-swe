@@ -2,7 +2,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.auth.thread_token import get_github_token
+from agent.github.thread_token import get_github_token
 from agent.review.findings import (
     FindingInteraction,
     ReviewerThreadMissingError,

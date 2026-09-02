@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import server
-from agent.integrations import corridor_mcp
+from agent.tool_loaders import corridor_mcp
 
 
 class _FakeTool:

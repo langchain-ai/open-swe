@@ -33,7 +33,7 @@ from agent.dashboard.thread_api import (
     _thread_source,
 )
 from agent.dispatch import dispatch_agent_run
-from agent.platforms.slack.client import post_slack_thread_reply
+from agent.slack.client import post_slack_thread_reply
 from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)

@@ -49,7 +49,6 @@ from agent.dashboard.environments import (
 from agent.dashboard.eval_jobs import (
     get_reviewer_eval_status,
 )
-from agent.dashboard.github_token_auth import admin_session_for_github_token, bearer_github_token
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -163,14 +162,6 @@ from agent.dashboard.skills import (
     update_organization_skill,
     update_skill,
 )
-from agent.dashboard.slack_oauth import (
-    SLACK_STATE_COOKIE_NAME,
-    build_authorize_url,
-    exchange_slack_code,
-    fetch_slack_identity,
-    slack_oauth_configured,
-    verify_team,
-)
 from agent.dashboard.team_credentials import (
     DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
@@ -251,6 +242,15 @@ from agent.dashboard.user_mappings import (
     upsert_mapping,
 )
 from agent.dashboard.voice import transcribe_audio
+from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.slack.oauth import (
+    SLACK_STATE_COOKIE_NAME,
+    build_authorize_url,
+    exchange_slack_code,
+    fetch_slack_identity,
+    slack_oauth_configured,
+    verify_team,
+)
 from agent.utils.thread_ops import langgraph_url
 from agent.utils.timing import server_timing_header
 
@@ -2056,7 +2056,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1013, reason="Cloud terminal capacity reached")
         return
     try:
-        from agent.integrations.langsmith import connect_async_langsmith_sandbox
+        from agent.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
 
         client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
         cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"

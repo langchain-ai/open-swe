@@ -3,7 +3,7 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.platforms.github import checks as github_checks
+from agent.github import checks as github_checks
 from agent.review import publish as reviewer_publish
 
 

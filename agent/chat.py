@@ -32,7 +32,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.auth.github_app import get_github_app_installation_token
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -44,6 +43,7 @@ from agent.dashboard.team_settings import (
     get_team_default_model,
     get_team_fable_enabled,
 )
+from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,

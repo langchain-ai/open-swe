@@ -39,8 +39,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.auth.github_app import get_github_app_installation_token_with_expiry
-from agent.auth.thread_token import cache_github_token_for_thread
 from agent.dashboard.options import gate_fable_model
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -49,6 +47,8 @@ from agent.dashboard.team_settings import (
     get_team_default_model_pair,
     get_team_fable_enabled,
 )
+from agent.github.app import get_github_app_installation_token_with_expiry
+from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
     BasePrepareRunMiddleware,
     ModelCallTimeoutMiddleware,

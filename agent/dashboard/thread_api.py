@@ -35,7 +35,6 @@ from agent.dashboard.profiles import get_profile, get_valid_access_token
 from agent.dashboard.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.dashboard.pull_request_context import get_pull_request_context
 from agent.dashboard.pull_request_status import get_pull_request_statuses
-from agent.dashboard.slack_oauth import SLACK_TEAM_ID
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from agent.dashboard.thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
@@ -47,12 +46,13 @@ from agent.input_messages import (
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
-from agent.platforms.slack.client import (
+from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     parse_github_pr_url,
     update_slack_trace_reply_for_web_handoff,
 )
-from agent.platforms.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from agent.slack.oauth import SLACK_TEAM_ID
 from agent.source_context import SourceContext
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import (
@@ -112,7 +112,7 @@ _SANDBOX_CREATING_SENTINEL = "__creating__"
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
-    from agent.sandboxes.providers import create_sandbox as _create_sandbox
+    from agent.sandboxes.providers.registry import create_sandbox as _create_sandbox
 
     return await _create_sandbox(*args, **kwargs)
 

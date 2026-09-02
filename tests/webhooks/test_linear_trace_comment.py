@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
-from agent.platforms.linear import client as linear_utils
+from agent.linear import client as linear_utils
 
 
 async def test_posts_resolved_trace_url() -> None:

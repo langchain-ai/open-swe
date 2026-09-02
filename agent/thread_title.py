@@ -14,7 +14,7 @@ from agent.input_messages import (
     input_message_text,
     wrap_system_prompt,
 )
-from agent.platforms.slack.code_channels import CODE_CHANNEL_SESSION_TS, rename_session
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, rename_session
 from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)

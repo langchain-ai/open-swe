@@ -6,7 +6,7 @@ from typing import Any, Literal, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.platforms.slack.client import (
+from agent.slack.client import (
     fetch_slack_thread_message_by_ts,
     format_slack_session_cost,
     lookup_slack_run_message_mapping,

@@ -30,9 +30,8 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.auth.github_app import get_github_app_installation_token
 from agent.dashboard.team_settings import get_effective_gateway_enabled
-from agent.integrations.langsmith import _configure_github_proxy
+from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
@@ -51,6 +50,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.providers.langsmith import _configure_github_proxy
 from agent.sandboxes.state import unwrap_sandbox_backend
 from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt

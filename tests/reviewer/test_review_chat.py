@@ -13,8 +13,8 @@ from agent.dashboard import review_chat_api
 # `agent.tools.__init__` rebinds these names to the tool *functions*, shadowing
 # the submodules. Import the real modules so we can monkeypatch their globals.
 list_review_findings = importlib.import_module("agent.tools.list_review_findings")
-read_repo_file = importlib.import_module("agent.tools.read_repo_file")
-search_repo_code = importlib.import_module("agent.tools.search_repo_code")
+read_repo_file = importlib.import_module("agent.github.tools.read_repo_file")
+search_repo_code = importlib.import_module("agent.github.tools.search_repo_code")
 web_search = importlib.import_module("agent.tools.web_search")
 
 
