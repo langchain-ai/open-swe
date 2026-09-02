@@ -62,6 +62,19 @@ function cleanSkills(value) {
     }));
 }
 
+function cleanPaths(value) {
+  if (!Array.isArray(value)) return [];
+  const paths = value
+    .filter(
+      (item) =>
+        typeof item === "string" &&
+        item.length <= 8_192 &&
+        path.isAbsolute(item),
+    )
+    .map((item) => path.normalize(item));
+  return [...new Set(paths)];
+}
+
 function normalizeThread(value) {
   if (
     !isRecord(value) ||
@@ -97,6 +110,7 @@ function normalizeThread(value) {
       worktreePath && path.isAbsolute(worktreePath)
         ? path.normalize(worktreePath)
         : null,
+    ownedWorktrees: cleanPaths(value.ownedWorktrees),
     title: value.title.slice(0, 80) || "New local agent",
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
@@ -176,6 +190,7 @@ class LocalThreadStore {
       id: this.uuid(),
       cwd: input.cwd,
       worktreePath: null,
+      ownedWorktrees: [],
       title: sessionTitle(prompt),
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
@@ -231,8 +246,12 @@ class LocalThreadStore {
     return this.get(id);
   }
 
-  /** `null` moves the thread back into the project's own checkout. */
-  setWorktree(id, worktreePath) {
+  /**
+   * `null` moves the thread back into the project's own checkout. `owned` marks
+   * a worktree this app created: it stays recorded even after the thread moves
+   * off it, so nothing the app made is left behind when the thread is deleted.
+   */
+  setWorktree(id, worktreePath, owned = false) {
     const current = this.threads.get(id);
     if (!current) return null;
     if (
@@ -240,9 +259,14 @@ class LocalThreadStore {
       (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath))
     )
       throw new Error("Invalid worktree path");
+    const next = worktreePath && path.normalize(worktreePath);
     this.threads.set(id, {
       ...current,
-      worktreePath: worktreePath && path.normalize(worktreePath),
+      worktreePath: next,
+      ownedWorktrees:
+        owned && next
+          ? [...new Set([...current.ownedWorktrees, next])]
+          : current.ownedWorktrees,
       updatedAt: this.now(),
     });
     this.persist();

@@ -19,6 +19,8 @@ export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
   worktreePath: string | null
+  /** Worktrees this app created for the thread, removed when it is deleted. */
+  ownedWorktrees?: Array<string>
   title: string
   viewed: boolean
   archived?: boolean

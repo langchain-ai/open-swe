@@ -141,6 +141,18 @@ function pathIsInside(root, candidate) {
   );
 }
 
+/**
+ * Worktrees the app made are the only ones it may take over or delete: one the
+ * user created themselves is theirs, and the backend refuses to run in it.
+ */
+function managedWorktree(candidate) {
+  return typeof candidate === "string" &&
+    path.isAbsolute(candidate) &&
+    pathIsInside(worktreesPath(), path.normalize(candidate))
+    ? path.normalize(candidate)
+    : null;
+}
+
 function registeredProject(cwd) {
   try {
     const canonical = fs.realpathSync(cwd);
@@ -228,7 +240,7 @@ async function createThreadWorktree(thread, baseBranch) {
     `${path.basename(repo)}-${token}`,
   );
   await addWorktree(repo, worktree, `open-swe/local-${token}`, base);
-  return localThreadStore.setWorktree(thread.id, worktree);
+  return localThreadStore.setWorktree(thread.id, worktree, true);
 }
 
 /**
@@ -255,8 +267,8 @@ async function assertWorkspaceFree(root, exceptThreadId = null) {
 
 /**
  * A branch can only be checked out in one working tree, so a thread starting on
- * one that already has a worktree runs in that worktree rather than trying to
- * create a second checkout of it.
+ * one that already has a worktree of this app's runs in that worktree rather
+ * than trying to create a second checkout of it.
  */
 async function startThreadWorktree(thread, baseBranch) {
   const project = await repoRoot(thread.cwd);
@@ -264,7 +276,8 @@ async function startThreadWorktree(thread, baseBranch) {
     ? (await localBranches(project)).find((ref) => ref.name === baseBranch)
         ?.worktreePath
     : null;
-  if (!existing) return createThreadWorktree(thread, baseBranch);
+  if (!existing || !managedWorktree(existing))
+    return createThreadWorktree(thread, baseBranch);
   await assertWorkspaceFree(existing, thread.id);
   return localThreadStore.setWorktree(thread.id, existing);
 }
@@ -287,9 +300,27 @@ async function ensureThreadWorktree(thread) {
   return thread;
 }
 
+/**
+ * Every worktree this app made for the thread, including ones it has since
+ * moved off, minus any another thread is in or owns.
+ */
 async function discardThreadWorktree(thread) {
-  const repo = thread.worktreePath && (await repoRoot(thread.cwd));
-  if (repo) await removeWorktree(repo, thread.worktreePath);
+  const others = localThreadStore.list().filter((it) => it.id !== thread.id);
+  const owned = [
+    ...new Set([...thread.ownedWorktrees, thread.worktreePath]),
+  ].filter(
+    (worktree) =>
+      managedWorktree(worktree) &&
+      !others.some(
+        (other) =>
+          other.worktreePath === worktree ||
+          other.ownedWorktrees.includes(worktree),
+      ),
+  );
+  if (!owned.length) return;
+  const repo = await repoRoot(thread.cwd);
+  if (!repo) return;
+  for (const worktree of owned) await removeWorktree(repo, worktree);
 }
 
 function configureDesktopIpc() {
@@ -503,6 +534,10 @@ function configureDesktopIpc() {
       (candidate) => candidate.name === branch,
     );
     if (ref?.worktreePath) {
+      if (!managedWorktree(ref.worktreePath))
+        throw new Error(
+          `“${branch}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+        );
       await assertWorkspaceFree(ref.worktreePath, thread.id);
       return moveThreadWorkspace(thread, ref.worktreePath);
     }
