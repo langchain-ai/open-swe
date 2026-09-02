@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:2ed1139f825f44af724c841ccc304ca1cbe2ffecd81fdd636671e25e93df0c9d",
+  "pageVersion": "sha256:569814a041ebc5f5a2527e9a3b31a81642f5d785bc39e00bb80437861ebca979",
   "claims": [
     {
       "id": "claim_dbbc3ca9eca441849138011e70eadf76",
@@ -95,30 +95,6 @@
         {
           "resource": "repo://agent/dashboard/routes.py#L2015-L2116",
           "version": "repo-lines-v1:sha256:066ca936e3bdd397fe0e785e3cf19be6fb727467b73e96e53977f70d7b805022:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4OTY4Y2UyNDkxMzBmOWY0ZTFhOWUxOTEzZWJiODk2NzY4YjZkYjlhNmRkYzY2ZjMzNzVmODgzNDA4NGYxYTQxIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJkZTYwMzljYTgwNDZiNTE2ODVlYWI4NzY1ZWIwOTMyMjE5NDIwN2RlMWUxMjhkZDYxMDczNjYwYmRmZGE1NTIyIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI0ZmJkMDA5MzE0YmMyNzA4NDE2NzM0YTAyYWU1ZmYzOWExZTQ4YTA1MGJlOTFmNDNiMmZhYTkyMDAyYzYyYmZjIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI3NzUyZTJkZjVkNWRmZjY5NzE0Y2QwZDRhYTFlOTc1NTFkMmZlYWQ4ZTc5OGM0ZTFjY2VhYTFhYTFlNWM1YzcwIn0"
-        }
-      ]
-    },
-    {
-      "id": "claim_0fc3441cbb7444139943a30079b94567",
-      "statement": "The ui/ app is a TanStack Start file-based-route app whose key routes include agents (with nested threads, local, environments, instructions, sandbox), review and $owner.$repo.pull.$number, admin and admin_.evals, usage, cloud-agents, my-settings, and login.",
-      "evidence": [
-        {
-          "resource": "repo://ui/src/routes/__root.tsx#L23-L54",
-          "version": "repo-lines-v1:sha256:5f1d7e136516b712afd166829436ca3a93af8adf37ae03c4562540105f89c6ba:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzM2VjM2VhYjVlNWJkZWIwODFjMjhhYTNmYTM2Yjg5YWUzMDZlZDRlMjcyNDE1NzIyMzJiMjQzMzViYTZhYzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1ODBiNzY1MThkYWU5NzlmYWViZDAyMzY3YTI5MjkyYTUwZDk3NjA5MjI1MWEzOGE2Y2UzMDg4MGJhNDI4MjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIxZTgxNGI2N2QyZjc0ODU2NjRlOGY2NTk1ODJkYTVkMzU3N2Y1OTdmNTc1MTUyNDA2M2U1ZGE0MGMwNzlhNjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVkYTkwZmExYTAwODZkNmQ2ODgzYjIxNTdjZjU3YjIzMDMxMzA4YTVjNmNmMzIzY2M3NmY4ZjFlMWI2NDUyZTQifQ"
-        },
-        {
-          "resource": "repo://ui/src/routes/agents.tsx#L11-L13",
-          "version": "repo-lines-v1:sha256:7b89986843b34e4c1ea6af9764b58ae80e8c7cff0465f2a3825d375017303f7b:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGYyNTdkMTU3ZGE1NDBlNjY1Y2Y4MTlkZDZhZGIzYmNhNzE4NGI5YzA4MmQ1NzEyMTQzMGU0MGUwYTdjZTgwNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODU4MGI3NjUxOGRhZTk3OWZhZWJkMDIzNjdhMjkyOTJhNTBkOTc2MDkyMjUxYTM4YTZjZTMwODgwYmE0MjgyNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTYxYmMzOGY1MjYyMDEwNzNiY2M0YTdlM2IyY2FhZTE4ZGUyOTU4YzMzMjc5YjBkZjAyMzQxYzFhYmM2ZTAzMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2FlZTAxZmEwOWRlMmRjYWYzNThhNjliOWZmNDNhNjc5NDIyNWRlYmU0YWE0ZjNiODZiODY1OWU2NWQ1M2E1NCJ9"
-        }
-      ]
-    },
-    {
-      "id": "claim_f6a26fe87b0c4b1a9423e8f129eb7975",
-      "statement": "The ui/ integrations route is a redirect to my-settings because integrations were folded into Profile Settings.",
-      "evidence": [
-        {
-          "resource": "repo://ui/src/routes/integrations.tsx#L1-L7",
-          "version": "repo-lines-v1:sha256:72e1e20787cf4550f97aa19c44a3c0daa71b0f8a5f360438d4c9038c3ecdb213:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDZiZmZkMTkyMmNjZWU4ZDJkMDY5YjgxMDdjNTdlMjZkZDk3MTllOGFmMTZmZTgxZjI0ZGNiNzAzMGUwMDkxZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODU4MGI3NjUxOGRhZTk3OWZhZWJkMDIzNjdhMjkyOTJhNTBkOTc2MDkyMjUxYTM4YTZjZTMwODgwYmE0MjgyNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
         }
       ]
     },
@@ -318,19 +294,23 @@
     },
     {
       "id": "claim_337b6db68ab943df8ec5d0d07bcb6f94",
-      "statement": "The thread listing API reserves all=true for administrators, supports a paginated filterable page view, and its sidebar separates active/resolved threads, excludes automation threads unless requested, and includes readable pinned threads.",
+      "statement": "Thread discovery is participant/admin scoped: all=true is reserved for administrators; ordinary page and project listings derive candidates from participant metadata, while pinned entries are fetched from a per-login store and independently checked for current readability.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/routes.py#L1835-L1925",
-          "version": "repo-lines-v1:sha256:cd98ad454592eb44207162390e25a25901e50f94feecce01eb18b1b63ea54150:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhNjZhNjJlYmVmZDNiNTNiN2M4NGU5ODM2MjkwMGU4NWI4OGQ3NzNlYTg0ZTNjNzJkYzdlOWE4ZTQ4MmQ0ODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBhZDY4ZDMyZTQwOTQxYTBjNWE1ZTAzYTExZTNhMGNiOWMyYmYwY2VlMmY1ZmQyN2NkNzU1YzdhMjJmYzY4ODQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxMzJjMmE0OTlhZjI5NzhhYWZjNjU2Yjc5YzU3MjdjYTQ5MmVjMzQ2MzljZGNiMTA1MGU4NzU3MzFhOTYwMTgifQ"
+          "resource": "repo://agent/dashboard/routes.py#L1835-L1931",
+          "version": "repo-lines-v1:sha256:08a0aaed9b59754de1611f134b7a7dc0b2cbbedd9c8c69afbd46f17bdda32f3b:eyJzZWxlY3RlZExpbmVDb3VudCI6OTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAwZjIxNjNjZGUyNTJiNmUwYWUyNDQ3ZjAxZjgzNGFhZGIxMjdlNTkxY2I3OTgwMGE2NzhkZTNkYTdhMWY5YTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxMzJjMmE0OTlhZjI5NzhhYWZjNjU2Yjc5YzU3MjdjYTQ5MmVjMzQ2MzljZGNiMTA1MGU4NzU3MzFhOTYwMTgifQ"
         },
         {
-          "resource": "repo://agent/dashboard/thread_api.py#L1121-L1163",
-          "version": "repo-lines-v1:sha256:7652f254557e0600bbb23be5455b8c26ecbeff401317e134d4e3ee36eb24efde:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4ZDA5MTA2NDI3MmYxNTc2NTU4NWFlYmY2YjllZTRkY2NhMDQ3N2MwODBlOWMwNjY3YzQ0NmZkNzZjY2U4ZTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQxYTFhYzU3NDQwZTMzY2U0MzNhOTdmZGUzNDVmMDY1MjBlNWQ2OTJlMTk2OGU4OTE5ZTdkNWU0ZjA3OGJjNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY4N2E4NDMwMGI3Zjg0ZGE2OWJmYTNmZTJiMWNlOTgzMjk1NjFhYWEwYWEwNWRiODdjMmU1MjhjOWM3NTM5NDcifQ"
+          "resource": "repo://agent/dashboard/thread_api.py#L684-L713",
+          "version": "repo-lines-v1:sha256:34f34864d594c150240e52bcc7471c011d0004652d02a5d1207cef1b43c63e72:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiMjQ2MGQ3ZTcwY2U1ODI3NmU1MjljYjUwMDNlYTQyYzQ1MTYzM2E1MGRiMzQyNGVhN2MwNmViNzQ5ODdkM2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg2MWRiMjFkN2Y3OWI5ZjhiNmFlNzQ3MDQ1Nzg0ZWI3M2YxMjRmZDU3ZTZjOTkxMTQyNjkyNTAxYmE3YzExNGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg4ZGRiZjBjODMyNjE0MjAzNjlkODg0OTA4Zjk4NThlYjllOWM2M2Y4ZmJhZWFhMjVlYzQ0NDk0NjM2ZWNmZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1ODQ0ZTZlMDUzOWY4ZTE0NjRmNzVmYzFjMmMwOTJmMTk1ZDNjNzM1NTdkY2M5YzMwNDE3MzU4NGE1NTQxMTYifQ"
         },
         {
-          "resource": "repo://agent/dashboard/thread_api.py#L955-L1102",
-          "version": "repo-lines-v1:sha256:27de200a9cbfcc0eabf13070ae00547c64492e63dd5d4785b9e899fd47049ff8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI2NGFmZmI1NTcyNzYxZDU4YjdkMzk5ZDkwNTc5OTYyYTQ3ZWVkODhiOWUzNDg3YTdhNTliNDI3YmIzM2FhZWRhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0ODkzZjQwZTM3ODFlYjg5NmM4MmQwNDZhMDgwNjdhMTFlMzVjZGYyZjFkZmFmMjZmZWE5MGI4ZGI2Njc2NDEzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIzMGNkNzc5N2VmOTNlYzMyNGExNjlmZjk5Y2Y5OWI4OGUyY2E2MzYwZjM3M2NlOGQ2YWVmOWY5M2E1Njc1MzlhIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIxOGM5NzU2Zjk0NDllMmVmMThlODdhNzM1MWVmYTNhYThhMmM4YzBlNjFjMzBhODliMGExNjhjMzcyMDM0ZjFhIn0"
+          "resource": "repo://agent/dashboard/thread_api.py#L981-L1054",
+          "version": "repo-lines-v1:sha256:fde4f3fcd3b2067d3a53a6bd1824473908293fdaaa33df7e6a62ff31582df958:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0YWZmYjU1NzI3NjFkNThiN2QzOTlkOTA1Nzk5NjJhNDdlZWQ4OGI5ZTM0ODdhN2E1OWI0MjdiYjMzYWFlZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzMWI3MDJkOTg4MWJjM2IyZjY3MGI3YzlhNzIyNGFmMTVlM2VlNDFhMzg4OTQyMmVjNjAxN2Y0OWFiZGE3Y2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ3ZTg3NGIwZTMwYjJmZDQ3OTY0NWY5MDgxYzE4MTJlYWE5MThiZmUzYzU2ZjUyNWYwMDRiY2RkYWVhMzFjNWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMyY2ZmYjc5OTcyNGNjOGI0YmJhZjhhNmQzYjhjMWFiMjU1MzQ5OTMwOWZmM2UyZGRjNmI1YjZhY2FjZGJlOTgifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/thread_pins.py#L5-L28",
+          "version": "repo-lines-v1:sha256:f9872ce274d19b51dad6ad8586478ef7d2664bdf58e2ebab61c892391b08c87e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdhZTc2MTUyOWNjZTgwZDU5MGRiM2JmZjc2MTExZWYzMDQwODIwNTNkNGQ4YzM2NWI0ZGM0NWNmODk4NDdkYWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YTI0ZWE4NTg1MThjYzBiNDA2NTM0ODBmYjQ0OGExZmEyMTVlNGE3YWFkOTU2MzE4ZWRjZWVkNzZiZDczYmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg3ZjExNGUxYWNlOTExMzVjMDUzNDAwMWUyY2YwYzgxOGMyMTExNjRlZDIwYTljOTQwNTkyNzAwZmNkOWZhOTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
@@ -423,10 +403,34 @@
           "version": "repo-lines-v1:sha256:aba3301e5ec33c5656797ccf20d3e5bd5b469dae0ce3d010a10e181338bafb88:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzNDE5ZmIzZjQxMDVhNGM3ZjM1NzEwZjc4NjllNjY0MTYzZmYxMGQxYzEyMWVhZTU1YTYxMGM4MDA3NjZkZWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZiZDc3OGFhOGE2MGExMGYwM2FhMmQxNTVjOGVkNGNlMzM0YmI2MmU5ZjcyMTM3YzhkNGJmNTQ1ZjdkZWVkM2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjExMzdhMTFjYjNmNTk4NzY3NGNjZDgyODAwODZiMjg3NGM0MzBmMzBhNGI1Njg2MjNhMGRmZTg4MWZhNTAwNzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmMTMxNTBkMjFjNmM2NjU0Yjc5NWFkNjIwZmY3ZmRiZDQ1YTQ1OTVjMjI4NzMyYWY0Yjc3Y2YwMDU1NjQ2MGEifQ"
         }
       ]
+    },
+    {
+      "id": "claim_617f90dcbba3411185f0b7a625d48787",
+      "statement": "The paginated thread listing applies metadata filters before summary construction, refreshes potentially active latest runs with concurrency limited to eight, and applies viewed/status filters only after summary construction.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/thread_api.py#L1057-L1134",
+          "version": "repo-lines-v1:sha256:b127112d1369187844863f1032503bdfacec6add1b1050ee2bbca9a44450263d:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4ZDA5MTA2NDI3MmYxNTc2NTU4NWFlYmY2YjllZTRkY2NhMDQ3N2MwODBlOWMwNjY3YzQ0NmZkNzZjY2U4ZTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJmZjgyZTUzYTUyMDdiMTg5MTFjOTRjNmNjMGZmNjU2ZDE3NjNmNGE4YTQ0MTc5NjFlZjI1N2I3MzBjZjNmMzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQxYTFhYzU3NDQwZTMzY2U0MzNhOTdmZGUzNDVmMDY1MjBlNWQ2OTJlMTk2OGU4OTE5ZTdkNWU0ZjA3OGJjNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlODAyMDc4OWFjYWU4NjFmNDIxODA5NjY3MTU1OGJmODEyMGYzMjA1ZDdjMjk2Njk3NDY1MTFjMGQ0NjE2YjkifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/thread_api.py#L759-L900",
+          "version": "repo-lines-v1:sha256:a264f18a0aa4ef9c9387d82d4a926885f8f3e329c46eee479838e8560ee52689:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiZmJjYmMxNmM0OWFkNTczYWMwMmUxNTc0MjY4MjUxM2EzNWRkY2FkODcyYjg2Zjc5ZTllMzFhMmNiM2JjZTA0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzZmI3MDFiYTBmMTFmNjM1NmRkNDE1NjY3OWY0OGI1ZWNhZjBkNDk4ZjBjNjg4NWQyYWNmMWI5YmZhOGJlM2E3IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJjYmYxZGYwMmY4OGQxMzAyMjQ2YzQ1NjM3ZjljNzJmOWZhNTdhZDdiY2UxYzEzNjBlOTcyNmNmOTcxNDAwYTNhIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1YzA3YmQzZGZiMDlmNjhiMTM4OWQ0ODY5MWM1NWQ4NTY0N2RkZDVmNzM3MjZjYmE5ZjAxMDI0YTdjYmI5YmVjIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_ac5b1e19c3974f08942b1be91556facb",
+      "statement": "The thread activity tests verify that list operations refresh stale latest-run metadata, any authenticated reader can mark a surfaced finished thread viewed, marking can be disabled, and running threads are not marked viewed.",
+      "evidence": [
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_thread_api_activity.py#L47-L139",
+          "version": "repo-lines-v1:sha256:4887333b6b8077d0588c6b42ce569ad6a8a722587ed609786902674649678616:eyJzZWxlY3RlZExpbmVDb3VudCI6OTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyNzY3ZmNkMmZkYzNhYjU1NTEzYWIzNGVhZDAxOTBjMDhjYjFkMDJmYzA1ODMxZWQ3NTFhZDM4YWM3ZGRjZTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2YzM5NzA4MmQ4YjFhMDUwNGFmZjY5MjcwZjc3N2E5NDA0ZTk2YTE0MzNlYWZmMzBiYmY2ZDg4ZGZjYjA4YTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg2NzVjYzNmOWE2ZmJhNmNkMTRkMWZiODU1NWViM2ZiNmUzY2UyZGJhYWQxODJkMTJhNmZkMjAzMjdmNjU1NTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-01T08:16:00.848Z"
+    "at": "2026-09-02T08:15:43.727Z"
   }
 }
