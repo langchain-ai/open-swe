@@ -963,10 +963,10 @@ async def post_slack_ephemeral_message(
             return False
 
 
-async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> bool:
+async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> str | None:
     """Add a reaction to a Slack message."""
     if not SLACK_BOT_TOKEN:
-        return False
+        return "missing_bot_token"
 
     payload = {
         "channel": channel_id,
@@ -984,14 +984,15 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
             response.raise_for_status()
             data = response.json()
             if data.get("ok"):
-                return True
+                return None
             if data.get("error") == "already_reacted":
-                return True
-            logger.warning("Slack reactions.add failed: %s", data.get("error"))
-            return False
+                return None
+            error = data.get("error")
+            logger.warning("Slack reactions.add failed: %s", error)
+            return error if isinstance(error, str) else "unknown_error"
         except httpx.HTTPError:
             logger.exception("Slack reactions.add request failed")
-            return False
+            return "request_failed"
 
 
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:

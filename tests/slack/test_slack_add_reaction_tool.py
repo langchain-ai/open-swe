@@ -18,22 +18,9 @@ def _config() -> dict[str, Any]:
     }
 
 
-async def test_slack_add_reaction_defaults_to_triggering_event(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, str] = {}
-
-    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
-        captured.update({"channel_id": channel_id, "message_ts": message_ts, "emoji": emoji})
-        return True
-
-    monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
-    monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fake_add_slack_reaction)
-
-    result = await slack_reaction_tool.slack_add_reaction(emoji="saluting_face")
-
-    assert result == {"success": True}
-    assert captured == {"channel_id": "C1", "message_ts": "1.1", "emoji": "saluting_face"}
+async def test_slack_add_reaction_requires_message_ts() -> None:
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'message_ts'"):
+        await slack_reaction_tool.slack_add_reaction(emoji="saluting_face")
 
 
 async def test_slack_add_reaction_accepts_explicit_message_and_normalizes_emoji(
@@ -41,9 +28,9 @@ async def test_slack_add_reaction_accepts_explicit_message_and_normalizes_emoji(
 ) -> None:
     captured: dict[str, str] = {}
 
-    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
+    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> str | None:
         captured.update({"channel_id": channel_id, "message_ts": message_ts, "emoji": emoji})
-        return True
+        return None
 
     monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
     monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fake_add_slack_reaction)
@@ -52,6 +39,26 @@ async def test_slack_add_reaction_accepts_explicit_message_and_normalizes_emoji(
 
     assert result == {"success": True}
     assert captured == {"channel_id": "C1", "message_ts": "1.2", "emoji": "eyes"}
+
+
+async def test_slack_add_reaction_surfaces_slack_error_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> str:
+        assert (channel_id, message_ts, emoji) == ("C1", "1.2", "eyes")
+        return "message_not_found"
+
+    monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fake_add_slack_reaction)
+
+    result = await slack_reaction_tool.slack_add_reaction(emoji="eyes", message_ts="1.2")
+
+    assert result == {
+        "success": False,
+        "error": "Slack reactions.add failed: message_not_found",
+        "channel_id": "C1",
+        "target_ts": "1.2",
+    }
 
 
 @pytest.mark.parametrize("emoji", ["white_check_mark", ":white_check_mark:"])
@@ -65,7 +72,7 @@ async def test_slack_add_reaction_rejects_white_check_mark(
     monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
     monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fail_if_called)
 
-    result = await slack_reaction_tool.slack_add_reaction(emoji=emoji)
+    result = await slack_reaction_tool.slack_add_reaction(emoji=emoji, message_ts="1.1")
 
     assert result == {
         "success": False,
@@ -76,7 +83,7 @@ async def test_slack_add_reaction_rejects_white_check_mark(
 async def test_slack_add_reaction_requires_slack_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_reaction_tool, "get_config", lambda: {"configurable": {}})
 
-    result = await slack_reaction_tool.slack_add_reaction(emoji="saluting_face")
+    result = await slack_reaction_tool.slack_add_reaction(emoji="saluting_face", message_ts="1.1")
 
     assert result == {"success": False, "error": "Missing slack_thread.channel_id in config"}
 
@@ -84,6 +91,6 @@ async def test_slack_add_reaction_requires_slack_channel(monkeypatch: pytest.Mon
 async def test_slack_add_reaction_rejects_empty_emoji(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
 
-    result = await slack_reaction_tool.slack_add_reaction(emoji="::")
+    result = await slack_reaction_tool.slack_add_reaction(emoji="::", message_ts="1.1")
 
     assert result == {"success": False, "error": "emoji is required"}

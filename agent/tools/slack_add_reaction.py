@@ -8,7 +8,7 @@ from ..utils.thread_ops import langgraph_client
 
 async def slack_add_reaction(
     emoji: str,
-    message_ts: str | None = None,
+    message_ts: str,
 ) -> dict[str, Any]:
     """Commit to acting on a Slack message by adding a context-appropriate reaction.
 
@@ -17,7 +17,6 @@ async def slack_add_reaction(
     `thinking_face` for investigation, and `tada` for genuine wins. Never use
     `white_check_mark`, because teams use it to indicate that a pull request is approved.
     To target a specific message, pass its `message_ts` identifier shown in Slack context.
-    If `message_ts` is omitted, this reacts to the latest message that triggered the run.
     Pass emoji names without surrounding colons.
     """
     config = get_config()
@@ -35,12 +34,9 @@ async def slack_add_reaction(
     if not channel_id:
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
 
-    target_ts = (message_ts or active.get("triggering_event_ts") or "").strip()
+    target_ts = message_ts.strip()
     if not target_ts:
-        return {
-            "success": False,
-            "error": "Missing message_ts and slack_thread.triggering_event_ts in config",
-        }
+        return {"success": False, "error": "message_ts is required"}
 
     reaction = emoji.strip().strip(":")
     if not reaction:
@@ -56,7 +52,12 @@ async def slack_add_reaction(
             "error": "emoji must be a Slack reaction name without whitespace",
         }
 
-    success = await add_slack_reaction(channel_id, target_ts, reaction)
-    if not success:
-        return {"success": False, "error": "Could not add Slack reaction"}
+    error = await add_slack_reaction(channel_id, target_ts, reaction)
+    if error is not None:
+        return {
+            "success": False,
+            "error": f"Slack reactions.add failed: {error}",
+            "channel_id": channel_id,
+            "target_ts": target_ts,
+        }
     return {"success": True}
