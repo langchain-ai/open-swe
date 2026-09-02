@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -19,6 +20,7 @@ import httpx
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 
+from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -36,7 +38,7 @@ SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 
-SlackChannelContext = dict[str, str]
+SlackChannelContext = dict[str, str | bool | None]
 _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
@@ -50,8 +52,6 @@ SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
 SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
 SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
 SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
-_SLACK_THREAD_VERSION_NAMESPACE = "slack_thread_versions"
-_SLACK_THREAD_VERSION_PAGE_SIZE = 100
 _SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES = 1
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.05
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
@@ -72,6 +72,12 @@ def _slack_headers() -> dict[str, str]:
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json; charset=utf-8",
     }
+
+
+def _slack_auth_headers() -> dict[str, str]:
+    if not SLACK_BOT_TOKEN:
+        return {}
+    return {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
 
 
 def _parse_ts(ts: str | None) -> float:
@@ -396,13 +402,17 @@ async def _post_slack_message_with_ts(
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
 
+    from .slack_code_channels import is_code_channel_session
+
     payload: dict[str, Any] = {
         "channel": channel_id,
         "text": text,
         "unfurl_links": unfurl_links,
         "unfurl_media": unfurl_media,
     }
-    if thread_ts is not None:
+    # A code channel is one flowing session: replies belong in the channel, not
+    # in a thread hanging off it.
+    if thread_ts is not None and not is_code_channel_session(thread_ts):
         payload["thread_ts"] = thread_ts
     if blocks:
         payload["blocks"] = blocks
@@ -624,6 +634,10 @@ async def post_slack_thread_reply_with_ts(
     agent_thread_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
+    from .slack_code_channels import is_code_channel_session
+
+    if is_code_channel_session(thread_ts):
+        agent_thread_id = None
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
     blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
     text = append_slack_web_link_footer(text, dashboard_url, usage)
@@ -653,6 +667,103 @@ async def post_slack_top_level_message_with_ts(
         unfurl_media=unfurl_media,
         blocks=blocks,
     )
+
+
+class SlackStreamError(Exception):
+    def __init__(self, code: str, *, retry_after: float | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retry_after = retry_after
+
+
+async def _slack_stream_call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not SLACK_BOT_TOKEN:
+        raise SlackStreamError("missing_slack_bot_token")
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/{method}", headers=_slack_headers(), json=payload
+            )
+            if response.status_code == 429:
+                raw_retry_after = response.headers.get("Retry-After")
+                try:
+                    retry_after = float(raw_retry_after) if raw_retry_after else None
+                except ValueError:
+                    retry_after = None
+                raise SlackStreamError("rate_limited", retry_after=retry_after)
+            response.raise_for_status()
+            data = response.json()
+        except SlackStreamError:
+            raise
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.exception("Slack %s request failed", method)
+            raise SlackStreamError(f"http_error:{type(exc).__name__}") from exc
+        if not isinstance(data, dict):
+            raise SlackStreamError("invalid_response")
+        if not data.get("ok"):
+            error = str(data.get("error") or "unknown_error")
+            raise SlackStreamError("rate_limited" if error == "ratelimited" else error)
+        return data
+
+
+async def start_slack_stream(
+    channel_id: str,
+    thread_ts: str,
+    chunks: list[dict[str, Any]],
+    *,
+    recipient_user_id: str = "",
+    recipient_team_id: str = "",
+) -> str:
+    """Start a Slack Thinking Steps stream and return its message timestamp."""
+    from .slack_code_channels import is_code_channel_session
+
+    payload: dict[str, Any] = {
+        "channel": channel_id,
+        "chunks": chunks,
+        "task_display_mode": "plan",
+    }
+    if not is_code_channel_session(thread_ts):
+        payload["thread_ts"] = thread_ts
+    if recipient_user_id:
+        payload["recipient_user_id"] = recipient_user_id
+    if recipient_team_id:
+        payload["recipient_team_id"] = recipient_team_id
+    data = await _slack_stream_call("chat.startStream", payload)
+    message_ts = data.get("ts")
+    if not isinstance(message_ts, str) or not message_ts:
+        raise SlackStreamError("missing_message_ts")
+    return message_ts
+
+
+async def append_slack_stream(
+    channel_id: str, message_ts: str, chunks: list[dict[str, Any]]
+) -> None:
+    """Append structured chunks to a Slack stream."""
+    await _slack_stream_call(
+        "chat.appendStream", {"channel": channel_id, "ts": message_ts, "chunks": chunks}
+    )
+
+
+async def stop_slack_stream(
+    channel_id: str,
+    message_ts: str,
+    chunks: list[dict[str, Any]] | None = None,
+    *,
+    session_status: str = "active",
+) -> None:
+    """Finalize a Slack stream."""
+    payload: dict[str, Any] = {
+        "channel": channel_id,
+        "ts": message_ts,
+        "session_status": session_status,
+    }
+    if chunks:
+        payload["chunks"] = chunks
+    try:
+        await _slack_stream_call("chat.stopStream", payload)
+    except SlackStreamError as exc:
+        if exc.code not in {"message_not_in_streaming_state", "stopped_by_user"}:
+            raise
 
 
 async def update_slack_message(
@@ -726,8 +837,8 @@ async def upload_slack_thread_file(
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
             ticket_response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/files.getUploadURLExternal",
-                headers=_slack_headers(),
-                json={"filename": filename, "length": len(content)},
+                headers=_slack_auth_headers(),
+                data={"filename": filename, "length": str(len(content))},
             )
             ticket_error = _slack_response_error(ticket_response)
             if ticket_error:
@@ -752,17 +863,17 @@ async def upload_slack_thread_file(
                 return None, "upload_failed"
             upload_response.raise_for_status()
 
-            payload: dict[str, Any] = {
-                "files": [{"id": file_id, "title": title or filename}],
+            data: dict[str, str] = {
+                "files": json.dumps([{"id": file_id, "title": title or filename}]),
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
             }
             if initial_comment:
-                payload["initial_comment"] = initial_comment
+                data["initial_comment"] = initial_comment
             complete_response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/files.completeUploadExternal",
-                headers=_slack_headers(),
-                json=payload,
+                headers=_slack_auth_headers(),
+                data=data,
             )
             complete_error = _slack_response_error(complete_response)
             if complete_error:
@@ -931,13 +1042,14 @@ def _cache_slack_channel_info(channel_id: str, channel: dict[str, Any]) -> None:
     )
 
 
-async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
+async def get_slack_channel_info(
+    channel_id: str, *, use_cache: bool = True
+) -> dict[str, Any] | None:
     """Get Slack channel details (including topic/purpose) by channel ID."""
     if not SLACK_BOT_TOKEN or not channel_id:
         return None
 
-    cached = _cached_slack_channel_info(channel_id)
-    if cached is not None:
+    if use_cache and (cached := _cached_slack_channel_info(channel_id)) is not None:
         return cached
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -1003,6 +1115,11 @@ def normalize_slack_channel_context(
     topic = _channel_section_value(channel, "topic")
     purpose = _channel_section_value(channel, "purpose")
     description = "\n".join(value for value in (topic, purpose) if value)
+    is_ext_shared = channel.get("is_ext_shared") if isinstance(channel, dict) else None
+    is_pending_ext_shared = (
+        channel.get("is_pending_ext_shared") if isinstance(channel, dict) else None
+    )
+    is_im = channel.get("is_im") if isinstance(channel, dict) else None
     return {
         "id": channel_id,
         "name": name,
@@ -1010,7 +1127,22 @@ def normalize_slack_channel_context(
         "topic": topic,
         "purpose": purpose,
         "description": description,
+        "is_ext_shared": is_ext_shared if isinstance(is_ext_shared, bool) else None,
+        "is_pending_ext_shared": (
+            is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
+        ),
+        "is_im": is_im if isinstance(is_im, bool) else None,
     }
+
+
+def slack_channel_allows_operations(channel_context: dict[str, Any] | None) -> bool:
+    """Allow operations only when Slack confirms the channel is not externally shared."""
+    if not isinstance(channel_context, dict):
+        return False
+    return channel_context.get("is_im") is True or (
+        channel_context.get("is_ext_shared") is False
+        and channel_context.get("is_pending_ext_shared") is False
+    )
 
 
 def get_slack_channel_context_description(channel_context: dict[str, Any] | None) -> str:
@@ -1049,9 +1181,11 @@ def is_slack_channel_named(channel_context: dict[str, Any] | None, expected_name
     )
 
 
-async def get_slack_channel_context(channel_id: str) -> SlackChannelContext:
+async def get_slack_channel_context(
+    channel_id: str, *, use_cache: bool = True
+) -> SlackChannelContext:
     """Fetch and normalize Slack channel context."""
-    channel = await get_slack_channel_info(channel_id)
+    channel = await get_slack_channel_info(channel_id, use_cache=use_cache)
     return normalize_slack_channel_context(channel_id, channel)
 
 
@@ -1086,30 +1220,38 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     if not SLACK_BOT_TOKEN:
         return []
 
+    from .slack_code_channels import is_code_channel_session
+
+    # A code channel session spans the whole channel rather than one thread.
+    session_channel = is_code_channel_session(thread_ts)
+    method = "conversations.history" if session_channel else "conversations.replies"
+
     messages: list[dict[str, Any]] = []
     cursor: str | None = None
     truncated = False
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         while True:
-            params: dict[str, str | int] = {"channel": channel_id, "ts": thread_ts, "limit": 200}
+            params: dict[str, str | int] = {"channel": channel_id, "limit": 200}
+            if not session_channel:
+                params["ts"] = thread_ts
             if cursor:
                 params["cursor"] = cursor
 
             try:
                 response = await http_client.get(
-                    f"{SLACK_API_BASE_URL}/conversations.replies",
+                    f"{SLACK_API_BASE_URL}/{method}",
                     headers=_slack_headers(),
                     params=params,
                 )
                 response.raise_for_status()
                 payload = response.json()
             except httpx.HTTPError:
-                logger.exception("Slack conversations.replies request failed")
+                logger.exception("Slack %s request failed", method)
                 break
 
             if not payload.get("ok"):
-                logger.warning("Slack conversations.replies failed: %s", payload.get("error"))
+                logger.warning("Slack %s failed: %s", method, payload.get("error"))
                 break
 
             batch = payload.get("messages", [])
@@ -1133,15 +1275,10 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             if not cursor:
                 break
 
+    messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     if truncated:
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
-    messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
-
-
-def _slack_thread_version_namespace(channel_id: str, thread_ts: str) -> tuple[str, str, str]:
-    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
-    return (_SLACK_THREAD_VERSION_NAMESPACE, channel, timestamp.replace(".", "_"))
 
 
 @asynccontextmanager
@@ -1184,41 +1321,6 @@ async def slack_thread_mutation_lock(
             )
 
 
-async def get_slack_thread_version(
-    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
-) -> int:
-    """Return the number of distinct inbound messages recorded for a Slack thread."""
-    namespace = _slack_thread_version_namespace(channel_id, thread_ts)
-    offset = 0
-    version = 0
-    while True:
-        response = await langgraph_client.store.search_items(
-            namespace, limit=_SLACK_THREAD_VERSION_PAGE_SIZE, offset=offset
-        )
-        items = response.get("items") if isinstance(response, Mapping) else None
-        page = items if isinstance(items, list) else []
-        version += len(page)
-        if len(page) < _SLACK_THREAD_VERSION_PAGE_SIZE:
-            return version
-        offset += len(page)
-
-
-async def increment_slack_thread_version(
-    langgraph_client: LangGraphClient,
-    channel_id: str,
-    thread_ts: str,
-    message_ts: str,
-) -> int:
-    """Record one inbound Slack event and return the resulting thread version."""
-    message_key = message_ts.strip()
-    if not _SLACK_MESSAGE_TS_RE.fullmatch(message_key):
-        raise ValueError("A valid Slack message timestamp is required")
-    async with slack_thread_mutation_lock(langgraph_client, channel_id, thread_ts):
-        namespace = _slack_thread_version_namespace(channel_id, thread_ts)
-        await langgraph_client.store.put_item(namespace, message_key, {"message_ts": message_key})
-        return await get_slack_thread_version(langgraph_client, channel_id, thread_ts)
-
-
 async def fetch_slack_thread_message_by_ts(
     channel_id: str, thread_ts: str, message_ts: str
 ) -> dict[str, Any] | None:
@@ -1226,25 +1328,33 @@ async def fetch_slack_thread_message_by_ts(
     if not SLACK_BOT_TOKEN:
         return None
 
+    from .slack_code_channels import is_code_channel_session
+
+    session_channel = is_code_channel_session(thread_ts)
+    method = "conversations.history" if session_channel else "conversations.replies"
+    params = {
+        "channel": channel_id,
+        "oldest": message_ts,
+        "latest": message_ts,
+        "inclusive": "true",
+        "limit": 1,
+    }
+    if not session_channel:
+        params["ts"] = thread_ts
+
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
-                f"{SLACK_API_BASE_URL}/conversations.replies",
+                f"{SLACK_API_BASE_URL}/{method}",
                 headers=_slack_headers(),
-                params={
-                    "channel": channel_id,
-                    "ts": thread_ts,
-                    "oldest": message_ts,
-                    "latest": message_ts,
-                    "inclusive": "true",
-                    "limit": 1,
-                },
+                params=params,
             )
             response.raise_for_status()
             payload = response.json()
         except httpx.HTTPError:
             logger.exception(
-                "Slack conversations.replies request failed for channel=%s thread=%s ts=%s",
+                "Slack %s request failed for channel=%s thread=%s ts=%s",
+                method,
                 channel_id,
                 thread_ts,
                 message_ts,
@@ -1253,7 +1363,8 @@ async def fetch_slack_thread_message_by_ts(
 
     if not payload.get("ok"):
         logger.warning(
-            "Slack conversations.replies failed for channel=%s thread=%s ts=%s: %s",
+            "Slack %s failed for channel=%s thread=%s ts=%s: %s",
+            method,
             channel_id,
             thread_ts,
             message_ts,
@@ -1347,7 +1458,12 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
 
 async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     """Return the public permalink for a Slack message, or None if unavailable."""
+    from .slack_code_channels import is_code_channel_session
+
+    # A code channel session has no anchor message to permalink to.
     if not SLACK_BOT_TOKEN or not channel_id or not message_ts:
+        return None
+    if is_code_channel_session(message_ts):
         return None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -1596,18 +1712,11 @@ def _thread_metadata_slack_location(thread: Mapping[str, Any]) -> tuple[str, str
     metadata = thread.get("metadata")
     if not isinstance(metadata, Mapping):
         return None
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, Mapping):
-        return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, Mapping):
-        return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+    location = SourceContext.from_metadata(metadata).slack_location
+    if location is None:
         return None
     try:
-        return _normalize_slack_location(channel_id, thread_ts)
+        return _normalize_slack_location(*location)
     except SlackThreadMappingError:
         return None
 
@@ -1626,7 +1735,9 @@ async def resolve_slack_thread_id(
 
     matches = await langgraph_client.threads.search(
         metadata={
-            "source_context": {"slack_thread": {"channel_id": channel, "thread_ts": timestamp}}
+            "source_context": SourceContext(
+                slack_thread=SlackThreadRef(channel_id=channel, thread_ts=timestamp)
+            ).dump()
         },
         limit=2,
     )
@@ -1659,18 +1770,12 @@ async def get_active_slack_thread(
         try:
             thread = await langgraph_client.threads.get(thread_id)
             metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
-            source_context = (
-                metadata.get("source_context") if isinstance(metadata, Mapping) else None
-            )
-            slack_thread = (
-                source_context.get("slack_thread") if isinstance(source_context, Mapping) else None
-            )
-            if isinstance(slack_thread, Mapping):
-                location = dict(slack_thread)
+            context = SourceContext.from_metadata(metadata)
+            if context.slack_thread is not None:
                 _normalize_slack_location(
-                    str(location.get("channel_id") or ""), str(location.get("thread_ts") or "")
+                    context.slack_thread.channel_id, context.slack_thread.thread_ts
                 )
-                return location
+                return context.dump()["slack_thread"]
         except Exception:
             logger.debug("Could not resolve active Slack location for thread %s", thread_id)
     if isinstance(fallback, Mapping):
@@ -1748,6 +1853,7 @@ async def store_slack_run_mapping(
     triggering_user_id: str | None = None,
     trace_message_ts: str | None = None,
     agent_thread_id: str | None = None,
+    thinking_message_ts: str | None = None,
 ) -> None:
     """Persist Slack thread/message to LangGraph run mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -1764,6 +1870,8 @@ async def store_slack_run_mapping(
         value["trace_message_ts"] = trace_message_ts
     if agent_thread_id:
         value["agent_thread_id"] = agent_thread_id
+    if thinking_message_ts:
+        value["thinking_message_ts"] = thinking_message_ts
     try:
         await langgraph_client.store.put_item(
             namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}", value

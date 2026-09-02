@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:7ffebd63e377a9bd0504a101dfaa82f999b80aa2439301c160f7634c47a0b0bb",
+  "claims": [
+    {
+      "id": "claim_5f37c6f3fd0d4b7daf65acc42b1cb6c1",
+      "statement": "The assembled agent middleware order (outer to inner) is PrepareAgentRunMiddleware, DynamicToolMiddleware (conditional), SanitizeToolInputsMiddleware, ModelCallLimitMiddleware, ToolErrorMiddleware, ExcludeToolsMiddleware, SubdirAgentsReadMiddleware, ToolRetryMiddleware, PullRequestCreationGuardMiddleware (non-local), WorkflowPushGuardMiddleware, refresh_github_proxy_before_model, check_message_queue_before_model, TimeoutWrapupMiddleware, notify_step_limit_reached, ModelFallbackMiddleware (conditional), PlanModeMiddleware, three message sanitizers, StableToolResultOrderMiddleware, and ModelCallTimeoutMiddleware.",
+      "evidence": [
+        {
+          "resource": "repo://agent/server.py#L1762-L1835",
+          "version": "repo-lines-v1:sha256:888736499cae96c22a14edcc09003ba4cf4d2974b1ae36e5fcf06a359a22b3fa:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjM2M0ZDU0NzQyMzM0MDQ2MWYxNjE5OWIxZDAxN2ZiNmYwNTY3MTMyZjI1Mjc5NzBhYjQzOWU1ODA2Nzc2NzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ3NjJmMWEyM2UzMmNhMGQ2YjYyNWI5MDE2NmExYTNlOTVjNTZjM2YyNzBkMTdkYzk2NmQ4MDcwYTVkYTUxM2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4eb9b2a86e1e4f08a610e13c0e319c00",
+      "statement": "ModelCallTimeoutMiddleware is installed innermost so its deadline covers the provider call itself, and a resulting timeout escalates outward to ModelFallbackMiddleware, which treats TimeoutError as a retryable transient error.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/model_fallback.py#L44-L59",
+          "version": "repo-lines-v1:sha256:4e07d10911ac8acfdfa73accca39a0bc7b2013564bf517be4b8edc1b9a4cc837:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM1NTVjMzEwMzc2MzQ1Nzk4MGM1OGVlNzI4OGE0ZTMyMjJjYjViOGQ1MTRkNzkyZjdjZmUyOTA1MDNkOWU2MDIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0YzBkOTllNTQ0ODkwNGRhYmZmODNjYzVmYWYyMTZjOTVkOTIxYzJlNDBlZDI5MDdjZTBlZDhmZDZkZDc4NGUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1824-L1832",
+          "version": "repo-lines-v1:sha256:7d08690159a2581159c4aa5a45fac120ce52bcab1157f8be69d3166319b00d7b:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmJhNWJjY2JjMjhkZjU3MWM0MjE1NjVmNDAwNWE2NDliYTJkZjcwMjI3YTg5NGJhNWQ0OTkxOGEyMzkwNjI1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjE5YzY5NDIyMjA0Y2MxMGUzY2NjMzE5MzkxYzlmMTdlOGU0ZTU0YzM4NjVkNzA0NTZmNWVkZDQyOWM0ODgwZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTBiZjMxNmIyYjYxMjUxYzY4YTA2ZDgyOGQ2YTM4ZGRmOTE2ZWY4ZjIzOWM4NTUwZGQxOTk3YjQxMjVlMWZjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDJmZWE4NTJlY2UyYmZiNTMwNDk0ZmM0OGY0NWI1YTliZjU0NTJhZTQwOTQzZGU1ZmRhMWRkNTExN2FiMzk4MyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_a5f5a575fd294f8d81eff9b1ec1703cd",
+      "statement": "The reviewer graph installs a leaner middleware chain with no model fallback, plan mode, PR guard, workflow push guard, or subdir-agents read hook, and it uniquely adds RepairOrphanedToolCallsMiddleware plus settle_review_check_on_exit.",
+      "evidence": [
+        {
+          "resource": "repo://agent/reviewer.py#L1400-L1440",
+          "version": "repo-lines-v1:sha256:59c6970c77849ca3a60c565aacd59b12579dbb43566ad02145465f74a1f28c25:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3ZGZiNmIzMWE0YzViMzMwNmZlZmU0MDI4YWM5YTIxMzg0YjgxYTUxMjQyOWEwZjVjOTVmNzk5Y2JhNWRmM2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjZTY1ODE3MDc4YjI3ZTc2ZDY2ZjQ1NDdlYjI0OTc5ODZiZTE5MTIzYTQxNDQyYjNkODY5YmNkMjk4NTQxMmUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d48962e5ea7146a3ba7e6aff213fd907",
+      "statement": "check_message_queue_before_model is a before-model hook that reads the LangGraph store namespace (queue, thread_id), injects pending messages as new human messages before the next model call, deletes the queued item before building messages to prevent double-processing, and processes messages FIFO.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/check_message_queue.py#L179-L318",
+          "version": "repo-lines-v1:sha256:b55d5b4be668fd54eb0ebf8652667c0adcffdcbaed3ab7216838e65cb7e7d46c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJmMmU3NTEwNTM1YzU4OGE1Y2Y4NGM3NzEwNzAyMmZlODljOGRkNzY3MTA2OGZkZDhiYWQxMzE0ZWY3ZDRmODU1IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0ODk2MDBhNzNkMmUwMmYzNTJiOTBmZWYxZDhkNjM4MTFiYTRhOGVlMGMxYmVhYTdhZTQ2NThmMzZhYTJlMTk4IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkMWI4MDkxZDQzYjFkMWFhZmM5OWJmN2E5MjRkNzc5M2JmYjJiMDdhZjZkMTJkMmY4ZWFhMzNkZDE2NTEwOTMwIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_4580ee46e23a46e9aa803914663d9366",
+      "statement": "ModelFallbackMiddleware wraps the model call in a retry loop that alternates between the primary and a cross-provider fallback model on transient errors, using an exponential backoff schedule with jitter, retrying on 5xx/429-class statuses, connection/timeout errors, and the TimeoutError from ModelCallTimeoutMiddleware.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/model_fallback.py#L129-L214",
+          "version": "repo-lines-v1:sha256:4a8016a6856e3af88d5c434ddf685469763d7c65c2bb547a6e2586568a0129f8:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzOTBmNGQ5MGIwNmFlZTM4MzlkN2NmMjRjZTFkMGU3NTU0MjEzNTAzNGVhYjQzYWVlYzQyYzY1OGE4ZGRmYWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmZGE5NTk0MDRkMmM3OTg0OWRjNGQxYWI3MTNmNWNlNmY5MWEwNmY1ZDNmODBhZTE2YjQ4ZmMyZDNlN2QwYmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/model_fallback.py#L44-L67",
+          "version": "repo-lines-v1:sha256:71d9cfb47b15a813fba7a55998cc7198653174e8375e6aa1b6db38fca35d592f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM1NTVjMzEwMzc2MzQ1Nzk4MGM1OGVlNzI4OGE0ZTMyMjJjYjViOGQ1MTRkNzkyZjdjZmUyOTA1MDNkOWU2MDIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmOWVkNDI1MjZhMTk4MzQ2NmU0OWM4ZTdjYjEwYzdhOGU3NjkxMDgzZjgwOTM5YTIxYmI4YjVmYTg3ZDkyZTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYyNjYzYWNlNDYxYTlkYTU3YmZlODFjYjZjMTkwOTQ5MDU4MGNlZjlmN2Q1NjU4ZTc0MDU1ZjI4ZTZlYTdiNGMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6b953b59b433476aa85f9780bf6007e2",
+      "statement": "When every ModelFallbackMiddleware attempt fails it returns a terminal AIMessage describing the outage instead of raising by default, and provider model-not-available errors short-circuit into a user-facing AIMessage.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/model_fallback.py#L103-L126",
+          "version": "repo-lines-v1:sha256:24e0e7fc3ceee0e3ac68c1a2b0777863e543e9f27745e350cc02223548a55e23:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyMzU3Y2U0NThmMmE0MjYwYjU2MjE2OGYwMTA1MjA0ZWQwMzVhNjdjNzZiZGM3YmI1NWUwMjVkODVhYzYxMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM3ZWRlYzY4NDg4NjJmOGRlOGU2ZWM3OGQxMTQ2MTRjNTZjYjNmNTFmYzIwYmU4YmY0ZDVkMmFiYzAwYmJiYjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ3NzAzMWYwY2JjNTg4YzdkNTk2MGYyZTYwMDk1Y2FkMjVmMWYyZTgzZjhhYzk0ZTgyY2UxMDU5N2Y3YTQxZDMifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/model_fallback.py#L180-L214",
+          "version": "repo-lines-v1:sha256:5b1df2d6c40aa0a3f741ac7c2613b4591fb9c81f69800acc2ab89d5e76a36224:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzNmZhMjNiNjA5ZGJjYmI0MzQ4ODM0ZmY3YjE0Njg1YzhmZjNiNWQzYmM5MWYxYWQzZGQzNDExMDAyNjliZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmZGE5NTk0MDRkMmM3OTg0OWRjNGQxYWI3MTNmNWNlNmY5MWEwNmY1ZDNmODBhZTE2YjQ4ZmMyZDNlN2QwYmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyNjE3YWQ5MDBlYTU4YmY5OTMxNTExODI1NWQ0ODM5M2YxN2MwNjcxYTA3Y2ZjN2VmNDA2YWExNGI2ODU5ZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_41b0ef637c1441b3a16057b24fb49963",
+      "statement": "PlanModeMiddleware strips external-mutation tools from each model request while plan mode is active, is installed unconditionally, resets plan_mode in before_agent to the value resolved for the current run, and honors a mid-run enter_plan_mode that restricts the next model turn because the tool list is recomputed each call.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/plan_mode.py#L38-L79",
+          "version": "repo-lines-v1:sha256:347f8d1e70218d62ecedb68b561bc68cadd995ea65443432bbf24fb5bf212205:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjNzgwYTZlYmFmYjkwMjliN2VhODA2Y2MzYzcwZWM4NjIyMTFkMjU5NzhiODQ0OTQ5MzUzZjQ3OWJkNGQ3YjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5YzEwZGEzMmY3NzY0ZDdkOTI0NjM4ZTZlNjJhNDhhOGEzNjBlMTc3OTNkY2EwOTAwNGMyODgzNGE0ZDJiN2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1599-L1610",
+          "version": "repo-lines-v1:sha256:4ea7c26198d03ad3a5964845a2359e148c3655b4c6e799e698baecc057fcf85f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxOWM1OTRkOWNkNGNkODE2N2Q1YmRjYjRjODY0NWJhZmE3OGIzNTgxODRjZmI5NzE3MmI5NmYzYjA2YjQxYjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjZTI1YjA4YTNhMzY3ZjI3ZDA3YjQyZTUyYThmYTc5Y2QwNGVjMGI1NmY0YmQwOGU2NzRiZTcwMDFjZDgwODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjYzIyNDgzMTRmODNlYjE0NjcxZGYwNDc1YmNjZjRmMDk0OThlYzRjY2Y4NDYzMGE2YjI1NWM0MTBiYjVlNDcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6920c45d48f54a41b4b9496ca4dd4a41",
+      "statement": "ToolErrorMiddleware converts ordinary unhandled tool exceptions into status=error ToolMessages, but treats an unreachable sandbox as terminal: it notifies the user and re-raises the error to end the run.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/tool_error_handler.py#L160-L205",
+          "version": "repo-lines-v1:sha256:64bf08d90acdb47d94808e987b200fc53c395dadb0cf81eeb4851dc297a8e2fb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4MmRkOTg2MmQ0YjY1YTRjNGMyZTEyMTRiNTliZThkNjUyZGE5OGNkNGM1MDZiN2YxZTBjYmEyMzliZmUwOTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyOWM1MjQ0MzRjMDA5YWFmMGQ3ZmU5ZTJmZmU3MjJiMTcwY2Y4ZWIxYzhjMTU3NWU0ZTNiZDUxZTkyNmM3MWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3de46cfdd8144bff8079631db2b902dd",
+      "statement": "ToolErrorMiddleware converts SandboxRetryableConnectionError into a sandbox_transient error ToolMessage because the SDK guarantees the command never started; SandboxConnectionError except SandboxServerReloadError, and ResourceNotFoundError for the sandbox resource, are unreachable and are notified then re-raised.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/tool_error_handler.py#L179-L205",
+          "version": "repo-lines-v1:sha256:d138c3c5da78d774e0450a4281700da9867caaabe80ca9beb08bbf9f7e84be64:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI1NjljYjA5MjgwZWUwNzgxOTQ1ZTQ4ZDQwNDFiZDJkZmFhZTY5MWFkMmVhYmY1ZDNjYmEwODQ2YzcyMTZjYWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyOWM1MjQ0MzRjMDA5YWFmMGQ3ZmU5ZTJmZmU3MjJiMTcwY2Y4ZWIxYzhjMTU3NWU0ZTNiZDUxZTkyNmM3MWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRlZWM0NGFkYTVjZWZiYjA5NWFiYmMzYzQwZWZhYWI4YmViMDE0MjZhYjYzZTU4ZWYyOGY3ZjA0MjllZTY3ZTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/tool_error_handler.py#L74-L107",
+          "version": "repo-lines-v1:sha256:b25ad563a738134142f2b1c030ffb2ae721590258f20f6ad7e7a38447ba0c80c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE1ZjYwYjg3OWY5OGVlNDIwM2NjNTg1NDMxYWUzNWUzMGUzMDM0OTZhNDhhNzU4ZjkyMzc0ZTE2ODgwNTRlNDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzYTNiYzA0M2I5MTFkZjUwMTk5OGEzOTU2ZTY0NjE4ODg2NDdkZDVlMGZkM2Q3N2ZkMmYxMzU3NmI2NWMyYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ3NTE1NzZhMjc3NDdlYWMxZWZlYWU4MzNmMTA5YzE4Y2M3NjRjYjNhNDZiMzc3NDE2OTAyNmQ3NjE1YmJiMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyZmVmNTVjZDNhNGZkYTc2OWUwMDJiOTY3ZjhkZDExNzZhNjExNGYyNjZkNjM2Y2U3NWJmNTQwZGRiZmI4MDQifQ"
+        },
+        {
+          "resource": "repo://agent/utils/sandbox_retry.py#L21-L28",
+          "version": "repo-lines-v1:sha256:7dbc7039616704de450b2ad1edfd964207989750ee923d410c0a7085d3a5a3e5:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDM4MDY4ODVlYjhlODg3NDUyOTkxNDBlZmUxMzdiOGQwYWM1MGZmMmVlYWM4ZGFjYWYwMmQ5YzJhMDU5MmZlYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjU1OGIwOTExY2I4NDQ0ZDU0NzBiYWYxMGMyYmZiNzIwNjFkN2Q4NGY5MTU3OWQxYTkyNTNhOTI3ZDczY2E0NyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2FjMzk4Mjk0YjQ3NjM2ZGFjOWY1MzUzYWJhMGY3MjIwYjk3NjEwMmIyZWQ3NmU3ZTlmNGZlMGUyYmIzMWNkZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzFiYzVlN2IzMzk5MDQ4NGZlZDkxMWQ0NmJiZmVjOGNiNzdlOTZjMGM4NThlZjBkZTA3NzVlN2QwOTgwYTliZSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_505e4e7c9da847f0894633c517ed1d32",
+      "statement": "The agent installs ToolRetryMiddleware scoped to the task tool with task_retry_on retrying on 5xx/429-class statuses and transient exception names (including a subagent's ModelCallTimeoutError since subagents lack fallback middleware), while task_on_failure returns a structured failed payload for prompt/context errors and re-raises otherwise.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/task_retry.py#L3-L84",
+          "version": "repo-lines-v1:sha256:5fd3707bf8f921a96c989dd9d073054042d76c128d7255cbdd93a45ebf278f6a:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzN2ZiZmIwMmExZjVkNmExYTk1MmNlMDY4NTM3N2Q1MTViYTE0MjZiNjVjZWExNzQwMmM5OGQwZDBiNGNkOWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4MDg3ZGFjZjRjNzBhZDI0NjE0NDRiODNkMzJkMWYzODc5NTk2Y2ExMzUzMTRkNTEwNThiMzAzZjFiOTE1NmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1810-L1817",
+          "version": "repo-lines-v1:sha256:dd41638cdff8bab00cecb529006c3ac4196d43fee429e651c1546cd12aa1ed20:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjlhNGQyZGJlNGQzN2IyMzkzMzQ1MjRjM2Y4NWZhYjIwZTBiMGEwOTE1MDhkMTIwMzU1MzNhMTVhMjUyYmVhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjBkOWY3MzRiZTVhYTAzOTM1YzQ5OWI3MTQxMTM1NWNlZmFjMmEyYmY1Nzk4OWUxMjQ2ZDM1YTczNTJjN2U5YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjNDI2MzBlNjA3MjcyZjYyYmNiN2JjNjY4ZmExOWM5OGMyMzkzODM1MDlkMDQ3MmRmMGRjMGRmMDNkNTg1ZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTE5MzhhZDJmYmUyNDI5YTEwMDBmNDNjZGVlZDQ3YTJjYmE1MGI0OTFjMGQ2ZDY5YWIzNjcwNTg0YzRiZDg1MiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_bd091a2e48714f5589d317537c003ad2",
+      "statement": "retry_transient_sandbox_errors retries only SDK-marked SandboxRetryableConnectionError failures before a command starts, with at most four attempts and jittered bounded exponential backoff; terminal sandbox errors are not retried.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/sandbox_retry.py#L13-L61",
+          "version": "repo-lines-v1:sha256:b8d088f800734d4aea1fdf4c3a07a974faf37c5e42dbc98056a091e22ddb261c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ5MGE0YWJjODc4MzhkNzc1MjhhZjBkZmQ4ZGQ0YWQxNjcxMTZkZTNiODg3YjJhZTkxMGNiOTJmMzc3ZjgxODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0NjBhYjY1MzNjMDU4N2ZjOTNmOTBlMzIyYTA4M2U2MzI5ZDZiYTUyYTVmNzYwZTczNDhkMmQzZDQ0MTk5NmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_retry.py#L19-L66",
+          "version": "repo-lines-v1:sha256:3b754b2e87f0d88a521b09c172bf4c7a43817738b5f2a23d51db33a4597dbb21:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YzgxMGYzOWFhYjRmMmFmYWE4YTAyYmZiZDk3ODA5N2E1ODQ5ZGMxZDAzMWQwZWM0Y2YxYjViMWM5N2VkMzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YmMxNGVlOGE0Y2E1MDk1OWE5OTBiNWUwN2MzYzQxNzZkMTQ5ZDMxMDQwNjNhY2NjM2Y0ZjkzMmRkY2U4OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_281a6dbdce1946b5af54e557f3c97603",
+      "statement": "Sandbox-unreachable notification targets an active Slack thread first, then Linear, then a configured GitHub issue or pull request when a token is available; the coding-agent message avoids automatic replacement because it could discard uncommitted work.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/sandbox_circuit_breaker.py#L135-L181",
+          "version": "repo-lines-v1:sha256:9a35650a8a0fa81530b6bbde86ffbf363fb28ff2d1f297cd4aa582e339aefda8:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExMmNmMTI5YjU1ZTE5ZjAwM2Y5NDVlMDgyNDgwM2I0NjIyMjE5OWZhODNkOTZjMmNlMTc4MDYxYzQzOGI2NTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1NTFjZDRjOTFmYmIyNTc5ZDU5MzJkZmE0MWZiYmFjYmRkMDg0YTViN2RlODk3YTYwZTAxMTEwYTdiMzQ5YmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/sandbox_circuit_breaker.py#L20-L55",
+          "version": "repo-lines-v1:sha256:4b1bf6bd1adcdba334db790d717ac81005a4b116cce7f7465bf76dc0e7bc4ba1:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjMmFmZWRmZDBjY2IyMDA5NDY3OGJiNjI5YTEwMGY0NDQ1NDg4ODllOTE0YWIxNWQ1M2RhZmNiYzNjMTg2Y2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRjMTNhODE5NDI1NjQ2NDNiMWNhMDZlNTVmNWU5ZjIxZGY4NGEwOTE4MmNlMWZkYWVhMzFjM2E5MTNmZWU3ZmIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9243fec26a5c42ac97fc72d8e8325091",
+      "statement": "Reviewer sandbox setup permits replacement because its checkout is re-derived, whereas the default coding-agent sandbox setup does not; a failed replacement remains a typed SandboxUnreachableError.",
+      "evidence": [
+        {
+          "resource": "repo://tests/sandbox/test_reviewer_sandbox_recovery.py#L1-L6",
+          "version": "repo-lines-v1:sha256:f31191f447ed977ef2c719bda6501921f3c0f4853cf688c61bb137c05a864ffc:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTViM2ZhZjZlNTkxNjBhNGZmMDhiZDllOGE5NGViZDAzMjdjZGU4ODU3MzJlNjRmOTA2N2ZlYjIwYjA3Y2Y3NSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTAyZWUzYThjMTU4NjVlZWQ2YmFkNmFlMGRkMzQ3ZjNlM2NkOTY0MDQ5YjNlYjEzNmEwNGRjMTE2NWJkMDIxNiJ9"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_reviewer_sandbox_recovery.py#L107-L166",
+          "version": "repo-lines-v1:sha256:c6e41dfae93bf21a611aa8adb7ab6bc8c8ed5b8764ac66dfdb3ebd7203a0ff56:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1NWNjOGFkMmI0ZTBhM2RmN2QzODU3MmI3ZTAyZmQwMGI4NjY4M2IwMzgyODk2MjAwOTQ0ZGZmYzI1OTkyMDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3eb50944fdd54c23b76fe96dd0fc3326",
+      "statement": "The guard and utility layers repair malformed tool inputs, enforce PR and workflow-push policy, refresh the GitHub proxy, inject wrap-up and step-limit notices, and repair reviewer orphaned tool calls.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/notify_step_limit.py#L17-L79",
+          "version": "repo-lines-v1:sha256:24d83be1654e88b5bd8d0bfa33b4b9492c4ad83271d4c5e86f4d59b55788a0d4:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjYTIyYWMxNmI5Nzc4Y2MyODdlM2ZlN2RkNmFiODI4MDU3ZjY1YzExMDYyZmY4M2RiMmQ1NWQ5MjlmMDI1OGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4MTQ2ZTJkMjZkYjQ2YWNmZGMzNjJjMjFiM2YwNDAyN2NkZmFiODg3MDk4Y2Q3MjZmMTA0NTY0NzJkN2I5YTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ4NmUxNjVkYTY4ZTE0NjFkMTNjYTFjMmJkYTk4NDM2YzA4MWIyZmVlMjFkMzc5OWUzZWZhODUzZjJjMjU1ZjUifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/pr_creation_guard.py#L118-L266",
+          "version": "repo-lines-v1:sha256:a9958d25c8deda121a9a18ef753989262a02259f7ac75506cd8cbab68caa014c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIzNjUyZWM2ZjA1MzIxZjM4YTcwZjY1MjdiZTcxMzVlNmIxOTI5ZmJlOTU0NzQwZDA2YzNkMTM0NTQxZmM3OWMzIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwZmUyOTk0ZjExNTY2MzBhNjZjYTM1YTc1MWU3MTQ5YTMyMDI1MzQ3NWIyNDI4ZWRhNWZkNTkwMjAwMTVkNzZmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIzOWNiM2E0MGIwYmY2MDEzNDk4MDY2MjdkODA0NDFkM2VhZmZmNTgyOGNkZjBmYTcyMGJlOTk5NjdlZTMzMTNmIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0NWY3ZWIzNzdjNDkxYjFhZGQ5NDYzY2U4MzExNmY0OTJkN2QzYzIxNGZjOWQxNjE0MmE2ODMzZjI0MzI4NTUxIn0"
+        },
+        {
+          "resource": "repo://agent/middleware/refresh_github_proxy.py#L1-L45",
+          "version": "repo-lines-v1:sha256:d6546112bf62e612879d55a0001e246e92eb994234498bf0189a52fee73c3d2a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxNzE4ZDc3NTdiMmU3OGU3MTlkYjJhMWVlMmZlMzhhMGFmNDhmZWNmOGIyYzBiNmUwODI2N2NhYmE4NmI2NTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/repair_orphaned_tool_calls.py#L1-L107",
+          "version": "repo-lines-v1:sha256:4b8939b7ad050b1bf2a0e845829955cd329dba270f1632febd6956e9bc6bee0c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJlN2EzZWFjMDhlOTkyMzdjZGRkNGFjMTFhNzhlNzJiYjNlY2VmMzhkODY2NDQ0OWZhMjIzMTA1NjgwZGJlMjU2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MWVhNjNhNjJmOTIxYWNmZTkxYTE3MjMxMTA5MjI5YzU5M2RlNzgzMWYwMWFmZGFmZDYwNTFjNTI2MTU0Y2U5IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        },
+        {
+          "resource": "repo://agent/middleware/sanitize_tool_inputs.py#L1-L50",
+          "version": "repo-lines-v1:sha256:a14493102c17b3b20ceb9016d91baf6854474891db23794cd91dfb209889bd89:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlMDhjNzA1Yjg5ZGE4MzQxOGI1MDQ0OWU4MDNhNzlmMWUyOWU4NGFmYWUyNDk1YTIwODg1ODBjN2NkNzczYzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyNmViMGRkMGUwZjA4YmJmN2ExNzRhOGU5Nzk4NjIzZmI1MzNjNTBmZTczMzcyMmVhZjkzMjc5ZGExZTdkY2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBkNGIyZjQxM2MxNTM4MTcyMGE0NzE0MWFjYTE3ZDQ1OTBiMGY3NmZhYmQ5ODU3NmEwNmY4ZDE3ZTIyOWJkMWIifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/timeout_wrapup.py#L11-L67",
+          "version": "repo-lines-v1:sha256:8192002afabf849e88e87cf8da2832250ad7599cb7a5fc58586f42230d3967c3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdhNTFjMjZhYjRjZTc4YzZiMGFlZWIzNWNiYTMxMGVmNTMyNDRkNGNiMjYzZGUyYjYzYjAxODExMzk0ZDA3NmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5YjFiYzVkZjliZWIyMzAxNzc0OWNhMTc3YmJiZjEwNzc5MmQ0YTQ4NGYzMmNlYTI4MzYxNTFmM2Y1NjliYTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwM2FhYWIzOTBjZWZlY2RmOTBhMWU2Y2IyYjFlOGFjZGZjNTk3NTQ1NDY0NzM4OTk0NWU4Nzk0YjdiMThjY2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyMzc1NjhmMzcxYzY2NGZhNzM5ZmU2ZGYzNzAyZTc2MjUzZTA3NDMyOGQwMjU2YTRhYWQzZGVkOTlkN2Y4YTQifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/workflow_push_guard.py#L526-L573",
+          "version": "repo-lines-v1:sha256:f4645457b1ca939358f5c91d7eede13bdf23d1d4b7ddf40034a164942227b244:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzZjhkMWJhMTQzY2UxNmVhYjg3OGU0YzIwODU4OTdiN2U4ZmYwOWU4NjRmZDQyNDE5OWNjMWJjMGI2YTFhODciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjOGI4ZTNkYTQ2YTZlNDc1YTQ1NTY3Y2Y3NDdkOWYwNDMyMmU2NDExZWM3YTRiODY4ZDVkNmZhODUyNjAxNTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVlNGYwYzRlM2IzYzg4OWY5YWViMWJkN2FhYjZjMzAwZjM2OGM1MTZkMTM1OTQzOTYwZTNhNDU4ZDRmMDgyNGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-31T08:17:06.525Z"
+  }
+}

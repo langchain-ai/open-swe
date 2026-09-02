@@ -19,22 +19,27 @@ def _require_admin() -> str | None:
     return require_admin("manage environments")
 
 
-def _summary(record: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "name": record.get("name"),
-        "slug": record.get("slug"),
-        "prompt": record.get("prompt"),
-        "repos": record.get("repos") or [],
-        "mem_bytes": record.get("mem_bytes"),
-        "vcpus": record.get("vcpus"),
-        "fs_capacity_bytes": record.get("fs_capacity_bytes"),
-        "create_params": record.get("create_params") or {},
-        "snapshot_status": record.get("snapshot_status"),
-        "snapshot_id": record.get("snapshot_id"),
-        "snapshot_name": record.get("snapshot_name"),
-        "status_message": record.get("status_message"),
-        "last_captured_at": record.get("last_captured_at"),
-    }
+# Deliberately narrower than the record: the agent has no use for authorship
+# or the source sandbox.
+_SUMMARY_FIELDS = {
+    "name",
+    "slug",
+    "prompt",
+    "repos",
+    "mem_bytes",
+    "vcpus",
+    "fs_capacity_bytes",
+    "create_params",
+    "snapshot_status",
+    "snapshot_id",
+    "snapshot_name",
+    "status_message",
+    "last_captured_at",
+}
+
+
+def _summary(record: store.Environment) -> dict[str, Any]:
+    return record.model_dump(mode="json", include=_SUMMARY_FIELDS)
 
 
 async def list_environments() -> dict[str, Any]:
@@ -47,11 +52,11 @@ async def list_environments() -> dict[str, Any]:
     """
     if error := _require_admin():
         return {"ok": False, "error": error}
-    records = await store.list_environments()
+    records = await store.ENVIRONMENTS.list_all()
     return {
         "ok": True,
         "environments": [
-            {**_summary(record), "is_default": record.get("slug") == store.DEFAULT_ENVIRONMENT_SLUG}
+            {**_summary(record), "is_default": record.slug == store.DEFAULT_ENVIRONMENT_SLUG}
             for record in records
         ],
     }
@@ -117,11 +122,11 @@ async def save_environment(
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
-    existing = await store.get_environment(slug)
+    existing = await store.ENVIRONMENTS.get(slug)
     try:
         if existing is None:
             login = _configurable().get("github_login")
-            record = await store.create_environment(
+            record = await store.ENVIRONMENTS.create(
                 store.EnvironmentCreate(
                     name=name,
                     prompt=prompt,
@@ -144,7 +149,7 @@ async def save_environment(
                 update_values["create_params"] = create_params
             elif clear_create_params:
                 update_values["create_params"] = {}
-            record = await store.update_environment(
+            record = await store.ENVIRONMENTS.apply_update(
                 slug,
                 store.EnvironmentUpdate(**update_values),
             )
@@ -179,7 +184,7 @@ async def capture_environment_snapshot(name: str) -> dict[str, Any]:
         slug = store.slugify(name)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    if await store.get_environment(slug) is None:
+    if await store.ENVIRONMENTS.get(slug) is None:
         return {"ok": False, "error": f"no environment named {name!r}; call save_environment first"}
 
     thread_id = _configurable().get("thread_id")
@@ -187,7 +192,7 @@ async def capture_environment_snapshot(name: str) -> dict[str, Any]:
         return {"ok": False, "error": "no thread_id in the current run config"}
 
     try:
-        from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
+        from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.
@@ -219,7 +224,7 @@ async def delete_environment(name: str) -> dict[str, Any]:
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     try:
-        deleted = await store.delete_environment(slug)
+        deleted = await store.ENVIRONMENTS.remove(slug)
     except Exception as exc:
         logger.exception("Failed to delete environment %s", slug)
         return {"ok": False, "error": f"failed to delete environment: {exc}"}

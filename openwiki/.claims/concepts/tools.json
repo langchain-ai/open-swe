@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:035d91e706f41fe6be2185100d81940ff0c2d0fa31b16edf33241281da46e8ef",
+  "claims": [
+    {
+      "id": "claim_11517f4004d84d74a9aa5799a8d72849",
+      "statement": "All curated tool modules live flat under agent/tools/ and are re-exported through agent/tools/__init__.py, which lazily imports and caches each export from _TOOL_MODULES; its custom _LazyToolsModule prevents same-named imported submodules from shadowing public tool exports.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/__init__.py#L199-L226",
+          "version": "repo-lines-v1:sha256:0b186303b85a5cffc53d95e4ab9e1510ffe421d7482d7dcae9cd7523c97098e9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc0ZTFiNmZiNDBlOGNiZDFkZWRiODVhY2NlODAyODc0NDcyMzU3ZGQyNGU0OGRlOGNhMzRiNzQ4Zjg0MWEwNWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0NTljMTlkZWJjYmM3MDkxODU5M2VhYjBjYjYwNWFkZGI2NDNkZTAzMmE3ZGEwNDAzNTAxYjdlODZjYjBiMjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM2NzgwZjQ1ZDM1ZWM1ODk0NjMxYWM4NzExZjUxZGQ4ZGY1NDg1ZWZjNWFmNTA1OWY0OTQ3NzZhOTgzNDM3MGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/tools/__init__.py#L5-L68",
+          "version": "repo-lines-v1:sha256:19fe06c2b53a427a0d01d5d4150500e76c78e1323f930cbf69dead4a557c8838:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4OTVjNjczOGE2NjMyMmM5M2FmN2FiOTY4NTM5YzhlNjMwNTBkMDljZWRjMGYxZDU4YmQ4MGFmNmU0NDQ1ZWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1M2IyNjgwOWU3ZDY4YjI0Yjg5YmMxOWFkOWIyYjgwYThiMjQ3ODk5MDIyM2M1N2Q5M2I3ZDY2ZTk5ZjYyMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBlYzBlNjE3MDA4ODZlM2VlMDJmMzhiZWIxNWI2ZTMyZjRmODVlZjg0OGJkMDlhZjU2MWY1MzhjMWM2MTZkYzMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b823ac1ae2804800ae8f17a8a5d42f91",
+      "statement": "agent/server.py:get_agent assembles the main coding agent's static_tools list covering web, plan lifecycle, background execution, user configuration, Linear, thread, baby-sit, notification, PR creation/review, scheduling, Slack, and user-facing sandbox helpers.",
+      "evidence": [
+        {
+          "resource": "repo://agent/server.py#L1638-L1691",
+          "version": "repo-lines-v1:sha256:3404c2e70186cd95be2030e9a3efe064e067ff4fa7bb4d2c42d5c8817daf5461:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1YzBiNjI0NTI2MjY5NWZkYzFlNGYyZTA1ODFiYzlmNDUzMDJlZWRiMzM5NDNhYTdkMzgwZjY5YzRiMmE5NTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRlYWI2YzQ5ZjMwNTBlZWNmMzBmODRlNTQzYTEwZmY2NzhiM2I2YTNjMmI1YzBjNGI3MjUwZDBlMDVhZTU2NTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcyMDA0NzlhNmExYzUwNzNlOGM5M2U3ZDk2NTU5YmViYTU0ZTZjMTY0N2M5ZmQ2YTJmOWMzZjE3YjQ0OWEwOWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ec4ebfd8391b4df9a982288c88182ba1",
+      "statement": "The main agent's tool list is dynamic: admin threads add ADMIN_TOOLS, sandbox download tools are added only when enabled, local_run collapses to just http_request/fetch_url/web_search, stop_summary_mode collapses to slack_read_thread_messages/slack_thread_reply, and Slack tools are removed when Slack is not enabled.",
+      "evidence": [
+        {
+          "resource": "repo://agent/server.py#L1612-L1618",
+          "version": "repo-lines-v1:sha256:b0fb1ed70f44bfb8ca87e494aa2813440acaf445e0a56f01cc0eba958fd3fca8:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWVkZDYxMjU5N2Y5ZDgyMjg0N2Q1N2IwYTM1YTA0OTIyY2IwMGU1Yzg3Mzc2ZTM1YzQ4NjAyMDVlOGIzODMzNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTAxZDg0YjFkMDQ0NTE3Mzc2OWZlM2VlNmQyOTRlMjU1YmQ5MGY2ODhmZjZiODQ1NWU1ZDJlYWU5NjVjMGEwNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTg2NzFhMjE1ODY4MDhiMjMyMTBkMWQ4ZDI4NTU3OGQxYTQyNDBmNTk2ZDFiYmE5OGI2NzBkMzc0M2Y2ZjA2YiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTJiMzE5YWQyYjBhYmJiYjRjYmRmY2FhZTZkMmE3OTM5OTdiNzllYTkwNzBkZDkxYzIzOTNkNGMzMzUxMDI0NiJ9"
+        },
+        {
+          "resource": "repo://agent/server.py#L1673-L1718",
+          "version": "repo-lines-v1:sha256:4a50d35801188fa1c54c571f5e65ebab32bef8ee72aa0e1caf539bfcaf24fed1:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZkMjVkOWQ2ZTliODQ1N2JkNGNiZGZkNTEwOTY1MWE5MTJmMWY0NTQxYjVhM2ExZGIzZjg4NGFmMmU2Nzc4NDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3MDdkNzY2YTFkZmYxZWJkNmZhMDg1MjdkNDEzNjIyNDY3ODljNmIxZDRlOWViODJkNzAyYjYzZDExMTI2NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ2NzcwNDkxM2E5ZjQ0ZmJmMjM0ZGI3ODViMWIzOGFhZGMxMmQ5ODFmYTFmZDNmMGJkNzdjYmIwOTYyZTZkOWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJkNTJhYzJkOWZkNjY1ODEzMmJjZDdmNDdiMDMyZDAyMWI2MTI3ODNiZDEyMDI2NTVmZjI0NDEwMmE2OTE2ZTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_40576a4345864dc7b2202ef359e3d8fc",
+      "statement": "The main agent exposes Observability, Currents, Notion, and optionally Corridor as DynamicToolMiddleware integration groups, so the model must call load_integration_tools before a requested integration tool is added to a later model turn; group loading is deferred and failures are returned as tool errors rather than failing the run.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/dynamic_tools.py#L30-L40",
+          "version": "repo-lines-v1:sha256:24e6b1de478bc566939d5a7b37f69ae1ecafc8308455d6504a86630176fecb01:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2OWExMzk3NWMyNTZlYzgzMjBlMjAxNjA4M2M5NmRmNjM3Y2EzZDM1YmViZGUyMzE0YmVlM2E0NzExYjU2Y2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmNWUxZTIzMTA3N2IyNDY0YTFhMDc0OTlhZDA1ZDAxMDFlMzM3MzBjYzc5OGU2MzM3YmIzODhjN2Q2OWYwYzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ2MzdlZmZkMDNhZGZlZjY2YzA0MjIyYzBmYjdjZGFmZDlhODM4MGEwMTIwYjU1NGZlMjYxNDMwY2RmMjI5MjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFjZjFjZDJhZDkwYjdhNzA4ZWRkYThkZjQzZDk4ZGZlZTdlYjc5MDY1NzUzZjczNmM3NzE5N2NhNWM4OWZkMDAifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/dynamic_tools.py#L90-L230",
+          "version": "repo-lines-v1:sha256:560bb10006c97e47c719d3c34b816abcdd7c659f93af03da45088a2d59c58075:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJmNDBmMTIwYTQ3ZGFhOTFmNWNiZGE3MmZiMTBiNWFhZTIyMzFhNjdlNzFjMmIzYmE4ZGQxODFkZDIyYmZkNWM0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzOTg5OGQwODVjNWE2NjVhMDYyMDcxNTkwYjJmYTQ0MWFhNTEwOTYyYWE5OWMwODg0NDRjMTRkOWFiYmZjY2VjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3MjY0MTI5MjUwYTk4Y2VkYzk5YTI5MWRjODk5MWY1YmEyMGM3MjY3ZGM1OTg3NDI1NDQzYTViMzI1ZmIzMDhiIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5ZTA5MDNiNWVjOWFkZjJiODVlMTY0NTRhODFlYTAyOTllMDExMzk2MmYzMDFmMGI4NTEzMTRmODYwNTUxZmUxIn0"
+        },
+        {
+          "resource": "repo://agent/server.py#L1699-L1718",
+          "version": "repo-lines-v1:sha256:27ef648702d33eb08e6f4492209cb7f2af7aab98dcf4a5e67f039e6d327eefbe:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5NDJmM2NiYzlkNzMyMTcwZmZlOTAxMWZmNWFmN2Y4M2ZmMWMyNGNjMjY3ZWE3YTBjMmE2ZTM3NGRkZTNlYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3MDdkNzY2YTFkZmYxZWJkNmZhMDg1MjdkNDEzNjIyNDY3ODljNmIxZDRlOWViODJkNzAyYjYzZDExMTI2NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMwOTZkNGM5ZDg3OGRlZjgyMzQwYjQ5ZjE3MTVkMzdiN2Y2ZDBjMTRmYjIxM2Y5NzNhM2Q2MzdmYjNmZjQxZGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJkNTJhYzJkOWZkNjY1ODEzMmJjZDdmNDdiMDMyZDAyMWI2MTI3ODNiZDEyMDI2NTVmZjI0NDEwMmE2OTE2ZTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b4e5b20a6b7649318bc4d4fd2ad9882b",
+      "statement": "agent/reviewer.py:get_reviewer_agent wires curated review tools fetch_review_diff, add_finding, update_finding, list_findings, publish_review, resolve_finding_thread, reply_to_finding_thread, plus web_search, fetch_url, and http_request; it does not wire open_pull_request as a curated reviewer tool.",
+      "evidence": [
+        {
+          "resource": "repo://agent/reviewer.py#L1400-L1416",
+          "version": "repo-lines-v1:sha256:7b30d7fe9a94840040feda5d269d92a59da1fe3ecb6999c7d3028aefcac66cca:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYzJjMWZjMjhmN2IxMzU1MzkwMzhlNDQ5NjVlZjdhYWE3YTUyYjJlOGY1M2JlZmUwZjAzMjY5ZjRhNzI1YzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3ZGZiNmIzMWE0YzViMzMwNmZlZmU0MDI4YWM5YTIxMzg0YjgxYTUxMjQyOWEwZjVjOTVmNzk5Y2JhNWRmM2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2MDA5OTg0MDhmNjY0YWM5YjhlMWZjZDZiZDdkZDNlNWM3ZTBiYjg2N2QzOTgzNGMzZWU2ZDAwYTJmZGViNWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1fc649ceff2c46fba346bfbf6b7d98cd",
+      "statement": "agent/analyzer.py:get_analyzer runs a minimal graph exposing only save_review_style_prompt (the save_review_style module export) and read_finding_outcomes, the latter used in continual mode to refine the per-repo review-style prompt from prior finding outcomes.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L46-L46",
+          "version": "repo-lines-v1:sha256:794b70aaf70a703e5a233894dd8faf35ff18276ae8d0e381673b696dc725b7e0:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzk0YjcwYWFmNzBhNzAzZTVhMjMzODk0ZGQ4ZmFmMzVmZjE4Mjc2YWU4ZDBlMzgxNjczYjY5NmRjNzI1YjdlMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNzk0YjcwYWFmNzBhNzAzZTVhMjMzODk0ZGQ4ZmFmMzVmZjE4Mjc2YWU4ZDBlMzgxNjczYjY5NmRjNzI1YjdlMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOWY1YjQwMzY3Mzg1NGI3ZTcwZDlkNTZkZWFmZjBiYTQyN2YyMGQxZjY1NjEzMzlmNDVmOThiODc1YTEzNDYwOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYThhY2YxZmM2NDFmNDNiM2FlN2Q0YjhmMWIzZmVlNzUwN2QxNjZkZjNlNTAzM2ZiZTVhZmQ0MzJiMzk3MmUyMCJ9"
+        },
+        {
+          "resource": "repo://agent/analyzer.py#L187-L191",
+          "version": "repo-lines-v1:sha256:fa00d17f38bbcc4f33337f6151b3f090293262fe620955ae8e57b611f2365be9:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGViOTJhN2Q4NjFjYWM5MDQyNWJkNGUzMWZmZDBiYTExYWY1Njk3OWVhMThmY2Q5OTFjNjkyNWY3NDZjY2UxMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOTJjMmMxZmMyOGY3YjEzNTUzOTAzOGU0NDk2NWVmN2FhYTdhNTJiMmU4ZjUzYmVmZTBmMDMyNjlmNGE3MjVjMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGRkN2MzZTIxMDUyNmFmNmVmOWQ0MzM2MmIxODQzNmIzZDViOWNiZTdmYjBlN2E1NDU3NjIzZWUzYzhkYjM3YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTNjODQ3ZDZhNTRiNmEyNWI4OTE4NDc2NjVlMDBhOGQwMjM5ZTdlMGQ1NzE4NTk5YmRmYmJmMTE0MWFkMDY0NyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_c4881cbc1df6419bb3ed94a0c64a0a11",
+      "statement": "agent/chat.py defines a separate sandbox-less 'chat with this PR' agent for the review UI that uses GitHub-API-backed read tools (read_repo_file, search_repo_code), list_review_findings, and web tools, operating over PR context seeded as virtual /pr/ files.",
+      "evidence": [
+        {
+          "resource": "repo://agent/chat.py#L2-L14",
+          "version": "repo-lines-v1:sha256:71a2ee2917c8d62eac6055658c944f2afc7867f2e5df0cf65e24512d5cde60ac:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoxLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE2NzlkNzc4ZTMzYTdkYTEzYjlmZjBiOTViY2U5OTcyYTJiMDYxNzgyMTEzNmYzYWZiZjJhM2JlNDZlNWQxMjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxMDkwNzY0ZWJhZGM4NTlkNGVkZjk1MWFmODkzMWM3ZDRhN2JmMDJjZjBiZWI3YmM5NzU5MmUwZmRmODQ1YTMifQ"
+        },
+        {
+          "resource": "repo://agent/chat.py#L238-L263",
+          "version": "repo-lines-v1:sha256:b733ef2900bfce7a03383004defbdeb3df44fe3c65c681034084967e33b23ee5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBkZDdjM2UyMTA1MjZhZjZlZjlkNDMzNjJiMTg0MzZiM2Q1YjljYmU3ZmIwZTdhNTQ1NzYyM2VlM2M4ZGIzN2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlOGMyNWVhNTRlYWFjOGU4ZTViZGI5NDQwOTZlYmVhNTY5YWRjZjkzOGY0NGQ1NDFmN2I0NDFlYmI3YmZlZDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3376911a964c40c29dad944ab794b5a1",
+      "statement": "Plan mode is enforced by PlanModeMiddleware using PLAN_MODE_EXCLUDED_TOOLS; it is installed unconditionally and is state-aware, so it restricts mutating tools even after a mid-run enter_plan_mode call, not only when a run starts in plan mode.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/plan_mode.py#L1-L79",
+          "version": "repo-lines-v1:sha256:75bec36fff7f0ce8290e1afec065794649373be650c673945c45fffe378ecd78:eyJzZWxlY3RlZExpbmVDb3VudCI6NzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjNjVlZTJhMzFmNmE2ZmQzZTlkYTUxMDI4MGNjNWYxYTY0NDg1YjFlMDJlOWY4ZDNhMDEyYmYxNmM4NjVjN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1599-L1610",
+          "version": "repo-lines-v1:sha256:4ea7c26198d03ad3a5964845a2359e148c3655b4c6e799e698baecc057fcf85f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxOWM1OTRkOWNkNGNkODE2N2Q1YmRjYjRjODY0NWJhZmE3OGIzNTgxODRjZmI5NzE3MmI5NmYzYjA2YjQxYjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjZTI1YjA4YTNhMzY3ZjI3ZDA3YjQyZTUyYThmYTc5Y2QwNGVjMGI1NmY0YmQwOGU2NzRiZTcwMDFjZDgwODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjYzIyNDgzMTRmODNlYjE0NjcxZGYwNDc1YmNjZjRmMDk0OThlYzRjY2Y4NDYzMGE2YjI1NWM0MTBiYjVlNDcifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1823-L1826",
+          "version": "repo-lines-v1:sha256:26745ab75568f24e9575b630ee4e8c9c41008cbf283f0534a38fdbb6d53d5318:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWE1MWM0OTE4Y2Y1Y2FjMjcwOTdjNGNhZGEzYTZiY2IxY2Q1ZTYwYmQ5OTY1ZjRiYmQyNzg2MmM2NTkzOWVlMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2NmNjU3Njk5ZDBhNWFkYmY5MjMwNzVkNDJhMTljM2FjZjMyNjdjOTlhNDYxMzk2MTNjNDQ3MGY5YTlmZjY3MiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjkwMWVlYmQzZTNiNzdkOGQ3YjE3ZGM4NTAwNDAwZjc1ZTViNjBmZWY1N2FiODBhOTlkOWY1MDA1ODQ2NGU1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTZkNmQzNTUwNjQxNmE1YWQxZGM3YThlYmNiMTRjOGJlYjY0ZTBmYTFmNDk2MmU5ODFmNWUxNjU1ODFmNDNjYyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_48b01057d195429f9da61ae78c526e3e",
+      "statement": "PLAN_MODE_EXCLUDED_TOOLS removes side-effecting curated tools during planning — including task, background_execute/background_task, create_sandbox_service_url, http_request, open_pull_request, request_pr_review, manage_thread, manage_baby_sit, sandbox_reset, recreate_sandbox, mutating Linear tools, user-skill mutations, Slack moves/new threads, environment mutations, and automation mutations — while list_threads, get_thread, and built-ins write_file/edit_file/execute remain available.",
+      "evidence": [
+        {
+          "resource": "repo://agent/server.py#L779-L816",
+          "version": "repo-lines-v1:sha256:3d7ab8e39fe97a97036330cddd1a7e8028d8e8110cbd89e693bda49eb7adf995:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhNDMwZjdlZTdiM2RhMGM3MDdjNzY4ODA2YWY4NjVjNzM1Mjg2NGEwOGVkNmI4MmJiOGQ3M2FkMGZjZTdmMGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0NjYzNmUxZTllNWZkZTU0MmE2ZDA2OTkyOTY1M2MyMDdmYmFmNDI3MjJmZTlmZmFiYWY0MTc3NTBlNzAxNTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUifQ"
+        },
+        {
+          "resource": "repo://tests/agent/test_plan_mode.py#L40-L65",
+          "version": "repo-lines-v1:sha256:fab3eb20b8e9b1ec05549e35f1941ade2fed0b99935496b4acf96338b8c48baa:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1ZTY0MjIxOTUxYTIzMWRhY2ZiNTYyOTg0YjU0NDEzNWE5NWIyMDUzZDQxMjkxNWQzYjBjNzRkMTg1MzU5NDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2NjkzMjllODg0OGY3NTFjMDRhYzNjYTk0MGVhMWJlMzhjOGE1YmEwZGVhNzgxNTg1ZjRjMWU2ZWFiNTQxM2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVjMTgxMjBhYzI5YzAzYzYxMGU5MzI5MDMyNmNiNTdhNmJkYWNiNjlhN2M0MGVkOWQ2ZjkyZGUxMjhmNGE0NzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU0NzAwZjM3MTJlZDM0OWY4ZDY1MTFjYTk4NzY1YmQxNTc2M2EzN2E2MWQwZGZiNDkxNGEzYzAzNDMwMWY2NWYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_423ee25a4d4c43d4a0165517104411c8",
+      "statement": "The lazy tool catalog exports five automation operations from .automations and read_user_settings, but automation management is attached only through ADMIN_TOOLS while read_user_settings is a normal main-agent static tool.",
+      "evidence": [
+        {
+          "resource": "repo://agent/server.py#L1647-L1691",
+          "version": "repo-lines-v1:sha256:d4e53b1f5b1cf39c51de6a9d48afa3a38995dafb0abd21bb7bb63a7ef6328e9d:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY5NzdkMmQyM2EzM2FmNzdjOTg5YjVkMmQxNjhjMDA5MDNhOWJjNGEzMTllOWMyMzBhMjYzN2RhNTY0Zjk1N2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1YTM5YWI3ZGUzYjViOTI3YWE0ZWJlZTg2NDk0MTk0NTdjMTRlM2FjMDVlMGI2MTQ2NmM4ZTQ2NWY3ZmEwYTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcyMDA0NzlhNmExYzUwNzNlOGM5M2U3ZDk2NTU5YmViYTU0ZTZjMTY0N2M5ZmQ2YTJmOWMzZjE3YjQ0OWEwOWQifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L960-L974",
+          "version": "repo-lines-v1:sha256:a13389e796bf83a74e8a11fd0e6551b99f17573b0163f5b9dc98c6a9f0279b78:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2ZDBkOTg3OWI2MzYxOTY3Y2NjZWRkMmQwNjk3YTAxYzUyOThlMTcwZGUxNzE0ZGY1NzE0OTE3OWVkZWRlMTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA5ZjkzMDgzYzE5NzEyMWI5ODI3MDBiYThhZmFiZDE3MjJjZjFkM2U3NDA0NTA5ZTgwZWZhMjcyNDdmNjJmMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjliNGI1ZWRiNWQwN2MyZTg1YmVmNWZjYTBhZDc2YzM4ZDk4OTM5MTFhN2Q4NWU0Y2FmMDc1OTFjYzRiYjViNzkifQ"
+        },
+        {
+          "resource": "repo://agent/tools/__init__.py#L5-L67",
+          "version": "repo-lines-v1:sha256:8034004580ca3e3ce1c1556ad398d0e794125285b534e1c7439c1d890a50f86f:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4OTVjNjczOGE2NjMyMmM5M2FmN2FiOTY4NTM5YzhlNjMwNTBkMDljZWRjMGYxZDU4YmQ4MGFmNmU0NDQ1ZWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg2ZDA4ODg2MDRkNTAwY2ZiODliMDE4MWU3MzJhNWMxM2I2YzdjZTlkMzRmMDliMjE1MGVlMTM1Nzg3NGI0YzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1M2IyNjgwOWU3ZDY4YjI0Yjg5YmMxOWFkOWIyYjgwYThiMjQ3ODk5MDIyM2M1N2Q5M2I3ZDY2ZTk5ZjYyMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzOGMyMzg3ZDg3YjNkZWM2ODRmN2I0YTk3OTExYTdkYTI2Y2I4NzJhNTljMWU0NTkzYzY3N2UwZjdiYmEwOGYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1c83d009afb4439bbbf31b0e595369de",
+      "statement": "Automation tools enforce admin authorization and wrap the dashboard schedule service: creation uses the verified admin identity, updates reject contradictory clear/set arguments, triggers can run paused automations, and operations return structured errors rather than propagating service exceptions.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/automations.py#L14-L27",
+          "version": "repo-lines-v1:sha256:5323ad176d5ffe30ac4b363d11066b7733ed02496db25735955ee3b5b1b98f0b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5NzZiNDlhMDJkZTVhZGViOGVlYmQ0Y2IyMzUxZWQ3OTEwMzNlMjM3ZDU1Njg3NThhOWQ5MzIwN2E4MWNiMGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkOTcwZjUwMTQ5YTBiMzFlMTQ1NTBhMWEyZTgxMzEyNWNjNzIwNzBiZTI0ZWQxMTg3OWQyYWNiOTA0YTY0ODUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE4MDgwYzU4ZWNhMzVjNDg1OGY3MzhhNTlkMjYxYTdmNjQwMzA3NTAxM2NhYmU5Y2VhNDY0MThjZGViZmQ5OWIifQ"
+        },
+        {
+          "resource": "repo://agent/tools/automations.py#L37-L167",
+          "version": "repo-lines-v1:sha256:c319851fed485999dc1f817e22c5d1d84305044c950117d55232f88f5c045d1c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxM2U0OGI2N2FiNjcyODg0MWUxNGNlYmU3MTg3OTQ4NzhhNDQ2YjA1MTMyOGJhNGRhMDAzNTc2MzI0Yjk5NjM0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlYzA5N2FhOGJjOWRiYzhjMTVkNTViZTc3MGNiZDY5ZmM3MDAyZTI2N2MxNDNjOGRkMTA4NmRhYzMwNjc1OGZlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI0OTA4NDNkOTdkMzYwNTAxYjMxYTE5ZmM3MjNhZWE0ZTc3OTgzNmM2YTkwODUwNTU3NGEwZWJjMGVlOTcwZGY5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_dd5e07fd3c934b329f4bddec94d47ed7",
+      "statement": "read_user_settings derives all identities from verified thread participants and returns safe profile settings, instructions, and redacted integration connection statuses without tokens or credentials.",
+      "evidence": [
+        {
+          "resource": "repo://agent/tools/read_user_settings.py#L18-L33",
+          "version": "repo-lines-v1:sha256:340e84cf961e9d6b4bc1c61ce659fd57d411ef407723a91f1c00a591e6ed73cb:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0YWFjMjVhZWFjYjhkODJmNjBmMjI0OTFiMmQ0YTk0MjFlOGU4MjAzMjFmOGI5N2ZmMDcyZTA1NWMxMDg2MTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlOWVlZWFiNjIxMzJiMTI5NDhkNzM2MzNkZDlmMzE0ZTFmYmNhOTg4YzRjYmQ5MjVkNDA5OTE1MGE3YmQxNGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ1ZmNjMWIyM2E2NGYxZjg3YWQxMGQ1YTk1YjdlYTkyZmVmNmU3YmJlNmQxZTBjM2YwY2QyZWVlMjg2Y2QzZjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgyYmRlOTkxYmJlNTU5NDI2MDc2YzdkNmU1YWI3YTE3NzliMzBlNWQ0YTVhOWYwN2Y0YTZjZWViOWM3ZjE2ZDcifQ"
+        },
+        {
+          "resource": "repo://agent/tools/read_user_settings.py#L57-L76",
+          "version": "repo-lines-v1:sha256:40210ba007d7399183d15f068b90b2056b44a9b9e191bfc33e5fd5d8424f2f48:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyZDE1NjI4NzIxZjNlZjEzZWUyZDkxYjkzMGE0ZjhhN2ZjZTI1MjgxOGJiYzMxZmQyZTg2Y2E4NjNhM2RkNjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_68cf9b76789044b0a9abc72700a343c2",
+      "statement": "PlanModeMiddleware resets the plan_mode state at each run to its configured initial value, avoiding stale persisted state while still responding to a mid-run Command before the next model call.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/plan_mode.py#L3-L9",
+          "version": "repo-lines-v1:sha256:a58c9a5e7beeacc8cab51c5ffe807f5b62b85fe3080d06e63af9cdf960b4b450:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDIxMTRkN2NiMGEwZDFiNWQ1NGQ5ZTg2NjA5MzcxZGU1OTg4MjdlZGZhZmYyYTg0MzgwYzg2M2VhOTdjYmQ5YyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMGE3ODhkOTBlYzNkMjgxMTUyZjgwM2YyZjRkYmY4MGIyNTc5ZWY1MzU0YmQ3NDE4OGE5ZTcyODIzZjI2YjJmZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjIsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGRlZWUyNjA1MGI4MjFmNzYyNWY5Y2MzYjRjY2NmNWU4MTFiZjcyODVhZDY5OGM1MjYwODRmMmEwMGQ5MDhlOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWI1NDY5ZWRiMTVhNTA2YjQ2Yjk0ZTRhZWYxMDA4YmI5ZDE2NjMzZjE2NDcyMWI0MDcxOGEzMTJkNGI5OTBmMiJ9"
+        },
+        {
+          "resource": "repo://agent/middleware/plan_mode.py#L47-L79",
+          "version": "repo-lines-v1:sha256:b4d9131c354a6375cf9f66b6ff1daec499309be40c43a540d29e4fd529c11005:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjNjNjNjAwMWMwZDAxZDUwNmNiM2MzMzkzNjQzNGViODhjYmQ4Y2ExMmM3MzZiOTM0NTQ5NTk0ODcxM2ViYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZjY2RiN2E0NTcwNDcyZDQ0NzRmYWU4M2Y5MDliMmNmMjU2NGRlNTYxNTNlN2VkMDBkMDUyYTc4NGFhNDA0YjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-31T08:17:06.525Z"
+  }
+}

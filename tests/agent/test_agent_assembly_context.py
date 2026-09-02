@@ -15,9 +15,9 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.server import _registered_tool_name, get_agent
-from agent.utils.read_only_backend import ReadOnlyBackend
-from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
 
 class _DummyAgent:
@@ -44,6 +44,7 @@ async def _capture_create_deep_agent_kwargs(
     thread_settings: dict[str, object] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
+    make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = "thread-ctx"
 
@@ -51,7 +52,11 @@ async def _capture_create_deep_agent_kwargs(
         captured.update(kwargs)
         return _DummyAgent()
 
-    clear_sandbox_backend(thread_id)
+    def fake_make_model(model_id: str, **kwargs: object) -> MagicMock:
+        make_model_calls.append((model_id, kwargs))
+        return MagicMock()
+
+    SANDBOX_BACKENDS.pop(thread_id, None)
     with (
         patch(
             "agent.server.resolve_github_token",
@@ -65,7 +70,7 @@ async def _capture_create_deep_agent_kwargs(
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -81,13 +86,14 @@ async def _capture_create_deep_agent_kwargs(
             return_value=thread_settings or {},
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[MagicMock(), MagicMock()]),
+        patch("agent.server.make_model", side_effect=fake_make_model),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
-    clear_sandbox_backend(thread_id)
+    SANDBOX_BACKENDS.pop(thread_id, None)
+    captured["make_model_calls"] = make_model_calls
     return captured
 
 
@@ -126,7 +132,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         await started.wait()
         return (("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low"))
 
-    clear_sandbox_backend("thread-ctx")
+    SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
         patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
@@ -147,7 +153,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         release.set()
         await agent_task
 
-    clear_sandbox_backend("thread-ctx")
+    SANDBOX_BACKENDS.pop("thread-ctx", None)
 
 
 @pytest.mark.asyncio
@@ -175,6 +181,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
             backend.write(f"{route}poison/SKILL.md", "malicious")
     skill = await backend.aread("/bundled-skills/baby-sit/SKILL.md")
     assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
+    artifacts = await backend.aread("/bundled-skills/html-artifacts/SKILL.md")
+    assert artifacts.file_data and "name: html-artifacts" in artifacts.file_data["content"]
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
@@ -195,6 +203,24 @@ async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     assert isinstance(backend, CompositeBackend)
     assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
     assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
+
+
+@pytest.mark.asyncio
+async def test_desktop_agent_honors_gateway_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
+    config = _base_config()
+    config.setdefault("configurable", {}).update(
+        {"source": "desktop", "local_project_path": "/tmp"}
+    )
+    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+        captured = await _capture_create_deep_agent_kwargs(config)
+
+    calls = captured["make_model_calls"]
+    assert isinstance(calls, list)
+    assert calls
+    assert all(kwargs["use_gateway"] is True for _, kwargs in calls)
 
 
 @pytest.mark.asyncio
@@ -228,6 +254,34 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert report_platform_issue in tools
+
+
+@pytest.mark.asyncio
+async def test_agent_loads_browser_tools_dynamically_without_a_browser_subagent() -> None:
+    from langchain_core.tools import StructuredTool
+
+    from agent.middleware import DynamicToolMiddleware
+
+    async def browser_navigate(url: str) -> str:
+        """Navigate to a URL."""
+        return url
+
+    browser_tool = StructuredTool.from_function(coroutine=browser_navigate)
+    with patch("agent.server.load_browser_tools", return_value=[browser_tool]):
+        captured = await _capture_create_deep_agent_kwargs()
+
+    tools = captured["tools"]
+    middleware = captured["middleware"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(middleware, list)
+    assert isinstance(subagents, list)
+    assert browser_tool not in tools
+    assert {subagent["name"] for subagent in subagents} == {"general-purpose"}
+
+    dynamic_tools = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
+    loader = dynamic_tools.tools[0]
+    assert "browser_navigate (integration: Browser)" in loader.description
 
 
 @pytest.mark.asyncio
@@ -293,12 +347,17 @@ async def test_agent_includes_sandbox_reset_only_in_admin_threads(
 
 @pytest.mark.asyncio
 async def test_agent_includes_sandbox_file_download_url_tools() -> None:
-    from agent.tools import create_sandbox_file_download_url, output_iframe
+    from agent.tools import (
+        create_sandbox_file_download_url,
+        create_sandbox_service_url,
+        output_iframe,
+    )
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert create_sandbox_file_download_url in tools
+    assert create_sandbox_service_url in tools
     assert output_iframe in tools
 
 
@@ -309,7 +368,11 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
     from agent.prompt import OPEN_SWE_SHARED_BASE
-    from agent.tools import create_sandbox_file_download_url, output_iframe
+    from agent.tools import (
+        create_sandbox_file_download_url,
+        create_sandbox_service_url,
+        output_iframe,
+    )
 
     monkeypatch.setenv("SANDBOX_TYPE", "modal")
     captured = await _capture_create_deep_agent_kwargs()
@@ -318,9 +381,11 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert isinstance(tools, list)
     assert isinstance(subagents, list)
     assert create_sandbox_file_download_url not in tools
+    assert create_sandbox_service_url not in tools
     assert output_iframe not in tools
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     assert create_sandbox_file_download_url not in general_purpose["tools"]
+    assert create_sandbox_service_url not in general_purpose["tools"]
     assert output_iframe not in general_purpose["tools"]
     assert general_purpose["system_prompt"] == (
         f"{OPEN_SWE_SHARED_BASE}\n\n{GENERAL_PURPOSE_SUBAGENT['system_prompt']}"
@@ -475,6 +540,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     parent_names = {_registered_tool_name(tool) for tool in parent_tools}
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
+        "manage_code_channel",
         "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",

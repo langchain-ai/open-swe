@@ -8,6 +8,8 @@ compatible Open SWE backend; they do not need a separately hosted dashboard.
 
 Desktop users can choose **This Mac** in the new-task composer to run the same Open SWE LangGraph agent over a selected local project. Electron owns a loopback-only LangGraph server, proxies it to the bundled UI, and stops it with the app. Local threads use the same streaming protocol, graph, tools, subagents, and middleware assembly as cloud threads; only the filesystem backend and unavailable cloud integrations differ.
 
+The composer's workspace selector chooses where a local thread runs. **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects. **New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and up to ten local threads can run at once without contending for a working tree. Deleting a thread removes its worktree along with anything uncommitted in it. Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
+
 The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
 
 For local OpenAI models, the app can use either `OPENAI_API_KEY` or Sign in with ChatGPT. When no
@@ -16,9 +18,14 @@ credentials are encrypted with the operating system's secure storage, refreshed 
 made available to the local model client through an authenticated loopback broker. Refresh tokens
 are never placed in the local backend environment or inherited by agent shell commands.
 
+Local model calls also honor `LANGSMITH_GATEWAY_*` configuration. On managed macOS installs, the
+app reads `LC_GATEWAY_KEY` from `launchctl` when no explicit gateway key is configured and enables
+gateway routing for the local backend. Gateway and provider credentials are not inherited by agent
+shell commands.
+
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
-the current branch and discovers its pull request when the GitHub CLI is installed and authenticated.
+the workspace's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 
 ## How it connects
 
@@ -100,16 +107,22 @@ to `desktop/dist/`.
 
 ## macOS releases
 
-Maintainers can run **Release Desktop** from the GitHub Actions page on `main` and choose a patch,
-minor, or major version bump. The workflow builds the current `ui/` bundle, signs and notarizes the
-Electron app, verifies the resulting app and DMG, bumps `desktop/package.json`, creates a
-`desktop-vX.Y.Z` tag, and publishes the DMG, macOS zip, and app zip to a GitHub release. The
-desktop-prefixed tags keep this release stream separate from web and backend releases; the workflow
-packages the web UI but does not deploy or otherwise change the hosted web app.
+`desktop/package.json` is the latest stable version. Every **Promote main to prod** run publishes a
+prerelease nightly from the promoted commit with a UTC timestamp, such as
+`desktop-v0.2.3-nightly.20260902080000`. Nightly releases never publish the stable version.
+
+Stable releases use a deliberate bump, test, release process: bump `desktop/package.json` in a normal
+pull request, merge it to `main`, test the resulting code as needed, then run **Release Desktop**
+manually. The workflow publishes the exact package version and fails if that stable release is
+already complete. A partial stable release remains manually retryable.
+
+Both paths compile the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
+app and DMG, create the tag, and publish the DMG, macOS zip, and app zip. Desktop-prefixed tags keep
+this release stream separate from web and backend releases; the workflow packages the web UI but
+does not deploy or otherwise change the hosted web app.
 
 The workflow requires these GitHub Actions secrets:
 
-- `RELEASE_PAT`: token allowed to push to `main` and create tags
 - `APPLE_SIGNING_CERT`: base64-encoded Developer ID Application `.p12` certificate
 - `APPLE_SIGNING_CERT_PASSWORD`: password for the certificate
 - `APPLE_API_KEY`: App Store Connect `.p8` key contents

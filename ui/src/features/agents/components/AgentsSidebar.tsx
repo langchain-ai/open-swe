@@ -1,40 +1,53 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
-import { Dialog } from "@base-ui/react/dialog"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
-  ArrowCounterClockwiseIcon,
-  CalendarBlankIcon,
-  CaretDownIcon,
-  CaretRightIcon,
-  ChatCircleIcon,
-  CheckCircleIcon,
   CircleNotchIcon,
-  CopyIcon,
+  DownloadSimpleIcon,
+  FolderIcon,
   FolderOpenIcon,
-  GitMergeIcon,
   GitPullRequestIcon,
   LightningIcon,
   MagnifyingGlassIcon,
+  NotePencilIcon,
   PlusIcon,
-  SparkleIcon,
   TrashIcon,
-  TreeStructureIcon,
+  PushPinIcon,
+  PushPinSlashIcon,
+  SparkleIcon,
 } from "@phosphor-icons/react"
 import { Kanban } from "lucide-react"
-import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
-import { SiLinear } from "react-icons/si"
-import { useCallback, useEffect, useMemo, useState } from "react"
-import type { ComponentType, SVGProps } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
-import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
-import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
+import type {
+  PullRequestSnapshot,
+  SidebarProject,
+} from "@/features/agents/lib/api"
+import type { AgentThread } from "@/features/agents/lib/types"
+import type {
+  SidebarProjectGroup,
+  SidebarThreadItem,
+} from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
-import { DesktopThreadSourceToggle } from "@/features/agents/components/DesktopThreadSourceToggle"
-import { SidebarFilterMenu } from "@/features/agents/components/SidebarFilterMenu"
-import { SidebarProjectSelector } from "@/features/agents/components/SidebarProjectSelector"
-import { Button } from "@/components/ui/button"
+import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  SidebarSectionAction,
+  SidebarSectionHeader,
+  SidebarSectionMenu,
+} from "@/features/agents/components/SidebarSectionHeader"
+import {
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+} from "@/components/ui/menu"
 import {
   SidebarCollapseButton,
   SidebarFrame,
@@ -42,19 +55,26 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import {
-  availableFacets,
   filterThreads,
-  groupThreadsByMode,
   hasActiveFilters,
-  reconcilePinnedAttentionThread,
 } from "@/features/agents/lib/sidebarFilter"
+import type {
+  ChatSort,
+  OrganizeMode,
+  PinnedSort,
+} from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
-  useDeleteAgentThread,
+  usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
-  useSidebarThreads,
+  useSidebarActiveThread,
+  useSidebarPinnedThreads,
+  useSidebarProjects,
+  useSidebarProjectThreads,
+  useSidebarRecents,
 } from "@/features/agents/lib/queries"
+import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
@@ -62,69 +82,22 @@ import {
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import {
+  applyProjectKeyAliases,
+  cloudSidebarThread,
+  groupSidebarThreadsByProject,
+  localSidebarThread,
+  sidebarProjectKey,
+  sidebarProjectOptions,
+  sortSidebarThreads,
+} from "@/features/agents/lib/sidebarThreads"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
-
-type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
-
-const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
-  dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
-  github: { icon: IoLogoGithub, label: "Triggered from GitHub" },
-  slack: { icon: IoLogoSlack, label: "Triggered from Slack" },
-  linear: { icon: SiLinear, label: "Triggered from Linear" },
-  schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
-}
-
-type PrState = NonNullable<AgentThread["pr"]>["state"]
-
-const PR_STATE_META: Record<
-  PrState,
-  { icon: SourceIcon; label: string; className: string }
-> = {
-  draft: {
-    icon: GitPullRequestIcon,
-    label: "Draft pull request",
-    className: "text-muted-foreground/70",
-  },
-  open: {
-    icon: GitPullRequestIcon,
-    label: "Open pull request",
-    className: "text-success-foreground",
-  },
-  merged: {
-    icon: GitMergeIcon,
-    label: "Merged pull request",
-    className: "text-primary",
-  },
-  closed: {
-    icon: GitPullRequestIcon,
-    label: "Closed pull request",
-    className: "text-destructive",
-  },
-}
-
-function openContextMenuFromKeyboard(
-  event: React.KeyboardEvent<HTMLAnchorElement>
-) {
-  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
-    return
-  }
-  event.preventDefault()
-  const rect = event.currentTarget.getBoundingClientRect()
-  event.currentTarget.dispatchEvent(
-    new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2,
-    })
-  )
-}
 
 interface AgentsSidebarProps {
   user: SessionUser | null
@@ -134,12 +107,76 @@ interface AgentsSidebarProps {
   layout: SidebarLayout
 }
 
+interface HydratedProjectGroup extends SidebarProjectGroup {
+  repoFullName: string | null
+  updatedAt: number
+  activeThread?: AgentThread
+}
+
 const NAV = [
-  { to: "/agents/threads", label: "Kanban", icon: Kanban },
+  {
+    to: "/agents/threads",
+    label: "Kanban",
+    icon: Kanban,
+    badge: "Experimental",
+  },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
+
+/** Threads shown per project before the group needs a "Show more". */
+const PROJECT_PREVIEW_COUNT = 5
+
+function cloudProjectAliases(
+  projects: ReadonlyArray<SidebarProject>
+): Map<string, string> {
+  const keys = new Map<string, Array<string>>()
+  for (const project of projects) {
+    const label = project.name.trim().toLowerCase()
+    const key = sidebarProjectKey(project.repoFullName)
+    if (label && key) keys.set(label, [...(keys.get(label) ?? []), key])
+  }
+  return new Map(
+    [...keys].flatMap(([label, values]) =>
+      values.length === 1 ? [[label, values[0] as string]] : []
+    )
+  )
+}
+
+/**
+ * Tracks whether the scroll container has content hidden above or below, so
+ * the sidebar can show an edge hairline + fade only where there is more to
+ * reach. Measured after every render because the thread list polls, and on
+ * container resize.
+ */
+function useScrollEdges() {
+  const viewport = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ top: false, bottom: false })
+
+  const measure = useCallback(() => {
+    const el = viewport.current
+    if (!el) return
+    const top = el.scrollTop > 0
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight > 1
+    // Returning the previous object when nothing moved lets React bail out —
+    // without it the dependency-free effect below would re-render forever.
+    setEdges((prev) =>
+      prev.top === top && prev.bottom === bottom ? prev : { top, bottom }
+    )
+  }, [])
+
+  useEffect(measure)
+  useEffect(() => {
+    const el = viewport.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [measure])
+
+  return { viewport, edges, measure }
+}
 
 export function AgentsSidebar({
   user,
@@ -149,6 +186,11 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const {
+    viewport: scrollViewport,
+    edges: scrollEdges,
+    measure: measureScrollEdges,
+  } = useScrollEdges()
   const { openPalette } = useAppCommandControls()
   const openThread = useCallback(
     (threadId: string) => {
@@ -156,119 +198,389 @@ export function AgentsSidebar({
     },
     [navigate]
   )
-  const { prefs, setGroup, setCompact, setFilters, resetFilters } =
-    useSidebarPrefs()
-  const sidebar = useSidebarThreads({
-    activeThreadId,
-    includeAutomations:
-      prefs.filters.includeAutomations ||
-      prefs.filters.sources.includes("schedule"),
+  const {
+    prefs,
+    setCompact,
+    setFilters,
+    toggleLocalPin,
+    toggleProjectPin,
+    toggleProjectCollapsed,
+    toggleSectionCollapsed,
+    expandProject,
+    setView,
+  } = useSidebarPrefs()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
+    status: "idle",
+  })
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    if (!desktop) return
+    void desktop.getUpdateState().then(setUpdateState)
+    return desktop.onUpdateState(setUpdateState)
+  }, [])
+  const projectMode = prefs.organize === "project"
+  const includeAutomations =
+    prefs.filters.includeAutomations ||
+    prefs.filters.sources.includes("schedule")
+  const pinnedQuery = useSidebarPinnedThreads({ enabled: !localOnly })
+  const recentsQuery = useSidebarRecents({
+    projectMode,
+    includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly,
   })
-  const localSessions = useDesktopLocalThreads().data ?? []
+  const projectsQuery = useSidebarProjects({
+    includeAutomations,
+    includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly && projectMode,
+  })
+  const localThreads = useDesktopLocalThreads({ enabled: isDesktop })
+  const localSessions = localThreads.data ?? []
   const activity = useLocalThreadActivity()
   const refreshLocalThreads = useRefreshLocalThreads()
-  const deleteLocalSession = async (sessionId: string) => {
-    const deleted =
-      (await window.openSweDesktop?.deleteLocalThread(sessionId)) ?? false
-    if (deleted) refreshLocalThreads()
-    return deleted
-  }
+  const pinThread = usePinAgentThread()
+  const resolveThread = useResolveAgentThread()
   const {
     projects: localProjects,
     addProject: addLocalProject,
     removeProject: removeLocalProject,
   } = useDesktopProjects()
-  const localGroups = groupLocalProjects(localProjects, localSessions)
-  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
-    null
+  const projectCommands = useMemo(
+    () =>
+      isDesktop
+        ? [
+            {
+              id: "add-project",
+              label: "Add project",
+              aliases: ["open folder", "add folder", "repository", "repo"],
+              group: "Workspace",
+              run: async () => {
+                await addLocalProject()
+              },
+            },
+          ]
+        : [],
+    [addLocalProject, isDesktop]
   )
-  const activeProjectPath = localProjects.some(
-    (project) => project.cwd === selectedProjectPath
+  useRegisterAppCommands(projectCommands)
+
+  const pinnedThreads = pinnedQuery.data ?? []
+  const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
+  const pageThreads = recentsQuery.items.filter(
+    (thread) => !cloudPinnedIds.has(thread.id)
   )
-    ? selectedProjectPath
-    : null
-  const visibleLocalGroups = activeProjectPath
-    ? localGroups.filter((group) => group.project.cwd === activeProjectPath)
-    : localGroups
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
-  useEffect(() => {
-    if (!isDesktop) return
-    if (activeLocalSessionId) setDesktopThreadSource("local")
-    else if (activeThreadId) setDesktopThreadSource("cloud")
-  }, [activeLocalSessionId, activeThreadId, isDesktop, setDesktopThreadSource])
-  const activeThreads = sidebar.data.active.items
-  const resolvedThreads = sidebar.data.resolved.items
-  const activeHasMore = sidebar.data.active.hasMore
-  const resolvedHasMore = sidebar.data.resolved.hasMore
-  const visibleThreads = [...activeThreads, ...resolvedThreads]
+  const activeThread = useSidebarActiveThread({
+    activeThreadId,
+    loadedThreads: [...pinnedThreads, ...pageThreads],
+    includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly,
+  })
+  const activeInProject = Boolean(
+    projectMode && activeThread?.repoFullName.trim()
+  )
+  const recentThreads = [
+    ...(activeThread && !activeInProject ? [activeThread] : []),
+    ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
+  ]
+  const visibleThreads = [...pinnedThreads, ...recentThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
-  const loadedFacets = availableFacets(visibleThreads)
-  const facets = {
-    models: [
-      ...new Set([...prefs.filters.models, ...loadedFacets.models]),
-    ].sort((a, b) => a.localeCompare(b)),
-    repos: [...new Set([...prefs.filters.repos, ...loadedFacets.repos])].sort(
-      (a, b) => a.localeCompare(b)
-    ),
-  }
-  const filteredActive = filterThreads(activeThreads, prefs.filters)
-  const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
-  const showResolved = prefs.filters.includeResolved
-  const groupedThreads =
-    prefs.group === "focus" && showResolved
-      ? [...filteredActive, ...filteredResolved]
-      : filteredActive
-  const naturalSections = groupThreadsByMode(groupedThreads, prefs.group)
-  const activeAttentionThread = naturalSections
-    .find((section) => section.key === "attention")
-    ?.threads.find((thread) => thread.id === activeThreadId)
-  const [pinnedAttentionThread, setPinnedAttentionThread] =
-    useState<AgentThread>()
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setPinnedAttentionThread((current) =>
-      reconcilePinnedAttentionThread(
-        current,
-        activeThreadId,
-        activeAttentionThread
+  const projectByPath = new Map(
+    localProjects.map((project) => [project.cwd, project])
+  )
+  const localPinnedIds = new Set(prefs.pinnedLocalIds)
+  const localItems = localSessions
+    // Removing a project has to remove its threads too, otherwise they linger
+    // and re-derive the project from the cwd basename.
+    .filter((thread) => projectByPath.has(thread.cwd))
+    .map((thread) =>
+      localSidebarThread(
+        thread,
+        projectByPath.get(thread.cwd),
+        activity[thread.id]
       )
     )
-  }, [activeAttentionThread, activeThreadId])
-  const sections = pinnedAttentionThread
-    ? groupThreadsByMode(groupedThreads, prefs.group, pinnedAttentionThread)
-    : naturalSections
-  const resolvedLoading =
-    !sidebar.isPending && showResolved && sidebar.resolvedQuery.isLoading
-  const isCloudEmpty =
-    !sidebar.isPending &&
-    !resolvedLoading &&
-    sections.length === 0 &&
-    (!showResolved || filteredResolved.length === 0) &&
-    hasActiveFilters(prefs.filters)
-  const cloudActivity = {
-    running: activeThreads.filter((thread) => thread.status === "running")
-      .length,
-    completed: activeThreads.filter(
-      (thread) => thread.status === "finished" && !thread.viewed
-    ).length,
+    // Cloud threads are omitted server-side unless includeResolved; local
+    // archiving is client-side, so it has to honour the same switch here.
+    .filter((item) => prefs.filters.includeResolved || !item.resolved)
+  // Fold a local checkout into the cloud project of the same name so the repo
+  // renders as one folder; project keys are otherwise full identities.
+  const serverProjects = projectsQuery.data ?? []
+  const activeProject = activeThread?.repoFullName.trim()
+    ? {
+        repoFullName: activeThread.repoFullName,
+        name: activeThread.repo,
+        updatedAt: activeThread.updatedAt,
+      }
+    : undefined
+  const cloudProjects =
+    activeProject &&
+    !serverProjects.some(
+      (project) =>
+        project.repoFullName.toLowerCase() ===
+        activeProject.repoFullName.toLowerCase()
+    )
+      ? [activeProject, ...serverProjects]
+      : serverProjects
+  const aliases = cloudProjectAliases(cloudProjects)
+  const alignedLocalItems = applyProjectKeyAliases(localItems, aliases)
+  const pinnedItems = [
+    ...pinnedThreads.map(cloudSidebarThread),
+    ...alignedLocalItems.filter((item) => localPinnedIds.has(item.id)),
+  ]
+  const threadItems: Array<SidebarThreadItem> = [
+    ...recentThreads.map(cloudSidebarThread),
+    ...(projectMode
+      ? []
+      : alignedLocalItems.filter((item) => !localPinnedIds.has(item.id))),
+  ]
+  const allItems = [...pinnedItems, ...threadItems]
+  const filteredPinnedItems = sortSidebarThreads(
+    filterThreads(pinnedItems, prefs.filters),
+    prefs.sortPinned
+  )
+  const recents = sortSidebarThreads(
+    filterThreads(threadItems, prefs.filters),
+    prefs.sortChats
+  )
+  const unpinnedLocalItems = alignedLocalItems.filter(
+    (item) => !localPinnedIds.has(item.id)
+  )
+  const localGroups = projectMode
+    ? groupSidebarThreadsByProject(
+        filterThreads(unpinnedLocalItems, prefs.filters),
+        sidebarProjectOptions(unpinnedLocalItems, localProjects),
+        prefs.sortChats
+      ).projects
+    : []
+  const projectGroups: Array<HydratedProjectGroup> = projectMode
+    ? [
+        ...cloudProjects.map((project) => {
+          const key = sidebarProjectKey(project.repoFullName)!
+          return {
+            key,
+            label: project.name,
+            repoFullName: project.repoFullName,
+            updatedAt: project.updatedAt,
+            activeThread:
+              activeInProject &&
+              activeThread?.repoFullName.toLowerCase() ===
+                project.repoFullName.toLowerCase()
+                ? activeThread
+                : undefined,
+            threads:
+              localGroups.find((group) => group.key === key)?.threads ?? [],
+          }
+        }),
+        ...localGroups
+          .filter(
+            (group) =>
+              !cloudProjects.some(
+                (project) =>
+                  sidebarProjectKey(project.repoFullName) === group.key
+              )
+          )
+          .map((group) => ({
+            ...group,
+            repoFullName: null,
+            updatedAt: group.threads[0]?.updatedAt ?? 0,
+          })),
+      ].sort((left, right) => right.updatedAt - left.updatedAt)
+    : []
+  const pinnedProjectKeys = new Set(prefs.pinnedProjectKeys)
+  const pinnedGroups = projectGroups.filter((group) =>
+    pinnedProjectKeys.has(group.key)
+  )
+  const unpinnedGroups = projectGroups.filter(
+    (group) => !pinnedProjectKeys.has(group.key)
+  )
+
+  const pullRequestFor = useSidebarPullRequests(allItems, !localOnly)
+  const isPinned = (item: SidebarThreadItem) =>
+    item.location === "cloud"
+      ? cloudPinnedIds.has(item.id)
+      : localPinnedIds.has(item.id)
+  const isArchived = (item: SidebarThreadItem) =>
+    item.location === "cloud"
+      ? item.thread.resolved === true
+      : item.thread.archived === true
+  const toggleArchived = (item: SidebarThreadItem) => {
+    if (item.location === "local") {
+      void window.openSweDesktop
+        ?.updateLocalThread({ threadId: item.id, archived: !isArchived(item) })
+        .then(() => refreshLocalThreads(item.id))
+      return
+    }
+    if (!resolveThread.isPending) {
+      resolveThread.mutate({
+        threadId: item.id,
+        resolved: !isArchived(item),
+      })
+    }
   }
-  const localActivity = {
-    running: localSessions.filter((thread) => activity[thread.id] === "running")
-      .length,
-    completed: localSessions.filter(
-      (thread) => !thread.viewed && activity[thread.id] !== "running"
-    ).length,
+  const togglePin = (item: SidebarThreadItem) => {
+    if (item.location === "local") {
+      toggleLocalPin(item.id)
+      return
+    }
+    if (!pinThread.isPending) {
+      pinThread.mutate({
+        threadId: item.id,
+        pinned: !cloudPinnedIds.has(item.id),
+      })
+    }
   }
-  const showLocalThreads =
-    isDesktop && (localOnly || desktopThreadSource === "local")
-  const showCloudThreads =
-    !localOnly && (!isDesktop || desktopThreadSource === "cloud")
+
+  const activeKey = activeLocalSessionId
+    ? `local:${activeLocalSessionId}`
+    : activeThreadId
+      ? `cloud:${activeThreadId}`
+      : undefined
+
+  const rowProps = (
+    item: SidebarThreadItem,
+    live: PullRequestSnapshot | undefined = pullRequestFor(item)
+  ) => ({
+    item,
+    isActive: item.key === activeKey,
+    pinned: isPinned(item),
+    archived: isArchived(item),
+    live,
+    compact: prefs.compact,
+    onNavigate: layout.closeOnMobile,
+    onDeleteLocal: refreshLocalThreads,
+    onTogglePin: () => togglePin(item),
+    onToggleArchived: () => toggleArchived(item),
+  })
+
+  const sectionCollapsed = (key: string) =>
+    prefs.collapsedSectionKeys.includes(key)
+  const hydrateProjectThreads = (threads: Array<AgentThread>) =>
+    filterThreads(
+      threads
+        .filter((thread) => !cloudPinnedIds.has(thread.id))
+        .map(cloudSidebarThread),
+      prefs.filters
+    )
+
+  // Projects and Recents share one menu: both control the same list.
+  const removeProjectItems = isDesktop && localProjects.length > 0 && (
+    <>
+      <MenuSeparator />
+      <MenuSub>
+        <MenuSubTrigger>
+          <TrashIcon />
+          Remove project…
+        </MenuSubTrigger>
+        <MenuSubPopup className="w-56">
+          <MenuGroup>
+            {localProjects.map((project) => (
+              <MenuItem
+                key={project.cwd}
+                onClick={() => void removeLocalProject(project.cwd)}
+                variant="destructive"
+              >
+                <TrashIcon />
+                <span className="min-w-0 truncate">{project.name}</span>
+              </MenuItem>
+            ))}
+          </MenuGroup>
+        </MenuSubPopup>
+      </MenuSub>
+    </>
+  )
+
+  const viewMenuItems = (
+    <>
+      <MenuGroup>
+        <MenuGroupLabel>Organize sidebar</MenuGroupLabel>
+        <MenuRadioGroup
+          value={prefs.organize}
+          onValueChange={(value) =>
+            setView({ organize: value as OrganizeMode })
+          }
+        >
+          <MenuRadioItem value="project">By project</MenuRadioItem>
+          <MenuRadioItem value="list">In one list</MenuRadioItem>
+        </MenuRadioGroup>
+      </MenuGroup>
+      <MenuGroup>
+        <MenuGroupLabel>Sort chats by</MenuGroupLabel>
+        <MenuRadioGroup
+          value={prefs.sortChats}
+          onValueChange={(value) => setView({ sortChats: value as ChatSort })}
+        >
+          <MenuRadioItem value="priority">Priority</MenuRadioItem>
+          <MenuRadioItem value="updated">Last updated</MenuRadioItem>
+        </MenuRadioGroup>
+      </MenuGroup>
+      <MenuSeparator />
+      <MenuGroup>
+        <MenuCheckboxItem
+          checked={prefs.filters.includeResolved}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeResolved: checked })
+          }
+        >
+          Show archived
+        </MenuCheckboxItem>
+        <MenuCheckboxItem
+          checked={prefs.filters.includeAutomations}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeAutomations: checked })
+          }
+        >
+          Show automations
+        </MenuCheckboxItem>
+        <MenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
+          Compact rows
+        </MenuCheckboxItem>
+      </MenuGroup>
+    </>
+  )
+
+  const renderProjectGroup = (group: HydratedProjectGroup) => (
+    <ProjectGroup
+      key={group.key}
+      group={group}
+      activeKey={activeKey}
+      collapsed={prefs.collapsedProjectKeys.includes(group.key)}
+      expanded={prefs.expandedProjectKeys.includes(group.key)}
+      pinned={pinnedProjectKeys.has(group.key)}
+      includeResolved={prefs.filters.includeResolved}
+      includeAutomations={includeAutomations}
+      sort={prefs.sortChats}
+      activeThreadId={activeThreadId}
+      openThread={openThread}
+      hydrate={hydrateProjectThreads}
+      onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
+      onExpand={() => expandProject(group.key)}
+      onTogglePin={() => toggleProjectPin(group.key)}
+      renderRow={(item, live) => (
+        <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
+      )}
+    />
+  )
+
+  const cloudPending =
+    !localOnly &&
+    (pinnedQuery.isPending ||
+      recentsQuery.isPending ||
+      (projectMode && projectsQuery.isPending))
+  const cloudError =
+    pinnedQuery.isError ||
+    recentsQuery.isError ||
+    (projectMode && projectsQuery.isError)
+  const sourcesLoading = cloudPending || (isDesktop && localThreads.isPending)
+  const isEmpty =
+    !cloudPending &&
+    (!isDesktop || !localThreads.isPending) &&
+    filteredPinnedItems.length === 0 &&
+    projectGroups.length === 0 &&
+    recents.length === 0
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -308,178 +620,207 @@ export function AgentsSidebar({
           onClick={layout.closeOnMobile}
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
-          <PlusIcon className="size-4" />
+          <NotePencilIcon className="size-4" />
           New Thread
         </Link>
       </div>
 
-      {!localOnly && (
-        <nav
-          className={cn(
-            "flex flex-col gap-0.5 px-2",
-            isDesktop ? "pb-3" : "pb-4"
+      <TooltipProvider delay={500} closeDelay={100}>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {scrollEdges.top && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
+            </>
           )}
-        >
-          {NAV.map((item) => {
-            const Icon = item.icon
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                onClick={layout.closeOnMobile}
-                className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-                activeProps={{
-                  className:
-                    "bg-sidebar-row-hover !text-foreground font-medium",
-                }}
-              >
-                <Icon className="size-4" />
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
-      )}
-
-      <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
-        {isDesktop && !localOnly && (
-          <DesktopThreadSourceToggle
-            source={desktopThreadSource}
-            localActivity={localActivity}
-            cloudActivity={cloudActivity}
-            onSourceChange={setDesktopThreadSource}
-          />
-        )}
-        {showLocalThreads && (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <SidebarProjectSelector
-              projects={localProjects}
-              selectedProjectPath={activeProjectPath}
-              onSelectProject={setSelectedProjectPath}
-              onAddProject={() => void addLocalProject()}
-              onRemoveProject={(cwd) => void removeLocalProject(cwd)}
-            />
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {activeProjectPath
-                ? visibleLocalGroups[0]?.sessions.map((session) => (
-                    <LocalThreadRow
-                      key={session.id}
-                      session={session}
-                      isActive={session.id === activeLocalSessionId}
-                      onNavigate={layout.closeOnMobile}
-                      onDelete={deleteLocalSession}
-                      compact={prefs.compact}
-                    />
-                  ))
-                : visibleLocalGroups.map((group) => (
-                    <LocalThreadGroup
-                      key={group.project.cwd}
-                      project={group.project}
-                      sessions={group.sessions}
-                      activeSessionId={activeLocalSessionId}
-                      onNavigate={layout.closeOnMobile}
-                      onDelete={deleteLocalSession}
-                      onRemove={() =>
-                        void removeLocalProject(group.project.cwd)
-                      }
-                      compact={prefs.compact}
-                    />
-                  ))}
-              {localGroups.length === 0 && (
-                <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
-                  No projects yet
-                </p>
-              )}
-              {activeProjectPath &&
-                visibleLocalGroups[0]?.sessions.length === 0 && (
-                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
-                    No threads yet
-                  </p>
+          {scrollEdges.bottom && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-px z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
+            </>
+          )}
+          <div
+            ref={scrollViewport}
+            className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+            onScroll={measureScrollEdges}
+          >
+            {!localOnly && (
+              <nav
+                className={cn(
+                  "flex flex-col gap-0.5",
+                  isDesktop ? "pb-3" : "pb-4"
                 )}
-            </div>
-          </div>
-        )}
-        {showCloudThreads && (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {sidebar.isPending && (
+              >
+                {NAV.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      onClick={layout.closeOnMobile}
+                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                      activeProps={{
+                        className:
+                          "bg-sidebar-row-hover !text-foreground font-medium",
+                      }}
+                    >
+                      <Icon className="size-4" />
+                      {item.label}
+                      {"badge" in item && (
+                        <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] leading-none font-medium text-muted-foreground">
+                          {item.badge}
+                        </span>
+                      )}
+                    </Link>
+                  )
+                })}
+              </nav>
+            )}
+            {sourcesLoading && allItems.length === 0 && (
               <ThreadListSkeleton compact={prefs.compact} />
             )}
-            {!sidebar.isPending &&
-              (prefs.group === "none"
-                ? sections[0]?.threads.map((thread) => (
-                    <ThreadRow
-                      key={thread.id}
-                      thread={thread}
-                      isActive={thread.id === activeThreadId}
-                      onNavigate={layout.closeOnMobile}
-                      compact={prefs.compact}
-                    />
-                  ))
-                : sections.map((section) => (
-                    <ThreadGroup
-                      key={`${prefs.group}:${section.key}`}
-                      label={section.label}
-                      threads={section.threads}
-                      activeThreadId={activeThreadId}
-                      onNavigate={layout.closeOnMobile}
-                      defaultCollapsed={section.defaultCollapsed}
-                      compact={prefs.compact}
-                      hasMore={
-                        prefs.group === "focus" && section.key === "done"
-                          ? resolvedHasMore
-                          : false
-                      }
-                      count={
-                        prefs.group === "focus" && section.key === "done"
-                          ? filteredResolved.length
-                          : section.threads.length
-                      }
-                    />
-                  )))}
-            {!sidebar.isPending && activeHasMore && (
-              <LoadMoreThreadsButton
-                label="Load more threads"
-                loading={sidebar.activeQuery.isFetchingNextPage}
-                onClick={() => void sidebar.activeQuery.fetchNextPage()}
+            {cloudError && (
+              <ThreadSourceError
+                label="Cloud threads unavailable"
+                onRetry={() => {
+                  void pinnedQuery.refetch()
+                  void recentsQuery.refetch()
+                  if (projectMode) void projectsQuery.refetch()
+                }}
               />
             )}
-            {!sidebar.isPending &&
-              showResolved &&
-              prefs.group === "focus" &&
-              resolvedHasMore && (
-                <LoadMoreThreadsButton
-                  label="Load more resolved threads"
-                  loading={sidebar.resolvedQuery.isFetchingNextPage}
-                  onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
-                />
-              )}
-            {showResolved && prefs.group !== "focus" && (
-              <ResolvedThreadGroup
-                threads={filteredResolved}
-                hasMore={resolvedHasMore}
-                activeThreadId={activeThreadId}
-                onNavigate={layout.closeOnMobile}
-                compact={prefs.compact}
-                onLoadMore={() => void sidebar.resolvedQuery.fetchNextPage()}
-                isLoadingMore={sidebar.resolvedQuery.isFetchingNextPage}
+            {localThreads.isError && (
+              <ThreadSourceError
+                label="Local threads unavailable"
+                onRetry={() => void localThreads.refetch()}
               />
             )}
-            {resolvedLoading && (
+            {sourcesLoading && allItems.length > 0 && (
               <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
                 <CircleNotchIcon className="size-3.5 animate-spin" />
-                Loading resolved threads…
+                Loading threads…
               </div>
             )}
-            {isCloudEmpty && (
+
+            {(filteredPinnedItems.length > 0 || pinnedGroups.length > 0) && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Pinned"
+                  collapsed={sectionCollapsed("pinned")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
+                  menu={
+                    <SidebarSectionMenu label="Pinned options">
+                      <MenuGroup>
+                        <MenuGroupLabel>Sort pinned by</MenuGroupLabel>
+                        <MenuRadioGroup
+                          value={prefs.sortPinned}
+                          onValueChange={(value) =>
+                            setView({ sortPinned: value as PinnedSort })
+                          }
+                        >
+                          <MenuRadioItem value="priority">
+                            Priority
+                          </MenuRadioItem>
+                          <MenuRadioItem value="updated">
+                            Last updated
+                          </MenuRadioItem>
+                          <MenuRadioItem value="manual">
+                            Manual order
+                          </MenuRadioItem>
+                        </MenuRadioGroup>
+                      </MenuGroup>
+                    </SidebarSectionMenu>
+                  }
+                />
+                {!sectionCollapsed("pinned") && (
+                  <>
+                    {filteredPinnedItems.map((item) => (
+                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                    ))}
+                    {pinnedGroups.map(renderProjectGroup)}
+                  </>
+                )}
+              </section>
+            )}
+
+            {projectMode && (unpinnedGroups.length > 0 || isDesktop) && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Projects"
+                  collapsed={sectionCollapsed("projects")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                  menu={
+                    <SidebarSectionMenu label="Projects options">
+                      {viewMenuItems}
+                      {removeProjectItems}
+                    </SidebarSectionMenu>
+                  }
+                  action={
+                    isDesktop ? (
+                      <SidebarSectionAction
+                        label="Add project"
+                        icon={<PlusIcon className="size-4" />}
+                        onClick={() => void addLocalProject()}
+                      />
+                    ) : undefined
+                  }
+                />
+                {!sectionCollapsed("projects") &&
+                  unpinnedGroups.map(renderProjectGroup)}
+              </section>
+            )}
+
+            {(recents.length > 0 || recentsQuery.hasMore) && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Recents"
+                  collapsed={sectionCollapsed("recents")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+                  menu={
+                    <SidebarSectionMenu label="Recents options">
+                      {viewMenuItems}
+                    </SidebarSectionMenu>
+                  }
+                  action={
+                    <SidebarSectionAction
+                      label="New thread"
+                      icon={<NotePencilIcon className="size-4" />}
+                      onClick={() => {
+                        layout.closeOnMobile()
+                        void navigate({ to: "/agents" })
+                      }}
+                    />
+                  }
+                />
+                {!sectionCollapsed("recents") && (
+                  <>
+                    {recents.map((item) => (
+                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                    ))}
+                    {recentsQuery.hasMore && (
+                      <LoadMoreThreadsOnScroll
+                        label="Load more threads"
+                        root={scrollViewport}
+                        loading={recentsQuery.isFetchingNextPage}
+                        onLoadMore={recentsQuery.fetchNextPage}
+                      />
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+            {isEmpty && !cloudError && !localThreads.isError && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
-                No threads match these filters.
+                {hasActiveFilters(prefs.filters)
+                  ? "No threads match these filters."
+                  : "No threads yet."}
               </p>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      </TooltipProvider>
 
-      <div className="flex items-center gap-1 p-2">
+      <div className="flex items-center gap-2 p-2">
         <div className="min-w-0 flex-1">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
@@ -492,264 +833,171 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
-        {showCloudThreads && (
-          <SidebarFilterMenu
-            prefs={prefs}
-            facets={facets}
-            onGroupChange={setGroup}
-            onFiltersChange={setFilters}
-            onCompactChange={setCompact}
-            onResetFilters={resetFilters}
-          />
+        {updateState.status !== "idle" && (
+          <button
+            type="button"
+            title={
+              updateState.status === "ready" ? "Update" : "Downloading update…"
+            }
+            aria-label={
+              updateState.status === "ready" ? "Update" : "Downloading update"
+            }
+            disabled={updateState.status !== "ready"}
+            onClick={() => void window.openSweDesktop?.installUpdate()}
+            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60"
+          >
+            {updateState.status === "downloading" ? (
+              <CircleNotchIcon className="size-4 animate-spin group-hover:hidden" />
+            ) : (
+              <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+            )}
+            <span className="hidden group-hover:inline">
+              {updateState.status === "ready" ? "Update" : "Downloading…"}
+            </span>
+          </button>
         )}
       </div>
     </SidebarFrame>
   )
 }
 
-function DeleteThreadDialog({
-  open,
-  onOpenChange,
-  threadTitle,
-  isDeleting,
-  onConfirm,
-  detail = "This cannot be undone.",
-  error,
+function ProjectGroup({
+  group,
+  activeKey,
+  collapsed,
+  expanded,
+  pinned,
+  includeResolved,
+  includeAutomations,
+  sort,
+  activeThreadId,
+  openThread,
+  hydrate,
+  onToggleCollapsed,
+  onExpand,
+  onTogglePin,
+  renderRow,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  threadTitle: string
-  isDeleting: boolean
-  onConfirm: () => void
-  detail?: string
-  error?: string | null
+  group: HydratedProjectGroup
+  activeKey?: string
+  collapsed: boolean
+  expanded: boolean
+  pinned: boolean
+  includeResolved: boolean
+  includeAutomations: boolean
+  sort: ChatSort
+  activeThreadId?: string
+  openThread: (threadId: string) => void
+  hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
+  onToggleCollapsed: () => void
+  onExpand: () => void
+  onTogglePin: () => void
+  renderRow: (
+    item: SidebarThreadItem,
+    live: PullRequestSnapshot | undefined
+  ) => React.ReactNode
 }) {
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-          <div className="flex flex-col gap-4">
-            <Dialog.Title className="text-sm font-medium">
-              Delete thread
-            </Dialog.Title>
-            <Dialog.Description className="text-xs text-muted-foreground">
-              Delete "{threadTitle}"? {detail}
-            </Dialog.Description>
-            {error && <p className="text-xs text-destructive">{error}</p>}
-            <div className="mt-2 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onOpenChange(false)}
-                disabled={isDeleting}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={onConfirm}
-                disabled={isDeleting}
-              >
-                {isDeleting ? "Deleting..." : "Delete"}
-              </Button>
-            </div>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+  const Folder = collapsed ? FolderIcon : FolderOpenIcon
+  const project = useSidebarProjectThreads({
+    repoFullName: group.repoFullName,
+    includeResolved,
+    includeAutomations,
+    enabled: !collapsed,
+  })
+  const cloudThreads = [
+    ...(group.activeThread ? [group.activeThread] : []),
+    ...project.items.filter((thread) => thread.id !== group.activeThread?.id),
+  ]
+  useSeedAgentThreadDetails(cloudThreads, activeThreadId)
+  useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
+  const threads = sortSidebarThreads(
+    [...hydrate(cloudThreads), ...group.threads],
+    sort
   )
-}
-
-function groupLocalProjects(
-  projects: Array<DesktopProject>,
-  sessions: Array<DesktopLocalThreadSummary>
-) {
-  const sessionsByProject = new Map<string, Array<DesktopLocalThreadSummary>>()
-  for (const session of sessions) {
-    const group = sessionsByProject.get(session.cwd) ?? []
-    group.push(session)
-    sessionsByProject.set(session.cwd, group)
-  }
-  return projects
-    .map((project) => ({
-      project,
-      sessions: (sessionsByProject.get(project.cwd) ?? []).sort(
-        (left, right) => right.createdAt - left.createdAt
-      ),
-    }))
-    .sort((left, right) => right.project.addedAt - left.project.addedAt)
-}
-
-function LocalThreadGroup({
-  project,
-  sessions,
-  activeSessionId,
-  onNavigate,
-  onDelete,
-  onRemove,
-  compact = false,
-}: {
-  project: DesktopProject
-  sessions: Array<DesktopLocalThreadSummary>
-  activeSessionId?: string
-  onNavigate?: () => void
-  onDelete: (sessionId: string) => Promise<boolean>
-  onRemove: () => void
-  compact?: boolean
-}) {
-  const [collapsed, setCollapsed] = useState(false)
-  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
+  const pullRequestFor = useSidebarPullRequests(
+    threads,
+    Boolean(group.repoFullName)
+  )
+  const preview = threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const active = threads.find((thread) => thread.key === activeKey)
+  const shown = expanded
+    ? threads
+    : active && !preview.includes(active)
+      ? [...preview.slice(0, -1), active]
+      : preview
+  const loading =
+    project.isFetchingNextPage ||
+    (Boolean(group.repoFullName) && !collapsed && project.isPending)
+  const hasMore = expanded
+    ? project.hasMore
+    : threads.length > PROJECT_PREVIEW_COUNT || project.hasMore
 
   return (
-    <div className={cn("group/project", compact ? "mb-2" : "mb-3")}>
-      <div className="flex items-center">
+    <div className="mb-1">
+      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground">
         <button
           type="button"
-          onClick={() => setCollapsed((value) => !value)}
-          className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
+          onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          title={project.cwd}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
         >
-          <ToggleIcon className="size-3" />
-          <FolderOpenIcon className="size-3.5" />
-          <span className="min-w-0 flex-1 truncate">{project.name}</span>
-          <span>{sessions.length}</span>
+          <Folder className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{group.label}</span>
         </button>
         <button
-          aria-label={`Remove ${project.name}`}
-          className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity group-hover/project:opacity-100 hover:bg-sidebar-row-hover hover:text-destructive focus:opacity-100 [@media(hover:none)]:opacity-100"
-          onClick={onRemove}
-          title="Remove project"
           type="button"
+          aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
+          title={pinned ? "Unpin project" : "Pin project"}
+          onClick={onTogglePin}
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
         >
-          <TrashIcon className="size-3.5" />
+          {pinned ? (
+            <PushPinSlashIcon className="size-3.5" />
+          ) : (
+            <PushPinIcon className="size-3.5" />
+          )}
         </button>
       </div>
-      {!collapsed &&
-        sessions.map((session) => (
-          <LocalThreadRow
-            key={session.id}
-            session={session}
-            isActive={session.id === activeSessionId}
-            onNavigate={onNavigate}
-            onDelete={onDelete}
-            compact={compact}
-          />
-        ))}
+      {!collapsed && (
+        <>
+          {shown.map((item) => renderRow(item, pullRequestFor(item)))}
+          {shown.length === 0 && loading && (
+            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/70">
+              <CircleNotchIcon className="size-3.5 animate-spin" />
+              Loading chats…
+            </div>
+          )}
+          {shown.length === 0 && !loading && !project.isError && (
+            <p className="py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/60">
+              No chats
+            </p>
+          )}
+          {project.isError && (
+            <button
+              type="button"
+              onClick={() => void project.refetch()}
+              className="w-full py-1 pr-2.5 pl-6 text-left text-[13px] text-destructive"
+            >
+              Retry loading chats
+            </button>
+          )}
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!expanded) onExpand()
+                else project.fetchNextPage()
+              }}
+              disabled={loading}
+              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+            >
+              {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
+              {loading ? "Loading…" : "Show more"}
+            </button>
+          )}
+        </>
+      )}
     </div>
-  )
-}
-
-function LocalThreadRow({
-  session,
-  isActive,
-  onNavigate,
-  onDelete,
-  compact = false,
-}: {
-  session: DesktopLocalThreadSummary
-  isActive: boolean
-  onNavigate?: () => void
-  onDelete: (sessionId: string) => Promise<boolean>
-  compact?: boolean
-}) {
-  const navigate = useNavigate()
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [contextMenuOpen, setContextMenuOpen] = useState(false)
-  const running = useLocalThreadActivity()[session.id] === "running"
-
-  const confirmDelete = async () => {
-    if (isDeleting) return
-    setIsDeleting(true)
-    setDeleteError(null)
-    try {
-      if (!(await onDelete(session.id))) {
-        throw new Error("Local Open SWE thread not found")
-      }
-      setDeleteOpen(false)
-      if (isActive) {
-        onNavigate?.()
-        void navigate({ to: "/agents" })
-      }
-    } catch (error) {
-      setDeleteError(
-        error instanceof Error ? error.message : "Could not delete local thread"
-      )
-    } finally {
-      setIsDeleting(false)
-    }
-  }
-
-  return (
-    <>
-      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
-        <ContextMenu.Trigger
-          className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
-        >
-          <Link
-            to="/agents/local/$sessionId"
-            params={{ sessionId: session.id }}
-            onClick={(event) => {
-              if (contextMenuOpen) {
-                event.preventDefault()
-                return
-              }
-              onNavigate?.()
-            }}
-            onKeyDown={openContextMenuFromKeyboard}
-            className={cn(
-              "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
-              compact ? "h-7 gap-1.5" : "h-8",
-              isActive
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground group-hover:bg-sidebar-row-hover"
-            )}
-          >
-            {running ? (
-              <CircleNotchIcon
-                className="size-3 shrink-0 animate-spin text-primary"
-                aria-label="Local thread running"
-              />
-            ) : (
-              <span className="size-2 shrink-0 rounded-full bg-border" />
-            )}
-            <span className="min-w-0 flex-1 truncate text-[13px]">
-              {session.title}
-            </span>
-          </Link>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-              <ContextMenu.Item
-                onClick={() => setDeleteOpen(true)}
-                disabled={isDeleting}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-              >
-                <TrashIcon className="size-3.5" />
-                Delete thread
-              </ContextMenu.Item>
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
-      <DeleteThreadDialog
-        open={deleteOpen}
-        onOpenChange={(open) => {
-          setDeleteOpen(open)
-          if (!open) setDeleteError(null)
-        }}
-        threadTitle={session.title}
-        isDeleting={isDeleting}
-        onConfirm={() => void confirmDelete()}
-        detail="This removes its history but does not revert changes made to your project."
-        error={deleteError}
-      />
-    </>
   )
 }
 
@@ -791,362 +1039,73 @@ function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
   )
 }
 
-function ThreadGroup({
+function ThreadSourceError({
   label,
-  threads,
-  activeThreadId,
-  onNavigate,
-  defaultCollapsed = false,
-  compact = false,
-  hasMore = false,
-  count = threads.length,
+  onRetry,
 }: {
   label: string
-  threads: Array<AgentThread>
-  activeThreadId?: string
-  onNavigate?: () => void
-  defaultCollapsed?: boolean
-  compact?: boolean
-  hasMore?: boolean
-  count?: number
+  onRetry: () => void
 }) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed)
-  if (threads.length === 0) return null
-
-  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
-
   return (
-    <div className={compact ? "mb-2" : "mb-3"}>
+    <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       <button
         type="button"
-        onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
-        aria-expanded={!collapsed}
+        className="shrink-0 font-medium text-foreground hover:underline"
+        onClick={onRetry}
       >
-        <ToggleIcon className="size-3" />
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span>
-          {count}
-          {hasMore ? "+" : ""}
-        </span>
+        Retry
       </button>
-      {!collapsed && (
-        <>
-          {threads.map((thread) => (
-            <ThreadRow
-              key={thread.id}
-              thread={thread}
-              isActive={thread.id === activeThreadId}
-              onNavigate={onNavigate}
-              compact={compact}
-            />
-          ))}
-        </>
-      )}
     </div>
   )
 }
 
-function ResolvedThreadGroup({
-  threads,
-  hasMore,
-  activeThreadId,
-  onNavigate,
-  compact = false,
-  onLoadMore,
-  isLoadingMore,
-}: {
-  threads: Array<AgentThread>
-  hasMore: boolean
-  activeThreadId?: string
-  onNavigate?: () => void
-  compact?: boolean
-  onLoadMore: () => void
-  isLoadingMore: boolean
-}) {
-  const [collapsed, setCollapsed] = useState(true)
-  if (threads.length === 0 && !hasMore) return null
-
-  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
-
-  return (
-    <div className="mb-3">
-      <button
-        type="button"
-        onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
-        aria-expanded={!collapsed}
-      >
-        <ToggleIcon className="size-3" />
-        <span className="min-w-0 flex-1 truncate">Resolved</span>
-        <span>
-          {threads.length}
-          {hasMore ? "+" : ""}
-        </span>
-      </button>
-      {!collapsed && (
-        <>
-          {threads.map((thread) => (
-            <ThreadRow
-              key={thread.id}
-              thread={thread}
-              isActive={thread.id === activeThreadId}
-              onNavigate={onNavigate}
-              compact={compact}
-            />
-          ))}
-          {hasMore && (
-            <LoadMoreThreadsButton
-              label="Load more resolved threads"
-              loading={isLoadingMore}
-              onClick={onLoadMore}
-            />
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-function LoadMoreThreadsButton({
+function LoadMoreThreadsOnScroll({
   label,
+  root,
   loading,
-  onClick,
+  onLoadMore,
 }: {
   label: string
+  root: React.RefObject<HTMLDivElement | null>
   loading: boolean
-  onClick: () => void
+  onLoadMore: () => void
 }) {
+  const sentinel = useRef<HTMLButtonElement>(null)
+  const load = useRef(onLoadMore)
+  useEffect(() => {
+    load.current = onLoadMore
+  })
+  useEffect(() => {
+    const node = sentinel.current
+    if (!node || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!loading && entries.some((entry) => entry.isIntersecting)) {
+          load.current()
+        }
+      },
+      { root: root.current, rootMargin: "200px" }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [loading, root])
+
   return (
     <button
+      ref={sentinel}
       type="button"
-      onClick={onClick}
+      onClick={() => load.current()}
       disabled={loading}
-      className="mt-0.5 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      aria-label={label}
+      className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] text-muted-foreground/70"
     >
-      {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
-      {loading ? "Loading…" : label}
+      {loading ? (
+        <CircleNotchIcon className="size-3.5 animate-spin" />
+      ) : (
+        <span className="sr-only">{label}</span>
+      )}
     </button>
-  )
-}
-
-function ThreadRow({
-  thread,
-  isActive,
-  onNavigate,
-  compact = false,
-}: {
-  thread: AgentThread
-  isActive: boolean
-  onNavigate?: () => void
-  compact?: boolean
-}) {
-  const deleteThread = useDeleteAgentThread()
-  const resolveThread = useResolveAgentThread()
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [contextMenuOpen, setContextMenuOpen] = useState(false)
-  const isReadOnly = thread.isOwner === false
-  const badge =
-    thread.diffStats && thread.diffStats.additions > 0
-      ? `+${thread.diffStats.additions}`
-      : null
-  const isDeleting =
-    deleteThread.isPending && deleteThread.variables === thread.id
-
-  const onDelete = (e?: React.MouseEvent) => {
-    e?.preventDefault()
-    e?.stopPropagation()
-    if (isDeleting) return
-    setDeleteOpen(true)
-  }
-
-  const onConfirmDelete = () => {
-    if (isDeleting) return
-    deleteThread.mutate(thread.id, {
-      onSuccess: () => setDeleteOpen(false),
-    })
-  }
-
-  const isResolved = thread.resolved === true
-  const onToggleResolved = (e?: React.MouseEvent) => {
-    e?.preventDefault()
-    e?.stopPropagation()
-    if (resolveThread.isPending) return
-    resolveThread.mutate({ threadId: thread.id, resolved: !isResolved })
-  }
-
-  const source =
-    thread.source && thread.source !== "dashboard"
-      ? SOURCE_META[thread.source]
-      : null
-  const SourceIcon = source?.icon
-  const prMeta = thread.pr ? PR_STATE_META[thread.pr.state] : null
-  const PrIcon = prMeta?.icon
-  const isAutomation =
-    thread.threadCategory === "automation" || thread.source === "schedule"
-  const showFinishedIndicator = thread.status === "finished" && !thread.viewed
-
-  const copySandboxId = () => {
-    if (!thread.sandboxId) return
-    void navigator.clipboard.writeText(thread.sandboxId)
-  }
-
-  return (
-    <>
-      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
-        <ContextMenu.Trigger
-          className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
-        >
-          <Link
-            to="/agents/$threadId"
-            params={{ threadId: thread.id }}
-            onClick={(event) => {
-              if (contextMenuOpen) {
-                event.preventDefault()
-                return
-              }
-              onNavigate?.()
-            }}
-            onKeyDown={openContextMenuFromKeyboard}
-            className={cn(
-              "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
-              compact ? "h-7 gap-1.5" : "h-8",
-              isActive
-                ? thread.adminThread
-                  ? "bg-destructive/10 text-foreground"
-                  : "bg-accent text-foreground"
-                : thread.adminThread
-                  ? "bg-destructive/5 text-muted-foreground group-hover:bg-destructive/10"
-                  : "text-muted-foreground group-hover:bg-sidebar-row-hover"
-            )}
-          >
-            {thread.status === "running" ? (
-              <CircleNotchIcon
-                className="size-3 shrink-0 animate-spin text-primary"
-                aria-label="Thread running"
-              />
-            ) : (
-              <span
-                className={cn(
-                  "size-2 shrink-0 rounded-full",
-                  showFinishedIndicator ? "bg-primary" : "bg-border"
-                )}
-                aria-label={
-                  showFinishedIndicator ? "Thread finished" : "Thread viewed"
-                }
-              />
-            )}
-            {source && SourceIcon && (
-              <SourceIcon
-                className="size-3.5 shrink-0 text-muted-foreground/70"
-                aria-label={source.label}
-              >
-                <title>{source.label}</title>
-              </SourceIcon>
-            )}
-            <span className="min-w-0 flex-1 truncate text-[13px]">
-              {thread.title}
-            </span>
-            {thread.automationActionPosted && (
-              <IoLogoSlack
-                className="size-3.5 shrink-0 text-success-foreground"
-                aria-label="Action posted to Slack"
-              >
-                <title>Action posted to Slack</title>
-              </IoLogoSlack>
-            )}
-            {!compact && isAutomation && (
-              <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                Automation
-              </span>
-            )}
-            {!compact && prMeta && PrIcon && (
-              <PrIcon
-                className={cn("size-3.5 shrink-0", prMeta.className)}
-                aria-label={prMeta.label}
-              >
-                <title>{prMeta.label}</title>
-              </PrIcon>
-            )}
-            {!compact && badge && (
-              <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-success-foreground">
-                {badge}
-              </span>
-            )}
-          </Link>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-              {thread.traceUrl && (
-                <ContextMenu.LinkItem
-                  href={thread.traceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-                >
-                  <TreeStructureIcon className="size-3.5" />
-                  Open trace
-                </ContextMenu.LinkItem>
-              )}
-              {thread.sourceUrl && (
-                <ContextMenu.LinkItem
-                  href={thread.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-                >
-                  <IoLogoSlack className="size-3.5" />
-                  Open Slack thread
-                </ContextMenu.LinkItem>
-              )}
-              <ContextMenu.Item
-                disabled={!thread.sandboxId}
-                onClick={copySandboxId}
-                title={thread.sandboxId ?? undefined}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-              >
-                <CopyIcon className="size-3.5" />
-                Copy sandbox ID
-              </ContextMenu.Item>
-              {!isReadOnly && (
-                <ContextMenu.Item
-                  onClick={() => onToggleResolved()}
-                  disabled={resolveThread.isPending}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  {isResolved ? (
-                    <ArrowCounterClockwiseIcon className="size-3.5" />
-                  ) : (
-                    <CheckCircleIcon className="size-3.5" />
-                  )}
-                  {isResolved ? "Unresolve thread" : "Resolve thread"}
-                </ContextMenu.Item>
-              )}
-              {!isReadOnly && (
-                <ContextMenu.Item
-                  onClick={() => onDelete()}
-                  disabled={isDeleting}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  <TrashIcon className="size-3.5" />
-                  Delete thread
-                </ContextMenu.Item>
-              )}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
-      <DeleteThreadDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        threadTitle={thread.title}
-        isDeleting={isDeleting}
-        onConfirm={onConfirmDelete}
-      />
-    </>
   )
 }
 
@@ -1166,8 +1125,19 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const sidebarCommands = useMemo(
-    () => [
+  const pinThread = usePinAgentThread()
+  const resolveThread = useResolveAgentThread()
+  const pinnedThreads = useSidebarPinnedThreads({
+    enabled: Boolean(activeThreadId),
+  })
+  const activeThread = useSidebarActiveThread({
+    activeThreadId,
+    loadedThreads: [],
+    includeResolved: true,
+    enabled: Boolean(activeThreadId),
+  })
+  const sidebarCommands = useMemo(() => {
+    const commands = [
       {
         id: "toggle-sidebar",
         label: "Toggle sidebar",
@@ -1178,9 +1148,61 @@ export function AgentsShell({
         desktopId: "toggle-sidebar" as const,
         desktopShortcuts: ["mod+b"],
       },
-    ],
-    [layout.toggle]
-  )
+    ]
+    if (!activeThread) return commands
+    const reference =
+      activeThread.pullRequests?.at(-1)?.url ??
+      activeThread.pr?.url ??
+      activeThread.id
+    return [
+      ...commands,
+      {
+        id: "copy-thread-reference",
+        label:
+          reference === activeThread.id ? "Copy thread ID" : "Copy PR link",
+        aliases: ["copy reference", "pull request", "pr link"],
+        shortcuts: ["mod+shift+c"],
+        group: "Thread",
+        run: () => navigator.clipboard.writeText(reference),
+      },
+      {
+        id: "pin-thread",
+        label: pinnedThreads.data?.some(
+          (thread) => thread.id === activeThread.id
+        )
+          ? "Unpin thread"
+          : "Pin thread",
+        aliases: ["pin thread", "unpin thread"],
+        shortcuts: ["mod+shift+p"],
+        group: "Thread",
+        run: () =>
+          pinThread.mutate({
+            threadId: activeThread.id,
+            pinned: !pinnedThreads.data?.some(
+              (thread) => thread.id === activeThread.id
+            ),
+          }),
+      },
+      {
+        id: "archive-thread",
+        label: activeThread.resolved ? "Unarchive thread" : "Archive thread",
+        aliases: ["resolve thread", "settle thread", "restore thread"],
+        shortcuts: ["mod+shift+s"],
+        group: "Thread",
+        run: () =>
+          resolveThread.mutate({
+            threadId: activeThread.id,
+            resolved: !activeThread.resolved,
+          }),
+      },
+    ]
+  }, [
+    activeThread,
+    layout.toggle,
+    pinThread,
+    pinnedThreads.data,
+    resolveThread,
+  ])
   useRegisterAppCommands(sidebarCommands)
 
   return (

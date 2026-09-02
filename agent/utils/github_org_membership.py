@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .github_app import (
+from agent.auth.github_app import (
     get_github_app_installation_id_for_org,
     get_github_app_installation_token,
 )

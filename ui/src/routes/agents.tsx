@@ -72,8 +72,9 @@ function AgentsLayout() {
       hideSidebar={nestedRoute === "plan"}
     >
       <AgentThreadStreamProvider
-        threadId={activeThreadId ?? null}
-        onThreadId={(id) => {
+        threadId={activeLocalSessionId ?? activeThreadId ?? null}
+        transport={activeLocalSessionId ? "local" : "cloud"}
+        onThreadCreated={(id) => {
           if (!activeThreadId) {
             void navigate({ to: "/agents/$threadId", params: { threadId: id } })
           }

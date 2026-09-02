@@ -7,7 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
+
+from agent.source_context import SourceContext
 
 from ..dispatch import dispatch_agent_run
 from ..utils.slack import post_slack_thread_reply
@@ -20,6 +22,7 @@ from .plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
     delete_plan_comment,
+    format_plan_comments,
     get_plan_content,
     list_plan_comments,
     make_plan_approver,
@@ -32,7 +35,6 @@ from .thread_api import (
     _repo_config_from_metadata,
     _thread_is_readable,
     _thread_source,
-    _user_owns_thread,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,8 +48,25 @@ plan_router = APIRouter(
 _SESSION_DEP = Depends(require_session)
 
 
+class TextAnchor(BaseModel):
+    exact: str = Field(min_length=1, max_length=1000)
+    prefix: str = Field(max_length=64)
+    suffix: str = Field(max_length=64)
+    context_before: str = Field(default="", max_length=1000)
+    context_after: str = Field(default="", max_length=1000)
+    start: int = Field(ge=0, le=2_000_000)
+    end: int = Field(gt=0, le=2_000_000)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "TextAnchor":
+        if self.end <= self.start or self.end - self.start != len(self.exact):
+            raise ValueError("anchor range must match the selected text")
+        return self
+
+
 class CommentBody(BaseModel):
-    body: str
+    body: str = Field(min_length=1, max_length=10_000)
+    anchor: TextAnchor | None = None
 
 
 class PlanUpdate(BaseModel):
@@ -94,7 +113,6 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "status": content.get("status") or metadata.get("plan_status") or "planning",
         "html": content.get("html", ""),
         "markdown": content.get("markdown", ""),
-        "isOwner": _user_owns_thread(metadata, login, email),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
         "user": {
@@ -110,10 +128,10 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
 async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    """Save an owner-edited HTML artifact while preserving review comments."""
+    """Save an edited HTML artifact while preserving review comments."""
     metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
-        raise HTTPException(403, "only the plan owner can edit the plan")
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
     legacy_markdown = isinstance(content.get("markdown"), str) and not content.get("html")
@@ -172,7 +190,11 @@ async def post_plan_comment(
         raise HTTPException(422, "comment body cannot be empty")
     login = session["sub"]
     return await add_plan_comment(
-        thread_id, author=session.get("name") or login, author_login=login, body=text
+        thread_id,
+        author=session.get("name") or login,
+        author_login=login,
+        body=text,
+        anchor=body.anchor.model_dump() if body.anchor else None,
     )
 
 
@@ -189,9 +211,8 @@ async def remove_plan_comment(
     if target is None:
         raise HTTPException(404, "comment not found")
     login = session["sub"]
-    is_owner = _user_owns_thread(metadata, login, session.get("email"))
-    if target.get("author_login") != login and not is_owner:
-        raise HTTPException(403, "only the author or the plan owner can delete a comment")
+    if target.get("author_login") != login:
+        raise HTTPException(403, "only the comment author can delete a comment")
     await delete_plan_comment(thread_id, comment_id)
     return {"ok": True}
 
@@ -235,7 +256,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         plan_html = str(content.get("html", "")).strip()
         plan_markdown = str(content.get("markdown", "")).strip()
         comments = await list_plan_comments(thread_id, raise_on_error=True)
-        feedback = _format_comments(comments)
+        feedback = format_plan_comments(comments)
         await set_plan_status(
             thread_id,
             PLAN_STATUS_APPROVED,
@@ -294,7 +315,7 @@ async def reject_plan(
         await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     if rejection is not None and not rejection.dispatch:
         return {"status": PLAN_STATUS_REVISING}
-    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
+    feedback = format_plan_comments(await list_plan_comments(thread_id, raise_on_error=True))
     text = (
         "The plan needs changes before implementation. Address this reviewer feedback in the "
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "
@@ -315,14 +336,11 @@ def _approval_actor_name(session: dict[str, Any]) -> str:
 
 
 def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | None:
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, dict):
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None:
         return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
+    channel_id = slack_thread.channel_id
+    thread_ts = slack_thread.thread_ts
     if not isinstance(channel_id, str) or not channel_id.strip():
         return None
     if not isinstance(thread_ts, str) or not thread_ts.strip():
@@ -361,19 +379,6 @@ async def _maybe_post_plan_approved_to_slack(
         logger.warning("Could not post plan approval Slack reply to %s/%s", channel_id, thread_ts)
 
 
-def _format_comments(comments: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    index = 1
-    for comment in comments:
-        body = str(comment.get("body", "")).strip()
-        if not body:
-            continue
-        author = str(comment.get("author") or "reviewer").strip()
-        lines.append(f"{index}. {author}: {body}")
-        index += 1
-    return "\n".join(lines)
-
-
 async def _dispatch_followup(
     thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
 ) -> Run:
@@ -391,11 +396,9 @@ async def _dispatch_followup(
     repo = _repo_config_from_metadata(metadata)
     if repo:
         configurable["repo"] = repo
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        slack_thread = source_context.get("slack_thread")
-        if isinstance(slack_thread, dict):
-            configurable["slack_thread"] = slack_thread
+    context = SourceContext.from_metadata(metadata)
+    if context.slack_thread is not None:
+        configurable["slack_thread"] = context.dump()["slack_thread"]
     configurable["plan_mode"] = plan_mode
 
     return await dispatch_agent_run(

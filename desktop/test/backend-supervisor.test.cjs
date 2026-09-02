@@ -10,12 +10,16 @@ const {
   packagedBackendTarget,
 } = require("../src/backend-supervisor.cjs");
 
-test("development target runs the repository LangGraph app through uv", () => {
+test("development target isolates repository LangGraph state", () => {
   const repoRoot = path.resolve("/work/open-swe");
-  assert.deepEqual(devBackendTarget({ repoRoot, port: 49152, env: {} }), {
+  const stateDir = path.resolve("/tmp/open-swe-state");
+  const target = devBackendTarget({ repoRoot, stateDir, port: 49152, env: {} });
+  assert.deepEqual(target, {
     command: "uv",
     args: [
       "run",
+      "--project",
+      repoRoot,
       "langgraph",
       "dev",
       "--no-browser",
@@ -24,10 +28,12 @@ test("development target runs the repository LangGraph app through uv", () => {
       "127.0.0.1",
       "--port",
       "49152",
+      "--n-jobs-per-worker",
+      "10",
       "--config",
       path.join(repoRoot, "langgraph.desktop.json"),
     ],
-    cwd: repoRoot,
+    cwd: stateDir,
   });
 });
 
@@ -75,6 +81,34 @@ test("reports whether the selected provider is configured", () => {
     available: true,
     variable: null,
   });
+  assert.deepEqual(
+    modelCredentialStatus("anthropic:test", {
+      LANGSMITH_GATEWAY_API_KEY: "gateway-key",
+      LANGSMITH_GATEWAY_ENABLED: "true",
+    }),
+    { available: true, variable: null },
+  );
+});
+
+test("caches the managed macOS gateway key", () => {
+  let probes = 0;
+  const supervisor = new BackendSupervisor({
+    env: {},
+    gatewayEnvironment: {
+      platform: "darwin",
+      execFileSync: () => {
+        probes += 1;
+        return "managed-key\n";
+      },
+    },
+  });
+
+  assert.deepEqual(supervisor.credentialStatus("anthropic:test"), {
+    available: true,
+    variable: null,
+  });
+  supervisor.credentialStatus("openai:test");
+  assert.equal(probes, 1);
 });
 
 test("creates the local LangGraph thread before stream hydration", async () => {

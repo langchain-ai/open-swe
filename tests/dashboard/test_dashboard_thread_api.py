@@ -19,6 +19,14 @@ _FABLE = "anthropic:claude-fable-5"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
+@pytest.fixture(autouse=True)
+def _empty_thread_pins(monkeypatch) -> None:
+    async def empty_pins(login: str) -> list[str]:
+        return []
+
+    monkeypatch.setattr(thread_api, "list_thread_pin_ids", empty_pins)
+
+
 def _image() -> thread_api.DashboardImageBody:
     return thread_api.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),
@@ -88,19 +96,19 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
     assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
 
 
-async def test_resolve_agent_model_choice_migrates_deprecated_request_model(monkeypatch) -> None:
+async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(monkeypatch) -> None:
     async def fake_team_default(role: str) -> tuple[str, str]:
         return _VISION_MODEL, "medium"
 
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
 
     model_id, effort = await thread_api._resolve_agent_model_choice(
-        {},
-        "openai:gpt-5.5",
+        {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
+        "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
     )
 
-    assert (model_id, effort) == ("openai:gpt-5.6-sol", "high")
+    assert (model_id, effort) == (_VISION_MODEL, "medium")
 
 
 async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
@@ -140,15 +148,17 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
     assert model_id == "anthropic:claude-opus-5"
 
 
-async def test_resolve_agent_model_id_migrates_deprecated_per_thread_override(monkeypatch) -> None:
+async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monkeypatch) -> None:
     async def fake_team_default(role: str) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
-    model_id = await resolve_agent_model_id(None, per_thread_model_id="openai:gpt-5.5")
-    assert model_id == "openai:gpt-5.6-sol"
+    model_id = await resolve_agent_model_id(
+        None, per_thread_model_id="fireworks:accounts/fireworks/models/glm-5p2"
+    )
+    assert model_id == _TEXT_ONLY_MODEL
 
 
 def _new_thread_client(created: dict[str, object]) -> object:
@@ -226,7 +236,7 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert stamped["origin"] == "dashboard"
     assert stamped["thread_category"] == "interactive"
     assert stamped["trigger_kind"] == "user"
-    assert stamped["github_login"] == "octocat"
+    assert stamped["participant_logins"] == {"octocat": True}
     assert stamped["title"] == "Fix the flaky test"
     assert stamped["repo_owner"] == "octo"
     assert stamped["repo_name"] == "repo"
@@ -434,10 +444,9 @@ async def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
     assert summary["sandboxId"] is None
 
 
-async def test_terminal_sandbox_requires_owner_and_existing_sandbox(monkeypatch) -> None:
+async def test_terminal_sandbox_requires_existing_sandbox(monkeypatch) -> None:
     metadata = {
         "source": "dashboard",
-        "github_login": "owner",
         "sandbox_id": "sandbox-123",
         "repo_name": "repo",
     }
@@ -451,55 +460,115 @@ async def test_terminal_sandbox_requires_owner_and_existing_sandbox(monkeypatch)
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
-    assert await thread_api.get_dashboard_terminal_sandbox("tid", "owner") == (
+    assert await thread_api.get_dashboard_terminal_sandbox("tid", "teammate") == (
         "sandbox-123",
         "repo",
     )
-    with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_terminal_sandbox("tid", "intruder")
-    assert exc_info.value.status_code == 404
 
     metadata["sandbox_id"] = "__creating__"
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_terminal_sandbox("tid", "owner")
+        await thread_api.get_dashboard_terminal_sandbox("tid", "teammate")
     assert exc_info.value.status_code == 404
 
 
-async def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:
+async def test_thread_summary_includes_slack_source_urls_for_private_repo(monkeypatch) -> None:
+    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T workspace")
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
                 "repo_private": True,
-                "source_context": {"slack_thread": {"permalink": "https://slack.example/thread"}},
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "C channel",
+                        "thread_ts": "123.456",
+                        "permalink": "https://slack.example/thread",
+                    }
+                },
             }
         )
     )
 
     assert summary["sourceUrl"] == "https://slack.example/thread"
+    assert summary["sourceAppUrl"] == (
+        "slack://channel?team=T+workspace&id=C+channel&message=123.456"
+    )
 
 
-async def test_thread_summary_omits_slack_source_url_for_public_repo() -> None:
+async def test_thread_summary_includes_slack_source_urls_for_public_repo(monkeypatch) -> None:
+    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T-workspace")
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
                 "repo_private": False,
-                "source_context": {"slack_thread": {"permalink": "https://slack.example/thread"}},
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "C-channel",
+                        "thread_ts": "123.456",
+                        "permalink": "https://slack.example/thread",
+                    }
+                },
             }
         )
     )
 
-    assert summary["sourceUrl"] is None
+    assert summary["sourceUrl"] == "https://slack.example/thread"
+    assert summary["sourceAppUrl"] == (
+        "slack://channel?team=T-workspace&id=C-channel&message=123.456"
+    )
 
 
-async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
+async def test_thread_summary_includes_code_channel_url(monkeypatch) -> None:
+    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T team&workspace")
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {
+                    "slack_thread": {"channel_id": "C code&channel", "thread_ts": "0"}
+                },
+            }
+        )
+    )
+
+    assert summary["codeChannelUrl"] == (
+        "https://slack.com/app_redirect?channel=C+code%26channel&team=T+team%26workspace"
+    )
+
+
+async def test_thread_summary_omits_code_channel_url_without_team() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "0"}},
+            }
+        )
+    )
+
+    assert summary["codeChannelUrl"] is None
+
+
+async def test_thread_summary_omits_code_channel_url_for_slack_thread() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {
+                    "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"}
+                },
+            }
+        )
+    )
+
+    assert summary["codeChannelUrl"] is None
+
+
+async def test_recovery_patch_reaches_any_authenticated_user(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": thread_id,
-                "metadata": {"source": "dashboard", "github_login": "owner", "sandbox_id": "sbx"},
-            }
+            return {"thread_id": thread_id, "metadata": {"source": "dashboard"}}
 
     class FakeClient:
         threads = FakeThreads()
@@ -507,9 +576,10 @@ async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "intruder")
+        await thread_api.get_dashboard_thread_recovery_patch("tid", "teammate")
 
     assert exc_info.value.status_code == 404
+    assert "sandbox" in exc_info.value.detail
 
 
 async def test_recovery_patch_requires_sandbox(monkeypatch) -> None:
@@ -675,8 +745,7 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
         command,
         metadata={
             "source": "dashboard",
-            "github_login": "owner",
-            "participant_logins": ["owner"],
+            "participant_logins": {"first": True},
         },
         email="teammate@example.com",
     )
@@ -684,7 +753,7 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
     last = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
     assert last.attrib["sender"] == "github:teammate"
     assert last.findtext("content") == "fix the bug"
-    assert updates[-1]["participant_logins"] == ["owner", "teammate"]
+    assert updates[-1]["participant_logins"] == {"first": True, "teammate": True}
 
 
 async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
@@ -1114,25 +1183,19 @@ async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
     assert exc_info.value.status_code == 400
 
 
-async def test_proxy_commands_non_run_start_by_non_owner_is_rejected(monkeypatch) -> None:
-    """Non-owners may only post via the attributed run.start path; other write
-    commands (e.g. input.respond) carry unattributed input and stay owner-only."""
-
-    class OwnedThreads:
+async def test_proxy_commands_rejects_unsurfaced_thread(monkeypatch) -> None:
+    class InternalThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": thread_id,
-                "metadata": {"source": "dashboard", "github_login": "owner"},
-            }
+            return {"thread_id": thread_id, "metadata": {"source": "reviewer"}}
 
-    class OwnedClient:
-        threads = OwnedThreads()
+    class InternalClient:
+        threads = InternalThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: OwnedClient())
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: InternalClient())
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.proxy_dashboard_thread_commands(
-            "tid", "intruder", b'{"method": "input.respond"}'
+            "tid", "teammate", b'{"method": "input.respond"}'
         )
     assert exc_info.value.status_code == 404
 
@@ -1161,7 +1224,7 @@ async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> 
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch) -> None:
@@ -1222,16 +1285,11 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
     ]
 
 
-async def test_run_cancel_enforces_thread_ownership(monkeypatch) -> None:
-    """Cancelling a run still requires thread ownership (it is not "posting")."""
-
+async def test_run_cancel_rejects_unsurfaced_thread(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
             assert thread_id == "tid"
-            return {
-                "thread_id": "tid",
-                "metadata": {"source": "dashboard", "github_login": "owner"},
-            }
+            return {"thread_id": "tid", "metadata": {"source": "reviewer"}}
 
     class FakeClient:
         threads = FakeThreads()
@@ -1239,7 +1297,7 @@ async def test_run_cancel_enforces_thread_ownership(monkeypatch) -> None:
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_run_cancel("tid", "run-1", "intruder")
+        await thread_api.proxy_dashboard_thread_run_cancel("tid", "run-1", "teammate")
     assert exc_info.value.status_code == 404
 
 
@@ -1423,7 +1481,7 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in admin threads"
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
@@ -1433,6 +1491,19 @@ def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
         {"source": "dashboard", "admin_thread": True},
         "workspace-admin",
     )
+
+
+def test_assert_thread_postable_restricts_workspace_automation(monkeypatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+
+    with pytest.raises(HTTPException) as exc_info:
+        thread_api._assert_thread_postable(
+            {"source": "schedule", "thread_category": "automation"},
+            "teammate",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
@@ -1536,49 +1607,6 @@ async def test_thread_summary_defaults_to_not_resolved() -> None:
     assert summary["resolvedAt"] is None
 
 
-async def test_thread_summary_is_owner_true_for_matching_login() -> None:
-    summary = await thread_api._thread_summary(
-        {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
-        owner_login="octocat",
-    )
-
-    assert summary["isOwner"] is True
-
-
-async def test_thread_summary_is_owner_false_for_non_owner() -> None:
-    summary = await thread_api._thread_summary(
-        {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
-        owner_login="teammate",
-    )
-
-    assert summary["isOwner"] is False
-
-
-async def test_thread_summary_is_owner_true_for_matching_email() -> None:
-    summary = await thread_api._thread_summary(
-        {
-            "thread_id": "tid",
-            "metadata": {
-                "source": "slack",
-                "github_login": "octocat",
-                "triggering_user_email": "octo@example.com",
-            },
-        },
-        owner_login="someone-else",
-        owner_email="OCTO@example.com",
-    )
-
-    assert summary["isOwner"] is True
-
-
-async def test_thread_summary_is_owner_defaults_true_without_owner_login() -> None:
-    summary = await thread_api._thread_summary(
-        {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
-    )
-
-    assert summary["isOwner"] is True
-
-
 async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
     updates: list[dict[str, object]] = []
 
@@ -1634,13 +1662,10 @@ async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
     assert summary["resolved"] is False
 
 
-async def test_resolve_dashboard_thread_enforces_ownership(monkeypatch) -> None:
+async def test_resolve_dashboard_thread_rejects_unsurfaced_thread(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": thread_id,
-                "metadata": {"source": "dashboard", "github_login": "owner"},
-            }
+            return {"thread_id": thread_id, "metadata": {"source": "reviewer"}}
 
     class FakeClient:
         threads = FakeThreads()
@@ -1648,7 +1673,7 @@ async def test_resolve_dashboard_thread_enforces_ownership(monkeypatch) -> None:
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.resolve_dashboard_thread("tid", "intruder", resolved=True)
+        await thread_api.resolve_dashboard_thread("tid", "teammate", resolved=True)
     assert exc_info.value.status_code == 404
 
 
@@ -1702,6 +1727,9 @@ def test_summary_matches_filters() -> None:
         "source": "github",
         "status": "finished",
         "title": "Fix the flaky test",
+        "repoFullName": "langchain-ai/open-swe",
+        "branch": "open-swe/fix-flake",
+        "pr": {"number": 123, "url": "https://github.com/langchain-ai/open-swe/pull/123"},
     }
 
     assert thread_api._summary_matches_filters(
@@ -1716,10 +1744,27 @@ def test_summary_matches_filters() -> None:
     assert not thread_api._summary_matches_filters(
         summary, resolved=None, viewed=None, source=None, status=None, query="missing"
     )
+    assert thread_api._summary_matches_filters(
+        summary, resolved=None, viewed=None, source=None, status=None, query="pull/123"
+    )
 
 
 def test_metadata_matches_filters() -> None:
-    metadata = {"source": "dashboard", "title": "Fix login bug", "resolved": True}
+    metadata = {
+        "source": "dashboard",
+        "title": "Fix login bug",
+        "resolved": True,
+        "repo_owner": "langchain-ai",
+        "repo_name": "open-swe",
+        "branch_name": "open-swe/fix-login",
+        "pull_requests": [
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "number": 123,
+                "url": "https://github.com/langchain-ai/open-swe/pull/123",
+            }
+        ],
+    }
     automation = {
         "source": "schedule",
         "schedule_id": "schedule-1",
@@ -1736,6 +1781,10 @@ def test_metadata_matches_filters() -> None:
     assert not thread_api._metadata_matches_filters(
         metadata, resolved=None, source="github", query=None
     )
+    for query in ("langchain-ai/open-swe", "fix-login", "pull/123"):
+        assert thread_api._metadata_matches_filters(
+            metadata, resolved=None, source=None, query=query
+        )
     assert thread_api._metadata_matches_filters(
         metadata, resolved=None, source=None, query=None, scope="interactive"
     )
@@ -1828,10 +1877,9 @@ async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -
     second.update({"source": "schedule", "schedule_id": "schedule-2"})
     threads.append(
         {
-            "thread_id": "other-owner",
+            "thread_id": "other-participant",
             "metadata": {
                 "source": "schedule",
-                "github_login": "someone-else",
                 "schedule_id": "schedule-1",
                 "latest_run_status": "success",
                 "updated_at_ms": 10,
@@ -1864,17 +1912,19 @@ async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -
     )
 
     assert [item["id"] for item in interactive["items"]] == ["t2"]
-    assert [item["id"] for item in automation["items"]] == ["t0"]
+    assert [item["id"] for item in automation["items"]] == ["other-participant", "t0"]
     assert automation["items"][0]["automationId"] == "schedule-1"
 
 
-async def test_list_dashboard_threads_page_separates_filter_owner_from_viewer(monkeypatch) -> None:
+async def test_list_dashboard_threads_page_scopes_search_to_requested_participant(
+    monkeypatch,
+) -> None:
     threads = [
         {
             "thread_id": "surfaced",
             "metadata": {
                 "source": "dashboard",
-                "github_login": "other-user",
+                "participant_logins": {"other-user": True},
                 "latest_run_status": "success",
                 "updated_at_ms": 2,
             },
@@ -1883,7 +1933,7 @@ async def test_list_dashboard_threads_page_separates_filter_owner_from_viewer(mo
             "thread_id": "internal",
             "metadata": {
                 "source": "reviewer",
-                "github_login": "other-user",
+                "participant_logins": {"other-user": True},
                 "latest_run_status": "success",
                 "updated_at_ms": 1,
             },
@@ -1912,300 +1962,256 @@ async def test_list_dashboard_threads_page_separates_filter_owner_from_viewer(mo
     result = await thread_api.list_dashboard_threads_page(
         "admin-user",
         email="admin@example.com",
-        filter_owner_login="other-user",
+        filter_participant_login="other-user",
         surfaced_only=True,
     )
 
-    assert searches == [{"github_login": "other-user"}]
+    # The legacy owner filter rides along until pre-participant threads age out.
+    assert searches == [
+        {"participant_logins": {"other-user": True}},
+        {"github_login": "other-user"},
+    ]
     assert [item["id"] for item in result["items"]] == ["surfaced"]
-    assert result["items"][0]["ownerLogin"] == "other-user"
-    assert result["items"][0]["isOwner"] is False
 
 
-async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 10, resolved_before=page_size)
+async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "open-swe"}
+    )
+    cast(dict[str, object], threads[1]["metadata"])["repo"] = {
+        "owner": "langchain-ai",
+        "name": "langgraph",
+    }
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
+    )
+
+    result = await thread_api.list_dashboard_threads_page("octocat", email=None, ownerless=True)
+
+    assert [item["id"] for item in result["items"]] == ["t2"]
+
+
+async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata(
+    monkeypatch,
+) -> None:
+    threads = _make_threads(4, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "open-swe"}
+    )
+    cast(dict[str, object], threads[1]["metadata"])["repo"] = {
+        "owner": "LANGCHAIN-AI",
+        "name": "OPEN-SWE",
+    }
+    cast(dict[str, object], threads[2]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "langgraph"}
+    )
     searches: list[dict[str, object]] = []
 
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            searches.append({"metadata": metadata, "offset": offset})
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=5
-    )
-
-    assert len(result["active"]["items"]) == 5
-    assert len(result["resolved"]["items"]) == 5
-    assert result["active"]["hasMore"] is True
-    assert result["resolved"]["hasMore"] is True
-    assert {call["offset"] for call in searches} == {0, page_size}
-
-
-async def test_list_dashboard_threads_sidebar_allows_limits_beyond_100(monkeypatch) -> None:
-    threads = _make_threads(120, resolved_before=0)
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
+            searches.append(metadata)
+            matches = [
+                thread
+                for thread in threads
+                if all(
+                    cast(dict[str, object], thread["metadata"]).get(key) == value
+                    for key, value in metadata.items()
+                )
+            ]
+            return matches[offset : offset + limit]
 
     class FakeRuns:
         async def list(self, thread_id, limit=1):
             return []
 
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=110, resolved_limit=0
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
 
-    assert result["active"]["limit"] == 110
-    assert len(result["active"]["items"]) == 110
-    assert result["active"]["hasMore"] is True
-
-
-async def test_list_dashboard_threads_sidebar_accepts_zero_resolved_limit(monkeypatch) -> None:
-    threads = _make_threads(2, resolved_before=1)
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=1, resolved_limit=0
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, repo="langchain-ai/open-swe"
     )
 
-    assert result["active"]["limit"] == 1
-    assert result["resolved"] == {"items": [], "limit": 0, "hasMore": True}
-
-
-async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiting(
-    monkeypatch,
-) -> None:
-    page_size = thread_api._THREADS_SEARCH_PAGE
-    threads = _make_threads(page_size + 5, resolved_before=0)
-    for thread in threads[:page_size]:
-        metadata = cast(dict[str, object], thread["metadata"])
-        metadata["source"] = "schedule"
-        metadata["schedule_id"] = f"schedule-{thread['thread_id']}"
-    offsets: list[int] = []
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            offsets.append(offset)
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat", email=None, active_limit=5, resolved_limit=5
-    )
-
-    assert [item["id"] for item in result["active"]["items"]] == [
-        f"t{index}" for index in range(page_size, page_size + 5)
+    assert [item["id"] for item in result["items"]] == ["t0", "t1"]
+    assert searches == [
+        {"participant_logins": {"octocat": True}},
+        {"github_login": "octocat"},
     ]
-    assert set(offsets) == {0, page_size}
 
 
-async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(
+async def test_list_dashboard_thread_projects_discovers_metadata_without_summaries(
     monkeypatch,
 ) -> None:
-    threads = _make_threads(1, resolved_before=0)
-    shared_thread = {
-        "thread_id": "shared-thread",
-        "metadata": {
-            "source": "slack",
-            "github_login": "teammate",
-            "title": "Teammate thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
-            "sandbox_id": "sandbox-123",
-        },
-    }
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
-        async def get(self, thread_id):
-            assert thread_id == "shared-thread"
-            return shared_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="shared-thread",
+    threads = _make_threads(5, resolved_before=0)
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "open-swe", "updated_at_ms": 50}
     )
-
-    assert [item["id"] for item in result["active"]["items"]] == ["shared-thread", "t0"]
-    shared = result["active"]["items"][0]
-    assert shared["isOwner"] is False
-    assert shared["sandboxId"] == "sandbox-123"
-
-
-async def test_list_dashboard_threads_sidebar_keeps_resolved_active_thread_resolved(
-    monkeypatch,
-) -> None:
-    threads = _make_threads(1, resolved_before=0)
-    shared_thread = {
-        "thread_id": "shared-resolved-thread",
-        "metadata": {
-            "source": "slack",
-            "github_login": "teammate",
-            "title": "Resolved teammate thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
+    cast(dict[str, object], threads[1]["metadata"])["repo"] = {
+        "owner": "LANGCHAIN-AI",
+        "name": "OPEN-SWE",
+    }
+    cast(dict[str, object], threads[2]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "langgraph", "updated_at_ms": 30}
+    )
+    cast(dict[str, object], threads[3]["metadata"]).update(
+        {
+            "repo_owner": "langchain-ai",
+            "repo_name": "private",
             "resolved": True,
-            "sandbox_id": "sandbox-456",
-        },
-    }
+            "updated_at_ms": 60,
+        }
+    )
 
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
 
-        async def get(self, thread_id):
-            assert thread_id == "shared-resolved-thread"
-            return shared_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="shared-resolved-thread",
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
     )
 
-    assert [item["id"] for item in result["active"]["items"]] == ["t0"]
-    assert [item["id"] for item in result["resolved"]["items"]] == ["shared-resolved-thread"]
-    shared = result["resolved"]["items"][0]
-    assert shared["isOwner"] is False
-    assert shared["resolved"] is True
-    assert shared["sandboxId"] == "sandbox-456"
+    result = await thread_api.list_dashboard_thread_projects("octocat")
+
+    assert result == [
+        {
+            "repoFullName": "langchain-ai/open-swe",
+            "name": "open-swe",
+            "updatedAt": 50,
+        },
+        {
+            "repoFullName": "langchain-ai/langgraph",
+            "name": "langgraph",
+            "updatedAt": 30,
+        },
+    ]
 
 
-async def test_list_dashboard_threads_sidebar_ignores_unreadable_active_thread(
+async def test_pin_dashboard_thread_allows_readable_non_owner(monkeypatch) -> None:
+    pinned: list[tuple[str, str]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id):
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "slack", "github_login": "other"},
+            }
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    async def fake_pin(login: str, thread_id: str) -> None:
+        pinned.append((login, thread_id))
+
+    monkeypatch.setattr(thread_api, "pin_thread", fake_pin)
+
+    await thread_api.pin_dashboard_thread("shared-thread", "octocat")
+
+    assert pinned == [("octocat", "shared-thread")]
+
+
+async def test_pin_dashboard_thread_returns_not_found_for_lookup_failure(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id):
+            raise RuntimeError("thread missing")
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.pin_dashboard_thread("missing-thread", "octocat")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "thread not found"
+
+
+async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id):
+            return {"thread_id": thread_id, "metadata": {"source": "internal"}}
+
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.pin_dashboard_thread("private-thread", "octocat")
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_list_dashboard_pinned_threads_returns_only_readable_threads(
     monkeypatch,
 ) -> None:
-    threads = _make_threads(1, resolved_before=0)
-    private_thread = {
-        "thread_id": "private-thread",
-        "metadata": {
-            "source": "internal",
-            "github_login": "teammate",
-            "title": "Private thread",
-            "updated_at_ms": 100,
-            "latest_run_status": "success",
+    threads = {
+        "shared-thread": {
+            "thread_id": "shared-thread",
+            "metadata": {
+                "source": "slack",
+                "github_login": "teammate",
+                "title": "Pinned teammate thread",
+                "updated_at_ms": 100,
+                "latest_run_status": "success",
+            },
+        },
+        "private-thread": {
+            "thread_id": "private-thread",
+            "metadata": {"source": "reviewer"},
         },
     }
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            assert select == thread_api._THREAD_LIST_SELECT
-            return threads[offset : offset + limit]
-
         async def get(self, thread_id):
-            assert thread_id == "private-thread"
-            return private_thread
-
-        async def update(self, *, thread_id, metadata):
-            return None
+            if thread_id == "missing-thread":
+                raise RuntimeError("missing")
+            return threads[thread_id]
 
     class FakeRuns:
         async def list(self, thread_id, limit=1):
             return []
 
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    result = await thread_api.list_dashboard_threads_sidebar(
-        "octocat",
-        email=None,
-        active_limit=5,
-        resolved_limit=5,
-        active_thread_id="private-thread",
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
 
-    assert [item["id"] for item in result["active"]["items"]] == ["t0"]
+    async def fake_pin_ids(login: str) -> list[str]:
+        assert login == "octocat"
+        return ["shared-thread", "private-thread", "missing-thread"]
+
+    monkeypatch.setattr(thread_api, "list_thread_pin_ids", fake_pin_ids)
+
+    result = await thread_api.list_dashboard_pinned_threads("octocat")
+
+    assert [item["id"] for item in result] == ["shared-thread"]
 
 
 async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch) -> None:
@@ -2244,7 +2250,7 @@ async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch
         "octocat", email=None, limit=2, offset=0, sort_by="created_at"
     )
 
-    assert requested_sorts == ["created_at"]
+    assert set(requested_sorts) == {"created_at"}
     assert [item["id"] for item in result["items"]] == ["t1", "t0"]
 
 
@@ -2321,23 +2327,19 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_get_my_profile_migrates_deprecated_models() -> None:
+async def test_get_my_profile_drops_deprecated_models() -> None:
     with patch(
         "agent.dashboard.routes.get_profile",
         new_callable=AsyncMock,
         return_value={
-            "default_model": "openai:gpt-5.5",
-            "reasoning_effort": "medium",
-            "default_subagent_model": "anthropic:claude-opus-4-8",
-            "subagent_reasoning_effort": "low",
+            "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
+            "reasoning_effort": "high",
         },
     ):
         payload = await routes.get_my_profile({"sub": "octocat"})
 
-    assert payload["default_model"] == "openai:gpt-5.6-sol"
-    assert payload["reasoning_effort"] == "medium"
-    assert payload["default_subagent_model"] == "anthropic:claude-opus-5"
-    assert payload["subagent_reasoning_effort"] == "low"
+    assert "default_model" not in payload
+    assert "reasoning_effort" not in payload
 
 
 @pytest.mark.asyncio
@@ -2436,7 +2438,7 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     sandbox = object()
     monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
     monkeypatch.setattr(
-        "agent.utils.sandbox_paths.aresolve_sandbox_work_dir",
+        "agent.sandboxes.paths.resolve_sandbox_work_dir",
         AsyncMock(return_value="/work"),
     )
     read_diff = AsyncMock(return_value=live)

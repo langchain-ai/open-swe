@@ -8,7 +8,10 @@ _TOOL_MODULES = {
     "background_execute": ".background_execute",
     "background_task": ".background_execute",
     "capture_environment_snapshot": ".environments",
+    "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
+    "create_sandbox_service_url": ".create_sandbox_service_url",
+    "delete_automation": ".automations",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
@@ -23,11 +26,13 @@ _TOOL_MODULES = {
     "linear_list_teams": ".linear_list_teams",
     "linear_search_issues": ".linear_search_issues",
     "linear_update_issue": ".linear_update_issue",
+    "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "manage_code_channel": ".manage_code_channel",
     "manage_thread": ".threads",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
@@ -56,6 +61,8 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
     "slack_thread_reply": ".slack_thread_reply",
+    "trigger_automation": ".automations",
+    "update_automation": ".automations",
     "update_finding": ".update_finding",
     "web_search": ".web_search",
 }
@@ -66,7 +73,10 @@ __all__ = [
     "background_execute",
     "background_task",
     "capture_environment_snapshot",
+    "create_automation",
     "create_sandbox_file_download_url",
+    "create_sandbox_service_url",
+    "delete_automation",
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
@@ -81,11 +91,13 @@ __all__ = [
     "linear_list_teams",
     "linear_search_issues",
     "linear_update_issue",
+    "list_automations",
     "list_environments",
     "list_findings",
     "list_review_findings",
     "list_threads",
     "manage_baby_sit",
+    "manage_code_channel",
     "manage_thread",
     "notify_automation_channel",
     "open_pull_request",
@@ -114,6 +126,8 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
+    "trigger_automation",
+    "update_automation",
     "update_finding",
     "web_search",
 ]
@@ -121,8 +135,16 @@ __all__ = [
 if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
+    from .automations import (
+        create_automation,
+        delete_automation,
+        list_automations,
+        trigger_automation,
+        update_automation,
+    )
     from .background_execute import background_execute, background_task
     from .create_sandbox_file_download_url import create_sandbox_file_download_url
+    from .create_sandbox_service_url import create_sandbox_service_url
     from .enter_plan_mode import enter_plan_mode
     from .environments import (
         capture_environment_snapshot,
@@ -144,6 +166,7 @@ if TYPE_CHECKING:
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings
     from .manage_baby_sit import manage_baby_sit
+    from .manage_code_channel import manage_code_channel
     from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
     from .organization_skills import delete_organization_skill, save_organization_skill

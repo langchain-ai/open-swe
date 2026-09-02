@@ -14,7 +14,7 @@ describe("app commands", () => {
   it("uses Linear-style C for new threads on web and desktop", () => {
     const newThread = createNewThreadCommand(vi.fn())
 
-    expect(newThread.shortcuts).toEqual(["c"])
+    expect(newThread.shortcuts).toEqual(["c", "mod+n", "mod+shift+o"])
     expect(newThread.desktopShortcuts).toBeUndefined()
     expect(newThread.desktopId).toBe("new-thread")
   })
@@ -52,6 +52,7 @@ describe("app commands", () => {
       id: "local-1",
       title: "Fix local search",
       cwd: "/tmp/repo",
+      worktreePath: null,
       viewed: true,
       createdAt: 1,
       updatedAt: 2,

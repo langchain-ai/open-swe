@@ -16,14 +16,19 @@ import logging
 import os
 from typing import Any
 
+from langgraph_sdk.client import LangGraphClient
+
+from agent.auth.github_app import get_github_app_installation_token
+from agent.source_context import SourceContext
+
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
 from .session_cost import schedule_session_cost_refresh
 from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
 from .utils.slack import post_slack_thread_reply
+from .utils.slack_code_channels import is_code_channel_session, set_session_status
 from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
 
@@ -134,37 +139,28 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
 async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: str) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
-    ctx = metadata.get("source_context")
-    ctx = ctx if isinstance(ctx, dict) else {}
+    ctx = SourceContext.from_metadata(metadata)
     text = _failure_text(status)
 
-    slack_thread = ctx.get("slack_thread")
-    if source == "slack" or isinstance(slack_thread, dict):
-        if isinstance(slack_thread, dict):
-            channel_id = slack_thread.get("channel_id")
-            thread_ts = slack_thread.get("thread_ts")
-            if channel_id and thread_ts:
-                slack_text = _failure_text(status, dashboard_thread_url(thread_id))
-                return await post_slack_thread_reply(
-                    channel_id, thread_ts, slack_text, agent_thread_id=thread_id
-                )
+    if source == "slack" or ctx.slack_thread is not None:
+        location = ctx.slack_location
+        if location is not None:
+            slack_text = _failure_text(status, dashboard_thread_url(thread_id))
+            return await post_slack_thread_reply(
+                location[0], location[1], slack_text, agent_thread_id=thread_id
+            )
         return False
 
     if source == "linear":
-        linear_issue = ctx.get("linear_issue")
-        if isinstance(linear_issue, dict):
-            issue_id = linear_issue.get("id")
-            if issue_id:
-                return await comment_on_linear_issue(issue_id, text)
+        if ctx.linear_issue and ctx.linear_issue.id:
+            return await comment_on_linear_issue(ctx.linear_issue.id, text)
         return False
 
     if source in ("github", "github_issue"):
         repo_config = metadata.get("repo")
-        number = ctx.get("pr_number")
-        if number is None:
-            github_issue = ctx.get("github_issue")
-            if isinstance(github_issue, dict):
-                number = github_issue.get("number")
+        number = ctx.pr_number
+        if number is None and ctx.github_issue is not None:
+            number = ctx.github_issue.number
         if isinstance(repo_config, dict) and isinstance(number, int):
             token = await get_github_app_installation_token()
             if token:
@@ -219,14 +215,31 @@ def _prepare_run_id(payload: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+async def _settle_code_channel_session(
+    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
+) -> None:
+    """Return a code channel session to ``active`` once its work stops.
+
+    A later message can already have started another run, so a completion that
+    arrives out of order must not clear the loading UI that run is relying on.
+    """
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None or not is_code_channel_session(slack_thread.thread_ts):
+        return
+    try:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return
+    except Exception:  # noqa: BLE001
+        logger.debug("run-complete: could not list runs for %s", thread_id, exc_info=True)
+    await set_session_status(slack_thread.channel_id, "active")
+
+
 async def _schedule_success_cost_refresh(
     thread_id: str, run_id: str | None, payload: dict[str, Any]
 ) -> dict[str, str]:
     if run_id is None:
         return {"status": "ignored", "reason": "missing run_id"}
-    prepare_run_id = _prepare_run_id(payload)
-    if prepare_run_id is None:
-        return {"status": "ignored", "reason": "missing prepare_run_id"}
 
     client = langgraph_client()
     try:
@@ -238,17 +251,20 @@ async def _schedule_success_cost_refresh(
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
+    await _settle_code_channel_session(client, thread_id, metadata)
+    prepare_run_id = _prepare_run_id(payload)
+    if prepare_run_id is None:
+        return {"status": "ignored", "reason": "missing prepare_run_id"}
     if run_id in _scheduled_cost_run_ids(metadata):
         return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
 
-    source_context = metadata.get("source_context")
-    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
-    channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
-    thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
-    if not isinstance(channel_id, str) or not channel_id:
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None or not slack_thread.channel_id:
         return {"status": "ignored", "reason": "no Slack channel"}
-    if not isinstance(thread_ts, str) or not thread_ts:
+    if not slack_thread.thread_ts:
         return {"status": "ignored", "reason": "no Slack thread"}
+    channel_id = slack_thread.channel_id
+    thread_ts = slack_thread.thread_ts
 
     scheduled = await schedule_session_cost_refresh(
         {
@@ -305,6 +321,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     await _settle_failed_reviewer_check(thread_id, metadata)
+    await _settle_code_channel_session(client, thread_id, metadata)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

@@ -2,6 +2,10 @@ import { useState } from "react"
 import { ChevronDown, Download } from "lucide-react"
 
 import type { OutputIframeDisplay } from "@/features/agents/lib/types"
+import {
+  ARTIFACT_ALLOW,
+  ARTIFACT_SANDBOX,
+} from "@/features/agents/lib/artifactShell"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -57,18 +61,18 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
           <SandboxedHtmlFrame
             title={display.title}
             html={display.html}
-            sandbox="allow-scripts allow-downloads"
-            allow="clipboard-write"
-            className="border-t border-border bg-white"
+            sandbox={ARTIFACT_SANDBOX}
+            allow={ARTIFACT_ALLOW}
+            className="border-t border-border bg-background"
             style={{ height: IFRAME_HEIGHT }}
           />
         ) : (
           <SandboxedHtmlFrame
             title={display.title}
             src={display.previewUrl}
-            sandbox="allow-scripts allow-downloads"
-            allow="clipboard-write"
-            className="border-t border-border bg-white"
+            sandbox={ARTIFACT_SANDBOX}
+            allow={ARTIFACT_ALLOW}
+            className="border-t border-border bg-background"
             style={{ height: IFRAME_HEIGHT }}
           />
         ))}

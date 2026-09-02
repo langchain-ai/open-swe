@@ -88,7 +88,7 @@ All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__
 Agent/UI parity is a product principle: anything users can do in the dashboard UI should generally also be possible through an agent tool, subject to the same authorization and safety boundaries. When adding a UI capability, add or extend the corresponding curated tool unless there is a documented reason not to.
 
 Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `manage_code_channel`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
 
 `list_threads`, `get_thread`, and `manage_thread` are parent-agent-only; `manage_thread` is unavailable during plan mode while the two read-only tools remain available.
 
@@ -118,9 +118,12 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 
 Webhooks compute deterministic thread ids so the same Linear issue / Slack thread / PR routes back to the same running agent. See `utils/github_comments.py:get_thread_id_from_branch` and the equivalents in `utils/linear.py` / `utils/slack.py`. Reviewer threads have their own deterministic ids and are tagged with `REVIEWER_THREAD_KIND` metadata so the FastAPI side can find them.
 
+Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task session. Open SWE keys Slack locations by `(channel_id, thread_ts)`, so a code channel uses the `CODE_CHANNEL_SESSION_TS` (`"0"`) sentinel as its timestamp: it satisfies the existing timestamp validation, can never collide with a real message ts, and makes default replies post top-level while preserving a real `reply_thread_ts` when the user starts a Slack thread. Channel context reads from `conversations.history`; user-started thread context reads from `conversations.replies`. Session status, runtime commands, properties, views, canvases, and archival go through `agents.sessions.*` / `agents.conversations.*`.
+
 ## Conventions
 
 - Tests are unit-only by default (`tests/`). Integration tests would go under `tests/integration_tests/` (currently empty — `make integration_tests` no-ops if missing).
+- Do not add tests that only assert or restate static prompt text. Prompt tests must verify rendering, composition, precedence, or another meaningful behavioral contract.
 - New sandbox providers: add a module under `agent/integrations/` and wire it into `SANDBOX_FACTORIES` in `agent/utils/sandbox.py`. See `docs/CUSTOMIZATION.md`.
 - New tools: add to `agent/tools/`, export from `agent/tools/__init__.py`, add to the `tools=[...]` list in `server.py:get_agent` (or `reviewer.py` for reviewer-only tools).
 - New middleware: add to `agent/middleware/`, export from `agent/middleware/__init__.py`, add to the `middleware=[...]` list in `server.py:get_agent` — order is significant (see the stack above).
@@ -128,12 +131,16 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 - New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+- Do not use parent-relative Python imports that start with `..`; use absolute imports instead. Same-package imports with a single dot, such as `.foo`, are allowed.
 
 <!-- OPENWIKI:START -->
 
 ## OpenWiki
 
-This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+This repository has a generated `openwiki/` evidence index. It is optional just-in-time context, not required startup reading.
+
+- Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
+- Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
 
 The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
 

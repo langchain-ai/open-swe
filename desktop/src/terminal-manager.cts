@@ -420,8 +420,7 @@ function createTerminalManager(options) {
   const adapter = options.pty || require("node-pty");
   const fileSystem = options.fs || fs;
   const logsDir = options.logsDir;
-  const listProjects = options.listProjects;
-  const getLocalThread = options.getLocalThread;
+  const getSessionRoot = options.getSessionRoot;
   const baseEnv = options.env || getUserShellEnv();
   const inspect = options.inspect || defaultInspect;
   const historyLines = options.historyLines || HISTORY_LINES;
@@ -465,40 +464,30 @@ function createTerminalManager(options) {
     }
     const localSessionId = cleanId(input.localSessionId, "local session ID");
     const terminalId = cleanId(input.terminalId, "terminal ID");
-    const localSession = getLocalThread(localSessionId);
-    if (!localSession || typeof localSession.cwd !== "string") {
+    const sessionRoot = getSessionRoot(localSessionId);
+    if (typeof sessionRoot !== "string" || !sessionRoot) {
       throw new Error("Local thread not found");
     }
-    return { localSessionId, terminalId, localSession };
+    return { localSessionId, terminalId, sessionRoot };
   }
 
-  function validateCwd(value, localSession) {
+  function validateCwd(value, sessionRoot) {
     if (typeof value !== "string" || !path.isAbsolute(value)) {
       throw new Error("Choose a valid local project directory");
     }
     let cwd;
-    let sessionCwd;
+    let root;
     try {
       cwd = fileSystem.realpathSync(value);
-      sessionCwd = fileSystem.realpathSync(localSession.cwd);
+      root = fileSystem.realpathSync(sessionRoot);
       if (!fileSystem.statSync(cwd).isDirectory())
         throw new Error("not directory");
     } catch {
       throw new Error("Choose a valid local project directory");
     }
-    const roots = listProjects().map((project) => {
-      try {
-        return fileSystem.realpathSync(project.cwd);
-      } catch {
-        return null;
-      }
-    });
-    if (
-      !containsPath(sessionCwd, cwd) ||
-      !roots.some((root) => root && containsPath(root, cwd))
-    ) {
+    if (!containsPath(root, cwd)) {
       throw new Error(
-        "Terminal directory must belong to this registered local session",
+        "Terminal directory must belong to this local session's workspace",
       );
     }
     return cwd;
@@ -506,7 +495,7 @@ function createTerminalManager(options) {
 
   function validateLaunch(input, existing) {
     const identity = validateIdentity(input);
-    const cwd = validateCwd(input.cwd ?? existing?.cwd, identity.localSession);
+    const cwd = validateCwd(input.cwd ?? existing?.cwd, identity.sessionRoot);
     const env =
       input.env === undefined
         ? (existing?.runtimeEnv ?? null)
@@ -1028,7 +1017,7 @@ function createTerminalManager(options) {
   async function close(input) {
     if (!isRecord(input)) throw new Error("Invalid terminal request");
     const localSessionId = cleanId(input.localSessionId, "local session ID");
-    if (!getLocalThread(localSessionId))
+    if (!getSessionRoot(localSessionId))
       throw new Error("Local thread not found");
     if (input.terminalId !== undefined) {
       const terminalId = cleanId(input.terminalId, "terminal ID");
@@ -1093,7 +1082,7 @@ function createTerminalManager(options) {
 
   function list(localSessionId) {
     cleanId(localSessionId, "local session ID");
-    if (!getLocalThread(localSessionId))
+    if (!getSessionRoot(localSessionId))
       throw new Error("Local thread not found");
     return [...sessions.values()]
       .filter((session) => session.localSessionId === localSessionId)
@@ -1107,7 +1096,7 @@ function createTerminalManager(options) {
 
   function subscribeMetadata(localSessionId, listener) {
     cleanId(localSessionId, "local session ID");
-    if (!getLocalThread(localSessionId))
+    if (!getSessionRoot(localSessionId))
       throw new Error("Local thread not found");
     const subscription = (event) => {
       const eventSessionId =
@@ -1166,15 +1155,13 @@ function configureTerminalIpc({
   ipcMain,
   requireTrusted,
   getWindow,
-  listProjects,
-  getLocalThread,
+  getSessionRoot,
   userDataPath,
 }) {
   ensurePtySpawnHelperExecutable();
   configuredManager = createTerminalManager({
     logsDir: path.join(userDataPath, "terminal-history"),
-    listProjects,
-    getLocalThread,
+    getSessionRoot,
   });
   const attachments = new Map();
   const metadataAttachments = new Map();

@@ -1,10 +1,16 @@
-const { spawn: spawnProcess } = require("node:child_process");
+const {
+  execFileSync: execFileSyncProcess,
+  spawn: spawnProcess,
+} = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 
 const HOST = "127.0.0.1";
+// `langgraph dev` runs one job per worker unless told otherwise; every thread
+// has its own worktree, so runs no longer have to wait for each other.
+const JOBS_PER_WORKER = "10";
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 5_000;
 const THREAD_STATUS = { busy: "running", error: "error" };
@@ -14,13 +20,20 @@ const PROVIDER_KEYS = {
   google_genai: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
   openai: ["OPENAI_API_KEY"],
 };
+const GATEWAY_KEYS = [
+  "LANGSMITH_GATEWAY_API_KEY",
+  "LANGSMITH_API_KEY_PROD",
+  "LANGSMITH_API_KEY",
+];
 
-function devBackendTarget({ repoRoot, port, env = process.env }) {
+function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
+  const config = env.OPEN_SWE_LOCAL_BACKEND_CONFIG || "langgraph.desktop.json";
   return {
     command:
       env.OPEN_SWE_LOCAL_BACKEND_COMMAND || env.OPEN_SWE_UV_COMMAND || "uv",
     args: [
       "run",
+      ...(stateDir ? ["--project", repoRoot] : []),
       "langgraph",
       "dev",
       "--no-browser",
@@ -29,11 +42,12 @@ function devBackendTarget({ repoRoot, port, env = process.env }) {
       HOST,
       "--port",
       String(port),
+      "--n-jobs-per-worker",
+      JOBS_PER_WORKER,
       "--config",
-      env.OPEN_SWE_LOCAL_BACKEND_CONFIG ||
-        path.join(repoRoot, "langgraph.desktop.json"),
+      path.resolve(repoRoot, config),
     ],
-    cwd: repoRoot,
+    cwd: stateDir || repoRoot,
   };
 }
 
@@ -61,6 +75,8 @@ function packagedBackendTarget({
       HOST,
       "--port",
       String(port),
+      "--n-jobs-per-worker",
+      JOBS_PER_WORKER,
       "--config",
       path.join(root, "langgraph.json"),
     ],
@@ -98,12 +114,44 @@ function modelCredentialStatus(modelId, env, options = {}) {
   const variables = PROVIDER_KEYS[provider];
   if (!variables) return { available: true, variable: null };
   const variable = variables.find((key) => env[key]);
+  const gatewayAvailable =
+    ["1", "true", "yes", "on"].includes(
+      String(env.LANGSMITH_GATEWAY_ENABLED || "")
+        .trim()
+        .toLowerCase(),
+    ) && GATEWAY_KEYS.some((key) => env[key]);
   const oauthAvailable = provider === "openai" && options.openAiOAuth === true;
   return {
-    available: Boolean(variable) || oauthAvailable,
-    variable: variable || (oauthAvailable ? null : variables[0]),
-    ...(provider === "openai" && !variable ? { canSignIn: true } : {}),
+    available: Boolean(variable) || gatewayAvailable || oauthAvailable,
+    variable:
+      variable || (gatewayAvailable || oauthAvailable ? null : variables[0]),
+    ...(provider === "openai" && !variable && !gatewayAvailable
+      ? { canSignIn: true }
+      : {}),
   };
+}
+
+function resolveGatewayEnvironment(
+  env,
+  { platform = process.platform, execFileSync = execFileSyncProcess } = {},
+) {
+  if (env.LANGSMITH_GATEWAY_API_KEY || platform !== "darwin") return {};
+  try {
+    const key = execFileSync("/bin/launchctl", ["getenv", "LC_GATEWAY_KEY"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1_000,
+    }).trim();
+    if (!key) return {};
+    return {
+      LANGSMITH_GATEWAY_API_KEY: key,
+      ...(env.LANGSMITH_GATEWAY_ENABLED === undefined
+        ? { LANGSMITH_GATEWAY_ENABLED: "true" }
+        : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 class BackendSupervisor {
@@ -119,6 +167,17 @@ class BackendSupervisor {
     this.closing = false;
     this.ready = null;
     this.failure = null;
+    this.gatewayEnv = null;
+  }
+
+  gatewayEnvironment() {
+    if (this.gatewayEnv) return this.gatewayEnv;
+    const env = { ...process.env, ...this.options.env };
+    this.gatewayEnv = resolveGatewayEnvironment(
+      env,
+      this.options.gatewayEnvironment,
+    );
+    return this.gatewayEnv;
   }
 
   start() {
@@ -139,6 +198,9 @@ class BackendSupervisor {
     const target = localBackendTarget({ ...this.options, port: this.port });
     if (!this.options.projectsFile)
       throw new Error("Local project allowlist is not configured");
+    if (!this.options.worktreesDir)
+      throw new Error("Local worktree directory is not configured");
+    fs.mkdirSync(this.options.worktreesDir, { recursive: true });
     if (this.options.stateDir)
       fs.mkdirSync(this.options.stateDir, { recursive: true });
     if (this.options.isPackaged && !fs.existsSync(target.command)) {
@@ -149,9 +211,11 @@ class BackendSupervisor {
       env: {
         ...process.env,
         ...this.options.env,
+        ...this.gatewayEnvironment(),
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
+        OPEN_SWE_LOCAL_WORKTREES_DIR: this.options.worktreesDir,
         ...(this.options.stateDir
           ? {
               OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(
@@ -219,7 +283,11 @@ class BackendSupervisor {
   credentialStatus(modelId) {
     return modelCredentialStatus(
       modelId,
-      { ...process.env, ...this.options.env },
+      {
+        ...process.env,
+        ...this.options.env,
+        ...this.gatewayEnvironment(),
+      },
       { openAiOAuth: this.options.openAiOAuthAvailable?.() === true },
     );
   }

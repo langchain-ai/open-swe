@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 
 from agent.dashboard import analyzer_cron
+from agent.dashboard.review_styles import REVIEW_STYLES, ReviewStyle
 
 
 class _FakeCrons:
@@ -30,23 +31,25 @@ def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     return client
 
 
-def _patch_record(monkeypatch, record: dict[str, Any] | None) -> dict[str, Any]:  # noqa: ANN001
+def _patch_record(monkeypatch, record: ReviewStyle | None) -> dict[str, Any]:  # noqa: ANN001
     updates: dict[str, Any] = {}
 
-    async def fake_get(full_name: str) -> dict[str, Any] | None:
+    async def fake_get(full_name: str) -> ReviewStyle | None:
         return record
 
-    async def fake_update(full_name: str, patch: dict[str, Any]) -> dict[str, Any]:
-        updates.update(patch)
-        return {**(record or {}), **patch}
+    async def fake_set_cron(full_name: str, cron_id: str | None) -> ReviewStyle:
+        updates["continual_cron_id"] = cron_id
+        return (record or ReviewStyle.seed(full_name)).model_copy(
+            update={"continual_cron_id": cron_id}
+        )
 
-    monkeypatch.setattr(analyzer_cron, "get_review_style", fake_get)
-    monkeypatch.setattr(analyzer_cron, "update_review_style", fake_update)
+    monkeypatch.setattr(REVIEW_STYLES, "get", fake_get)
+    monkeypatch.setattr(REVIEW_STYLES, "set_continual_cron", fake_set_cron)
     return updates
 
 
 async def test_ensure_continual_cron_creates_and_stores(monkeypatch, fake_client) -> None:  # noqa: ANN001
-    updates = _patch_record(monkeypatch, {"full_name": "o/r", "continual_cron_id": None})
+    updates = _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id=None))
 
     cron_id = await analyzer_cron.ensure_continual_cron("o/r")
 
@@ -63,7 +66,7 @@ async def test_ensure_continual_cron_creates_and_stores(monkeypatch, fake_client
 
 
 async def test_ensure_continual_cron_idempotent(monkeypatch, fake_client) -> None:  # noqa: ANN001
-    _patch_record(monkeypatch, {"full_name": "o/r", "continual_cron_id": "existing"})
+    _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id="existing"))
 
     cron_id = await analyzer_cron.ensure_continual_cron("o/r")
 
@@ -72,7 +75,7 @@ async def test_ensure_continual_cron_idempotent(monkeypatch, fake_client) -> Non
 
 
 async def test_remove_continual_cron(monkeypatch, fake_client) -> None:  # noqa: ANN001
-    updates = _patch_record(monkeypatch, {"full_name": "o/r", "continual_cron_id": "cron_123"})
+    updates = _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id="cron_123"))
 
     await analyzer_cron.remove_continual_cron("o/r")
 
@@ -81,7 +84,7 @@ async def test_remove_continual_cron(monkeypatch, fake_client) -> None:  # noqa:
 
 
 async def test_remove_continual_cron_noop_when_absent(monkeypatch, fake_client) -> None:  # noqa: ANN001
-    _patch_record(monkeypatch, {"full_name": "o/r", "continual_cron_id": None})
+    _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id=None))
 
     await analyzer_cron.remove_continual_cron("o/r")
 

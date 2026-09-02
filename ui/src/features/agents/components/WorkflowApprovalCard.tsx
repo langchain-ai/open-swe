@@ -40,7 +40,6 @@ export function WorkflowApprovalCard({
 
   if (approvals.length === 0) return null
 
-  const isOwner = query.data?.isOwner === true
   const decide = async (
     approval: WorkflowPushApproval,
     kind: "approve" | "reject"
@@ -94,14 +93,14 @@ export function WorkflowApprovalCard({
                     </Button>
                   )}
                   <Button
-                    disabled={!isOwner || busy}
+                    disabled={busy}
                     onClick={() => void decide(approval, "approve")}
                   >
                     Approve
                   </Button>
                   <Button
                     variant="destructive"
-                    disabled={!isOwner || busy}
+                    disabled={busy}
                     onClick={() => void decide(approval, "reject")}
                   >
                     Reject
@@ -109,12 +108,6 @@ export function WorkflowApprovalCard({
                 </div>
               </div>
 
-              {!isOwner && (
-                <p className="mt-3 text-xs text-muted-foreground/70">
-                  Only the thread owner can approve or reject this workflow
-                  push.
-                </p>
-              )}
               {error && (
                 <p className="mt-3 text-xs text-destructive">{error}</p>
               )}

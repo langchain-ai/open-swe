@@ -13,17 +13,10 @@ async def test_recreate_sandbox_returns_old_and_new_ids() -> None:
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
         }
     }
-    repo = {"owner": "langchain-ai", "name": "open-swe"}
-
     with (
         patch("agent.tools.recreate_sandbox.get_config", return_value=config),
         patch(
-            "agent.server._resolve_prompt_default_repo",
-            new_callable=AsyncMock,
-            return_value=repo,
-        ) as resolve_repo,
-        patch(
-            "agent.server.recreate_sandbox_for_thread",
+            "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=("sandbox-old", "sandbox-new"),
         ) as recreate,
@@ -35,8 +28,7 @@ async def test_recreate_sandbox_returns_old_and_new_ids() -> None:
         "old_sandbox_id": "sandbox-old",
         "new_sandbox_id": "sandbox-new",
     }
-    resolve_repo.assert_awaited_once_with(config["configurable"])
-    recreate.assert_awaited_once_with("thread-1", repo=repo, environment_slug=None)
+    recreate.assert_awaited_once_with("thread-1", environment_slug=None)
 
 
 @pytest.mark.asyncio
@@ -46,12 +38,7 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
     with (
         patch("agent.tools.recreate_sandbox.get_config", return_value=config),
         patch(
-            "agent.server._resolve_prompt_default_repo",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch(
-            "agent.server.recreate_sandbox_for_thread",
+            "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
             new_callable=AsyncMock,
             side_effect=RuntimeError("creation failed"),
         ),

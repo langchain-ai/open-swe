@@ -3,7 +3,7 @@
   "python_version": "3.12",
   "api_version": "0.12.6",
   "graphs": {
-    "agent": "./tests/e2e/agent_entrypoint.py:traced_agent"
+    "agent": "agent_entrypoint:traced_agent"
   },
   "dependencies": ["."],
   "auth": {

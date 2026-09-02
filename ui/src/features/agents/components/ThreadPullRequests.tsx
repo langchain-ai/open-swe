@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
   draft: "bg-muted text-muted-foreground",
   open: "bg-success/15 text-success-foreground",
-  merged: "bg-info/15 text-info-foreground",
+  merged: "bg-merged/15 text-merged-foreground",
   closed: "bg-destructive/10 text-destructive",
 }
 
@@ -94,30 +94,6 @@ function pullRequestTone(
 
 function healthKey(repoFullName: string, number: number): string {
   return `${repoFullName}#${number}`
-}
-
-function fixPrompt(
-  pullRequest: AgentPullRequest,
-  health: AgentPullRequestHealth
-): string {
-  const issues = []
-  if (health.failingChecks.length > 0) {
-    issues.push(
-      `${health.failingChecks.length} failing check${health.failingChecks.length === 1 ? "" : "s"}`
-    )
-  }
-  const commentCount = health.unresolvedReviewThreadCount ?? 0
-  if (commentCount > 0) {
-    issues.push(
-      `${commentCount} unresolved review comment${commentCount === 1 ? "" : "s"}`
-    )
-  }
-  if (health.mergeConflictState === "conflicting") {
-    issues.push("a merge conflict")
-  }
-  return `Fix the actionable issues on ${pullRequest.url}: ${issues.join(
-    ", "
-  )}. Inspect the current GitHub state, address each issue, push the fixes, and update the existing pull request.`
 }
 
 function HealthSummary({
@@ -341,7 +317,7 @@ function PullRequestLink({
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
   healthUnavailable: boolean
-  onFix?: (prompt: string) => Promise<void> | void
+  onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
   fixDisabled: boolean
 }) {
   const [fixing, setFixing] = useState(false)
@@ -354,7 +330,7 @@ function PullRequestLink({
     setFixFailed(false)
     setFixing(true)
     try {
-      await onFix(fixPrompt(pullRequest, health))
+      await onFix(pullRequest)
     } catch {
       setFixFailed(true)
     } finally {
@@ -446,7 +422,7 @@ export function ThreadPullRequests({
   pullRequests: Array<AgentPullRequest>
   health?: Array<AgentPullRequestHealth>
   healthUnavailable?: boolean
-  onFix?: (prompt: string) => Promise<void> | void
+  onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
   fixDisabled?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)

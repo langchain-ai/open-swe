@@ -7,15 +7,20 @@ from typing import Any
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.auth.thread_token import get_github_token
+from agent.source_context import SourceContext
+
 from ..dashboard.agent_overrides import resolve_github_login
 from ..dashboard.user_mappings import get_mapping, login_for_email, login_for_slack_id
 from .github_comments import fetch_github_thread_participants
-from .github_token import get_github_token
 from .json_types import as_json_object, thread_metadata
 from .linear import fetch_linear_issue_participant_emails
 from .slack import fetch_slack_thread_messages
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
+# Slack and Linear senders who have no GitHub mapping are still participants;
+# their email is the only identifier the thread ever learns.
+PARTICIPANT_EMAILS_KEY = "participant_emails"
 _SLACK_SYSTEM_MESSAGE_SUBTYPES = {
     "bot_message",
     "channel_archive",
@@ -35,16 +40,35 @@ _SLACK_SYSTEM_MESSAGE_SUBTYPES = {
 }
 
 
-def merge_participant_logins(existing: Any, *logins: Any) -> list[str]:
-    merged: dict[str, str] = {}
-    if isinstance(existing, list):
-        for value in existing:
-            if isinstance(value, str) and value.strip():
-                merged[value.strip().lower()] = value.strip()
-    for value in logins:
+def participant_search_filters(login: str, email: str | None = None) -> list[dict[str, Any]]:
+    """Metadata filters matching threads this person has participated in."""
+    filters = [{PARTICIPANT_LOGINS_KEY: {login.strip().lower(): True}}]
+    if isinstance(email, str) and email.strip():
+        filters.append({PARTICIPANT_EMAILS_KEY: {email.strip().lower(): True}})
+    return filters
+
+
+def merge_participants(existing: Any, *values: Any) -> dict[str, bool]:
+    """Participants as a key-per-person map so metadata search can match one entry.
+
+    JSONB containment only reaches inside objects, so a list would force an
+    exact-match filter on the whole set.
+    """
+    merged = dict.fromkeys(participant_logins(existing), True)
+    for value in values:
         if isinstance(value, str) and value.strip():
-            merged[value.strip().lower()] = value.strip()
-    return [merged[key] for key in sorted(merged)]
+            merged[value.strip().lower()] = True
+    return dict(sorted(merged.items()))
+
+
+def participant_logins(stored: Any) -> list[str]:
+    if isinstance(stored, Mapping):
+        return sorted(key.strip().lower() for key in stored if isinstance(key, str) and key.strip())
+    if isinstance(stored, list):
+        return sorted(
+            {value.strip().lower() for value in stored if isinstance(value, str) and value.strip()}
+        )
+    return []
 
 
 async def _active_mapping_login(login: str | None) -> str | None:
@@ -82,14 +106,14 @@ async def _mapped_github_logins(logins: set[str]) -> tuple[set[str], int]:
     return {login.strip() for login in logins if login.strip()}, 0
 
 
-def _context_value(configurable: dict[str, Any], metadata: dict[str, Any], key: str) -> Any:
-    value = configurable.get(key)
-    if value is not None:
-        return value
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        return source_context.get(key)
-    return None
+def _context(configurable: dict[str, Any], metadata: dict[str, Any]) -> SourceContext:
+    """Thread source, with ``configurable`` taking precedence over metadata."""
+    merged = SourceContext.from_metadata(metadata).dump()
+    for key in ("slack_thread", "linear_issue", "github_issue", "pr_number"):
+        value = configurable.get(key)
+        if value is not None:
+            merged[key] = value
+    return SourceContext.parse(merged)
 
 
 def _repo_config(configurable: dict[str, Any], metadata: dict[str, Any]) -> dict[str, str] | None:
@@ -123,51 +147,41 @@ async def resolve_thread_participant_logins(
     metadata = thread_metadata(thread)
 
     candidate_logins = set(
-        merge_participant_logins(
+        merge_participants(
             metadata.get(PARTICIPANT_LOGINS_KEY),
-            metadata.get("github_login"),
             configurable.get("github_login"),
         )
     )
     logins, unresolved_count = await _mapped_github_logins(candidate_logins)
 
-    slack_thread = _context_value(configurable, metadata, "slack_thread")
-    linear_issue = _context_value(configurable, metadata, "linear_issue")
-    github_issue = _context_value(configurable, metadata, "github_issue")
+    context = _context(configurable, metadata)
     source = configurable.get("source") or metadata.get("source")
 
-    if isinstance(slack_thread, dict):
-        channel_id = slack_thread.get("channel_id")
-        thread_ts = slack_thread.get("thread_ts")
-        if not isinstance(channel_id, str) or not channel_id or not isinstance(thread_ts, str):
+    if context.slack_thread is not None:
+        slack_thread = context.slack_thread
+        if not slack_thread.channel_id:
             return None, 0, "Slack thread context is incomplete"
-        messages = await fetch_slack_thread_messages(channel_id, thread_ts)
+        messages = await fetch_slack_thread_messages(
+            slack_thread.channel_id, slack_thread.thread_ts
+        )
         if not messages:
             return None, 0, "Could not verify Slack thread participants"
         mapped, source_unresolved = await _mapped_slack_logins(messages)
         logins.update(mapped)
         unresolved_count += source_unresolved
-    elif isinstance(linear_issue, dict):
-        issue_id = linear_issue.get("id")
-        if not isinstance(issue_id, str) or not issue_id:
+    elif context.linear_issue is not None:
+        if not context.linear_issue.id:
             return None, 0, "Linear issue context is incomplete"
-        emails = await fetch_linear_issue_participant_emails(issue_id)
+        emails = await fetch_linear_issue_participant_emails(context.linear_issue.id)
         if emails is None:
             return None, 0, "Could not verify Linear issue participants"
         mapped, source_unresolved = await _mapped_email_logins(emails)
         logins.update(mapped)
         unresolved_count += source_unresolved
-    elif isinstance(github_issue, dict) or (
-        source == "github" and _context_value(configurable, metadata, "pr_number") is not None
-    ):
+    elif context.github_issue is not None or (source == "github" and context.pr_number is not None):
         issue_number = (
-            github_issue.get("number")
-            if isinstance(github_issue, dict)
-            else configurable.get("pr_number")
-        )
-        if not isinstance(issue_number, int):
-            context_pr_number = _context_value(configurable, metadata, "pr_number")
-            issue_number = context_pr_number if isinstance(context_pr_number, int) else None
+            context.github_issue.number if context.github_issue else None
+        ) or context.pr_number
         repo = _repo_config(configurable, metadata)
         token = get_github_token(config)
         if not repo or not issue_number or not token:

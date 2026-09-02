@@ -6,9 +6,11 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.sandboxes.providers import create_sandbox
+from agent.source_context import SourceContext
+
 from .dispatch import dispatch_agent_run
 from .tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
-from .utils.sandbox import create_sandbox
 from .utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,6 @@ def _client():
 async def ensure_background_task_cron(thread_id: str) -> str:
     client = _client()
     crons = await client.crons.search(
-        assistant_id="scheduler",
         metadata={"kind": CRON_KIND, "thread_id": thread_id},
         limit=10,
     )
@@ -56,7 +57,6 @@ async def ensure_background_task_cron(thread_id: str) -> str:
 async def _delete_crons(thread_id: str) -> None:
     client = _client()
     crons = await client.crons.search(
-        assistant_id="scheduler",
         metadata={"kind": CRON_KIND, "thread_id": thread_id},
         limit=10,
     )
@@ -86,9 +86,7 @@ def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]
         value = metadata.get(key)
         if value is not None:
             configurable["user_email" if key == "triggering_user_email" else key] = value
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        configurable.update(source_context)
+    configurable.update(SourceContext.from_metadata(metadata).dump())
     return configurable
 
 

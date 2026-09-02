@@ -24,14 +24,15 @@ def detect_blocking_calls() -> Iterator[None]:
         blockbuster.deactivate()
 
 
-def test_desktop_backend_allows_registered_project_without_provider_secrets(
+def test_desktop_backend_allows_a_thread_worktree_without_provider_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    allowlist = tmp_path / "projects.json"
-    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
-    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    worktrees = tmp_path / "worktrees"
+    project = worktrees / "project-abc12345"
+    project.mkdir(parents=True)
+    marker = project / "marker.txt"
+    marker.write_text("marker")
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(worktrees))
     monkeypatch.setenv("PATH", "/bin")
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
 
@@ -39,18 +40,33 @@ def test_desktop_backend_allows_registered_project_without_provider_secrets(
     backend = create_desktop_backend({"local_project_path": str(project)})
     assert backend._env.get("PATH") == "/bin"
     assert "OPENAI_API_KEY" not in backend._env
+    assert backend.read(str(marker)).file_data == {"content": "marker", "encoding": "utf-8"}
 
 
-def test_desktop_backend_rejects_unregistered_project(
+def test_desktop_backend_allows_an_allowlisted_project_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
     allowlist = tmp_path / "projects.json"
-    allowlist.write_text("[]")
+    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
     monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
 
-    with pytest.raises(ValueError, match="not an allowed project"):
+    assert resolve_desktop_project({"local_project_path": str(project)}) == str(project)
+
+
+def test_desktop_backend_rejects_an_unregistered_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    allowlist = tmp_path / "projects.json"
+    allowlist.write_text(json.dumps([]))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
+
+    with pytest.raises(ValueError, match="not an allowed project directory"):
         resolve_desktop_project({"local_project_path": str(project)})
 
 

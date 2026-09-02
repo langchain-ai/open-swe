@@ -142,7 +142,7 @@ function CloudAgentsPage() {
     <AppShell
       user={session.data}
       title="Open SWE Agent"
-      description="Configure how the Open SWE Agent picks a model, repository, and PR defaults."
+      description="Personal defaults for Open SWE Agent runs you trigger. These settings only apply to your account."
     >
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">
@@ -313,9 +313,9 @@ function CloudAgentsPage() {
         />
         {session.data.is_admin && (
           <SettingsNavRow
-            to="/agents/snapshots"
-            label="Repository Snapshots"
-            description="Build a per-repo sandbox image from a custom Dockerfile. Falls back to the default image."
+            to="/agents/sandbox"
+            label="Sandbox"
+            description="The snapshot new sandboxes boot from when their environment has none."
           />
         )}
       </SettingsSection>

@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 from html import escape
@@ -77,6 +78,17 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
 
 fakes.seed_bare_remotes()
+
+if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
+    # Playwright closes the webServer stdin pipe when its runner exits.
+    def _exit_when_orphaned() -> None:
+        try:
+            sys.stdin.buffer.read()
+        except Exception:
+            return
+        os._exit(0)
+
+    threading.Thread(target=_exit_when_orphaned, daemon=True).start()
 
 
 # --- control + Slack compose (the test driver) -----------------------------
@@ -194,7 +206,7 @@ async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
 async def _slack_send_result(payload: dict[str, Any], resp: httpx.Response) -> JSONResponse:
     event = payload["event"]
     channel = str(event["channel"])
-    thread_ts = str(event["thread_ts"])
+    thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
     thread_id = await lookup_slack_thread_id(
         get_client(url=os.environ["LANGGRAPH_URL"]), channel, thread_ts
     )
@@ -279,31 +291,6 @@ async def slack_send(request: Request) -> JSONResponse:
     }
     LAST_SLACK_EVENT["payload"] = payload
     return await _slack_send_result(payload, await _deliver_slack_event(payload))
-
-
-@app.post("/mock/slack/reaction")
-async def slack_reaction(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel_id = str(CURRENT_THREAD.get("channel") or "")
-    thread_ts = str(body.get("thread_ts") or CURRENT_THREAD.get("thread_ts") or "")
-    message_ts = str(body.get("message_ts") or thread_ts)
-    user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
-    reaction = str(body.get("reaction") or "eyes")
-    payload = {
-        "type": "event_callback",
-        "event_id": f"Ev{EVENT_ID_SALT}{fakes.next_slack_ts()}",
-        "authorizations": [{"user_id": BOT_USER_ID}],
-        "event": {
-            "type": "reaction_added",
-            "user": user_id,
-            "reaction": reaction,
-            "item": {"type": "message", "channel": channel_id, "ts": message_ts},
-            "item_user": BOT_USER_ID,
-            "event_ts": fakes.next_slack_ts(),
-        },
-    }
-    response = await _deliver_slack_event(payload)
-    return JSONResponse(response.json(), status_code=response.status_code)
 
 
 @app.post("/mock/slack/action")
@@ -601,6 +588,32 @@ async def slack_messages(channel: str = "", thread_ts: str = "") -> JSONResponse
     )
 
 
+@app.get("/mock/slack/state")
+async def slack_state(channel: str = "") -> JSONResponse:
+    current_channel = CURRENT_THREAD["channel"] or DEMO_CHANNEL
+    selected_channel = (
+        current_channel if current_channel != DEMO_CHANNEL else channel or DEMO_CHANNEL
+    )
+    channels = [{"id": DEMO_CHANNEL, "name": "demo", "code_channel": False}]
+    channels.extend(
+        {
+            "id": message_channel,
+            "name": "direct-message"
+            if message_channel.startswith("D")
+            else message_channel.lower(),
+            "code_channel": False,
+        }
+        for message_channel in fakes.slack_channels()
+        if message_channel != DEMO_CHANNEL and message_channel not in fakes.CODE_CHANNELS
+    )
+    channels.extend(
+        {**value, "code_channel": True}
+        for value in fakes.CODE_CHANNELS.values()
+        if not value.get("archived")
+    )
+    return JSONResponse({"selected_channel": selected_channel, "channels": channels})
+
+
 # --- mock UIs --------------------------------------------------------------
 @app.get("/mock/slack", response_class=HTMLResponse)
 async def mock_slack_page() -> str:
@@ -757,23 +770,55 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
-    return JSONResponse(
-        {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                fakes.review_thread_graphql(thread)
-                                for thread in pr["review_threads"]
-                            ],
-                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+    review_threads = {
+        "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+    pull_request: dict[str, Any] = {"reviewThreads": review_threads}
+    query = body.get("query", "")
+    if "PullRequestFixReviews" in query:
+        pull_request.update(
+            {
+                "reviewDecision": pr["review_decision"],
+                "mergeStateStatus": "DIRTY" if not pr["mergeable"] else "CLEAN",
+                "latestOpinionatedReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": review.get("author")},
+                            "state": review.get("state"),
+                            "body": review.get("body", ""),
+                            "url": review.get("url"),
+                        }
+                        for review in pr["reviews"]
+                    ]
+                },
+            }
+        )
+    if "PullRequestFixChecks" in query:
+        pull_request = {
+            "commits": {
+                "nodes": [
+                    {
+                        "commit": {
+                            "oid": pr["head_sha"],
+                            "statusCheckRollup": {
+                                "contexts": {
+                                    "nodes": [
+                                        *[fakes.check_graphql(check) for check in pr["check_runs"]],
+                                        *[
+                                            fakes.status_graphql(status)
+                                            for status in pr["statuses"]
+                                        ],
+                                    ],
+                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                }
+                            },
                         }
                     }
-                }
+                ]
             }
         }
-    )
+    return JSONResponse({"data": {"repository": {"pullRequest": pull_request}}})
 
 
 # --- fake Slack API (real slack code hits this) ----------------------------
@@ -844,17 +889,19 @@ async def slack_users_info(user: str = "") -> JSONResponse:
 
 @app.get("/fake-slack/conversations.info")
 async def slack_conversations_info(channel: str = "") -> JSONResponse:
-    return _ok(
-        {
-            "channel": {
-                "id": channel,
-                "name": "demo",
-                "name_normalized": "demo",
-                "topic": {"value": "Demo channel topic"},
-                "purpose": {"value": "Demo channel purpose"},
-            }
-        }
-    )
+    code_channel = fakes.CODE_CHANNELS.get(channel)
+    data: dict[str, Any] = {
+        "id": channel,
+        "name": code_channel["name"] if code_channel else "demo",
+        "name_normalized": code_channel["name"] if code_channel else "demo",
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+        "topic": {"value": "Demo channel topic"},
+        "purpose": {"value": "Demo channel purpose"},
+    }
+    if code_channel:
+        data["properties"] = {"record_channel": {"record_type": "agent_channel"}}
+    return _ok({"channel": data})
 
 
 @app.get("/fake-slack/conversations.replies")
@@ -877,8 +924,85 @@ async def slack_conversations_replies(channel: str = "", ts: str = "") -> JSONRe
 
 
 @app.get("/fake-slack/conversations.history")
-async def slack_conversations_history(channel: str = "") -> JSONResponse:  # noqa: ARG001
-    return _ok({"messages": []})
+async def slack_conversations_history(channel: str = "") -> JSONResponse:
+    return _ok(
+        {
+            "messages": [
+                {
+                    "type": "message",
+                    "user": message["user"],
+                    "text": message["text"],
+                    "ts": message["ts"],
+                }
+                for message in reversed(fakes.slack_messages(channel))
+            ]
+        }
+    )
+
+
+@app.post("/fake-slack/agents.conversations.create")
+async def slack_create_code_channel(request: Request) -> JSONResponse:
+    channel = fakes.create_code_channel(await request.json())
+    return _ok({"channel": {"id": channel["id"]}})
+
+
+@app.post("/fake-slack/agents.sessions.setStatus")
+async def slack_set_code_channel_status(request: Request) -> JSONResponse:
+    body = await request.json()
+    channel = fakes.update_code_channel(
+        str(body.get("channel_id") or ""), status=body.get("status")
+    )
+    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
+
+
+@app.post("/fake-slack/agents.sessions.rename")
+async def slack_rename_code_channel(request: Request) -> JSONResponse:
+    body = await request.json()
+    channel = fakes.update_code_channel(str(body.get("channel_id") or ""), name=body.get("title"))
+    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
+
+
+@app.post("/fake-slack/agents.conversations.setProperties")
+async def slack_set_code_channel_properties(request: Request) -> JSONResponse:
+    body = await request.json()
+    channel_id = str(body.get("channel_id") or "")
+    code_channel = body.get("code_channel") if isinstance(body.get("code_channel"), dict) else {}
+    values: dict[str, Any] = {}
+    if "context_bar_items" in code_channel:
+        values["context_bar_items"] = code_channel["context_bar_items"]
+    if "summary_message" in code_channel:
+        values["summary_message"] = code_channel["summary_message"]
+    if "agent_resource" in body:
+        values["agent_resource"] = body["agent_resource"]
+    channel = fakes.update_code_channel(channel_id, **values)
+    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
+
+
+@app.post("/fake-slack/agents.conversations.setCommands")
+async def slack_set_code_channel_commands(request: Request) -> JSONResponse:
+    body = await request.json()
+    channel = fakes.update_code_channel(
+        str(body.get("channel_id") or ""), commands=body.get("commands", [])
+    )
+    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
+
+
+@app.post("/fake-slack/agents.conversations.setView")
+async def slack_set_code_channel_view(request: Request) -> JSONResponse:
+    body = await request.json()
+    channel = fakes.CODE_CHANNELS.get(str(body.get("channel_id") or ""))
+    if channel is None:
+        return JSONResponse({"ok": False, "error": "channel_not_found"})
+    view = {**body, "view_id": f"V{len(channel['views']) + 1}"}
+    channel["views"].append(view)
+    return _ok(view)
+
+
+@app.post("/fake-slack/agents.conversations.archive")
+async def slack_archive_code_channel(request: Request) -> JSONResponse:
+    body = await request.json()
+    channel = fakes.update_code_channel(str(body.get("channel_id") or ""), archived=True)
+    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
 
 
 @app.get("/fake-slack/chat.getPermalink")
