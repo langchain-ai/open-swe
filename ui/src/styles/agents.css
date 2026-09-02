@@ -8,10 +8,9 @@
  * already styles itself with `bg-card` / `text-muted-foreground` / …, so one
  * block of values recolours the whole surface.
  *
- * The dark neutrals follow Codex's `.electron-dark` layer. Codex itself paints
- * no canvas at all on macOS — it runs a transparent window over the native
- * `menu` vibrancy material — so `--background` is a solid stand-in for it, with
- * the sidebar, cards and menus lifted above it.
+ * The dark neutrals follow Codex's `.electron-dark` layer: the chat canvas is
+ * the black `background-surface-under`, the sidebar the `background-surface`
+ * above it, with cards, menus and the composer lifted further.
  *
  * Colour stops are written as literals rather than `var(--color-zinc-200)`
  * because Tailwind tree-shakes unreferenced theme colours out of the build.
@@ -76,7 +75,7 @@ html[data-agents-theme] {
 html.dark[data-agents-theme] {
   color-scheme: dark;
 
-  --background: #1a1a1a; /* stand-in for Codex's `menu` vibrancy material */
+  --background: #000; /* background-surface-under */
   --app-chrome-background: var(--background);
   --foreground: #dfdfdf;
   --card: #212121; /* background-elevated-secondary-opaque */
@@ -106,7 +105,7 @@ html.dark[data-agents-theme] {
   --input: color-mix(in srgb, #fff 16%, transparent);
   --ring: oklch(0.588 0.217 264);
 
-  --sidebar: #212121; /* background-elevated-secondary-opaque */
+  --sidebar: #181818; /* background-surface, one step above the canvas */
   --sidebar-control-surface: color-mix(in srgb, #fff 5%, transparent);
   --sidebar-row-hover: color-mix(in srgb, #fff 5%, transparent);
   --sidebar-row-active: color-mix(in srgb, #fff 8%, transparent);
