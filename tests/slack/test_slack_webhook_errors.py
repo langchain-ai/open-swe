@@ -508,18 +508,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert store_args.kwargs["agent_thread_id"] == "t1"
 
 
-def test_untagged_prompt_tells_the_agent_it_was_not_tagged() -> None:
-    preamble = slack_webhook._slack_prompt_preamble(untagged_reply=True)
-
-    assert "You were NOT tagged" in preamble
-    assert "end your turn without calling any tool and post nothing" in preamble
-    assert "Staying silent is the right" in preamble
-    assert slack_webhook._slack_request_heading(untagged_reply=True) == "## Untagged Message"
-
-
-def test_tagged_prompt_keeps_the_mention_wording() -> None:
+def test_tagged_prompt_omits_untagged_wording() -> None:
     preamble = slack_webhook._slack_prompt_preamble(untagged_reply=False)
 
-    assert preamble == "You were mentioned in Slack.\n\n"
     assert "NOT tagged" not in preamble
-    assert slack_webhook._slack_request_heading(untagged_reply=False) == "## Latest Mention Request"

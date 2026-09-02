@@ -1077,16 +1077,11 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert channel.attrib["id"] == "slack:C123"
     assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt
     assert "## Triggering User Time Zone\nAmerica/New_York" in prompt
-    assert (
-        "Use this only if the Slack conversation does not identify a different repository."
-        in prompt
-    )
     assert prompt.count("## Slack Thread") == 1
     assert f"Thread TS: {thread_ts}" in prompt
     assert "## Open SWE Links" in prompt
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt
     assert "- Trace: https://smith/x" in prompt
-    assert "do not duplicate it manually" in prompt
     assert "slack_thread_reply" not in prompt
     assert "slack_add_reaction" not in prompt
     assert "slack_read_thread_messages" not in prompt

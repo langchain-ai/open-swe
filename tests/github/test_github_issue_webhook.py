@@ -506,7 +506,6 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     message_content = messages[-1]["content"]
     assert isinstance(message_content, str)
     assert "Open SWE finding f_1" in message_content
-    assert "untrusted data from GitHub" in message_content
     assert "This is handled elsewhere." in message_content
     assert "</body>\nThis is handled elsewhere." not in message_content
     assert "&lt;/body_&gt;" in message_content

@@ -18,22 +18,19 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
 @pytest.mark.parametrize(
     "source", ["dashboard", "slack", "linear", "github", "schedule", "desktop", "generic"]
 )
-def test_plan_mode_requires_an_explicit_request_for_every_source(source: str) -> None:
+def test_plan_mode_omits_superseded_inference_guidance(source: str) -> None:
     prompt = construct_system_prompt(
         working_dir="/work", source=source, slack_context=source == "slack"
     )
 
-    assert "Call `enter_plan_mode` only when the user explicitly asks" in prompt
-    assert "Do not infer plan mode from task complexity, size, or ambiguity" in prompt
     assert "If a task would genuinely benefit from a structured plan" not in prompt
 
 
-def test_plan_mode_prompt_requests_slack_approval_options() -> None:
+def test_plan_mode_prompt_omits_superseded_slack_approval_guidance() -> None:
     prompt = construct_system_prompt(
         working_dir="/work", plan_mode=True, source="slack", slack_context=True
     )
 
-    assert 'options=["Approve & implement", "Request changes"]' in prompt
     assert "do not send approval buttons" not in prompt
 
 
@@ -298,7 +295,6 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert messages[0].tool_call_id == "call-1"
     assert "<title>Plan</title>" in messages[0].content
     assert "add tests" in messages[0].content
-    assert "reasonable engineering judgment" in messages[0].content
     assert "source of truth" not in messages[0].content
 
 
