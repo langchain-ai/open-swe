@@ -12,7 +12,7 @@ from langgraph.types import Command
 from langgraph_sdk import get_client
 from typing_extensions import TypedDict
 
-from ..dashboard.plan_store import (
+from agent.dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_SHARED,
     format_plan_comments,

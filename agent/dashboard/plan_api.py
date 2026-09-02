@@ -9,12 +9,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel, Field, model_validator
 
-from agent.platforms.slack.client import post_slack_thread_reply
-from agent.source_context import SourceContext
-
-from ..dispatch import dispatch_agent_run
-from .oauth import require_same_origin_for_mutations, require_session
-from .plan_store import (
+from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
+from agent.dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
     PLAN_STATUS_READY,
@@ -31,11 +27,14 @@ from .plan_store import (
     set_plan_status,
     write_plan_to_sandbox,
 )
-from .thread_api import (
+from agent.dashboard.thread_api import (
     _repo_config_from_metadata,
     _thread_is_readable,
     _thread_source,
 )
+from agent.dispatch import dispatch_agent_run
+from agent.platforms.slack.client import post_slack_thread_reply
+from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 _plan_approval_locks: dict[str, asyncio.Lock] = {}

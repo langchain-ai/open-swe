@@ -33,15 +33,14 @@ from agent.platforms.github.http import (
     github_client,
     github_request,
 )
-
-from ..utils.dashboard_links import dashboard_thread_url
-from .findings import (
+from agent.review.findings import (
     DiffSide,
     Finding,
     get_thread_metadata,
     normalize_finding_title,
     set_reviewer_thread_metadata,
 )
+from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 

@@ -27,9 +27,8 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
+from agent.dashboard.review_styles import normalize_repo_full_name
 from agent.store import TypedStore, now_iso
-
-from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
 

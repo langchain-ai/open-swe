@@ -33,19 +33,18 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from agent.auth.github_app import get_github_app_installation_token
-
-from .dashboard.options import (
+from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from .dashboard.team_settings import (
+from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model,
     get_team_fable_enabled,
 )
-from .middleware import (
+from agent.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
@@ -55,23 +54,23 @@ from .middleware import (
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
-from .middleware.prepare_run import PrepareRunState
-from .runtime import (
+from agent.middleware.prepare_run import PrepareRunState
+from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     graph_loaded_for_execution,
 )
-from .tools import (
+from agent.tools import (
     fetch_url,
     list_review_findings,
     read_repo_file,
     search_repo_code,
     web_search,
 )
-from .utils import ttl_cache
-from .utils.deferred_model import make_deferred_error_model
-from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+from agent.utils import ttl_cache
+from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from agent.utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
 

@@ -12,9 +12,8 @@ from agent.platforms.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
-
-from ..utils.run_usage import RunUsageSummary, summarize_run_usage
-from ..utils.thread_ops import langgraph_client as get_langgraph_client
+from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
+from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 
 async def slack_thread_reply(

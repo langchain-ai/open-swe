@@ -16,8 +16,7 @@ from agent.platforms.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply,
 )
-
-from ..utils.user_messages import warning
+from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 

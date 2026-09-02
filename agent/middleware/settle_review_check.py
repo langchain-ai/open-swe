@@ -15,9 +15,8 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from agent.auth.thread_token import get_github_token
-
-from ..review.findings import get_thread_metadata
-from ..review.publish import settle_review_check_run
+from agent.review.findings import get_thread_metadata
+from agent.review.publish import settle_review_check_run
 
 logger = logging.getLogger(__name__)
 

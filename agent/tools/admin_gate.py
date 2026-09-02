@@ -8,7 +8,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.admin import is_admin
+from agent.dashboard.admin import is_admin
 
 
 def configurable() -> dict[str, Any]:

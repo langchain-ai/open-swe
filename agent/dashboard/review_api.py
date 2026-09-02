@@ -18,20 +18,19 @@ import httpx
 from fastapi import HTTPException, Response
 
 from agent.auth.github_app import get_github_app_installation_token
+from agent.dashboard.pr_diff import build_pr_diff_files
 from agent.platforms.github.checks import github_headers
-from agent.thread_ids import reviewer_thread_id
-
-from ..review.findings import (
+from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
     comment_ids_for_finding,
     is_thread_resolved,
 )
-from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
-from ..utils.thread_ops import langgraph_client
-from ..webhooks.common import fetch_github_pr_metadata
-from ..webhooks.github import trigger_pr_review_from_ref
-from .pr_diff import build_pr_diff_files
+from agent.thread_ids import reviewer_thread_id
+from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
+from agent.utils.thread_ops import langgraph_client
+from agent.webhooks.common import fetch_github_pr_metadata
+from agent.webhooks.github import trigger_pr_review_from_ref
 
 logger = logging.getLogger(__name__)
 
@@ -750,8 +749,7 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
 
     from agent.auth.github_app import get_github_app_installation_token_with_expiry
     from agent.platforms.slack.client import GitHubPrRef
-
-    from ..review.trace_context import resolve_pr_trace
+    from agent.review.trace_context import resolve_pr_trace
 
     pr_ref = GitHubPrRef(
         owner=owner,

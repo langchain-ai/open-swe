@@ -8,9 +8,9 @@ from typing import Any
 from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
 
-from ..utils.thread_ops import langgraph_client as get_langgraph_client
-from . import common
-from . import slack as service
+from agent.utils.thread_ops import langgraph_client as get_langgraph_client
+from agent.webhooks import common
+from agent.webhooks import slack as service
 
 router = APIRouter()
 

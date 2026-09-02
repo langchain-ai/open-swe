@@ -37,10 +37,9 @@ from agent.platforms.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
-
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.thread_ops import langgraph_client
-from .create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.tools.create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.thread_ops import langgraph_client
 
 
 async def manage_code_channel(

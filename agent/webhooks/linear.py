@@ -19,8 +19,7 @@ from agent.input_messages import (
 )
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
-
-from . import common
+from agent.webhooks import common
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915

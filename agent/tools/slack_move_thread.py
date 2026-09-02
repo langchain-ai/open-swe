@@ -15,9 +15,8 @@ from agent.platforms.slack.client import (
     store_slack_run_mapping,
 )
 from agent.source_context import SourceContext
-
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.thread_ops import langgraph_client
+from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.thread_ops import langgraph_client
 
 _MESSAGE_MAX_CHARS = 2800
 _CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")

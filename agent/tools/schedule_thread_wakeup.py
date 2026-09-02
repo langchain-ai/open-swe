@@ -12,11 +12,10 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
+from agent.input_messages import build_run_input
 from agent.platforms.slack.client import get_active_slack_thread
-
-from ..dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
-from ..input_messages import build_run_input
-from ..utils.thread_ops import langgraph_url
+from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 

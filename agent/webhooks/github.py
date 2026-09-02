@@ -6,18 +6,8 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from typing import Any
 
-from agent.platforms.github.comments import GitHubAuthError
-from agent.platforms.slack.client import GitHubPrRef
-from agent.source_context import SourceContext
-from agent.thread_ids import (
-    github_issue_thread_id,
-    pr_comment_thread_id,
-    reviewer_thread_id,
-    thread_id_from_branch,
-)
-
-from ..baby_sit import handle_ci_webhook
-from ..input_messages import (
+from agent.baby_sit import handle_ci_webhook
+from agent.input_messages import (
     PersonIdentity,
     RunInput,
     SystemIdentity,
@@ -26,8 +16,17 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
-from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
-from . import common
+from agent.platforms.github.comments import GitHubAuthError
+from agent.platforms.slack.client import GitHubPrRef
+from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
+from agent.source_context import SourceContext
+from agent.thread_ids import (
+    github_issue_thread_id,
+    pr_comment_thread_id,
+    reviewer_thread_id,
+    thread_id_from_branch,
+)
+from agent.webhooks import common
 
 
 def build_github_issue_prompt(

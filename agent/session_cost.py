@@ -13,9 +13,8 @@ from agent.platforms.slack.client import (
     update_slack_message,
     with_slack_session_cost,
 )
-
-from .utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
-from .utils.thread_ops import langgraph_client
+from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
+from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 

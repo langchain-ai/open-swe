@@ -7,11 +7,10 @@ from langgraph.config import get_config
 
 from agent.auth.github_app import get_github_app_installation_id_for_repo
 from agent.auth.resolve import resolve_github_token
+from agent.baby_sit import record_retry, start_watch, stop_watch, watch_key
 from agent.platforms.github.ci import fetch_pr
 from agent.platforms.slack.client import parse_github_pr_url
-
-from ..baby_sit import record_retry, start_watch, stop_watch, watch_key
-from ..source_context import SourceContext
+from agent.source_context import SourceContext
 
 
 def _configurable() -> tuple[dict[str, Any], Mapping[str, Any]]:
@@ -80,7 +79,7 @@ async def manage_baby_sit(
 
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if action == "stop":
-        from ..baby_sit import WATCHES
+        from agent.baby_sit import WATCHES
 
         watch = await WATCHES.get(key)
         if watch and watch.thread_id != thread_id:

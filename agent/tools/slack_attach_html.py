@@ -11,9 +11,8 @@ from agent.platforms.slack.client import (
     slack_thread_mutation_lock,
     upload_slack_thread_file,
 )
-
-from ..utils.thread_ops import langgraph_client
-from .create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.tools.create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.utils.thread_ops import langgraph_client
 
 _MAX_SLACK_ATTACHMENT_BYTES = 10 * 1024 * 1024
 _MAX_COMMENT_CHARS = 3000

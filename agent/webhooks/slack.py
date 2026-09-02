@@ -33,9 +33,8 @@ from agent.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
 from agent.utils.thread_ops import queue_message_for_thread
-
-from ..utils.user_messages import warning
-from . import common
+from agent.utils.user_messages import warning
+from agent.webhooks import common
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60

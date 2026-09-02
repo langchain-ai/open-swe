@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter
 
-from . import common
-from . import linear as service
+from agent.webhooks import common
+from agent.webhooks import linear as service
 
 router = APIRouter()
 

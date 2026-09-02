@@ -5,10 +5,9 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.review.diff import changed_files, materialize_review_diff, review_diff_range
+from agent.runtime import get_cached_sandbox_backend
 from agent.sandboxes.paths import resolve_sandbox_work_dir
-
-from ..review.diff import changed_files, materialize_review_diff, review_diff_range
-from ..runtime import get_cached_sandbox_backend
 
 _MAX_CHANGED_FILES = 200
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")

@@ -9,6 +9,8 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.auth.github_app import get_github_app_installation_token
+from agent.dashboard.agent_usage import record_agent_pr_usage
+from agent.dashboard.plan_store import get_plan_content
 from agent.platforms.github.comments import derive_pr_state
 from agent.platforms.slack.client import (
     get_active_slack_thread,
@@ -22,10 +24,7 @@ from agent.platforms.slack.code_channels import (
     set_context_bar,
     set_view,
 )
-
-from ..dashboard.agent_usage import record_agent_pr_usage
-from ..dashboard.plan_store import get_plan_content
-from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +66,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     github_login = configurable.get("github_login")
 
     if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
-        from ..dashboard.profiles import get_valid_access_token
+        from agent.dashboard.profiles import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
         if user_token:
@@ -553,7 +552,7 @@ async def _record_pr_telemetry(
         github_login = configurable.get("github_login")
         user_email = configurable.get("user_email")
         if not isinstance(github_login, str) or not github_login.strip():
-            from ..dashboard.user_mappings import login_for_email
+            from agent.dashboard.user_mappings import login_for_email
 
             github_login = (
                 await login_for_email(user_email if isinstance(user_email, str) else None) or ""

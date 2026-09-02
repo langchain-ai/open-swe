@@ -9,12 +9,12 @@ token resolved inside ``get_analyzer`` (the cron carries no fresh user token).
 import hashlib
 import logging
 
-from .review_style_jobs import (
+from agent.dashboard.review_style_jobs import (
     _client,
     build_continual_run_configurable,
     build_continual_run_input,
 )
-from .review_styles import REVIEW_STYLES
+from agent.dashboard.review_styles import REVIEW_STYLES
 
 logger = logging.getLogger(__name__)
 

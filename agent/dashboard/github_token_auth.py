@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, Request
 
-from .admin import is_admin
+from agent.dashboard.admin import is_admin
 
 logger = logging.getLogger(__name__)
 

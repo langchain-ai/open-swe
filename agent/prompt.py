@@ -6,8 +6,7 @@ from importlib import resources
 from pathlib import Path
 
 from agent.platforms.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
-
-from .utils.authorship import (
+from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,

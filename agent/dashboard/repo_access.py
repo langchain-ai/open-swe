@@ -3,9 +3,9 @@
 import httpx
 from fastapi import HTTPException
 
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from .profiles import get_valid_access_token
-from .review_styles import normalize_repo_full_name
+from agent.dashboard.profiles import get_valid_access_token
+from agent.dashboard.review_styles import normalize_repo_full_name
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 
 def _raise_for_github_repo_status(status_code: int) -> None:

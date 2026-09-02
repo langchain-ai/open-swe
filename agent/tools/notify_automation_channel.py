@@ -12,8 +12,7 @@ from agent.platforms.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from agent.store import delete_value, get_value, now_iso, put_value
-
-from ..utils.dashboard_links import dashboard_thread_url
+from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 

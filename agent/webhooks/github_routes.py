@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter
 
-from . import common
-from . import github as service
+from agent.webhooks import common
+from agent.webhooks import github as service
 
 router = APIRouter()
 
