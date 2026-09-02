@@ -179,6 +179,10 @@ export function SidebarThreadRow({
   onDeleteLocal,
   onTogglePin,
   onToggleArchived,
+  selected = false,
+  selectionMode = false,
+  onToggleSelected,
+  onRowElement,
 }: {
   item: SidebarThreadItem
   isActive: boolean
@@ -192,6 +196,10 @@ export function SidebarThreadRow({
   onDeleteLocal: (threadId?: string) => void
   onTogglePin: () => void
   onToggleArchived: () => void
+  selected?: boolean
+  selectionMode?: boolean
+  onToggleSelected?: () => void
+  onRowElement?: (node: HTMLDivElement | null) => void
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -282,6 +290,26 @@ export function SidebarThreadRow({
 
   const rowContent = (
     <>
+      {selectionMode && (
+        <span
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={`${selected ? "Deselect" : "Select"} ${item.title}`}
+          className={cn(
+            "flex size-4 shrink-0 items-center justify-center rounded border text-[10px] font-bold",
+            selected
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-muted-foreground/40"
+          )}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onToggleSelected?.()
+          }}
+        >
+          {selected ? "✓" : null}
+        </span>
+      )}
       <span
         ref={marquee.viewport}
         className={cn(
@@ -377,6 +405,7 @@ export function SidebarThreadRow({
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
+    selected && "ring-1 ring-primary/70 ring-inset",
     isActive
       ? thread?.adminThread
         ? "bg-destructive/10 text-foreground"
@@ -409,6 +438,8 @@ export function SidebarThreadRow({
     <>
       <ContextMenu.Root onOpenChange={setContextMenuOpen}>
         <ContextMenu.Trigger
+          ref={onRowElement}
+          data-thread-row={item.key}
           className={cn(
             "group/row relative mb-0.5",
             isDeleting && "opacity-50"

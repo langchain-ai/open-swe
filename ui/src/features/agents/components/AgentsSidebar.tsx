@@ -95,6 +95,12 @@ import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
+import {
+  adjacentThreadRow,
+  orderThreadRows,
+  threadRangeKeys,
+} from "@/features/agents/lib/threadKeyboard"
+import type { RegisteredThreadRow } from "@/features/agents/lib/threadKeyboard"
 import { cn } from "@/lib/utils"
 
 interface AgentsSidebarProps {
@@ -185,6 +191,12 @@ export function AgentsSidebar({
     measure: measureScrollEdges,
   } = useScrollEdges()
   const { openPalette } = useAppCommandControls()
+  const threadRows = useRef(new Map<string, RegisteredThreadRow>())
+  const navigationCursor = useRef<string | undefined>(undefined)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [bulkError, setBulkError] = useState<string>()
+  const selectionAnchor = useRef<string | undefined>(undefined)
+  const selectionMode = selectedKeys.size > 0
   const openThread = useCallback(
     (threadId: string) => {
       void navigate({ to: "/agents/$threadId", params: { threadId } })
@@ -250,8 +262,14 @@ export function AgentsSidebar({
   )
   useRegisterAppCommands(projectCommands)
 
-  const pinnedThreads = pinnedQuery.data ?? []
-  const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
+  const pinnedThreads = useMemo(
+    () => pinnedQuery.data ?? [],
+    [pinnedQuery.data]
+  )
+  const cloudPinnedIds = useMemo(
+    () => new Set(pinnedThreads.map((thread) => thread.id)),
+    [pinnedThreads]
+  )
   const pageThreads = recentsQuery.items.filter(
     (thread) => !cloudPinnedIds.has(thread.id)
   )
@@ -275,7 +293,10 @@ export function AgentsSidebar({
   const projectByPath = new Map(
     localProjects.map((project) => [project.cwd, project])
   )
-  const localPinnedIds = new Set(prefs.pinnedLocalIds)
+  const localPinnedIds = useMemo(
+    () => new Set(prefs.pinnedLocalIds),
+    [prefs.pinnedLocalIds]
+  )
   const localItems = localSessions
     // Removing a project has to remove its threads too, otherwise they linger
     // and re-derive the project from the cwd basename.
@@ -424,6 +445,206 @@ export function AgentsSidebar({
       ? `cloud:${activeThreadId}`
       : undefined
 
+  const renderedRows = useCallback(
+    () => orderThreadRows(threadRows.current.values()),
+    []
+  )
+  const registerRow = useCallback(
+    (item: SidebarThreadItem) => (node: HTMLDivElement | null) => {
+      if (node) threadRows.current.set(item.key, { item, node })
+      else threadRows.current.delete(item.key)
+    },
+    []
+  )
+  useEffect(() => {
+    navigationCursor.current = activeKey
+  }, [activeKey])
+  const navigateToRow = useCallback(
+    (row: RegisteredThreadRow | undefined) => {
+      if (!row) return
+      navigationCursor.current = row.item.key
+      row.node.scrollIntoView({ block: "nearest" })
+      layout.closeOnMobile()
+      const route =
+        row.item.location === "cloud"
+          ? navigate({
+              to: "/agents/$threadId",
+              params: { threadId: row.item.id },
+            })
+          : navigate({
+              to: "/agents/local/$sessionId",
+              params: { sessionId: row.item.id },
+            })
+      void route.then(() => {
+        window.requestAnimationFrame(() =>
+          row.node.querySelector<HTMLAnchorElement>("a")?.focus({
+            preventScroll: true,
+          })
+        )
+      })
+    },
+    [layout, navigate]
+  )
+  const move = useCallback(
+    (direction: -1 | 1) => {
+      navigateToRow(
+        adjacentThreadRow(renderedRows(), navigationCursor.current, direction)
+      )
+    },
+    [navigateToRow, renderedRows]
+  )
+  const extendSelection = useCallback(
+    (direction: -1 | 1) => {
+      const rows = renderedRows()
+      const target = adjacentThreadRow(rows, activeKey, direction)
+      if (!target) return
+      const anchor = selectionAnchor.current ?? activeKey ?? target.item.key
+      selectionAnchor.current = anchor
+      setSelectedKeys(threadRangeKeys(rows, anchor, target.item.key))
+      navigateToRow(target)
+    },
+    [activeKey, navigateToRow, renderedRows]
+  )
+  const toggleSelected = useCallback((key: string) => {
+    selectionAnchor.current = key
+    setSelectedKeys((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+  const clearSelection = useCallback(() => {
+    selectionAnchor.current = undefined
+    setSelectedKeys(new Set())
+    setBulkError(undefined)
+  }, [])
+  const runBulkAction = useCallback(
+    async (action: "archive" | "pin") => {
+      const rows = renderedRows().filter((row) =>
+        selectedKeys.has(row.item.key)
+      )
+      setBulkError(undefined)
+      const results = await Promise.allSettled(
+        rows.map(async ({ item }) => {
+          if (action === "archive") {
+            if (item.location === "local") {
+              await window.openSweDesktop?.updateLocalThread({
+                threadId: item.id,
+                archived: true,
+              })
+              refreshLocalThreads(item.id)
+            } else {
+              await resolveThread.mutateAsync({
+                threadId: item.id,
+                resolved: true,
+              })
+            }
+          } else if (item.location === "local") {
+            if (!localPinnedIds.has(item.id)) toggleLocalPin(item.id)
+          } else if (!cloudPinnedIds.has(item.id)) {
+            await pinThread.mutateAsync({ threadId: item.id, pinned: true })
+          }
+        })
+      )
+      const failedKeys = new Set(
+        rows
+          .filter((_, index) => results[index]?.status === "rejected")
+          .map((row) => row.item.key)
+      )
+      if (failedKeys.size > 0) {
+        setSelectedKeys(failedKeys)
+        setBulkError(`${failedKeys.size} thread actions failed. Try again.`)
+      } else {
+        clearSelection()
+      }
+    },
+    [
+      clearSelection,
+      cloudPinnedIds,
+      localPinnedIds,
+      pinThread,
+      refreshLocalThreads,
+      renderedRows,
+      resolveThread,
+      selectedKeys,
+      toggleLocalPin,
+    ]
+  )
+  const selectionCommands = useMemo(
+    () => [
+      {
+        id: "previous-thread",
+        label: "Previous visible thread",
+        shortcuts: ["arrowup"],
+        allowRepeat: true,
+        group: "Thread navigation",
+        run: () => move(-1),
+      },
+      {
+        id: "next-thread",
+        label: "Next visible thread",
+        shortcuts: ["arrowdown"],
+        allowRepeat: true,
+        group: "Thread navigation",
+        run: () => move(1),
+      },
+      {
+        id: "select-visible-threads",
+        label: "Select visible threads",
+        shortcuts: ["mod+shift+a"],
+        group: "Thread navigation",
+        run: () => {
+          const rows = renderedRows()
+          selectionAnchor.current = activeKey ?? rows[0]?.item.key
+          setSelectedKeys(new Set(rows.map((row) => row.item.key)))
+        },
+      },
+      {
+        id: "clear-thread-selection",
+        label: "Clear thread selection",
+        shortcuts: ["escape"],
+        group: "Thread navigation",
+        available: selectionMode,
+        run: clearSelection,
+      },
+      {
+        id: "toggle-current-thread-selection",
+        label: "Toggle current thread selection",
+        shortcuts: ["space"],
+        group: "Thread navigation",
+        available: Boolean(activeKey) && selectionMode,
+        run: () => activeKey && toggleSelected(activeKey),
+      },
+      {
+        id: "extend-thread-selection-up",
+        label: "Extend thread selection up",
+        shortcuts: ["shift+arrowup"],
+        allowRepeat: true,
+        group: "Thread navigation",
+        run: () => extendSelection(-1),
+      },
+      {
+        id: "extend-thread-selection-down",
+        label: "Extend thread selection down",
+        shortcuts: ["shift+arrowdown"],
+        allowRepeat: true,
+        group: "Thread navigation",
+        run: () => extendSelection(1),
+      },
+    ],
+    [
+      activeKey,
+      clearSelection,
+      extendSelection,
+      move,
+      renderedRows,
+      selectionMode,
+      toggleSelected,
+    ]
+  )
+  useRegisterAppCommands(selectionCommands)
+
   const rowProps = (
     item: SidebarThreadItem,
     live: PullRequestSnapshot | undefined = pullRequestFor(item)
@@ -438,6 +659,10 @@ export function AgentsSidebar({
     onDeleteLocal: refreshLocalThreads,
     onTogglePin: () => togglePin(item),
     onToggleArchived: () => toggleArchived(item),
+    selected: selectedKeys.has(item.key),
+    selectionMode,
+    onToggleSelected: () => toggleSelected(item.key),
+    onRowElement: registerRow(item),
   })
 
   const sectionCollapsed = (key: string) =>
@@ -798,6 +1023,48 @@ export function AgentsSidebar({
           </div>
         </div>
       </TooltipProvider>
+
+      {selectionMode && (
+        <div
+          className="border-t border-border p-2"
+          role="region"
+          aria-label="Thread selection"
+        >
+          <div className="flex items-center gap-1 rounded-lg bg-accent p-1.5">
+            <span
+              className="min-w-0 flex-1 px-1 text-xs font-medium"
+              aria-live="polite"
+            >
+              {selectedKeys.size} visible selected
+            </span>
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-xs hover:bg-background/60"
+              onClick={() => void runBulkAction("pin")}
+            >
+              Pin
+            </button>
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-xs hover:bg-background/60"
+              onClick={() => void runBulkAction("archive")}
+            >
+              Archive
+            </button>
+            <button
+              type="button"
+              aria-label="Clear thread selection"
+              className="rounded px-2 py-1 text-xs hover:bg-background/60"
+              onClick={clearSelection}
+            >
+              Clear
+            </button>
+          </div>
+          {bulkError && (
+            <p className="px-2 pt-1 text-xs text-destructive">{bulkError}</p>
+          )}
+        </div>
+      )}
 
       <div className="p-2">
         <div className="min-w-0">
