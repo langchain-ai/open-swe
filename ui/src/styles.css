@@ -143,20 +143,20 @@
 }
 
 .dark {
-    --background: oklch(0.226 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.262 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.262 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.92 0 0);
-    --primary-foreground: oklch(0.21 0 0);
-    --secondary: oklch(0.31 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.31 0 0);
-    --muted-foreground: oklch(0.72 0 0);
-    --accent: oklch(0.31 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --background: oklch(0.248 0 0);
+    --foreground: oklch(1 0 0);
+    --card: oklch(0.309 0 0);
+    --card-foreground: oklch(1 0 0);
+    --popover: oklch(0.309 0 0);
+    --popover-foreground: oklch(1 0 0);
+    --primary: oklch(0.946 0 0);
+    --primary-foreground: oklch(0.209 0 0);
+    --secondary: oklch(0.345 0 0);
+    --secondary-foreground: oklch(1 0 0);
+    --muted: oklch(0.345 0 0);
+    --muted-foreground: oklch(0.786 0 0);
+    --accent: oklch(0.345 0 0);
+    --accent-foreground: oklch(1 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --destructive-foreground: oklch(0.704 0.191 22.216);
     --success: oklch(0.696 0.17 162.48);
@@ -173,18 +173,18 @@
     --chart-3: oklch(0.45 0 0);
     --chart-4: oklch(0.378 0 0);
     --chart-5: oklch(0.275 0 0);
-    --sidebar: oklch(0.262 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.92 0 0);
-    --sidebar-primary-foreground: oklch(0.21 0 0);
-    --sidebar-accent: oklch(0.31 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar: oklch(0.209 0 0);
+    --sidebar-foreground: oklch(1 0 0);
+    --sidebar-primary: oklch(0.946 0 0);
+    --sidebar-primary-foreground: oklch(0.209 0 0);
+    --sidebar-accent: oklch(0.345 0 0);
+    --sidebar-accent-foreground: oklch(1 0 0);
     --sidebar-border: oklch(1 0 0 / 12%);
     --sidebar-ring: oklch(0.556 0 0);
-    --sidebar-control-surface: var(--accent);
-    --sidebar-row-hover: var(--accent);
-    --sidebar-row-active: var(--accent);
-    --sidebar-row-selected: var(--accent);
+    --sidebar-control-surface: oklch(1 0 0 / 6%);
+    --sidebar-row-hover: oklch(1 0 0 / 6%);
+    --sidebar-row-active: oklch(1 0 0 / 8%);
+    --sidebar-row-selected: oklch(1 0 0 / 10%);
 }
 
 @layer utilities {
