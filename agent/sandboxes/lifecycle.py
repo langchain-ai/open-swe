@@ -15,6 +15,8 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
+from agent.auth.github_app import get_github_app_installation_token_with_expiry
+from agent.auth.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.dashboard.environments import SandboxResources, resolve_environment
 from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
 from agent.integrations.langsmith import (
@@ -34,8 +36,6 @@ from agent.sandboxes.state import (
     unwrap_sandbox_backend,
 )
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
-from agent.utils.github_app import get_github_app_installation_token_with_expiry
-from agent.utils.github_proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.utils.startup_trace import aphase
 
 logger = logging.getLogger(__name__)

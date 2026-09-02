@@ -42,6 +42,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from agent.auth.resolve import resolve_github_token
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -191,7 +192,6 @@ from .tools import (
     web_search,
 )
 from .utils import ttl_cache
-from .utils.auth import resolve_github_token
 from .utils.authorship import (
     CollaboratorIdentity,
     resolve_participant_identities,

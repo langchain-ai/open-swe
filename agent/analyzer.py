@@ -30,6 +30,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from agent.auth.github_app import get_github_app_installation_token
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.state import unwrap_sandbox_backend
 
@@ -57,7 +58,6 @@ from .tools.save_review_style import save_review_style_prompt
 from .utils import ttl_cache
 from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 

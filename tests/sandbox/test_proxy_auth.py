@@ -701,7 +701,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.server.construct_system_prompt", return_value="prompt"),
             patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict("agent.sandboxes.lifecycle.SANDBOX_BACKENDS", {}, clear=True),
-            patch.dict("agent.utils.github_proxy._PROXY_BASE_CONFIGS", {}, clear=True),
+            patch.dict("agent.auth.proxy._PROXY_BASE_CONFIGS", {}, clear=True),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from agent.server import get_agent

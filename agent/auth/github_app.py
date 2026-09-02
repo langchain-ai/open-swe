@@ -11,7 +11,7 @@ from urllib.parse import quote
 import httpx
 import jwt
 
-from .http import DEFAULT_HTTP_TIMEOUT
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
