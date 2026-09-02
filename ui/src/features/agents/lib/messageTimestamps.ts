@@ -65,5 +65,7 @@ const hoverTimeFormatter = new Intl.DateTimeFormat(undefined, {
 export function formatHoverTimestamp(value?: string): string | undefined {
   if (!value) return undefined
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? undefined : hoverTimeFormatter.format(date)
+  return Number.isNaN(date.getTime())
+    ? undefined
+    : hoverTimeFormatter.format(date)
 }

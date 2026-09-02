@@ -30,6 +30,7 @@ import {
 } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
+import { slackAppManifestJson } from "@/lib/slack-manifest"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -60,7 +61,11 @@ function AdminPage() {
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
+      <SlackIntegrationSection />
+
       <LLMGatewaySection />
+
+      <DictationSection />
 
       <FableSection />
 
@@ -92,6 +97,80 @@ function AdminPage() {
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
+  )
+}
+
+const SLACK_CODE_CHANNELS_STORAGE_KEY =
+  "open-swe.admin.slack-code-channels-enabled"
+
+export function SlackIntegrationSection() {
+  const [enabled, setEnabled] = useState(false)
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle"
+  )
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setEnabled(
+      window.localStorage.getItem(SLACK_CODE_CHANNELS_STORAGE_KEY) === "true"
+    )
+  }, [])
+
+  const setCodeChannelsEnabled = (next: boolean) => {
+    setEnabled(next)
+    setCopyState("idle")
+    window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
+  }
+
+  const copyManifest = async () => {
+    try {
+      await navigator.clipboard.writeText(slackAppManifestJson(enabled))
+      setCopyState("copied")
+    } catch {
+      setCopyState("failed")
+    }
+  }
+
+  return (
+    <SettingsSection
+      title="Slack integration"
+      description="Select the Slack app manifest for this installation. This browser-only setting does not change backend behavior."
+    >
+      <SettingsRow
+        htmlFor="slack-code-channels"
+        label="Slack Code Channels"
+        description={
+          enabled
+            ? "Early-access Code Channels manifest selected. Reinstall or re-authorize the Slack app after updating its manifest."
+            : "Legacy Slack manifest selected. Messages continue to use app mentions and Slack threads."
+        }
+        control={
+          <Switch
+            id="slack-code-channels"
+            checked={enabled}
+            onCheckedChange={setCodeChannelsEnabled}
+          />
+        }
+      />
+      <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm/none font-medium text-foreground">
+            App manifest
+          </span>
+          <span className="text-xs/relaxed text-muted-foreground">
+            Copy the selected manifest, replace its URL/provider placeholders,
+            then paste it into your Slack app settings and reinstall the app.
+          </span>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => void copyManifest()}>
+          {copyState === "copied"
+            ? "Copied"
+            : copyState === "failed"
+              ? "Copy failed"
+              : "Copy manifest"}
+        </Button>
+      </div>
+    </SettingsSection>
   )
 }
 
@@ -156,7 +235,9 @@ function RunningAgentsSection() {
                       setMessage(null)
                       cancel.mutate(thread.id, {
                         onSuccess: () =>
-                          setMessage(`Interruption requested for ${thread.title}.`),
+                          setMessage(
+                            `Interruption requested for ${thread.title}.`
+                          ),
                         onError: (error: Error) => setMessage(error.message),
                       })
                     }}
@@ -340,15 +421,14 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
   const total = mappings.data?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  useEffect(() => {
-    if (!mappings.isFetching && page > pageCount) {
-      setPage(pageCount)
-    }
-  }, [mappings.isFetching, page, pageCount])
-
   const remove = useMutation({
     mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
-    onSuccess: () => void mappings.refetch(),
+    onSuccess: () => {
+      setPage((current) =>
+        Math.min(current, Math.max(1, Math.ceil((total - 1) / PAGE_SIZE)))
+      )
+      void mappings.refetch()
+    },
     onError: (e: Error) => setError(e.message),
   })
 
@@ -615,6 +695,7 @@ function PRTraceResolutionSection() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setProjectDraft(settings.data?.review_tracing_project ?? "")
   }, [settings.data?.review_tracing_project])
 
@@ -732,7 +813,9 @@ function LLMGatewaySection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="inherit">Inherit deployment default</SelectItem>
+                <SelectItem value="inherit">
+                  Inherit deployment default
+                </SelectItem>
                 <SelectItem value="enabled">Enabled</SelectItem>
                 <SelectItem value="disabled">Disabled</SelectItem>
               </SelectContent>
@@ -745,9 +828,102 @@ function LLMGatewaySection() {
   )
 }
 
+const TRANSCRIPTION_MODELS = [
+  { value: "gpt-transcribe", label: "GPT Transcribe (recommended)" },
+  { value: "gpt-4o-transcribe", label: "GPT-4o Transcribe (legacy)" },
+  { value: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe (legacy)" },
+]
+
+function DictationSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+  const [customModel, setCustomModel] = useState<string | null>(null)
+  const selectedModel = settings.data?.transcription_model ?? "gpt-transcribe"
+  const preset = TRANSCRIPTION_MODELS.some(
+    (model) => model.value === selectedModel
+  )
+  const save = useMutation({
+    mutationFn: api.saveTranscriptionModel,
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  return (
+    <SettingsSection
+      title="Voice dictation"
+      description="Configure speech-to-text for the web and desktop message composer. Uses the same OpenAI API key and base URL as OpenAI LLMs."
+    >
+      <SettingsRow
+        label="Transcription model"
+        description="GPT Transcribe is OpenAI's recommended model for recorded speech."
+        control={
+          <Select
+            value={preset && customModel === null ? selectedModel : "custom"}
+            onValueChange={(model) => {
+              if (model === null) return
+              if (model === "custom")
+                setCustomModel(preset ? "" : selectedModel)
+              else {
+                setCustomModel(null)
+                save.mutate(model)
+              }
+            }}
+            disabled={!settings.data || save.isPending}
+          >
+            <SelectTrigger className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TRANSCRIPTION_MODELS.map((model) => (
+                <SelectItem key={model.value} value={model.value}>
+                  {model.label}
+                </SelectItem>
+              ))}
+              <SelectItem value="custom">Custom model</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
+      {(!preset || customModel !== null) && (
+        <SettingsRow
+          label="Custom model ID"
+          control={
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-56"
+                value={customModel ?? selectedModel}
+                onChange={(event) => setCustomModel(event.target.value)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!customModel?.trim() || save.isPending}
+                onClick={() => customModel && save.mutate(customModel.trim())}
+              >
+                Save
+              </Button>
+            </div>
+          }
+        />
+      )}
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
 function FableSection() {
   const qc = useQueryClient()
-  const settings = useQuery({ queryKey: ["teamSettings"], queryFn: api.getTeamSettings })
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
@@ -771,7 +947,8 @@ function FableSection() {
             <Switch
               checked={!!settings.data?.fable_enabled}
               onCheckedChange={(next) =>
-                settings.data && save.mutate({ ...settings.data, fable_enabled: next })
+                settings.data &&
+                save.mutate({ ...settings.data, fable_enabled: next })
               }
               disabled={!settings.data || save.isPending}
             />
@@ -793,6 +970,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   const [defaultRepoDraft, setDefaultRepoDraft] = useState("")
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setDefaultRepoDraft(settings.data?.default_repo ?? "")
   }, [settings.data?.default_repo])
 
@@ -841,6 +1019,22 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
               ...settings.data,
               default_agent_subagent_model: model,
               default_agent_subagent_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Thread title generation"
+          description="Model used to name new agent threads in the background."
+          models={models}
+          model={settings.data?.default_thread_title_model ?? null}
+          effort={settings.data?.default_thread_title_reasoning_effort ?? null}
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_thread_title_model: model,
+              default_thread_title_reasoning_effort: effort,
             })
           }
           disabled={!settings.data || save.isPending}
@@ -990,6 +1184,7 @@ function RolePicker({
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setLocalModel(model ?? inheritFallback)
     setLocalEffort(effort ?? "")
   }, [model, effort, inheritFallback])

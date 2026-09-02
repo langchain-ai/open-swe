@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -56,12 +54,11 @@ class TestModelCallTimeoutMiddleware:
         # Subagents compile into their own graphs, so the parent's middleware
         # never wraps their model calls.
         from agent.reviewer import _reviewer_subagent
-        from agent.server import _browser_subagent, _general_purpose_subagent
+        from agent.server import _general_purpose_subagent
 
         model = MagicMock()
         specs = [
-            _general_purpose_subagent(model),
-            _browser_subagent(model, []),
+            _general_purpose_subagent(model, tools=[]),
             _reviewer_subagent(model),
         ]
         for spec in specs:

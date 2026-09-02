@@ -5,8 +5,6 @@ dismissed (false positive / 👎), so the analyzer can promote the bug patterns
 this team actually fixes and add the noisy ones to a skip-list.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config
@@ -14,7 +12,7 @@ from langgraph.config import get_config
 from ..utils.reviewer_outcomes import read_outcomes_for_repo
 
 
-def read_finding_outcomes(limit: int = 60) -> dict[str, Any]:
+async def read_finding_outcomes(limit: int = 60) -> dict[str, Any]:
     """Return confirmed and dismissed past findings for the repo being analyzed.
 
     Call this before synthesizing the style prompt. Use the ``confirmed``
@@ -27,7 +25,7 @@ def read_finding_outcomes(limit: int = 60) -> dict[str, Any]:
     if not isinstance(full_name, str) or "/" not in full_name:
         return {"ok": False, "error": "no repo under analysis", "confirmed": [], "dismissed": []}
 
-    outcomes = read_outcomes_for_repo(full_name, limit=limit)
+    outcomes = await read_outcomes_for_repo(full_name, limit=limit)
     confirmed = outcomes["confirmed"]
     dismissed = outcomes["dismissed"]
     return {

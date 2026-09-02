@@ -1,7 +1,8 @@
-import { useStreamContext as useAgentThreadStream, useToolCalls } from "@langchain/react"
+import { useToolCalls } from "@langchain/react"
 import { Check, Loader2, X } from "lucide-react"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 /**
  * Live status for a single subagent, read straight from the SDK's scoped
@@ -16,11 +17,11 @@ import { humanizeToolName } from "@/features/agents/lib/toolNames"
  *
  * Mounting opens a ref-counted subscription scoped to `namespace`; unmounting
  * closes it. Only mounted from {@link SubagentCard} when
- * `useIsInAgentThreadStream()` is true, so the `useStreamContext` read is
- * always inside a `StreamProvider`.
+ * `useIsInAgentThreadStream()` is true, so the runtime read is always inside
+ * the agents layout provider.
  */
 export function SubagentActivity({ namespace }: { namespace: Array<string> }) {
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const toolCalls = useToolCalls(stream, { namespace })
 
   const current = toolCalls[toolCalls.length - 1]
@@ -29,21 +30,21 @@ export function SubagentActivity({ namespace }: { namespace: Array<string> }) {
   const stepCount = toolCalls.length
 
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-1.5 border-t border-[var(--ui-border)] pt-1.5">
+    <div className="mt-1 flex min-w-0 items-center gap-1.5 border-t border-border pt-1.5">
       {current.status === "finished" ? (
-        <Check className="h-3 w-3 shrink-0 text-[color:var(--ui-accent)]" aria-hidden />
+        <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
       ) : current.status === "error" ? (
         <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
       ) : (
         <Loader2
-          className="h-3 w-3 shrink-0 animate-spin text-[color:var(--ui-text-dim)]"
+          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
           aria-hidden
         />
       )}
-      <span className="truncate text-[10px] text-[color:var(--ui-text-dim)]">
+      <span className="truncate text-[10px] text-muted-foreground/70">
         {humanizeToolName(current.name)}
       </span>
-      <span className="ml-auto shrink-0 text-[10px] tabular-nums text-[color:var(--ui-text-dim)]">
+      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
         {stepCount} {stepCount === 1 ? "step" : "steps"}
       </span>
     </div>

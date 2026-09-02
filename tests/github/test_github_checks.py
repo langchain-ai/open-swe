@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 import httpx
@@ -38,7 +36,7 @@ class _FakeAsyncClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> _FakeAsyncClient:
+    async def __aenter__(self) -> "_FakeAsyncClient":
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:

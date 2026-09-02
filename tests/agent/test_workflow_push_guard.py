@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from typing import Any, cast
 
@@ -9,7 +7,7 @@ from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware import workflow_push_guard as guard
-from agent.utils.sandbox_state import SandboxBackendProxy
+from agent.sandboxes.state import SandboxBackendProxy
 
 
 class _Response:
@@ -27,7 +25,7 @@ class _Backend:
         self.commands: list[str] = []
         self.head = "a" * 40
 
-    def execute(self, command: str, *, timeout: int | None = None) -> _Response:
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> _Response:
         self.commands.append(command)
         if "rev-parse --show-toplevel" in command:
             return _Response("/repo\n")
@@ -66,14 +64,16 @@ class _Runtime:
 class _Request:
     runtime = _Runtime()
 
-    def __init__(self, command: str = "git -C /repo push origin feature") -> None:
+    def __init__(
+        self, command: str = "git -C /repo push origin feature", name: str = "execute"
+    ) -> None:
         self.tool_call = {
-            "name": "execute",
+            "name": name,
             "args": {"command": command},
             "id": "call-1",
         }
 
-    def override(self, **kwargs: Any) -> _Request:
+    def override(self, **kwargs: Any) -> "_Request":
         next_request = _Request()
         next_request.tool_call = kwargs.get("tool_call", self.tool_call)
         return next_request
@@ -103,9 +103,9 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
     assert guard._parse_git_push("git push origin feature; git push origin evil:feature") is None
 
 
-def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
+async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     backend = _Backend()
-    change = guard._workflow_change_for_push(
+    change = await guard._workflow_change_for_push(
         backend,
         guard.ParsedGitPush(
             repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
@@ -154,11 +154,11 @@ def test_workflow_approval_response_serializes_review_fields() -> None:
     assert response["approvalUrl"].endswith("workflowApproval=abc")
 
 
-def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
+async def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
     backend = _Backend(workflow_files="")
 
     assert (
-        guard._workflow_change_for_push(
+        await guard._workflow_change_for_push(
             backend,
             guard.ParsedGitPush(
                 repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
@@ -168,11 +168,11 @@ def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
     )
 
 
-def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
+async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
     backend = _Backend()
 
     assert (
-        guard._workflow_change_for_push(
+        await guard._workflow_change_for_push(
             backend,
             guard.ParsedGitPush(
                 repo_dir="/repo", remote="origin", local_ref="evil", remote_ref="feature"
@@ -182,8 +182,9 @@ def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
     )
 
 
+@pytest.mark.parametrize("tool_name", ["execute", "background_execute"])
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tool_name: str
 ) -> None:
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
@@ -223,7 +224,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
     result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
-        cast(ToolCallRequest, _Request()), handler
+        cast(ToolCallRequest, _Request(name=tool_name)), handler
     )
 
     assert called is False

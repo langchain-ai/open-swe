@@ -10,8 +10,6 @@ on public repos even when the GitHub App is not installed on them.
 """
 # ruff: noqa: E402
 
-from __future__ import annotations
-
 import logging
 import os
 import warnings
@@ -32,11 +30,16 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from agent.auth.github_app import get_github_app_installation_token
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.state import unwrap_sandbox_backend
+
 from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
@@ -55,10 +58,7 @@ from .tools.save_review_style import save_review_style_prompt
 from .utils import ttl_cache
 from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import unwrap_sandbox_backend
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
 STYLE_ANALYZER_PROMPT = """You are a code-review style analyst for `{repo_owner}/{repo_name}`.
 
 Sandbox: `{working_dir}`. Use the shell (``execute``) to run GitHub commands.
-**Always invoke gh as:** `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 Your job is to produce/refine the per-repo review-style prompt and persist it with
 `save_review_style_prompt`.
@@ -102,7 +102,7 @@ async def _configure_sandbox_github_proxy(
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -136,7 +136,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         configurable = self._config.get("configurable") or {}
         full_name = str(configurable.get("review_style_full_name") or "owner/repo")
         owner, _, name = full_name.partition("/")
@@ -202,6 +202,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 ),
                 ToolErrorMiddleware(),
                 TimeoutWrapupMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
             ],
         ),
     ).with_config(config)

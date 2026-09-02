@@ -1,18 +1,14 @@
-"""Tool: ``save_plan``. Publish sandbox Markdown for review or sharing.
-
-Reads the Markdown file the agent created in the sandbox and publishes it to the
-plan-review page. In plan mode it is an approvable implementation plan; outside
-plan mode it is read-only shared content.
-"""
-
-from __future__ import annotations
+"""Tool: ``save_plan``. Publish a sandbox HTML artifact for review or sharing."""
 
 import logging
+import re
 from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+
+from agent.sandboxes.state import get_sandbox_backend
 
 from ..dashboard.plan_store import (
     PLAN_FILE_DIRECTORY,
@@ -20,36 +16,31 @@ from ..dashboard.plan_store import (
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
-from ..utils.sandbox_state import get_sandbox_backend
+from ..utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 
 logger = logging.getLogger(__name__)
 
 _MAX_PLAN_LINES = 20_000
-_MARKDOWN_EXTENSIONS = (".md", ".markdown")
 
 
 async def save_plan(
     plan_file_path: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Publish a Markdown plan file from the sandbox for review.
+    """Publish a self-contained HTML plan artifact from the sandbox.
 
-    Use this in plan mode once your plan is ready. Outside plan mode, use it to
-    share long Slack responses without switching the thread into plan mode. First
-    create a Markdown file under ``/workspace/plans/`` using a dated, descriptive
-    filename, then pass that file path here. The file contents are published to
-    the plan-review page linked in the conversation. In plan mode, the user can
-    comment, approve, or request changes; outside plan mode, the page is read-only
-    shared content.
-
-    Write the content in standard Markdown — headings, bullet/numbered lists, and
-    fenced code blocks all render. Shared responses persist Markdown text only;
-    they do not upload or serve sandbox-local or relative image files. If images
-    or screenshots are needed for a Slack response, post them directly in Slack
-    instead of relying on the shared response page.
+    Use this in plan mode once the artifact is ready. Outside plan mode, use it
+    to share a long response without switching the thread into plan mode. Write
+    one ``.html`` file directly under ``/workspace/plans/`` and pass that path
+    here. Read the ``html-artifacts`` skill for the authoring rules: write the
+    page content and omit ``<html>``/``<head>``/``<body>`` — they are added
+    here, along with a minimal CSS reset — and include a ``<title>``. The
+    artifact is rendered in an opaque-origin sandboxed iframe under a strict CSP:
+    inline CSS and JavaScript, Canvas, WebGL, and Google Fonts work; network
+    access and web storage do not.
 
     Args:
-        plan_file_path: Path to the Markdown plan file in the sandbox.
+        plan_file_path: Path to the HTML artifact in the sandbox.
 
     Returns:
         ``{success: True, path}`` on success, or ``{success: False, error}``.
@@ -59,10 +50,10 @@ async def save_plan(
     path = plan_file_path.strip()
     if not path:
         return {"success": False, "error": "plan_file_path cannot be empty"}
-    if not _is_markdown_path(path):
+    if not _is_html_path(path):
         return {
             "success": False,
-            "error": f"plan_file_path must point to a Markdown file in {PLAN_FILE_DIRECTORY}",
+            "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
         }
 
     try:
@@ -78,7 +69,10 @@ async def save_plan(
         content = (await _read_plan_file(str(thread_id), path)).strip()
         if not content:
             return {"success": False, "error": "plan file cannot be empty"}
-        await _save(str(thread_id), content, path, plan_mode=_active_plan_mode(state, configurable))
+        document = wrap_html_artifact(content, title=_title_from_path(path))
+        await _save(
+            str(thread_id), document, path, plan_mode=_active_plan_mode(state, configurable)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
@@ -88,7 +82,7 @@ async def save_plan(
 async def _save(thread_id: str, content: str, path: str, *, plan_mode: bool) -> None:
     await save_plan_content(
         thread_id,
-        markdown=content,
+        html=content,
         status=PLAN_STATUS_READY if plan_mode else PLAN_STATUS_SHARED,
         plan_file_path=path,
         plan_mode=plan_mode or None,
@@ -127,10 +121,16 @@ def _value(value: Any, key: str) -> Any:
     return getattr(value, key, None)
 
 
-def _is_markdown_path(path: str) -> bool:
+def _is_html_path(path: str) -> bool:
     if "\x00" in path or not path.startswith(f"{PLAN_FILE_DIRECTORY}/"):
         return False
     filename = path.removeprefix(f"{PLAN_FILE_DIRECTORY}/")
-    if not filename or "/" in filename:
-        return False
-    return filename.lower().endswith(_MARKDOWN_EXTENSIONS)
+    return bool(filename and "/" not in filename and filename.lower().endswith(".html"))
+
+
+def _title_from_path(path: str) -> str:
+    """Fallback artifact name for a plan file that carries no title of its own."""
+    stem = path.rsplit("/", 1)[-1].removesuffix(".html")
+    stem = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", stem)
+    words = stem.replace("-", " ").replace("_", " ").strip()
+    return words[:1].upper() + words[1:] if words else DEFAULT_TITLE

@@ -8,46 +8,82 @@ import {
 // Full plan-review flow, driven through the mock Slack UI + the real dashboard:
 //   user asks Open SWE in Slack to PLAN something ->
 //   agent calls enter_plan_mode, posts the plan-review link to Slack, writes the
-//   plan as a markdown file (save_plan), and posts "ready" back to Slack ->
-//   owner (user1) and a collaborator (user2) open the plan and leave whole-document
-//   comments over plain HTTP (each polls and sees the other's) ->
-//   only the owner can approve -> on approval the agent implements, opens a PR,
-//   and replies in Slack with the link, echoing the reviewers' comments (which the
-//   server harvested from the comment store).
+//   plan as a self-contained HTML file (save_plan), and posts "ready" back to Slack ->
+//   owner (user1) and a collaborator (user2) open the read-only plan ->
+//   a reviewer can return to the thread to request changes, or approve the plan ->
+//   on approval the agent implements, opens a PR, and replies in Slack with the link.
 // Only the LLM is faked; all agent + dashboard code runs for real.
 
 const OWNER = { login: "alice", email: "alice@example.com" };
 const COLLABORATOR = { login: "bob", email: "bob@example.com" };
 
-async function botMessages(request: APIRequestContext): Promise<Array<string>> {
+// Scope to one thread via the "Open in Web" link every bot post carries. A run
+// started by an earlier spec can still be in flight and post here after this
+// test's `/control/reset`, and an unscoped read lets that stale message satisfy
+// a poll — which then stops waiting for the message this test actually wants.
+async function botMessages(
+  request: APIRequestContext,
+  threadId?: string,
+): Promise<Array<string>> {
   const res = await request.get("/mock/slack/messages");
   const msgs = (await res.json()) as Array<{ text: string; is_bot: boolean }>;
-  return msgs.filter((m) => m.is_bot).map((m) => m.text);
+  return msgs
+    .filter((m) => m.is_bot)
+    .map((m) => m.text)
+    .filter((text) => threadId === undefined || text.includes(threadId));
 }
 
-async function addComment(
-  page: Page,
-  text: string,
-  shortcut?: "meta" | "control",
-) {
-  const input = page.getByTestId("comment-input");
-  await input.fill(text);
-  if (shortcut === "meta") {
-    await input.press("Meta+Enter");
-    return;
-  }
-  if (shortcut === "control") {
-    await input.press("Control+Enter");
-    return;
-  }
-  await page.getByTestId("comment-submit").click();
+async function typeIntoComposer(page: Page, text: string) {
+  const editor = page.getByTestId("composer-editor");
+  await expect(editor).toBeFocused();
+  await editor.pressSequentially(text);
+  await editor.press("Enter");
 }
 
-test.describe("Plan review (HTTP comments)", () => {
-  test("Slack plan request → comments → owner approves → PR", async ({
+test.describe("Plan review", () => {
+  test("Slack plan approval button starts implementation", async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+    await expect(page.locator("#thread")).toContainText("No messages yet");
+
+    await page
+      .locator("#text")
+      .fill("<@U0BOT> plan how to add a greet() helper");
+    await page.locator("#send").click();
+
+    const ready = page
+      .locator(".msg.bot")
+      .filter({ hasText: /plan is ready for review/i });
+    await expect(ready).toBeVisible({ timeout: 60_000 });
+    const approve = ready.getByRole("button", {
+      name: "Approve & implement",
+    });
+    await expect(approve).toBeVisible();
+    await expect(
+      ready.getByRole("button", { name: "Request changes" }),
+    ).toBeVisible();
+
+    await approve.click();
+    await expect(ready).toContainText("Selected: Approve & implement");
+    await expect(ready.getByRole("button")).toHaveCount(0);
+
+    const reply = page
+      .locator(".msg.bot")
+      .filter({ has: page.locator('a[href*="/pull/"]') });
+    await expect(reply).toBeVisible({ timeout: 90_000 });
+    await expect(reply).toContainText("Add greet() helper");
+
+    await page.goto("/mock/github");
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText(
+      "Add greet() helper",
+    );
+  });
+
+  test("Slack plan request → collaborator approves → PR", async ({
     browser,
     request,
-  }) => {
+  }, testInfo) => {
     // 1. A user asks the bot to PLAN something in Slack.
     await request.post("/control/reset");
     const send = await request.post("/mock/slack/send", {
@@ -87,42 +123,63 @@ test.describe("Plan review (HTTP comments)", () => {
 
     // 2. The agent shares the plan-review link, then announces the plan is ready.
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
         timeout: 60_000,
       })
       .toMatch(/\/agents\/[^/]+\/plan\b/);
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
         timeout: 60_000,
       })
       .toMatch(/ready for review/i);
 
     // 3. A logged-out user follows the plan deep link, signs in through the fake
     //    GitHub OAuth simulator, and lands back on the same plan page.
-    const loggedOutCtx = await browser.newContext();
+    const loggedOutCtx = await browser.newContext({
+      viewport: { width: 900, height: 700 },
+    });
     const loggedOut = await loggedOutCtx.newPage();
     await loggedOut.goto(planPath);
     await expect(loggedOut).toHaveURL(
       new RegExp(`/login\\?redirect=.*${threadId}.*plan`),
     );
-    await expect(loggedOut.getByText("Sign in to open-swe")).toBeVisible({
+    await expect(loggedOut.getByText("Sign in to Open SWE")).toBeVisible({
       timeout: 30_000,
     });
     await loggedOut.getByRole("link", { name: "Continue with GitHub" }).click();
     await expect(loggedOut).toHaveURL(/\/fake-gh\/login\/oauth\/authorize/);
     await expect(loggedOut.getByTestId("fake-github-login")).toBeVisible();
     await loggedOut.getByLabel("GitHub user").selectOption(OWNER.login);
-    await loggedOut.getByRole("button", { name: "Authorize open-swe" }).click();
+    await loggedOut.getByRole("button", { name: "Authorize Open SWE" }).click();
     await expect(loggedOut).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(loggedOut.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(loggedOut.getByTestId("plan-document")).toContainText(
-      "greet",
-      {
-        timeout: 30_000,
-      },
+    await expect(
+      loggedOut
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByText("Add greet() helper"),
+    ).toBeVisible({ timeout: 30_000 });
+    const summaryBox = await loggedOut
+      .getByTestId("plan-summary")
+      .boundingBox();
+    const actionsBox = await loggedOut
+      .getByTestId("plan-actions")
+      .boundingBox();
+    expect(summaryBox).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(actionsBox!.y).toBeGreaterThanOrEqual(
+      summaryBox!.y + summaryBox!.height,
     );
+    const screenshotPath = testInfo.outputPath("plan-review-tablet.png");
+    await loggedOut
+      .getByTestId("plan-review")
+      .screenshot({ path: screenshotPath });
+    await testInfo.attach("plan-review-tablet", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
     await loggedOutCtx.close();
 
     // 4. The OWNER opens the conversation, follows the "Review plan" banner, and
@@ -133,38 +190,84 @@ test.describe("Plan review (HTTP comments)", () => {
     await ownerCtx.request.post("/control/login", { data: OWNER });
     const owner = await ownerCtx.newPage();
     await owner.goto(`/agents/${threadId}`);
-    const reviewLink = owner.getByTestId("review-plan-link");
+    const reviewLink = owner.getByTestId("inline-plan-artifact");
     await expect(reviewLink).toBeVisible({ timeout: 30_000 });
+    await expect(reviewLink).toHaveCSS("height", "250px");
+    await expect(owner.getByTestId("inline-plan-fade")).toBeVisible();
+    await expect(
+      owner.locator('button[aria-current="page"]', { hasText: "Plan" }),
+    ).toHaveCount(0);
     await reviewLink.click();
     await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(owner.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
     await expect(owner.getByText("Back to conversation")).toBeVisible();
-    await expect(owner.getByTestId("plan-document")).toContainText("greet", {
+    const ownerArtifact = owner.getByTestId("plan-artifact-frame");
+    await expect(
+      ownerArtifact.contentFrame().getByText("Add greet() helper"),
+    ).toBeVisible({
       timeout: 30_000,
     });
+    await expect(ownerArtifact).toHaveAttribute(
+      "sandbox",
+      "allow-scripts allow-downloads",
+    );
+    const embeddedSummaryBox = await owner
+      .getByTestId("plan-summary")
+      .boundingBox();
+    const embeddedActionsBox = await owner
+      .getByTestId("plan-actions")
+      .boundingBox();
+    expect(embeddedSummaryBox).not.toBeNull();
+    expect(embeddedActionsBox).not.toBeNull();
+    // At the plan page's full width the header runs as a row, so the actions
+    // sit to the right of the summary instead of stacking under it.
+    expect(embeddedActionsBox!.x).toBeGreaterThanOrEqual(
+      embeddedSummaryBox!.x + embeddedSummaryBox!.width,
+    );
     await expect(owner.getByTestId("approve-plan")).toBeVisible();
-    // "Request changes" is meaningless with no feedback → disabled until a
-    // comment exists.
-    await expect(owner.getByTestId("reject-plan")).toBeDisabled();
+    await expect(owner.getByTestId("reject-plan")).toBeEnabled();
+    await expect(owner.getByTestId("edit-plan")).toHaveCount(0);
+    await expect(owner.getByTestId("plan-editor")).toHaveCount(0);
+    await expect(owner.getByTestId("plan-comments")).toBeVisible();
 
-    // Copy the whole plan as markdown.
+    // Highlight text in the sandboxed HTML preview and attach a comment.
+    const verificationHeading = ownerArtifact
+      .contentFrame()
+      .getByText("Verification");
+    await verificationHeading.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await expect(owner.getByTestId("comment-composer")).toContainText(
+      "Verification",
+    );
+    await owner
+      .getByTestId("comment-input")
+      .fill("Clarify the expected output.");
+    await owner.getByTestId("comment-submit").click();
+    await expect(owner.getByTestId("plan-comment")).toContainText(
+      "Clarify the expected output.",
+    );
+    await expect(
+      ownerArtifact.contentFrame().locator(".plan-annotation-marker"),
+    ).toBeVisible();
+
+    // Copy the whole plan as HTML.
     await owner.getByTestId("copy-plan").click();
     await expect(owner.getByTestId("copy-plan")).toContainText("Copied!");
     const clipboard = await owner.evaluate(() =>
       navigator.clipboard.readText(),
     );
-    expect(clipboard).toContain("## Plan: Add greet() helper");
-    expect(clipboard).toContain("### Verification");
+    expect(clipboard).toContain("<title>Greeting Blueprint</title>");
+    expect(clipboard).toContain("<h2>Verification</h2>");
 
-    // Owner leaves a comment with Cmd+Enter.
-    await addComment(owner, "Owner: looks solid, ship it.", "meta");
-    await expect(owner.getByTestId("plan-comment")).toHaveCount(1);
-    await expect(owner.getByTestId("reject-plan")).toBeEnabled();
-
-    // 5. A COLLABORATOR opens the same plan: sees it AND the owner's comment
-    //    (fetched over HTTP), but has NO approve button.
+    // 5. A COLLABORATOR opens the same read-only plan.
     const collabCtx = await browser.newContext();
     await collabCtx.request.post("/control/login", { data: COLLABORATOR });
     const collab = await collabCtx.newPage();
@@ -172,39 +275,27 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(collab.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(collab.getByTestId("plan-document")).toContainText("greet", {
-      timeout: 30_000,
-    });
-    await expect(collab.getByTestId("plan-comment")).toHaveCount(1, {
-      timeout: 30_000,
-    });
-    await expect(collab.getByTestId("plan-comment")).toContainText(
-      "looks solid",
-    );
-    await expect(collab.getByTestId("approve-plan")).toHaveCount(0);
-    await expect(collab.getByTestId("reject-plan")).toBeVisible();
+    await expect(
+      collab
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByText("Add greet() helper"),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(collab.getByTestId("plan-comments")).toBeVisible();
+    await expect(collab.getByTestId("approve-plan")).toBeVisible();
+    await expect(collab.getByTestId("reject-plan")).toBeEnabled();
 
-    // Collaborator leaves feedback with Ctrl+Enter.
-    await addComment(collab, "Reviewer: please also add a docstring.", "control");
-    await expect(collab.getByTestId("plan-comment")).toHaveCount(2);
+    // 6. The collaborator approves and returns to the main conversation while
+    //    implementation starts.
+    await collab.getByTestId("approve-plan").click();
+    await expect(collab).toHaveURL(new RegExp(`/agents/${threadId}$`));
 
-    // 6. The owner sees the collaborator's comment (polled), then approves and
-    //    returns to the main conversation while implementation starts.
-    await expect(owner.getByTestId("plan-comment")).toHaveCount(2, {
-      timeout: 30_000,
-    });
-    await owner.getByTestId("approve-plan").click();
-    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
-
-    // 7. The agent implements, opens a PR, and links it back in the Slack thread,
-    //    echoing the reviewers' feedback — which proves the comments were stored
-    //    and harvested server-side on approve.
+    // 7. The agent implements, opens a PR, and links it back in the Slack thread.
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
         timeout: 90_000,
       })
       .toMatch(/\/pull\//);
-    expect((await botMessages(request)).join("\n")).toMatch(/docstring/);
 
     const prs = (await (
       await request.get("/mock/github/data")
@@ -213,5 +304,81 @@ test.describe("Plan review (HTTP comments)", () => {
 
     await ownerCtx.close();
     await collabCtx.close();
+  });
+
+  test("plan decisions return to a connected conversation", async ({
+    browser,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    await request.post("/control/reset");
+    const send = await request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> plan how to add a greet() helper",
+        mention_bot: true,
+      },
+    });
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+    const planPath = `/agents/${threadId}/plan`;
+
+    await expect
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
+        timeout: 60_000,
+      })
+      .toMatch(/ready for review/i);
+
+    const ownerCtx = await browser.newContext();
+    await ownerCtx.request.post("/control/login", { data: OWNER });
+    const owner = await ownerCtx.newPage();
+    await owner.goto(planPath);
+    await expect(owner.getByTestId("plan-review")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(owner.getByTestId("reject-plan")).toBeEnabled();
+    await expect(owner.getByTestId("plan-comments")).toBeVisible();
+
+    const hydrated = owner.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return (
+        response.request().method() === "GET" &&
+        path === `/dashboard/api/threads/${threadId}/state`
+      );
+    });
+    await owner.getByTestId("reject-plan").click();
+    await expect(owner).toHaveURL(
+      new RegExp(`/agents/${threadId}\\?feedback=true$`),
+    );
+    expect((await hydrated).ok()).toBeTruthy();
+    await typeIntoComposer(
+      owner,
+      "The plan needs changes: revise the verification steps.",
+    );
+    await expect(
+      owner.getByText(
+        "I'll wait for your review and approval before implementing.",
+      ),
+    ).toHaveCount(2, { timeout: 60_000 });
+    await expect(owner.getByTestId("inline-plan-artifact")).toBeVisible({
+      timeout: 60_000,
+    });
+
+    await owner.goto(planPath);
+    await expect(owner.getByTestId("approve-plan")).toBeVisible({
+      timeout: 30_000,
+    });
+    await owner.getByTestId("approve-plan").click();
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    await expect
+      .poll(async () => {
+        const prs = (await (
+          await request.get("/mock/github/data")
+        ).json()) as Array<unknown>;
+        return prs.length;
+      })
+      .toBeGreaterThan(0);
+
+    await ownerCtx.close();
   });
 });

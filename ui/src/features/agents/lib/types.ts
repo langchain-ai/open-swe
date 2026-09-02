@@ -26,6 +26,23 @@ export type AgentSource =
   | "linear"
   | "schedule"
 
+export type AgentThreadCategory =
+  | "interactive"
+  | "issue"
+  | "pull_request"
+  | "automation"
+  | "review"
+  | "system"
+
+export type AgentTriggerKind =
+  | "user"
+  | "schedule"
+  | "schedule_test"
+  | "wakeup"
+  | "reviewer"
+  | "analyzer"
+  | "ci_autofix"
+
 export interface TodoItem {
   content: string
   status: TodoStatus
@@ -63,6 +80,21 @@ export interface DiffData {
   totalLines: number
 }
 
+export type OutputIframeDisplay =
+  | {
+      type: "output_iframe"
+      previewUrl: string
+      downloadUrl: string
+      title: string
+      filename: string
+    }
+  | {
+      type: "output_iframe"
+      html: string
+      title: string
+      filename: string
+    }
+
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
@@ -73,6 +105,7 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData
@@ -140,6 +173,13 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  structuredSenderId?: string
+  structuredSenderKind?: "person" | "system"
+  structuredSenderName?: string
+  structuredSenderNote?: string
+  structuredSurface?: string
+  /** Id of the user message that opened this agent run and keys its diff artifact. */
+  turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
   timestampIsFallback?: boolean
@@ -156,13 +196,18 @@ export interface Project {
   gitBranch?: string
 }
 
+export type SlackNotificationMode = "always" | "on_action"
+
 export interface AgentSchedule {
   id: string
   name: string
   prompt: string
   schedule: string
+  scope: "workspace"
   repo: string | null
   slackChannelId?: string | null
+  slackNotificationMode: SlackNotificationMode
+  adminThread: boolean
   model: string
   effort?: string | null
   enabled: boolean
@@ -210,8 +255,97 @@ export interface WorkflowPushApproval {
 
 export interface WorkflowPushApprovalsResponse {
   threadId: string
-  isOwner: boolean
   approvals: Array<WorkflowPushApproval>
+}
+
+export interface AgentPullRequestSummary {
+  number: number
+  title: string
+  state: "draft" | "open" | "merged" | "closed"
+  headRef: string
+  baseRef: string
+  url: string
+}
+
+export interface AgentPullRequest extends AgentPullRequestSummary {
+  repoFullName: string
+  author: string | null
+  authorAvatarUrl: string | null
+  createdAt: string | null
+  diffStats: {
+    files: number
+    additions: number
+    deletions: number
+  }
+}
+
+export interface AgentPullRequestHealth {
+  repoFullName: string | null
+  number: number | null
+  url: string | null
+  statusAvailable: boolean
+  state: "open" | "merged" | "closed" | null
+  isDraft: boolean | null
+  mergeConflictState: "mergeable" | "conflicting" | "unknown" | null
+  checksAvailable: boolean
+  failingChecks: Array<{
+    name: string
+    conclusion: string | null
+    url: string | null
+  }>
+  pendingCheckCount: number | null
+  inconclusiveCheckCount: number | null
+  commentsAvailable: boolean
+  unresolvedReviewThreadCount: number | null
+  unresolvedReviewThreads: Array<{
+    author: string | null
+    body: string
+    path: string
+    line: number | null
+    url: string | null
+  }>
+}
+
+export interface AgentPullRequestStatusResponse {
+  pullRequests: Array<AgentPullRequestHealth>
+}
+
+export interface AgentPullRequestContextResponse {
+  context: {
+    repoFullName: string
+    number: number
+    url: string
+    headSha: string | null
+    mergeState: string | null
+    reviewDecision: string | null
+    checksAvailable: boolean
+    checks: Array<{
+      name: string
+      status: string
+      conclusion: string | null
+      required: boolean | null
+      url: string | null
+    }>
+    reviewsAvailable: boolean
+    changesRequestedReviews: Array<{
+      author: string
+      body: string
+      url: string | null
+    }>
+    unresolvedReviewThreads: Array<{
+      path: string
+      line: number | null
+      isOutdated: boolean
+      commentsTruncated: boolean
+      comments: Array<{
+        author: string
+        body: string
+        url: string | null
+      }>
+    }>
+    truncated: boolean
+  }
+  prompt: string
 }
 
 export interface AgentThread {
@@ -224,28 +358,30 @@ export interface AgentThread {
   effort?: string | null
   planMode?: boolean
   planStatus?: string | null
+  adminThread?: boolean
   source?: AgentSource
+  origin?: AgentSource | string
+  threadCategory?: AgentThreadCategory | string
+  triggerKind?: AgentTriggerKind | string
+  automationId?: string | null
+  automationName?: string | null
+  automationActionPosted?: boolean
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
-  isOwner?: boolean
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
   sourceUrl?: string | null
+  sourceAppUrl?: string | null
+  codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
-  pr?: {
-    number: number
-    title: string
-    state: "draft" | "open" | "merged" | "closed"
-    headRef: string
-    baseRef: string
-    url: string
-  }
+  pr?: AgentPullRequestSummary
+  pullRequests?: Array<AgentPullRequest>
   diffStats?: {
     files: number
     additions: number

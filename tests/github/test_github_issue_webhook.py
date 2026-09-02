@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import hmac
@@ -7,11 +5,13 @@ import importlib
 import json
 import logging
 from typing import cast
+from xml.etree import ElementTree
 
+import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
 
 from agent.api.app import app
+from agent.thread_ids import github_issue_thread_id
 from agent.tools import request_pr_review as request_pr_review_tool
 from agent.utils import slack as slack_utils
 from agent.utils.slack import GitHubPrRef
@@ -25,15 +25,29 @@ _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
 
 
+@pytest.fixture(autouse=True)
+def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def resolve(*args: object, **kwargs: object) -> str:
+        return "mapped-slack-thread"
+
+    async def lookup(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def channel_context(*args: object, **kwargs: object) -> dict[str, bool]:
+        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+
+    monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
+    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
+
+
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     """Compute the X-Hub-Signature-256 header value for raw bytes."""
     sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return f"sha256={sig}"
 
 
-def _post_github_webhook(
-    client: TestClient, event_type: str, payload: dict[object, object]
-) -> Response:
+def _post_github_webhook(client: TestClient, event_type: str, payload: dict[object, object]):
     """Send a signed GitHub webhook POST request."""
     body = json.dumps(payload, separators=(",", ":")).encode()
     return client.post(
@@ -53,7 +67,7 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
-def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Response:
+def _post_slack_webhook(client: TestClient, payload: dict[object, object]):
     body = json.dumps(payload, separators=(",", ":")).encode()
     timestamp = "1700000000"
     return client.post(
@@ -67,33 +81,12 @@ def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Re
     )
 
 
-def test_generate_thread_id_from_github_issue_is_deterministic() -> None:
-    first = webhook_common.generate_thread_id_from_github_issue("12345")
-    second = webhook_common.generate_thread_id_from_github_issue("12345")
+def test_github_issue_thread_id_is_deterministic() -> None:
+    first = github_issue_thread_id("12345")
+    second = github_issue_thread_id("12345")
 
     assert first == second
     assert len(first) == 36
-
-
-def test_build_github_issue_prompt_includes_issue_context() -> None:
-    prompt = github_webhooks.build_github_issue_prompt(
-        {"owner": "langchain-ai", "name": "open-swe"},
-        42,
-        "12345",
-        "Fix the flaky test",
-        "The test is failing intermittently.",
-        [{"author": "octocat", "body": "Please take a look", "created_at": "2026-03-09T00:00:00Z"}],
-        github_login="octocat",
-        issue_url="https://github.com/langchain-ai/open-swe/issues/42",
-    )
-
-    assert "Fix the flaky test" in prompt
-    assert "The test is failing intermittently." in prompt
-    assert "Please take a look" in prompt
-    assert "https://github.com/langchain-ai/open-swe/issues/42" in prompt
-    assert "PR description links back to this issue" in prompt
-    assert "repository's PR conventions" in prompt
-    assert "GH_TOKEN=dummy gh issue comment" in prompt
 
 
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
@@ -297,12 +290,13 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
         },
     )
 
+    tags = webhook_common.describe_open_swe_tags()
     assert response.status_code == 200
     assert response.json() == {
         "status": "ignored",
-        "reason": "Comment does not mention @openswe or @open-swe",
+        "reason": f"Comment does not mention {tags}",
     }
-    assert "does not mention @openswe or @open-swe" not in caplog.text
+    assert f"does not mention {tags}" not in caplog.text
 
 
 def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> None:
@@ -507,13 +501,15 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
 
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
-    message_content = kwargs["input"]["messages"][0]["content"]
+    messages = kwargs["input"]["messages"]
+    assert len(messages) == 2
+    message_content = messages[-1]["content"]
     assert isinstance(message_content, str)
     assert "Open SWE finding f_1" in message_content
     assert "untrusted data from GitHub" in message_content
     assert "This is handled elsewhere." in message_content
     assert "</body>\nThis is handled elsewhere." not in message_content
-    assert "</body_>" in message_content
+    assert "&lt;/body_&gt;" in message_content
 
 
 def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
@@ -600,7 +596,9 @@ def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
 def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
+    async def fake_get_slack_channel_context(
+        channel_id: str, *, use_cache: bool = True
+    ) -> dict[str, str | bool]:
         captured["checked_channel_id"] = channel_id
         return {
             "id": channel_id,
@@ -609,6 +607,8 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
             "topic": "",
             "purpose": "",
             "description": "",
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
         }
 
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
@@ -671,9 +671,13 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         "topic": "Coordinate work",
         "purpose": "repo:langchain-ai/open-swe",
         "description": "Coordinate work\nrepo:langchain-ai/open-swe",
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
     }
 
-    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
+    async def fake_get_slack_channel_context(
+        channel_id: str, *, use_cache: bool = True
+    ) -> dict[str, str | bool]:
         captured["channel_context_request"] = channel_id
         return channel_context
 
@@ -682,6 +686,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         thread_ts: str,
         slack_user_id: str | None = None,
         channel_context: dict[str, str] | None = None,
+        **kwargs: object,
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
             "channel_id": channel_id,
@@ -1100,7 +1105,7 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
 
     kwargs = cast(dict[str, object], captured["kwargs"])
     input_data = cast(dict[str, object], kwargs["input"])
-    prompt = cast(list[dict[str, str]], input_data["messages"])[0]["content"]
+    prompt = cast(list[dict[str, str]], input_data["messages"])[-1]["content"]
     config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
 
     assert captured["graph"] == "reviewer"
@@ -1109,8 +1114,8 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         "if_exists": "do_nothing",
     }
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
-    assert "Base SHA: base-sha" in prompt
-    assert "Head SHA: head-sha" in prompt
+    assert "<base_sha>base-sha</base_sha>" in prompt
+    assert "<head_sha>head-sha</head_sha>" in prompt
     assert config["source"] == "github"
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
@@ -1207,7 +1212,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
 
     kwargs = cast(dict[str, object], captured["kwargs"])
     input_data = cast(dict[str, object], kwargs["input"])
-    prompt = cast(list[dict[str, str]], input_data["messages"])[0]["content"]
+    prompt = cast(list[dict[str, str]], input_data["messages"])[-1]["content"]
     config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
     assert result["success"] is True
     assert auto_review_checked is False
@@ -1217,8 +1222,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "if_exists": "do_nothing",
     }
     assert captured["metadata_token"] == "app-token"
-    assert "Base SHA: base-sha" in prompt
-    assert "Head SHA: head-sha" in prompt
+    assert "<base_sha>base-sha</base_sha>" in prompt
+    assert "<head_sha>head-sha</head_sha>" in prompt
     assert config["source"] == "slack"
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
@@ -1446,7 +1451,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
 
     class _FakeRunsClient:
         async def create(self, *args, **kwargs) -> None:
-            captured["prompt"] = kwargs["input"]["messages"][0]["content"]
+            captured["messages"] = kwargs["input"]["messages"]
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
@@ -1497,9 +1502,13 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
         )
     )
 
-    assert captured["prompt"] == "**octocat:**\n@openswe please handle this"
-    prompt = cast(str, captured["prompt"])
-    assert "## Repository" not in prompt
+    messages = cast(list[dict[str, str]], captured["messages"])
+    assert len(messages) == 2
+    entity = ElementTree.fromstring(messages[0]["content"])
+    request = ElementTree.fromstring(messages[1]["content"])
+    assert entity.attrib["id"] == "github:octocat"
+    assert request.findtext("content") == "**octocat:**\n@openswe please handle this"
+    assert request.find("repository") is None
 
 
 def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:

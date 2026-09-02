@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import importlib
 import sys
@@ -226,7 +224,7 @@ async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
                 "title": "Open one",
                 "status": "open",
                 "severity": "high",
-                "github_review_comment_id": 999,
+                "github_review_comment_ids": [999],
             },
             {"id": "f2", "title": "Closed one", "status": "resolved", "severity": "low"},
         ]
@@ -238,7 +236,7 @@ async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
     finding = result["findings"][0]
     assert finding["id"] == "f1"
     # compact view drops GitHub plumbing fields
-    assert "github_review_comment_id" not in finding
+    assert "github_review_comment_ids" not in finding
 
 
 @pytest.mark.asyncio
@@ -315,10 +313,19 @@ async def test_read_repo_file_lists_directory(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_repo_file_missing_context(monkeypatch) -> None:
+async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
     monkeypatch.setattr(read_repo_file, "get_config", lambda: {"configurable": {}})
     result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is False
+
+    config = {"configurable": {"chat_repo_owner": "acme", "chat_repo_name": "repo"}}
+    for module, tool, args in (
+        (read_repo_file, read_repo_file.read_repo_file, ("src/app.py",)),
+        (search_repo_code, search_repo_code.search_repo_code, ("foo",)),
+    ):
+        monkeypatch.setattr(module, "get_config", lambda: config)
+        result = await tool(*args)
+        assert result["error"] == "GitHub credentials unavailable; repository source was not read"
 
 
 @pytest.mark.asyncio

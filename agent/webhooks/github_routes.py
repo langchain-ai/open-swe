@@ -53,6 +53,10 @@ async def github_webhook(
             }
         if action in common._GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
+            try:
+                await common.update_agent_pr_usage_from_webhook(payload)
+            except Exception:  # noqa: BLE001
+                common.logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action in common._GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
@@ -68,6 +72,8 @@ async def github_webhook(
             common.logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
             background_tasks.add_task(service.process_github_pr_ready, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for auto-review"}
+        if action in common._GH_PR_AGENT_STATE_ACTIONS:
+            return {"status": "accepted", "message": f"Processing PR {action} state"}
         common.logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
         return {
             "status": "ignored",
@@ -89,6 +95,16 @@ async def github_webhook(
         )
         return {"status": "ignored", "reason": "Repository not in allowlist"}
 
+    if event_type in common._GITHUB_CI_EVENTS:
+        delivery_id = request.headers.get("X-GitHub-Delivery")
+        background_tasks.add_task(
+            service.process_github_ci_event,
+            payload,
+            event_type,
+            delivery_id,
+        )
+        return {"status": "accepted", "message": "Processing GitHub CI event"}
+
     if is_issue_event:
         action = payload.get("action", "")
         if action not in common._SUPPORTED_GH_ISSUE_ACTIONS:
@@ -100,10 +116,11 @@ async def github_webhook(
                 common.logger.info("Ignoring GitHub issue edit without title/body changes")
                 return {"status": "ignored", "reason": "Issue edit did not change title or body"}
 
-        issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}".lower()
-        if not any(tag in issue_text for tag in common.OPEN_SWE_TAGS):
-            common.logger.info("Ignoring issue that does not mention @openswe or @open-swe")
-            return {"status": "ignored", "reason": "Issue does not mention @openswe or @open-swe"}
+        issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
+        if not common.mentions_open_swe(issue_text):
+            tags = common.describe_open_swe_tags()
+            common.logger.info("Ignoring issue that does not mention %s", tags)
+            return {"status": "ignored", "reason": f"Issue does not mention {tags}"}
 
         gate_rejection = await common._enforce_public_repo_org_gate(payload, event_type)
         if gate_rejection is not None:
@@ -135,13 +152,15 @@ async def github_webhook(
         background_tasks.add_task(service.process_github_review_finding_reply, payload)
         return {"status": "accepted", "message": "Processing review finding reply"}
 
-    if not any(tag in comment_body.lower() for tag in common.OPEN_SWE_TAGS):
+    if not common.mentions_open_swe(comment_body):
+        tags = common.describe_open_swe_tags()
         common.logger.debug(
-            "Ignoring GitHub %s%s that does not mention @openswe or @open-swe",
+            "Ignoring GitHub %s%s that does not mention %s",
             event_type,
             f" action={action}" if action else "",
+            tags,
         )
-        return {"status": "ignored", "reason": "Comment does not mention @openswe or @open-swe"}
+        return {"status": "ignored", "reason": f"Comment does not mention {tags}"}
 
     gate_rejection = await common._enforce_public_repo_org_gate(payload, event_type)
     if gate_rejection is not None:

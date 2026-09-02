@@ -1,13 +1,27 @@
-from __future__ import annotations
-
+import base64
+import hashlib
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import jwt
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent.dashboard import routes
-from agent.dashboard.oauth import COOKIE_NAME, sanitize_redirect_to
+from agent.dashboard.oauth import COOKIE_NAME, decode_session, sanitize_redirect_to
+
+
+@pytest.fixture(autouse=True)
+def _stub_upsert_mapping(monkeypatch) -> None:
+    async def fake_get_mapping(login: str) -> dict[str, Any] | None:
+        return None
+
+    async def fake_upsert_mapping(**kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    monkeypatch.setattr(routes, "get_mapping", fake_get_mapping)
+    monkeypatch.setattr(routes, "upsert_mapping", fake_upsert_mapping)
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:
@@ -59,6 +73,26 @@ def test_sanitize_redirect_to_rejects_unsafe_targets(monkeypatch) -> None:
         assert sanitize_redirect_to(target) == "https://dashboard.example"
 
 
+def test_desktop_login_uses_the_requested_backend_callback(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "client-id")
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="http://backend.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop": "true"},
+            headers={"x-forwarded-proto": "https"},
+            follow_redirects=False,
+        )
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == ["https://backend.example/dashboard/api/auth/callback"]
+
+
 def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "http://testserver")
@@ -86,16 +120,6 @@ def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
         login: str, email: str, data: dict[str, Any]
     ) -> None:
         persisted.update({"login": login, "email": email, "data": data})
-
-    async def fake_upsert_mapping(
-        *,
-        github_login: str,
-        work_email: str,
-        slack_user_id: str | None = None,
-        source: str = "github_oauth",
-        status: str = "active",
-    ) -> dict[str, Any]:
-        return {"github_login": github_login, "work_email": work_email}
 
     monkeypatch.setattr(routes, "exchange_code", fake_exchange_code)
     monkeypatch.setattr(routes, "fetch_github_user", fake_fetch_github_user)
@@ -184,3 +208,190 @@ def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:
         assert callback_response.status_code == 302
         assert callback_response.headers["location"] == f"http://localhost:3000{target}"
         assert not callback_response.headers["location"].startswith("http://localhost:2024")
+
+
+def _desktop_login_env(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "client-id")
+
+    async def fake_exchange_code(code: str) -> dict[str, Any]:
+        return {"access_token": "gho_test"}
+
+    async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
+        return {"login": "alice", "avatar_url": None}, "alice@example.com"
+
+    async def fake_enforce_org_login_gate(login: str) -> None:
+        pass
+
+    async def fake_upsert_access_token_from_github_response(
+        login: str, email: str, data: dict[str, Any]
+    ) -> None:
+        pass
+
+    monkeypatch.setattr(routes, "exchange_code", fake_exchange_code)
+    monkeypatch.setattr(routes, "fetch_github_user", fake_fetch_github_user)
+    monkeypatch.setattr(routes, "enforce_org_login_gate", fake_enforce_org_login_gate)
+    monkeypatch.setattr(
+        routes,
+        "upsert_access_token_from_github_response",
+        fake_upsert_access_token_from_github_response,
+    )
+
+
+def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+    verifier = "desktop-verifier"
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    )
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as login_client:
+        login_response = login_client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": challenge, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        authorize = parse_qs(urlparse(login_response.headers["location"]).query)
+        assert authorize["redirect_uri"] == [
+            "https://dashboard.example/dashboard/api/auth/callback"
+        ]
+        state = authorize["state"][0]
+
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        callback_response = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+        assert callback_response.status_code == 302
+        location = urlparse(callback_response.headers["location"])
+        assert (location.scheme, location.netloc, location.path) == (
+            "http",
+            "127.0.0.1:51234",
+            "/callback",
+        )
+        # The browser is only a courier here — it must not keep a session.
+        assert not callback_response.cookies.get(COOKIE_NAME)
+
+        handoff = parse_qs(location.query)["code"][0]
+        exchange = client.post(
+            "/dashboard/api/auth/desktop/exchange",
+            json={"code": handoff, "verifier": verifier},
+            headers={"origin": "open-swe://app"},
+        )
+        assert exchange.status_code == 200
+        assert decode_session(exchange.json()["session"])["sub"] == "alice"
+
+        forged = client.post(
+            "/dashboard/api/auth/desktop/exchange",
+            json={"code": handoff, "verifier": "wrong-verifier"},
+            headers={"origin": "open-swe://app"},
+        )
+        assert forged.status_code == 400
+
+
+def test_desktop_login_rejects_a_malformed_handoff_challenge(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": "../evil", "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+
+        out_of_range = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": "a" * 43, "desktop_port": 80},
+            follow_redirects=False,
+        )
+        assert out_of_range.status_code == 422
+
+
+def test_desktop_handoff_code_carries_no_session(monkeypatch) -> None:
+    """The handoff code rides in a URL the browser records and extensions can read.
+
+    A JWT is signed, not encrypted, so anything in its payload is readable
+    without the verifier — a session in there would make the PKCE check moot.
+    """
+    _desktop_login_env(monkeypatch)
+    verifier = "desktop-verifier"
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    )
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        login_response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": challenge, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+        callback_response = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+        location = urlparse(callback_response.headers["location"])
+        handoff = parse_qs(location.query)["code"][0]
+
+    payload = jwt.decode(handoff, "test-secret", algorithms=["HS256"])
+    assert "session" not in payload
+    assert not any(
+        isinstance(v, str) and v.count(".") == 2 and len(v) > 60 for v in payload.values()
+    ), f"handoff payload looks like it embeds a token: {payload}"
+    assert payload["sub"] == "alice"
+
+
+def test_desktop_login_callback_follows_the_configured_api_origin(monkeypatch) -> None:
+    """`redirect_uri` comes from DASHBOARD_API_BASE_URL, not the request host.
+
+    Driven from a host that differs from the configured one so the two cannot
+    be confused; the companion test below covers what that costs when a
+    deployment sets the variable to an origin the browser never visits.
+    """
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": "a" * 43, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == ["https://dashboard.example/dashboard/api/auth/callback"]
+
+
+def test_web_auth_callback_rejects_missing_state_cookie(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as login_client:
+        login_response = login_client.get(
+            "/dashboard/api/auth/login",
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+
+    with TestClient(app, base_url="https://dashboard.example") as callback_client:
+        callback_response = callback_client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+
+    assert callback_response.status_code == 400
+    assert "oauth state mismatch" in callback_response.json()["detail"]

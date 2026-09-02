@@ -1,10 +1,9 @@
 """Run-completion webhook handler — guarantees every run ends with a signal.
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
-as the ``webhook`` on every dispatched run, see ``agent.dispatch``). When a run
-ends in a failure state (``error`` / ``timeout``) we post a
-short failure reply to the originating channel, so a run that died on a server
-recycle or hit a limit never leaves the user in silence.
+as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
+Slack runs enqueue deferred session-cost enrichment; failures (``error`` /
+``timeout``) post a short reply so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -12,20 +11,24 @@ manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
 """
 
-from __future__ import annotations
-
 import hmac
 import logging
 import os
 from typing import Any
 
+from langgraph_sdk.client import LangGraphClient
+
+from agent.auth.github_app import get_github_app_installation_token
+from agent.source_context import SourceContext
+
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
+from .session_cost import schedule_session_cost_refresh
 from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
 from .utils.slack import post_slack_thread_reply
+from .utils.slack_code_channels import is_code_channel_session, set_session_status
 from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
 
@@ -40,6 +43,9 @@ _FAILURE_REPLY_FLAG = "failure_reply_posted"
 _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
 _MAX_FAILURE_REPLY_RUN_IDS = 20
+_SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
+_SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
+_MAX_SESSION_COST_REFRESH_RUN_IDS = 20
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
@@ -133,35 +139,28 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
 async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: str) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
-    ctx = metadata.get("source_context")
-    ctx = ctx if isinstance(ctx, dict) else {}
+    ctx = SourceContext.from_metadata(metadata)
     text = _failure_text(status)
 
-    slack_thread = ctx.get("slack_thread")
-    if source == "slack" or isinstance(slack_thread, dict):
-        if isinstance(slack_thread, dict):
-            channel_id = slack_thread.get("channel_id")
-            thread_ts = slack_thread.get("thread_ts")
-            if channel_id and thread_ts:
-                slack_text = _failure_text(status, dashboard_thread_url(thread_id))
-                return await post_slack_thread_reply(channel_id, thread_ts, slack_text)
+    if source == "slack" or ctx.slack_thread is not None:
+        location = ctx.slack_location
+        if location is not None:
+            slack_text = _failure_text(status, dashboard_thread_url(thread_id))
+            return await post_slack_thread_reply(
+                location[0], location[1], slack_text, agent_thread_id=thread_id
+            )
         return False
 
     if source == "linear":
-        linear_issue = ctx.get("linear_issue")
-        if isinstance(linear_issue, dict):
-            issue_id = linear_issue.get("id")
-            if issue_id:
-                return await comment_on_linear_issue(issue_id, text)
+        if ctx.linear_issue and ctx.linear_issue.id:
+            return await comment_on_linear_issue(ctx.linear_issue.id, text)
         return False
 
     if source in ("github", "github_issue"):
         repo_config = metadata.get("repo")
-        number = ctx.get("pr_number")
-        if number is None:
-            github_issue = ctx.get("github_issue")
-            if isinstance(github_issue, dict):
-                number = github_issue.get("number")
+        number = ctx.pr_number
+        if number is None and ctx.github_issue is not None:
+            number = ctx.github_issue.number
         if isinstance(repo_config, dict) and isinstance(number, int):
             token = await get_github_app_installation_token()
             if token:
@@ -192,11 +191,107 @@ def _failure_reply_metadata(metadata: dict[str, Any], run_id: str | None) -> dic
     }
 
 
+def _scheduled_cost_run_ids(metadata: dict[str, Any]) -> list[str]:
+    raw = metadata.get(_SESSION_COST_REFRESH_RUN_IDS)
+    ids = [item for item in raw if isinstance(item, str) and item] if isinstance(raw, list) else []
+    latest = metadata.get(_SESSION_COST_REFRESH_RUN_ID)
+    if isinstance(latest, str) and latest and latest not in ids:
+        ids.append(latest)
+    return ids
+
+
+def _cost_refresh_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, Any]:
+    ids = [item for item in _scheduled_cost_run_ids(metadata) if item != run_id]
+    ids.append(run_id)
+    return {
+        _SESSION_COST_REFRESH_RUN_ID: run_id,
+        _SESSION_COST_REFRESH_RUN_IDS: ids[-_MAX_SESSION_COST_REFRESH_RUN_IDS:],
+    }
+
+
+def _prepare_run_id(payload: dict[str, Any]) -> str | None:
+    metadata = payload.get("metadata")
+    value = metadata.get("prepare_run_id") if isinstance(metadata, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+async def _settle_code_channel_session(
+    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
+) -> None:
+    """Return a code channel session to ``active`` once its work stops.
+
+    A later message can already have started another run, so a completion that
+    arrives out of order must not clear the loading UI that run is relying on.
+    """
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None or not is_code_channel_session(slack_thread.thread_ts):
+        return
+    try:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return
+    except Exception:  # noqa: BLE001
+        logger.debug("run-complete: could not list runs for %s", thread_id, exc_info=True)
+    await set_session_status(slack_thread.channel_id, "active")
+
+
+async def _schedule_success_cost_refresh(
+    thread_id: str, run_id: str | None, payload: dict[str, Any]
+) -> dict[str, str]:
+    if run_id is None:
+        return {"status": "ignored", "reason": "missing run_id"}
+
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("run-complete: could not load thread %s", thread_id, exc_info=True)
+        return {"status": "error", "reason": "thread fetch failed"}
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+        return {"status": "ignored", "reason": "not an agent Slack run"}
+    await _settle_code_channel_session(client, thread_id, metadata)
+    prepare_run_id = _prepare_run_id(payload)
+    if prepare_run_id is None:
+        return {"status": "ignored", "reason": "missing prepare_run_id"}
+    if run_id in _scheduled_cost_run_ids(metadata):
+        return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
+
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None or not slack_thread.channel_id:
+        return {"status": "ignored", "reason": "no Slack channel"}
+    if not slack_thread.thread_ts:
+        return {"status": "ignored", "reason": "no Slack thread"}
+    channel_id = slack_thread.channel_id
+    thread_ts = slack_thread.thread_ts
+
+    scheduled = await schedule_session_cost_refresh(
+        {
+            "agent_thread_id": thread_id,
+            "run_id": run_id,
+            "prepare_run_id": prepare_run_id,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+        },
+        client=client,
+    )
+    if not scheduled:
+        return {"status": "error", "reason": "cost refresh scheduling failed"}
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata=_cost_refresh_metadata(metadata, run_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+    return {"status": "ok", "reason": "cost refresh scheduled"}
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Posts a failure reply only when the run ended in a failure state and we
-    haven't already replied for this thread.
+    Enqueues successful Slack cost refreshes and posts failure replies idempotently.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
@@ -204,6 +299,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    if status == "success":
+        return await _schedule_success_cost_refresh(thread_id, run_id, payload)
+    payload_metadata = payload.get("metadata")
+    if (
+        status in _TERMINAL_FAILURE_STATUSES
+        and isinstance(payload_metadata, dict)
+        and payload_metadata.get("kind") == "thread_wakeup"
+    ):
+        return {"status": "ignored", "reason": "automated wakeup failure"}
     if status not in _TERMINAL_FAILURE_STATUSES:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
 
@@ -217,6 +321,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     await _settle_failed_reviewer_check(thread_id, metadata)
+    await _settle_code_channel_session(client, thread_id, metadata)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

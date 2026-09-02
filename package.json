@@ -1,7 +1,27 @@
 {
   "name": "open-swe",
   "private": true,
+  "packageManager": "pnpm@11.18.0",
   "scripts": {
-    "dev:mock": "bash tests/e2e/dev-mock.sh"
+    "dev": "turbo run dev --filter=open-swe-dashboard",
+    "dev:desktop": "pnpm --dir desktop run dev",
+    "dev:mock": "bash tests/e2e/dev-mock.sh",
+    "build": "turbo run build",
+    "check": "turbo run check",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint",
+    "test": "turbo run test",
+    "test:e2e": "pnpm --filter open-swe-e2e run test",
+    "test:e2e:desktop": "pnpm --filter open-swe-e2e run test:desktop",
+    "test:e2e:install": "pnpm --filter open-swe-e2e exec playwright install --with-deps chromium",
+    "typecheck": "turbo run typecheck",
+    "format": "oxfmt"
+  },
+  "devDependencies": {
+    "@tanstack/eslint-plugin-query": "^5.102.0",
+    "@tanstack/eslint-plugin-router": "^1.162.0",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
+    "turbo": "^2.10.9"
   }
 }

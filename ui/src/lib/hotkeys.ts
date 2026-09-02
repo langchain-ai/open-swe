@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react"
 
+import { useIsHydrated } from "@/lib/hydration"
+
 export interface HotkeyOptions {
   enabled?: boolean
   preventDefault?: boolean
@@ -16,12 +18,15 @@ interface ParsedCombo {
   shift: boolean
 }
 
-function isMac(): boolean {
-  if (typeof navigator === "undefined") return false
+export type ShortcutPlatform = "mac" | "other"
+
+export function shortcutPlatform(): ShortcutPlatform {
+  if (typeof navigator === "undefined") return "other"
   return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent)
+    ? "mac"
+    : "other"
 }
 
-/** Parse a combo string like "mod+b" or "shift+escape" into its parts. */
 function parseCombo(combo: string): ParsedCombo {
   const parsed: ParsedCombo = {
     key: "",
@@ -34,7 +39,7 @@ function parseCombo(combo: string): ParsedCombo {
   for (const part of combo
     .toLowerCase()
     .split("+")
-    .map((p) => p.trim())) {
+    .map((value) => value.trim())) {
     switch (part) {
       case "":
         break
@@ -64,26 +69,100 @@ function parseCombo(combo: string): ParsedCombo {
   return parsed
 }
 
-function eventMatchesCombo(event: KeyboardEvent, combo: ParsedCombo): boolean {
+export function eventMatchesShortcut(
+  event: KeyboardEvent,
+  shortcut: string,
+  platform = shortcutPlatform()
+): boolean {
+  const combo = parseCombo(shortcut)
   if (event.key.toLowerCase() !== combo.key) return false
-  const mac = isMac()
-  const expectMeta = combo.meta || (combo.mod && mac)
-  const expectCtrl = combo.ctrl || (combo.mod && !mac)
+  const expectMeta = combo.meta || (combo.mod && platform === "mac")
+  const expectCtrl = combo.ctrl || (combo.mod && platform !== "mac")
+  const bareQuestionMark =
+    combo.key === "?" &&
+    !combo.mod &&
+    !combo.meta &&
+    !combo.ctrl &&
+    !combo.alt &&
+    !combo.shift
   return (
     event.metaKey === expectMeta &&
     event.ctrlKey === expectCtrl &&
     event.altKey === combo.alt &&
-    event.shiftKey === combo.shift
+    (event.shiftKey === combo.shift || bareQuestionMark)
   )
 }
 
-function isFormField(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
+function shortcutKeyLabel(key: string): string {
+  const labels: Record<string, string> = {
+    escape: "Esc",
+    enter: "Enter",
+    space: "Space",
+    tab: "Tab",
+  }
+  return labels[key] ?? (key.length === 1 ? key.toUpperCase() : key)
+}
+
+export function formatShortcut(
+  shortcut: string,
+  platform = shortcutPlatform()
+): string {
+  const combo = parseCombo(shortcut)
+  if (combo.key === "?" && combo.shift) return "?"
+
+  if (platform === "mac") {
+    const modifiers = [
+      combo.mod || combo.meta ? "⌘" : "",
+      combo.ctrl ? "⌃" : "",
+      combo.alt ? "⌥" : "",
+      combo.shift ? "⇧" : "",
+    ].join("")
+    return `${modifiers}${shortcutKeyLabel(combo.key)}`
+  }
+
+  const modifiers = [
+    combo.mod || combo.ctrl ? "Ctrl" : "",
+    combo.meta ? "Meta" : "",
+    combo.alt ? "Alt" : "",
+    combo.shift ? "Shift" : "",
+  ].filter(Boolean)
+  return [...modifiers, shortcutKeyLabel(combo.key)].join(" ")
+}
+
+export function useShortcutLabel(shortcut: string): string {
+  const hydrated = useIsHydrated()
+  return hydrated ? formatShortcut(shortcut) : formatShortcut(shortcut, "other")
+}
+
+function closestElement(target: EventTarget | null): Element | null {
+  if (typeof Element === "undefined" || !(target instanceof Element))
+    return null
+  return target
+}
+
+export function isTypingContext(target: EventTarget | null): boolean {
+  return Boolean(
+    closestElement(target)?.closest(
+      'input, textarea, select, iframe, [role="textbox"], [role="searchbox"], [contenteditable]:not([contenteditable="false"])'
+    )
+  )
+}
+
+export function isHotkeySuppressed(target: EventTarget | null): boolean {
+  return Boolean(closestElement(target)?.closest('[data-hotkeys="ignore"]'))
+}
+
+export function shouldIgnoreHotkey(
+  event: KeyboardEvent,
+  enableInFormFields = false,
+  ignoreRepeat = true
+): boolean {
   return (
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT" ||
-    target.isContentEditable
+    event.defaultPrevented ||
+    event.isComposing ||
+    (ignoreRepeat && event.repeat) ||
+    isHotkeySuppressed(event.target) ||
+    (!enableInFormFields && isTypingContext(event.target))
   )
 }
 
@@ -100,20 +179,21 @@ export function useHotkey(
     enabled = true,
     preventDefault = true,
     enableInFormFields = false,
-    ignoreRepeat = false,
+    ignoreRepeat = true,
   } = options
   const handlerRef = useRef(handler)
-  handlerRef.current = handler
+  useEffect(() => {
+    handlerRef.current = handler
+  }, [handler])
 
-  const comboKey = Array.isArray(combo) ? combo.join(",") : combo
+  const comboKey = Array.isArray(combo) ? combo.join("\u0000") : combo
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return
-    const combos = comboKey.split(",").map(parseCombo)
+    const combos = comboKey.split("\u0000")
     const onKeyDown = (event: KeyboardEvent) => {
-      if (ignoreRepeat && event.repeat) return
-      if (!enableInFormFields && isFormField(event.target)) return
-      if (!combos.some((c) => eventMatchesCombo(event, c))) return
+      if (shouldIgnoreHotkey(event, enableInFormFields, ignoreRepeat)) return
+      if (!combos.some((value) => eventMatchesShortcut(event, value))) return
       if (preventDefault) event.preventDefault()
       handlerRef.current(event)
     }

@@ -1,17 +1,20 @@
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config
 
+from agent.auth.thread_token import get_github_token
+
 from ..review.findings import (
     Finding,
     ReviewerThreadMissingError,
+    comment_ids_for_finding,
     get_finding,
     get_thread_id_from_runtime,
+    posted_resolution_comment_ids_for_finding,
+    resolved_thread_ids_for_finding,
+    thread_ids_for_finding,
     thread_missing_tool_result,
     update_finding_fields,
-    update_finding_surface,
 )
 from ..review.publish import (
     fetch_pr_review_threads,
@@ -21,7 +24,6 @@ from ..review.publish import (
     resolve_review_thread,
 )
 from ..review.reconcile import reconcile_findings_with_review_threads
-from ..utils.github_token import get_github_token
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
@@ -82,7 +84,7 @@ async def resolve_finding_thread(
         return thread_missing_tool_result(exc)
     if result.get("success") and isinstance(result.get("finding"), dict):
         thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
-        emit_finding_status_outcome(
+        await emit_finding_status_outcome(
             result["finding"],
             status,
             configurable=configurable,
@@ -113,8 +115,8 @@ async def _resolve_finding_thread_async(
     if finding is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
 
-    github_thread_ids = _thread_ids_for_finding(finding)
-    for comment_id in _comment_ids_for_finding(finding):
+    github_thread_ids = thread_ids_for_finding(finding)
+    for comment_id in comment_ids_for_finding(finding):
         thread_node_id = await fetch_review_thread_id_for_comment(
             owner=owner,
             repo=repo,
@@ -127,9 +129,9 @@ async def _resolve_finding_thread_async(
     if not github_thread_ids:
         return {"success": False, "error": "Could not resolve GitHub review thread id"}
 
-    resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))
-    posted_resolution_comment_ids = _int_list(finding.get("github_posted_resolution_comment_ids"))
-    comment_ids = _comment_ids_for_finding(finding)
+    resolved_thread_ids = resolved_thread_ids_for_finding(finding)
+    posted_resolution_comment_ids = posted_resolution_comment_ids_for_finding(finding)
+    comment_ids = comment_ids_for_finding(finding)
     resolution_body = render_resolution_comment(finding, status, note=note)
     if resolution_body is None:
         return {"success": False, "error": "Missing resolution note"}
@@ -159,29 +161,20 @@ async def _resolve_finding_thread_async(
     ):
         return {"success": False, "error": "GitHub did not resolve the review thread"}
 
+    fully_resolved = all(
+        github_thread_id in resolved_thread_ids for github_thread_id in github_thread_ids
+    )
     updates: dict[str, Any] = {
         "status": status,
-        "github_review_thread_id": github_thread_ids[0],
         "github_review_thread_ids": github_thread_ids,
         "github_resolved_thread_ids": resolved_thread_ids,
-        "github_thread_resolved": all(
-            github_thread_id in resolved_thread_ids for github_thread_id in github_thread_ids
-        ),
+        "surface_state": "resolved" if fully_resolved else "resolve_pending",
+        "last_reconciliation_note": note,
+        "resolution_note": note,
     }
-    updates["last_reconciliation_note"] = note
-    updates["resolution_note"] = note
     if posted_resolution_comment_ids:
         updates["github_posted_resolution_comment_ids"] = posted_resolution_comment_ids
     updated = await update_finding_fields(thread_id, finding_id, updates)
-    surface_updates: dict[str, Any] = {
-        "state": "resolved" if updates["github_thread_resolved"] else "resolve_pending",
-        "github_review_thread_id": github_thread_ids[0],
-        "last_error": None
-        if updates["github_thread_resolved"]
-        else "Not all GitHub threads resolved",
-    }
-    await update_finding_surface(thread_id, finding_id, surface_updates)
-    updated = await get_finding(thread_id, finding_id)
     return {"success": True, "finding": updated, "resolved_thread_count": resolved_count}
 
 
@@ -197,7 +190,7 @@ async def _get_finding_with_pr_backfill(
     finding = await get_finding(thread_id, finding_id)
     if finding is None:
         return None
-    if _thread_ids_for_finding(finding) or _comment_ids_for_finding(finding):
+    if thread_ids_for_finding(finding) or comment_ids_for_finding(finding):
         return finding
 
     review_threads = await fetch_pr_review_threads(
@@ -210,31 +203,3 @@ async def _get_finding_with_pr_backfill(
         await reconcile_findings_with_review_threads(thread_id, review_threads)
         finding = await get_finding(thread_id, finding_id)
     return finding
-
-
-def _int_list(value: Any) -> list[int]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, int)]
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str) and item]
-
-
-def _comment_ids_for_finding(finding: Finding) -> list[int]:
-    comment_ids = _int_list(finding.get("github_review_comment_ids"))
-    comment_id = finding.get("github_review_comment_id")
-    if isinstance(comment_id, int) and comment_id not in comment_ids:
-        comment_ids.insert(0, comment_id)
-    return comment_ids
-
-
-def _thread_ids_for_finding(finding: Finding) -> list[str]:
-    thread_ids = _str_list(finding.get("github_review_thread_ids"))
-    thread_id = finding.get("github_review_thread_id")
-    if isinstance(thread_id, str) and thread_id and thread_id not in thread_ids:
-        thread_ids.insert(0, thread_id)
-    return thread_ids

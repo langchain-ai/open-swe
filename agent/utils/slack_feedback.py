@@ -1,8 +1,5 @@
 """Slack reaction feedback handling."""
 
-from __future__ import annotations
-
-import asyncio
 import logging
 import os
 from collections.abc import Mapping
@@ -193,10 +190,9 @@ async def process_slack_reaction(
     }
     score = _score_reactions(active_reactions)
     if score is None:
-        success = await asyncio.to_thread(delete_langsmith_feedback, run_id, key)
+        success = await delete_langsmith_feedback(run_id, key)
     else:
-        success = await asyncio.to_thread(
-            create_langsmith_feedback,
+        success = await create_langsmith_feedback(
             run_id,
             key,
             score=score,
@@ -207,8 +203,7 @@ async def process_slack_reaction(
     outcome = _outcome_from_score(score, source="slack")
     if outcome is not None:
         label, label_source = outcome
-        await asyncio.to_thread(
-            upsert_run_outcome,
+        await upsert_run_outcome(
             label=label,
             label_source=label_source,
             run_id=run_id,

@@ -60,11 +60,11 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 
 1. Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → [New GitHub App](https://github.com/settings/apps/new)**
 2. Fill in:
-   - **App name**: `open-swe` (or your preferred name)
+   - **App name**: `Open SWE` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
    - **Callback URL**: GitHub Apps allow multiple callback URLs (one per line). Add **both**:
      1. `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`). This is the **agent-runtime** OAuth callback, brokered by LangSmith (step 4b).
-     2. `http://localhost:2024/dashboard/api/auth/callback` — the **dashboard-login** OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. This is a separate, direct GitHub OAuth flow (not via LangSmith), so it needs its own callback URL.
+     2. `http://localhost:2024/dashboard/api/auth/callback` — the **dashboard-login** OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. If you distribute the desktop app, add `https://<your-backend-url>/dashboard/api/auth/callback` as well. This is a separate, direct GitHub OAuth flow (not via LangSmith), so it needs its own callback URL.
    - **Request user authorization (OAuth) during installation**: ✅ Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` — use the ngrok URL from step 2
    - **Webhook secret**: generate one and save it — you'll need it later as `GITHUB_WEBHOOK_SECRET`:
@@ -76,20 +76,20 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Contents: Read & write
      - Pull requests: Read & write
      - Issues: Read & write
-     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs, and reads third-party CI conclusions for the auto-fix flow (it watches failing checks on agent-authored PRs and pushes fixes). Without it, check-run creation fails (logged, best-effort) but reviews still work, and CI auto-fix is disabled.
-     - Commit statuses: Read-only — only needed if you enable the `Status` event below; the CI auto-fix flow reads the legacy combined commit-status API for integrations that report via statuses instead of check runs. Without it, status-based CI is silently ignored (logged as "Failed to read combined status").
-     - Actions: Read-only — optional; lets Open SWE's sandbox proxy tokens download GitHub Actions workflow/job logs when troubleshooting CI failures. Do **not** grant Actions write for log access: write permission also allows rerunning, canceling, and deleting workflow runs, which is unnecessary for diagnostics.
+     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs and lets `/baby-sit` read third-party CI conclusions. Without it, check-run creation fails (logged, best-effort), reviews still work, and `/baby-sit` fails closed when it cannot read the complete check set.
+     - Commit statuses: Read-only — required for `/baby-sit` to evaluate the complete PR status set, including integrations that report via legacy commit statuses instead of check runs.
+     - Actions: Read-only — optional for CI diagnostics and log access. Grant **Read & write** only to enable `/baby-sit` to rerun evidence-backed flaky GitHub Actions jobs. Existing installations must approve this permission elevation. Actions write also permits rerunning, canceling, and deleting workflow runs at the token level; `/baby-sit` is instructed to use only failed-job reruns.
      - Workflows: Read & write — required to let Open SWE directly push branches containing explicitly requested GitHub Actions workflow changes.
      - Metadata: Read-only
    - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
-     - Members: Read-only — used to verify org membership for the dashboard-login gate via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403, the check fails closed, and **every** dashboard login is rejected.
+     - Members: Read-only — used to verify org membership for dashboard login and LangSmith trace-tool access via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403 and the check fails closed.
 4. Under **Subscribe to events**, enable:
    - `Issue comment`
    - `Pull request review`
    - `Pull request review comment`
-   - `Check run` — required for CI auto-fix (watching failing GitHub Actions checks on agent PRs)
-   - `Check suite` — required for CI auto-fix
-   - `Workflow run` — required for CI auto-fix
+   - `Check run` — required for immediate `/baby-sit` failure detection
+   - `Check suite` — required for immediate `/baby-sit` failure detection
+   - `Workflow run` — required for immediate `/baby-sit` failure detection
    - `Status` — optional; covers integrations that report via the legacy commit-status API
 5. Click **Create GitHub App**
 
@@ -159,28 +159,9 @@ To set up per-user OAuth:
 
 LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-(Optional) Build and Push a custom Docker Image to Docker hub
-First build and push the sandbox Docker image to a registry LangSmith can pull from. The sandbox image is `Dockerfile.sandbox` — pass `-f Dockerfile.sandbox`, because the root `Dockerfile` builds the API server image instead and produces snapshots without `git`, `gh`, `sfw`, the Docker CLI, or the language runtimes agent runs need. On Apple Silicon, force `linux/amd64`
+The image must carry the toolchain agent runs expect — `git`, `gh`, `sfw`, the Docker CLI, and the language runtimes — and must be in a registry LangSmith can pull from. Run `sfw --version` while building the image to populate its binary cache, and set `SFW_SKIP_UPDATE_CHECK=1` at runtime so the sandbox proxy does not block its update request.
 
-```bash
-docker buildx build \
-  -f Dockerfile.sandbox \
-  --platform linux/amd64 \
-  -t <your-docker-hub>/<name-of-your-image> \
-  --push .
-```
-
-For a multi-arch tag that also runs locally on Apple Silicon:
-
-```bash
-docker buildx build \
-  -f Dockerfile.sandbox \
-  --platform linux/amd64,linux/arm64 \
-  -t <your-docker-hub>/<name-of-your-image> \
-  --push .
-```
-
-Then build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
+Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
 ```python
 from langsmith.sandbox import SandboxClient
@@ -188,7 +169,7 @@ from langsmith.sandbox import SandboxClient
 client = SandboxClient(api_key="<your key>")
 snapshot = client.create_snapshot(
     name="open-swe",
-    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",  # built from ./Dockerfile.sandbox
+    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",
     fs_capacity_bytes=128 * 1024**3,
 )
 print(snapshot.id)
@@ -216,13 +197,47 @@ DEFAULT_SANDBOX_MEM_BYTES="17179869184"
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
 # Optional; delete a stopped sandbox after this many seconds. Default is 2592000 (30 days). 0 disables.
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"
-# Optional; required only for the admin Repository Snapshots page/template generator.
-REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
 
-`DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing. The snapshot should include the GitHub CLI from `Dockerfile.sandbox`; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot must include the GitHub CLI; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
 
-`REPO_SNAPSHOT_BASE_IMAGE` should point at the same published Open SWE sandbox image you used to create the default snapshot (for example, the image built from `./Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the `FROM` line when generating per-repo Dockerfile templates. If it is not set, template generation is intentionally disabled so admins do not accidentally build repo-scoped snapshots from a bare image that lacks Open SWE's required tools (`git`, `gh`, `sfw`, language runtimes, and proxy assumptions).
+### Environments
+
+An **environment** pairs a prompt with a snapshot every run boots from, and can span several repos. Admins build one from an **admin thread** (the **Admin** toggle in the composer, available when their login or email is in `CONFIGURED_ADMINS`): the agent provisions its own sandbox — cloning repos, installing toolchains, warming caches — and then captures it. The environment named `default` is the one runs use; any other name is a draft. Records are managed on the admin **Environments** page.
+
+With more than one environment configured, a picker appears in the dashboard composer (any signed-in user, names only), and a Slack thread can pick one with an `env:<name>` tag on the message that opens it — `@Open SWE env:staging fix the flaky test`. Only the opening message can: the sandbox is created once, so a later tag would change the prompt but not the image. A run with no selection uses `default`.
+
+Captures are named `openswe-environment-<name>` (the platform appends its own `:latest` tag, and rejects a name that carries one); set `ENVIRONMENT_SNAPSHOT_PREFIX` to replace the `openswe` prefix when several deployments share one LangSmith workspace. Snapshot resolution for a new sandbox is: the run's environment, then the base snapshot below.
+
+### Changing the base snapshot without a redeploy
+
+Admins can override `DEFAULT_SANDBOX_SNAPSHOT_ID` at runtime from the **Sandbox** page (**Base snapshot** field). The stored value wins; clearing it falls back to the env var. An environment with a ready snapshot still takes precedence.
+
+The same setting is available over the API, which is how the repo that builds your sandbox image can roll a new snapshot out on its own:
+
+```bash
+curl -X PUT "$OPEN_SWE_BASE_URL/dashboard/api/sandbox-settings" \
+  -H "Authorization: Bearer $ADMIN_GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"base_snapshot_id": "<snapshot-uuid>"}'
+```
+
+Admin-gated sandbox-settings requests accept two CI credentials in place of the browser session cookie, both as `Authorization: Bearer`:
+
+**GitHub Actions OIDC (preferred — no stored secret).** A workflow with `permissions: id-token: write` mints a short-lived token that GitHub signs and scopes to the repo, ref, and audience it requested. Allowlist it on the deployment:
+
+```bash
+ADMIN_OIDC_SUBJECTS="acme/sandbox-images"                       # any workflow/ref in this repo
+# or pin the ref with a full subject:
+# ADMIN_OIDC_SUBJECTS="repo:acme/sandbox-images:ref:refs/heads/main"
+ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this is the default
+```
+
+`ADMIN_OIDC_SUBJECTS` is the on/off switch — while it is empty, OIDC auth is unavailable. Entries containing `:` are matched against the token's `sub` claim, and `owner/repo` entries against its `repository` claim. The audience is verified either way, defaulting to `open-swe`; override it only if you set the workflow's requested audience to match. Anyone who can run a workflow on an allowlisted repo/ref gets admin on these endpoints, so keep the list to internal repos.
+
+**Admin personal access token.** The token only needs to identify its owner (`GET /user`), and that login (or email) must appear in `CONFIGURED_ADMINS`. Matching by login needs no token permissions; matching by email needs a token that can read email addresses (classic `user:email`, or the fine-grained "Email addresses" read permission) when the account's email isn't public. Prefer a machine user over a human's token.
+
+`secrets.GITHUB_TOKEN` works for neither: installation tokens have no user identity, and they are not OIDC tokens. `examples/github-actions/set-base-snapshot.yml` is a copy-ready workflow using the OIDC path.
 
 ## 5. Set up triggers
 
@@ -234,6 +249,8 @@ GitHub triggering works automatically once your GitHub App is set up (step 3). U
 - Tag `@openswe` in issue titles or bodies to start a task
 - Tag `@openswe` in issue comments for follow-up instructions
 - Tag `@openswe` in PR review comments to have it address review feedback
+
+The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev` and are configurable — set `OPEN_SWE_MENTION_TAGS` to a comma-separated list. Handles are matched on a word boundary, so `@openswe` does not fire on `@openswe-staging`. Give each deployment a distinct handle when more than one shares a GitHub org, Slack workspace, or Linear workspace.
 
 Which GitHub users can trigger the agent is controlled by the **user mapping** (GitHub login ⇄ work email ⇄ optional Slack ID), stored in the LangGraph Store rather than in code. Manage it in the dashboard under **Admin → User mappings**:
 
@@ -250,11 +267,15 @@ ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"
 ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 ```
 
-A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed. Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by the GitHub App installation permissions.
+A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed.
+
+For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level edit guard. To modify a repository outside those organizations, the user must explicitly request that exact repository with its full `https://github.com/<owner>/<repo>` URL. Repository hints, defaults, shorthand, and contextual links do not qualify. This does not bypass the server-side GitHub/Linear webhook filter above or GitHub credential and App installation permissions.
 
 `ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
 
-> **Required GitHub App permission**: the membership check calls `GET /orgs/{org}/memberships/{username}`, which requires the GitHub App's **Organization → Members: Read-only** permission (see step 3b). If you set `ALLOWED_GITHUB_ORGS` without granting that permission, the call returns 403, the check fails closed, and **every** dashboard login is rejected. After changing an installed app's permissions, GitHub requires you to **approve the new permission** on each installation before it takes effect.
+> **Observability access**: when team LangSmith credentials are connected, every active member of an organization in `ALLOWED_GITHUB_ORGS` can use the read-only LangSmith trace tools. Only list organizations whose full active membership may access team-level trace data. This does not grant Datadog access.
+
+> **Required GitHub App installation and permission**: install the App in every organization listed in `ALLOWED_GITHUB_ORGS` and grant **Organization → Members: Read-only** (see step 3b). Membership checks resolve each organization's installation and call `GET /orgs/{org}/memberships/{username}`. Missing installations, unapproved permissions, and API errors fail closed. `GITHUB_APP_INSTALLATION_ID` remains the default installation for ordinary GitHub operations.
 
 ### Linear (optional)
 
@@ -264,7 +285,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 1. In Linear, go to **Settings → API → Webhooks → New webhook**
 2. Fill in:
-   - **Label**: `open-swe`
+   - **Label**: `Open SWE`
    - **URL**: `https://<your-ngrok-url>/webhooks/linear` — use the ngrok URL from step 2
    - **Secret**: generate with `openssl rand -hex 32` — save this as `LINEAR_WEBHOOK_SECRET`
 3. Under **Data change events**, enable **Comments → Create** only
@@ -273,7 +294,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 **Get your API key:**
 
 1. Go to **Settings → API → Personal API keys → New API key**
-2. Name it `open-swe`, select **All access**, and copy the key
+2. Name it `Open SWE`, select **All access**, and copy the key
 3. Save it as `LINEAR_API_KEY`
 
 **Configure team-to-repo mapping:**
@@ -337,6 +358,7 @@ Users can also override the team/project mapping per-comment by including `repo:
                 "channels:history",
                 "channels:read",
                 "chat:write",
+                "files:write",
                 "groups:history",
                 "groups:read",
                 "im:history",
@@ -372,7 +394,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 
 </details>
 
-3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`)
+3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Existing installations must reinstall or re-authorize the app after adding `files:write`.
 
 **Slack URL checklist:**
 
@@ -382,6 +404,14 @@ Both Slack URLs must point at the Open SWE backend that serves `agent.webapp:app
 - **Interactivity & Shortcuts → Interactivity Request URL:** `https://<your-backend-url>/webhooks/slack/interactivity`
 
 Slack Block Kit option buttons only work when Interactivity is enabled and pointed at `/webhooks/slack/interactivity`.
+
+**Code channels (early access):**
+
+The default manifest above uses the legacy Slack integration. To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the existing Slack app, and reinstall or re-authorize it. The admin selection is browser-local and only controls which manifest is copied.
+
+In a code channel the whole channel is one Open SWE session, so Open SWE answers messages without requiring an `@`-mention, replies at the channel level by default (or in a thread the user started), reports its session status, and keeps the context bar current. The `manage_code_channel` tool covers channel creation and archival, status and title, context actions and external resources, runtime slash commands, HTML/diff/Block Kit/canvas views, view reconciliation, and canvas content/comments.
+
+This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`. The feature's `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint above, while Block Kit view actions use the normal interactivity endpoint. Code channel messages arrive over the `message.channels` / `message.groups` subscriptions an app already uses; `message.session` is an alternative for apps that want *only* session messages, and subscribing to both does not duplicate deliveries. Code channels are in early access: if your workspace is not enrolled, leave the Admin toggle off — everything else keeps working unchanged.
 
 **Credentials you'll need:**
 
@@ -393,6 +423,8 @@ Slack Block Kit option buttons only work when Interactivity is enabled and point
 **Default repo:**
 
 Slack messages are routed to the Slack default repo (`SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
+
+Open SWE refuses Slack Connect channels when `conversations.info` reports `is_ext_shared`, before starting an agent run. If Slack cannot verify a channel, it fails closed and does not operate there.
 
 **"Sign in with Slack" account linking (optional):**
 
@@ -419,9 +451,13 @@ LANGSMITH_URL_PROD="https://smith.langchain.com"
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key
-OPENAI_API_KEY=""                      # OpenAI API key (when using openai: models)
+BASETEN_API_KEY=""                     # Baseten models when not using LangSmith Gateway
+OPENAI_API_KEY=""                      # OpenAI models and dashboard voice dictation
+# OPENAI_BASE_URL="https://api.openai.com/v1"  # Optional OpenAI-compatible API base URL
 GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
 FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks: models)
+# Voice dictation uses this OpenAI configuration.
+# Admins choose its transcription model in the dashboard Admin page.
 
 # === GitHub App (required) ===
 GITHUB_APP_ID=""                       # From step 3c
@@ -433,6 +469,15 @@ GITHUB_APP_INSTALLATION_ID=""          # From step 3d
 
 # === GitHub Webhook (required) ===
 GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
+
+# === Mention handles (optional) ===
+# Comma-separated handles this deployment answers to, across GitHub, Linear and Slack.
+# Defaults to "@openswe,@open-swe,@openswe-dev".
+OPEN_SWE_MENTION_TAGS=""               # e.g. "@openswe-staging"
+# Comma-separated bot logins to treat as internal rather than untrusted external
+# commenters. Set this to the bot logins of any other Open SWE deployments sharing
+# these repos.
+EXTRA_INTERNAL_BOT_LOGINS=""           # e.g. "openswe-staging[bot]"
 
 # === Dashboard GitHub OAuth (required for the dashboard) ===
 # Direct GitHub OAuth used by the dashboard login flow (not via LangSmith).
@@ -448,14 +493,14 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 X_SERVICE_AUTH_JWT_SECRET=""
 
 # === Repo Allowlist (optional) ===
-# Comma-separated list of GitHub orgs the agent is allowed to operate on.
-# Also gates dashboard login to members of these orgs (requires the GitHub App's
-# Organization -> Members: Read-only permission; without it, all dashboard logins are rejected).
-# Leave empty to allow all orgs.
+# Comma-separated list of GitHub orgs allowed by the GitHub/Linear webhook filter.
+# Also gates dashboard login and prompts the agent to require an explicit full repository
+# URL before editing outside these orgs (requires Organization -> Members: Read-only).
+# Leave empty to allow all orgs and disable the prompt-level edit guard.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
-# Comma-separated list of specific owner/repo pairs the agent is allowed to operate on.
-# For GitHub/Linear webhooks, a repo is allowed if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
-# Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by GitHub App installation permissions.
+# Comma-separated list of specific owner/repo pairs allowed by the GitHub/Linear webhook filter.
+# A repo is accepted if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
+# Slack/dashboard access remains bounded by GitHub credentials and App installation permissions.
 # Leave both empty to allow all repos.
 ALLOWED_GITHUB_REPOS=""                # e.g. "some-user/their-repo,another-org/specific-repo"
 
@@ -482,6 +527,10 @@ DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"  # prod: your frontend origin(
 # Comma-separated GitHub login or email allowlist for admin dashboard endpoints.
 # Empty => nobody is an admin.
 CONFIGURED_ADMINS=""                   # e.g. "alice,bob@my-org.com"
+# Optional; lets a GitHub Actions workflow act as an admin over the API via OIDC
+# (see step 4c). Empty => off.
+ADMIN_OIDC_SUBJECTS=""                 # e.g. "acme/sandbox-images" or "repo:acme/sandbox-images:ref:refs/heads/main"
+ADMIN_OIDC_AUDIENCE=""                 # audience the workflow must request; defaults to "open-swe"
 # URL of the LangGraph server the FastAPI side calls to trigger/stream runs.
 # Defaults to http://localhost:2024 locally; set to your deployment URL in prod.
 LANGGRAPH_URL="http://localhost:2024"
@@ -517,12 +566,13 @@ PUBLIC_REPO_ORG_GATE=""
 # === Sandbox (optional) ===
 # Provider: langsmith (default), modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
 SANDBOX_TYPE="langsmith"
-DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
+DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith unless set at runtime by an admin (see step 4c)
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 128 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 7200; 0 disables)
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 2592000; 0 disables)
+ENVIRONMENT_SNAPSHOT_PREFIX=""         # Prefix for environment snapshot names (default: openswe)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
@@ -557,8 +607,7 @@ invalidating already-stored GitHub tokens:
 Make sure ngrok is still running from step 2, then start the backend in a second terminal:
 
 ```bash
-make dev          # uv run langgraph dev
-# or: uv run langgraph dev --no-browser
+make dev          # uv run langgraph dev --no-browser --port 2024
 ```
 
 `langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
@@ -580,24 +629,46 @@ make dev          # uv run langgraph dev
 
 ## 8. Run the dashboard (optional)
 
-The dashboard is the web app in `ui/`. It's a static TanStack Start client that calls the FastAPI dashboard API from step 7. Run it in a third terminal:
+The dashboard is the web app in `ui/`. It's a server-rendered TanStack Start app that calls the FastAPI dashboard API from step 7. Run it in a third terminal:
 
 ```bash
-cd ui
-pnpm install
-cat > .env <<'EOF'
-VITE_DASHBOARD_API_BASE_URL="http://localhost:2024"
-EOF
-pnpm run dev          # vite dev --port 3000 -> http://localhost:3000
+pnpm install          # from the repo root: ui/ and desktop/ are one pnpm workspace
+make web             # pnpm run dev -> Vite on http://localhost:3000
 ```
 
-The dashboard needs `VITE_DASHBOARD_API_BASE_URL` in `ui/.env` pointing at the backend for local dev. The file is intentionally untracked because `.env*` files are gitignored.
+No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `make web` or `pnpm run dev`. It is read at request time, so the same build can front any backend.
 
-The client calls `${VITE_DASHBOARD_API_BASE_URL}/dashboard/api/*` with `credentials: "include"`, so the backend's `osw_session` cookie rides along. Because the UI (`:3000`) and API (`:2024`) are different origins, the backend needs **CORS** enabled for the UI origin — set `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` (CORS is off unless this is set). Keep `DASHBOARD_API_BASE_URL` on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
+To enable Datadog browser RUM, set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building the dashboard. Optional build-time settings are `VITE_DATADOG_SITE` (default `datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` (default `100`), and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay is enabled by default for sampled RUM sessions with all content masked; telemetry also strips URL query strings and fragments. Values prefixed with `VITE_` are public in the browser bundle; use a Datadog client token, never an API or application key.
+
+Because the browser only ever talks to `http://localhost:3000`, no **CORS** preflight is involved. `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` is still required, though: the same allowlist is the backend's CSRF gate for every non-GET request, and it compares the browser's `Origin` — the dashboard's — against the origins it knows. Without it, the dashboard reads fine and every save returns `403 CSRF check failed`.
+
+The `osw_session` cookie has to be set on the dashboard origin too: set `DASHBOARD_API_BASE_URL="http://localhost:3000"` and register `http://localhost:3000/dashboard/api/auth/callback` as a GitHub App callback URL. Keep it on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
 
 For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
-Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`.
+`pnpm run build`, `pnpm run typecheck` and `pnpm run test` run the same task across the workspace through Turborepo; scope one to a package with `pnpm --filter open-swe-dashboard run <script>`. `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) are not Turborepo tasks — they run once from the root over every JS and TS file in the repo, `ui/`, `desktop/` and `tests/e2e/` alike, so there is no per-package variant to scope to.
+
+### Run the desktop app (optional)
+
+> **Experimental:** The desktop wrapper is an early-access convenience surface. The web UI is
+> the recommended way to use Open SWE.
+
+The Electron app in `desktop/` includes the compiled dashboard UI. Run it alongside the Open SWE
+backend (and, optionally, the web UI) in separate terminals:
+
+```bash
+pnpm install                  # from the repo root
+make dev                      # terminal 1
+pnpm run dev:desktop          # terminal 2
+make web                      # terminal 3, optional web UI
+```
+
+Development connects to `http://localhost:2024`. To use a hosted backend instead, run
+`pnpm --dir desktop run start -- --backend-url=https://your-backend.example.com` or set
+`OPEN_SWE_BACKEND_URL`. Create an unpacked application with `pnpm --dir desktop run pack`, or an
+installer with `pnpm --dir desktop run dist`. Packaged builds ask for the organization's backend
+URL on first launch and store it locally; they never default to the maintainers' deployment. The
+GitHub App must allow `<backend-url>/dashboard/api/auth/callback` for desktop login.
 
 ## 9. Verify it works
 
@@ -635,7 +706,7 @@ Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm
 
 Production runs the backend and dashboard separately.
 
-**Backend — standalone Docker:** the root `Dockerfile` builds a production LangGraph API server image for Open SWE. It is not the sandbox image; build sandbox snapshots from `Dockerfile.sandbox`.
+**Backend — standalone Docker:** the root `Dockerfile` builds a production LangGraph API server image for Open SWE. It is not the sandbox image.
 
 ```bash
 docker build -t open-swe .
@@ -677,9 +748,11 @@ The `langgraph.json` at the project root defines the graphs and HTTP app baked i
 
 **Backend — LangGraph Cloud / Platform:** alternatively, push your code to a GitHub repository, connect the repo to LangGraph Cloud, set the same environment variables in the deployment config, and use the hosted deployment URL for `LANGGRAPH_URL` and webhook callbacks.
 
-**Dashboard** — the `ui/` app deploys to [Vercel](https://vercel.com/). The recommended production setup uses **same-origin** requests to `/dashboard/api/*` (leave `VITE_DASHBOARD_API_BASE_URL` empty), and `ui/vercel.json` rewrites those to the hosted backend. In this mode, set both `DASHBOARD_API_BASE_URL` and the GitHub App dashboard callback URL to the Vercel/dashboard origin (for example, `https://your-dashboard.vercel.app/dashboard/api/auth/callback`). The OAuth callback response then sets the `osw_session` cookie on the dashboard host, and later same-origin `/dashboard/api/*` requests include it. Update the rewrite `destination` in `ui/vercel.json` to your own backend URL.
+**Dashboard** — the `ui/` app builds to a Nitro server that renders routes on request. Set `DASHBOARD_API_URL` in its environment to your hosted backend URL; it is read per request, so one image serves any backend. Browser requests to `/dashboard/api/*` and webhook deliveries to `/webhooks/*` are proxied to it, and server renders call it directly with the request's `osw_session` cookie forwarded.
 
-Alternatively, you can run the dashboard as a direct cross-origin client: set `VITE_DASHBOARD_API_BASE_URL` to the hosted backend origin, set `DASHBOARD_API_BASE_URL` to that same backend origin, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`.
+Requests are therefore **same-origin**: set both `DASHBOARD_API_BASE_URL` and the GitHub App dashboard callback URL to the Vercel/dashboard origin (for example, `https://your-dashboard.vercel.app/dashboard/api/auth/callback`). The OAuth callback response then sets the `osw_session` cookie on the dashboard host, and later `/dashboard/api/*` requests include it.
+
+Alternatively, you can have the browser call the backend cross-origin: set `VITE_DASHBOARD_API_BASE_URL` to the hosted backend origin, set `DASHBOARD_API_BASE_URL` to that same backend origin, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`. Keep `DASHBOARD_API_URL` pointed at the same backend so server renders and the webhook proxy reach it too. In this mode `osw_session` belongs to the backend's origin, so the dashboard's own requests never carry it and the session is resolved on the client instead — pages render unauthenticated and fill in after hydration.
 
 ## Troubleshooting
 
@@ -707,13 +780,13 @@ Alternatively, you can run the dashboard as a direct cross-origin client: set `V
 ### Dashboard UI can't reach the backend
 
 - Confirm the backend is running via `make dev` on `:2024` (not `make run` on `:8000`).
-- Confirm `ui/.env` has `VITE_DASHBOARD_API_BASE_URL=http://localhost:2024`. If it's empty, the UI falls back to relative `/dashboard/api/*`, which only works behind the Vercel rewrite, not in local dev.
+- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `make web` or `pnpm run dev`.
 
 ### Sandbox creation failures
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If the server refuses to start with `DEFAULT_SANDBOX_SNAPSHOT_ID must be set`, build a snapshot (see step 4c) and export its UUID
+- If sandbox creation fails with `No base snapshot configured`, build a snapshot (see step 4c) and either export its UUID as `DEFAULT_SANDBOX_SNAPSHOT_ID` or set it as the base snapshot on the admin **Sandbox** page
 - If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
 - If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 

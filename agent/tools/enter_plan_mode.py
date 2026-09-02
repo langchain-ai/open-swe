@@ -1,7 +1,5 @@
 """Tool: ``enter_plan_mode``. Switch the run into read-only planning."""
 
-from __future__ import annotations
-
 import logging
 from typing import Annotated
 
@@ -16,14 +14,16 @@ logger = logging.getLogger(__name__)
 
 _ENTERED_MESSAGE = (
     "Plan mode is active. Stay read-only for the target repo: research the codebase, "
-    "create or edit a dated, concise plan file under `/workspace/plans/`, then publish "
-    "it with the `save_plan` tool and share the plan-review link in the source channel. "
-    "Do not edit repo files, commit, push, or open a PR — wait for the user to approve "
-    "the plan."
+    "create or edit a dated, self-contained HTML artifact under `/workspace/plans/`, then "
+    "publish it with the `save_plan` tool and share the plan-review link in the source "
+    "channel. Do not edit repo files, commit, push, or open a PR — wait for the user to "
+    "approve the plan."
 )
 
 
-async def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+async def enter_plan_mode(
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
     """Activate plan mode mid-run.
 
     Call this when you believe the task would benefit from a structured
@@ -33,9 +33,9 @@ async def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> C
     judgment about whether planning is genuinely warranted.
 
     Once activated, stay read-only for the target repo: research the codebase,
-    create or edit a dated, concise Markdown plan outside any repo (for example,
-    ``/workspace/plans/YYYY-MM-DD-short-task-slug.md``), then publish it with
-    the ``save_plan`` tool and share the plan-review link with the user. Do not
+    create or edit a dated, self-contained HTML artifact outside any repo (for
+    example, ``/workspace/plans/YYYY-MM-DD-short-task-slug.html``), then publish
+    it with the ``save_plan`` tool and share the plan-review link with the user. Do not
     edit repo files, commit, push, or open a PR — the user reviews the plan and
     approves it before you implement.
     """

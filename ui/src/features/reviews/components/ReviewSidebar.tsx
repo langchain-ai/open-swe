@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
-} from "@/features/agents/components/AgentGitPanel"
+} from "@/features/agents/components/DiffFilesView"
 import { cn } from "@/lib/utils"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {
@@ -56,7 +56,7 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-2">
       <div className="flex items-center justify-between gap-2 px-4 py-1">
-        <span className="text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase">
+        <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
           {data.title}
         </span>
         {hasGroups && (
@@ -92,7 +92,7 @@ function ReviewViewToggle({
   onChange: (view: ReviewSidebarView) => void
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-[var(--ui-border)] p-0.5">
+    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
       <ReviewViewToggleButton
         active={view === "ai"}
         label="AI sorted"
@@ -130,10 +130,10 @@ function ReviewViewToggleButton({
       aria-pressed={active}
       title={label}
       className={cn(
-        "flex size-5 items-center justify-center rounded text-[var(--ui-text-dim)] transition-colors",
+        "flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors",
         active
-          ? "bg-[var(--ui-sidebar-hover)] text-[var(--ui-text)]"
-          : "hover:text-[var(--ui-text)]"
+          ? "bg-sidebar-row-hover text-foreground"
+          : "hover:text-foreground"
       )}
     >
       {children}
@@ -173,7 +173,7 @@ export function renderInlineCode(text: string): Array<ReactNode> {
       return (
         <code
           key={i}
-          className="rounded bg-[var(--ui-panel-2)] px-1 py-0.5 font-mono text-[0.9em] text-[var(--ui-accent)]"
+          className="rounded bg-accent px-1 py-0.5 font-mono text-[0.9em] text-primary"
         >
           {part.slice(1, -1)}
         </code>
@@ -221,19 +221,17 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       className={cn(
         "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
         active
-          ? "border-[var(--ui-accent)] bg-[var(--ui-sidebar-hover)]"
-          : "border-transparent hover:bg-[var(--ui-sidebar-hover)]"
+          ? "border-primary bg-sidebar-row-hover"
+          : "border-transparent hover:bg-sidebar-row-hover"
       )}
     >
-      <span className="mt-px shrink-0 text-[11px] font-medium text-[var(--ui-text-dim)] tabular-nums">
+      <span className="mt-px shrink-0 text-[11px] font-medium text-muted-foreground/70 tabular-nums">
         {group.index}.
       </span>
       <span
         className={cn(
           "min-w-0 text-xs leading-5",
-          active
-            ? "font-medium text-[var(--ui-text)]"
-            : "text-[var(--ui-text-muted)]"
+          active ? "font-medium text-foreground" : "text-muted-foreground"
         )}
       >
         {title}
@@ -304,7 +302,7 @@ function ReviewFileTreeExplorer({
             ...treeThemeStyle(),
             // Must stay opaque: the tree's truncation marker ("…") paints
             // this color behind itself to hide the overflowing filename.
-            "--trees-theme-sidebar-bg": "var(--ui-sidebar)",
+            "--trees-theme-sidebar-bg": "var(--sidebar)",
           } as React.CSSProperties
         }
       />

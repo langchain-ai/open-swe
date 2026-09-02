@@ -1,7 +1,5 @@
 """Tool: persist the triggering user's user-level custom instructions."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -17,9 +15,14 @@ logger = logging.getLogger(__name__)
 async def save_user_instructions(instructions: str) -> dict[str, Any]:
     """Save the triggering user's standing, user-level custom instructions.
 
-    Call this only when the user states a standing behavioural preference
-    ("always …", "never …", "from now on …", "stop doing …") that should apply
-    to all their future runs — not for one-off task details.
+    Call this only when the user explicitly says a standing behavioural preference
+    ("always …", "never …", "from now on …", "stop doing …") is personal to
+    them and should apply to all their future runs. If personal versus shared/global
+    scope is unclear, ask the user which scope they intend before calling this tool.
+
+    This is not general-purpose memory. Do not use it for one-off task details,
+    conversation context, shared team/repository/project facts, or preferences
+    concerning other users.
 
     This is a full replacement: pass the COMPLETE new instruction text. Your
     current user-level instructions are shown in your system prompt under "Your
@@ -27,15 +30,19 @@ async def save_user_instructions(instructions: str) -> dict[str, Any]:
     unless the user asked you to change or remove something. Pass an empty string
     only when the user asks to clear their instructions.
 
-    Changes take effect from the next run onward, and the user can edit them in
-    the dashboard Profile tab.
+    The user can also edit them in the dashboard Profile tab.
+
+    A thread's system prompt is fixed when the thread opens, so it keeps showing
+    the old text after this call. The ``reminder`` in the result is the current
+    version — follow it for the rest of the thread.
 
     Args:
         instructions: The complete user-level instruction text (markdown).
 
     Returns:
-        ``{"ok": True, "login": str, "instructions": str}`` on success, or
-        ``{"ok": False, "error": str}`` when the user could not be resolved.
+        ``{"ok": True, "login": str, "instructions": str, "reminder": str}`` on
+        success, or ``{"ok": False, "error": str}`` when the user could not be
+        resolved.
     """
     login = resolve_github_login(as_json_object(get_config()))
     if not login:
@@ -61,8 +68,18 @@ async def save_user_instructions(instructions: str) -> dict[str, Any]:
         logger.exception("Failed to save user instructions for %s", login)
         return {"ok": False, "error": f"failed to save user instructions: {exc}"}
 
+    saved = record.get("instructions", text)
     return {
         "ok": True,
         "login": login,
-        "instructions": record.get("instructions", text),
+        "instructions": saved,
+        "reminder": (
+            "<system-reminder>\n"
+            f"@{login}'s user-level custom instructions were just replaced with the text "
+            'below. The copy under "Your Custom Instructions (user-level)" in your system '
+            "prompt is the version this thread opened with and is now stale; follow this "
+            "text instead for the rest of the thread.\n\n"
+            f"{saved or '(cleared — they now have no user-level instructions)'}\n"
+            "</system-reminder>"
+        ),
     }

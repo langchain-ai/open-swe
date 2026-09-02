@@ -12,9 +12,6 @@ The reviewer needs three things from a PR diff:
    (``last_reviewed_sha..new_head_sha``).
 """
 
-from __future__ import annotations
-
-import asyncio
 import hashlib
 import logging
 import re
@@ -306,7 +303,7 @@ def review_diff_path(work_dir: str, base_ref: str, head_ref: str, merge_base: bo
 
 
 async def materialize_review_diff(
-    sandbox_backend: SandboxBackendProtocol,
+    sandbox_backend: "SandboxBackendProtocol",
     *,
     work_dir: str,
     base_ref: str,
@@ -381,7 +378,7 @@ def _download_content(response: object) -> str | None:
 
 
 async def compute_diff_in_sandbox(
-    sandbox_backend: SandboxBackendProtocol,
+    sandbox_backend: "SandboxBackendProtocol",
     work_dir: str,
     base_ref: str,
     head_ref: str,
@@ -404,7 +401,7 @@ async def compute_diff_in_sandbox(
     """
     operator = "..." if merge_base else ".."
     cmd = f"cd {work_dir} && git diff --no-color {base_ref}{operator}{head_ref}"
-    result = await asyncio.to_thread(sandbox_backend.execute, cmd)
+    result = await sandbox_backend.aexecute(cmd)
     exit_code = getattr(result, "exit_code", None)
     if exit_code not in (0, None):
         output = _stdout_from_result(result)

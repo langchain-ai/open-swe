@@ -1,7 +1,5 @@
 """Unit tests for LangSmith LLM Gateway routing (agent/utils/gateway.py + make_model)."""
 
-from __future__ import annotations
-
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -22,6 +20,8 @@ _GATEWAY_ENV_VARS = (
     "LANGSMITH_GATEWAY_ENABLED",
     "LANGSMITH_GATEWAY_BASE_URL",
     "LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES",
+    "OPENAI_API_BASE",
+    "OPENAI_BASE_URL",
 )
 
 
@@ -115,6 +115,14 @@ def test_fireworks_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     overrides = gateway.gateway_overrides("fireworks:accounts/fireworks/models/glm-5p2")
     assert overrides is not None
     assert overrides["base_url"] == "https://gateway.smith.langchain.com/fireworks"
+
+
+def test_baseten_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    assert gateway.gateway_overrides("baseten:zai-org/GLM-5.3-Flash") == {
+        "base_url": "https://gateway.smith.langchain.com/baseten/v1",
+        "api_key": "ls-key",
+    }
 
 
 async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
@@ -242,7 +250,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
 
 def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("google_genai:gemini-3.6-flash")
+    overrides = gateway.gateway_overrides("google_genai:gemini-3.8-flash")
     assert overrides == {
         "base_url": "https://gateway.smith.langchain.com/gemini",
         "api_key": "ls-key",
@@ -341,6 +349,37 @@ def test_make_model_direct_openai_uses_responses_websocket() -> None:
     assert captured["output_version"] == "responses/v1"
 
 
+def test_make_model_openai_honors_configured_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.smith.langchain.com/openai/v1")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
+    assert captured["base_url"] == "https://gateway.smith.langchain.com/openai/v1"
+
+
+def test_make_model_openai_falls_back_to_legacy_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_BASE", "https://openai-proxy.example/v1")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
+    assert captured["base_url"] == "https://openai-proxy.example/v1"
+
+
+def test_make_model_openai_base_url_precedes_legacy_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://primary-proxy.example/v1")
+    monkeypatch.setenv("OPENAI_API_BASE", "https://legacy-proxy.example/v1")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
+    assert captured["base_url"] == "https://primary-proxy.example/v1"
+
+
 def test_make_model_gateway_openai_replaces_websocket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -422,9 +461,36 @@ def test_make_model_gateway_google_genai(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("google_genai:gemini-3.6-flash", use_gateway=True)
+        model.make_model("google_genai:gemini-3.8-flash", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/gemini"
     assert captured["api_key"] == "ls-key"
+
+
+def test_make_model_gateway_baseten(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model(
+            "baseten:zai-org/GLM-5.3-Flash",
+            use_gateway=True,
+            **model.provider_model_kwargs("baseten:zai-org/GLM-5.3-Flash", "high", max_tokens=1024),
+        )
+    assert captured["model"] == "zai-org/GLM-5.3-Flash"
+    assert captured["model_provider"] == "openai"
+    assert captured["reasoning_effort"] == "high"
+    assert captured["base_url"] == "https://gateway.smith.langchain.com/baseten/v1"
+    assert captured["api_key"] == "ls-key"
+
+
+def test_make_model_direct_baseten(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BASETEN_API_KEY", "baseten-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("baseten:zai-org/GLM-5.3-Flash", use_gateway=False)
+    assert captured["model"] == "zai-org/GLM-5.3-Flash"
+    assert captured["model_provider"] == "openai"
+    assert captured["base_url"] == model.BASETEN_BASE_URL
+    assert captured["api_key"] == "baseten-key"
 
 
 def test_make_model_gateway_without_key_falls_back_direct(

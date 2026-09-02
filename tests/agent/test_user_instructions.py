@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -8,27 +6,20 @@ from agent.dashboard.user_instructions import (
     get_user_custom_instructions,
     set_user_instructions,
 )
-from agent.prompt import construct_system_prompt
 from agent.tools.save_user_instructions import save_user_instructions
 
 
 @pytest.mark.asyncio
 async def test_set_user_instructions_upserts_record() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.user_instructions.get_user_instructions",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch("agent.dashboard.user_instructions._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = MagicMock()
+    client.store.get_item = AsyncMock(return_value=None)
+    client.store.put_item = AsyncMock()
+    with patch("agent.store.store_client", return_value=client):
         record = await set_user_instructions("octo", "Always run the linter.")
     assert record["login"] == "octo"
     assert record["instructions"] == "Always run the linter."
     assert record["updated_by"] == "octo"
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["user_instructions"], "octo", record)
 
 
 @pytest.mark.asyncio
@@ -56,20 +47,6 @@ async def test_get_user_custom_instructions_without_login() -> None:
     assert await get_user_custom_instructions(None) is None
 
 
-def test_construct_system_prompt_appends_user_instructions() -> None:
-    prompt = construct_system_prompt(
-        working_dir="/work",
-        user_custom_instructions="Always reply in bullet points.",
-    )
-    assert "Your Custom Instructions (user-level)" in prompt
-    assert "Always reply in bullet points." in prompt
-
-
-def test_construct_system_prompt_without_user_instructions() -> None:
-    prompt = construct_system_prompt(working_dir="/work")
-    assert "Your Custom Instructions (user-level)" not in prompt
-
-
 @pytest.mark.asyncio
 async def test_save_user_instructions_requires_login() -> None:
     with patch(
@@ -92,5 +69,11 @@ async def test_save_user_instructions_writes_record() -> None:
         patch("agent.tools.save_user_instructions.set_user_instructions", mock_set),
     ):
         result = await save_user_instructions("  Always run tests.  ")
-    assert result == {"ok": True, "login": "octo", "instructions": "Always run tests."}
+    assert result["ok"] is True
+    assert result["login"] == "octo"
+    assert result["instructions"] == "Always run tests."
+    # The updated text is delivered as a new message, never by rewriting the
+    # thread's system prompt, which would invalidate its prefix cache.
+    assert "Always run tests." in result["reminder"]
+    assert result["reminder"].startswith("<system-reminder>")
     mock_set.assert_awaited_once_with("octo", "Always run tests.", updated_by="open-swe")

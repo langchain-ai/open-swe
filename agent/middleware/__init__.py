@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
-    "ensure_no_empty_msg": ".ensure_no_empty_msg",
+    "DynamicToolMiddleware": ".dynamic_tools",
+    "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelFallbackMiddleware": ".model_fallback",
@@ -14,24 +15,25 @@ _MIDDLEWARE_MODULES = {
     "BasePrepareRunMiddleware": ".prepare_run",
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
-    "SlackAssistantStatusMiddleware": ".refresh_slack_status",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
-    "SandboxCircuitBreakerMiddleware": ".sandbox_circuit_breaker",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
+    "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
+    "StableToolResultOrderMiddleware": ".stable_tool_order",
     "settle_review_check_on_exit": ".settle_review_check",
     "SubdirAgentsReadMiddleware": ".subdir_agents",
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
-    "ToolArtifactMiddleware": ".tool_artifact",
     "ToolErrorMiddleware": ".tool_error_handler",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
 }
 
 __all__ = [
+    "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
+    "IntegrationGroup",
     "ModelCallTimeoutMiddleware",
     "ModelFallbackMiddleware",
     "BasePrepareRunMiddleware",
@@ -40,17 +42,15 @@ __all__ = [
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "SanitizeFireworksMessagesMiddleware",
+    "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
+    "StableToolResultOrderMiddleware",
     "SubdirAgentsReadMiddleware",
-    "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
-    "SandboxCircuitBreakerMiddleware",
-    "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
-    "ensure_no_empty_msg",
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
@@ -60,7 +60,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
-    from .ensure_no_empty_msg import ensure_no_empty_msg
+    from .dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_call_timeout import ModelCallTimeoutMiddleware
     from .model_fallback import ModelFallbackMiddleware
@@ -69,17 +69,16 @@ if TYPE_CHECKING:
     from .pr_creation_guard import PullRequestCreationGuardMiddleware
     from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from .refresh_github_proxy import refresh_github_proxy_before_model
-    from .refresh_slack_status import SlackAssistantStatusMiddleware
     from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
-    from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
     from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
+    from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
     from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from .settle_review_check import settle_review_check_on_exit
+    from .stable_tool_order import StableToolResultOrderMiddleware
     from .subdir_agents import SubdirAgentsReadMiddleware
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware
-    from .tool_artifact import ToolArtifactMiddleware
     from .tool_error_handler import ToolErrorMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware
 

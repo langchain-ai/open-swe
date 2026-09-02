@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -8,6 +6,7 @@ import pytest
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
+from agent import store as agent_store
 from agent.dashboard import user_credentials as uc
 from agent.dashboard.notion_oauth import NotionOAuthError
 from agent.dashboard.user_credentials import CurrentsCredentialsUpdate
@@ -36,7 +35,7 @@ class _FakeClient:
 @pytest.fixture()
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
     store = _FakeStore()
-    monkeypatch.setattr(uc, "_client", lambda: _FakeClient(store))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     return store
 
@@ -85,6 +84,39 @@ async def test_currents_isolation_between_users(fake_store: _FakeStore) -> None:
     await uc.disconnect_currents("alice")
     assert await uc.get_currents_api_key("alice") is None
     assert await uc.get_currents_api_key("bob") == "bob-key-wxyz"
+
+
+@pytest.mark.asyncio
+async def test_langsmith_roundtrip_redaction_and_isolation(fake_store: _FakeStore) -> None:
+    with pytest.raises(ValidationError):
+        uc.UserLangSmithCredentialsUpdate(api_key="key")
+    with pytest.raises(ValidationError):
+        uc.UserLangSmithCredentialsUpdate.model_validate(
+            {"api_key": "valid-key", "endpoint": "https://x"}
+        )
+
+    await uc.connect_langsmith(
+        "alice", uc.UserLangSmithCredentialsUpdate(api_key="alice-langsmith-abcd")
+    )
+    await uc.connect_langsmith(
+        "bob", uc.UserLangSmithCredentialsUpdate(api_key="bob-langsmith-wxyz")
+    )
+
+    status = await uc.get_langsmith_status("alice")
+    assert status["langsmith"]["api_key_last4"] == "abcd"
+    record = fake_store.items[(("user_credentials", "alice"), "langsmith")]
+    assert record["encrypted_api_key"] != "alice-langsmith-abcd"
+    assert "alice-langsmith-abcd" not in str(status)
+
+    alice = await uc.get_langsmith_credentials("alice")
+    bob = await uc.get_langsmith_credentials("bob")
+    assert alice and alice.api_key == "alice-langsmith-abcd"
+    assert alice.endpoint == uc.DEFAULT_LANGSMITH_ENDPOINT
+    assert bob and bob.api_key == "bob-langsmith-wxyz"
+
+    await uc.disconnect_langsmith("alice")
+    assert await uc.get_langsmith_credentials("alice") is None
+    assert await uc.get_langsmith_credentials("bob") == bob
 
 
 @pytest.mark.asyncio

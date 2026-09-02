@@ -8,8 +8,6 @@ Covers:
   failure when GitHub responds 401
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,7 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.utils import github_comments, github_token
+from agent.auth import thread_token as github_token
+from agent.utils import github_comments
 from agent.webhooks import common as webhook_common
 from agent.webhooks import github as github_webhooks
 
@@ -166,7 +165,7 @@ class _MockHttpxClient:
         self.posts: list[dict[str, Any]] = []
         self.gets: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> _MockHttpxClient:
+    async def __aenter__(self) -> "_MockHttpxClient":
         return self
 
     async def __aexit__(self, *args: Any) -> None:

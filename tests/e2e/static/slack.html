@@ -3,84 +3,260 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mock Slack — #demo</title>
+    <title>Mock Slack</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 680px; margin: 1.5rem auto; padding: 0 1rem; }
-      h1 { font-size: 1.1rem; }
-      .msg { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
-      .msg.bot { background: #f0f7ff; }
-      .who { font-weight: 700; font-size: 0.8rem; color: #444; }
-      .text { white-space: pre-wrap; }
-      .compose { display: flex; gap: 0.5rem; margin-top: 1rem; }
-      .compose input { flex: 1; padding: 0.5rem; font: inherit; }
-      button { padding: 0.5rem 0.9rem; font: inherit; cursor: pointer; }
-      a { color: #1264a3; }
+      :root { color-scheme: light; font-family: Slack-Lato, system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: #f8f8f8; color: #1d1c1d; }
+      .app { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+      .sidebar { background: #3f0e40; color: #fff; padding: 18px 12px; }
+      .workspace { padding: 0 10px 18px; border-bottom: 1px solid #6d3a6e; font-size: 18px; font-weight: 800; }
+      .section-label { margin: 22px 10px 8px; color: #c9b6ca; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+      .channel { width: 100%; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; color: #e7dfe7; text-align: left; font: inherit; cursor: pointer; }
+      .channel:hover, .channel.active { background: #1164a3; color: #fff; }
+      .channel .spark { color: #7dd3fc; margin-right: 6px; }
+      main { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; background: #fff; }
+      header { min-height: 72px; padding: 15px 22px 12px; border-bottom: 1px solid #ddd; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+      h1 { margin: 0 0 4px; font-size: 19px; }
+      .subtitle { color: #616061; font-size: 13px; }
+      .status { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #ddd; border-radius: 999px; padding: 6px 10px; color: #1264a3; font-size: 12px; font-weight: 700; text-transform: capitalize; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: #2bac76; }
+      .status.processing .dot { background: #e8912d; animation: pulse 1s infinite alternate; }
+      @keyframes pulse { to { opacity: .35; } }
+      .chrome { min-height: 45px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 8px 22px; border-bottom: 1px solid #eee; }
+      .pill { border: 1px solid #d6d6d6; border-radius: 6px; padding: 5px 8px; background: #fafafa; color: #454245; font-size: 12px; }
+      .command { color: #1264a3; font-weight: 700; }
+      #thread { padding: 18px 22px; overflow-y: auto; }
+      .empty { color: #888; text-align: center; margin-top: 80px; }
+      .msg { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 10px; padding: 10px 0; }
+      .avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; background: #e8a5de; font-weight: 800; }
+      .msg.bot .avatar { background: #111827; color: #fff; }
+      .who { font-size: 14px; font-weight: 800; }
+      .text { margin-top: 3px; white-space: pre-wrap; line-height: 1.45; font-size: 14px; }
+      .context { color: #616061; font-size: 12px; margin-top: 5px; }
+      .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
+      .actions button.primary { background: #007a5a; color: #fff; border-color: #007a5a; }
+      .composer-wrap { padding: 10px 22px 20px; }
+      .compose { display: flex; gap: 8px; border: 1px solid #8d8d8d; border-radius: 9px; padding: 8px; box-shadow: 0 1px 1px rgba(0,0,0,.04); }
+      .compose select { border: 0; background: #f4f4f4; border-radius: 5px; padding: 7px; }
+      .compose input { min-width: 0; flex: 1; border: 0; padding: 7px; font: inherit; outline: 0; }
+      button.send { border: 0; border-radius: 5px; padding: 8px 15px; background: #007a5a; color: #fff; font-weight: 800; cursor: pointer; }
+      button.reset { border: 0; background: transparent; color: #616061; cursor: pointer; }
+      .hint { margin-top: 6px; color: #616061; font-size: 12px; }
+      @media (max-width: 700px) { .app { grid-template-columns: 150px minmax(0, 1fr); } .sidebar { padding-inline: 6px; } }
     </style>
   </head>
   <body>
-    <h1>#demo — Slack (mock)</h1>
-    <div class="compose">
-      <select id="user" title="sender"></select>
-      <input id="text" value="<@U0BOT> please add a greet() helper and open a PR" />
-      <button id="send">Send</button>
-      <button id="reset">Reset</button>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="workspace">Acme Engineering</div>
+        <div class="section-label">Channels</div>
+        <div id="channels"></div>
+      </aside>
+      <main>
+        <header>
+          <div><h1 id="channel-title"># demo</h1><div class="subtitle" id="channel-subtitle">Team channel</div></div>
+          <div id="status" class="status" hidden><span class="dot"></span><span id="status-text"></span></div>
+        </header>
+        <div id="chrome" class="chrome" hidden></div>
+        <div id="thread"></div>
+        <div class="composer-wrap">
+          <div class="compose">
+            <select id="user" title="sender"></select>
+            <input id="text" aria-label="Message" value="<@U0BOT> investigate the flaky CI failures — use a dedicated code channel if this warrants one E2E_CODE_CHANNEL" />
+            <button class="send" id="send">Send</button>
+            <button class="reset" id="reset">Reset</button>
+          </div>
+          <label class="hint"><input type="checkbox" id="mention" checked /> <span id="mention-label">Mention Open SWE</span></label>
+        </div>
+      </main>
     </div>
-    <label style="font-size:0.8rem"><input type="checkbox" id="mention" checked /> mention the bot (app_mention)</label>
-    <div id="thread"></div>
-
     <script>
       const $ = (id) => document.getElementById(id);
-      const userNames = {}; // slack_id -> display name
+      const userNames = {};
+      let selectedChannel = "C_DEMO";
+      let selectedIsCodeChannel = false;
+      let knownCodeChannels = 0;
 
       async function loadUsers() {
-        try {
-          const users = await (await fetch("/mock/users")).json();
-          $("user").innerHTML = users
-            .map((u) => `<option value="${u.slack_id}">${u.name}</option>`)
-            .join("");
-          for (const u of users) userNames[u.slack_id] = u.name;
-        } catch (_) {}
+        const users = await (await fetch("/mock/users")).json();
+        $("user").replaceChildren(...users.map((user) => {
+          userNames[user.slack_id] = user.name;
+          const option = document.createElement("option");
+          option.value = user.slack_id;
+          option.textContent = user.name;
+          return option;
+        }));
       }
 
-      function render(messages) {
-        const html = messages
-          .map((m) => {
-            const who = m.is_bot ? "open-swe (bot)" : userNames[m.user] || m.user;
-            const linked = m.text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '<a href="$1">$2</a>');
-            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}"><div class="who">${who}</div><div class="text">${linked}</div></div>`;
-          })
-          .join("");
-        $("thread").innerHTML = html || "<p style='color:#888'>No messages yet.</p>";
+      async function sendAction(message, action, button) {
+        button.disabled = true;
+        const response = await fetch("/mock/slack/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, message_ts: message.ts, thread_ts: message.thread_ts, user: $("user").value }),
+        });
+        if (!response.ok) button.disabled = false;
+        await poll();
+      }
+
+      function renderMessages(messages) {
+        const thread = $("thread");
+        thread.replaceChildren();
+        if (!messages.length) {
+          const empty = document.createElement("p");
+          empty.className = "empty";
+          empty.textContent = "No messages yet.";
+          thread.appendChild(empty);
+          return;
+        }
+        for (const message of messages) {
+          const item = document.createElement("article");
+          item.className = `msg ${message.is_bot ? "bot" : ""}`;
+          item.dataset.bot = String(message.is_bot);
+          item.dataset.threadTs = message.thread_ts || "";
+          const avatar = document.createElement("div");
+          avatar.className = "avatar";
+          avatar.textContent = message.is_bot ? "OS" : (userNames[message.user] || message.user).slice(0, 1);
+          const body = document.createElement("div");
+          const who = document.createElement("div");
+          who.className = "who";
+          who.textContent = message.is_bot ? "Open SWE" : userNames[message.user] || message.user;
+          const text = document.createElement("div");
+          text.className = "text";
+          const linkPattern = /<(https?:\/\/[^|>]+)\|([^>]+)>/g;
+          let cursor = 0;
+          for (const match of message.text.matchAll(linkPattern)) {
+            text.append(document.createTextNode(message.text.slice(cursor, match.index)));
+            const link = document.createElement("a");
+            link.href = match[1];
+            link.textContent = match[2];
+            text.appendChild(link);
+            cursor = match.index + match[0].length;
+          }
+          text.append(document.createTextNode(message.text.slice(cursor)));
+          body.append(who, text);
+          for (const block of message.blocks || []) {
+            if (block.type === "context") {
+              for (const context of block.elements || []) {
+                if (context.type !== "plain_text" || !context.text) continue;
+                const element = document.createElement("div");
+                element.className = "context";
+                element.textContent = context.text;
+                body.appendChild(element);
+              }
+            }
+            if (block.type === "actions") {
+              const actions = document.createElement("div");
+              actions.className = "actions";
+              for (const action of block.elements || []) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = action.text?.text || "Choose";
+                if (action.style === "primary") button.classList.add("primary");
+                button.addEventListener("click", () => sendAction(message, action, button));
+                actions.appendChild(button);
+              }
+              body.appendChild(actions);
+            }
+          }
+          item.append(avatar, body);
+          thread.appendChild(item);
+        }
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      function renderChrome(channel) {
+        const chrome = $("chrome");
+        chrome.replaceChildren();
+        if (!channel?.code_channel) { chrome.hidden = true; return; }
+        for (const item of channel.context_bar_items || []) {
+          const pill = document.createElement("span");
+          pill.className = "pill";
+          pill.textContent = `${item.icon === "folder" ? "▣" : "↗"} ${item.label}`;
+          chrome.appendChild(pill);
+        }
+        for (const command of channel.commands || []) {
+          const pill = document.createElement("span");
+          pill.className = "pill command";
+          pill.textContent = `/${command.name}`;
+          chrome.appendChild(pill);
+        }
+        chrome.hidden = false;
+      }
+
+      async function selectChannel(channel) {
+        selectedChannel = channel.id;
+        selectedIsCodeChannel = Boolean(channel.code_channel);
+        $("channel-title").textContent = `# ${channel.name}`;
+        $("channel-subtitle").textContent = selectedIsCodeChannel ? "Open SWE code channel · one task, one session" : "Team channel";
+        $("mention").checked = !selectedIsCodeChannel;
+        $("mention").disabled = selectedIsCodeChannel;
+        $("mention-label").textContent = selectedIsCodeChannel ? "Every message goes to Open SWE — no @mention needed" : "Mention Open SWE";
+        if (selectedIsCodeChannel && $("text").value.includes("E2E_CODE_CHANNEL")) $("text").value = "What is the current status? E2E_CODE_CHANNEL_FOLLOWUP";
+        await pollMessages();
+      }
+
+      async function pollState() {
+        const state = await (await fetch(`/mock/slack/state?channel=${encodeURIComponent(selectedChannel)}`)).json();
+        if (!state.channels.some((channel) => channel.id === selectedChannel)) selectedChannel = state.selected_channel;
+        const codeChannels = state.channels.filter((channel) => channel.code_channel);
+        if (codeChannels.length > knownCodeChannels) {
+          knownCodeChannels = codeChannels.length;
+          selectedChannel = codeChannels.at(-1).id;
+        }
+        const active = state.channels.find((channel) => channel.id === selectedChannel) || state.channels[0];
+        selectedIsCodeChannel = Boolean(active.code_channel);
+        const channels = $("channels");
+        channels.replaceChildren(...state.channels.map((channel) => {
+          const button = document.createElement("button");
+          button.className = `channel ${channel.id === active.id ? "active" : ""}`;
+          button.dataset.channelId = channel.id;
+          button.textContent = `${channel.code_channel ? "✦ " : "# "}${channel.name}`;
+          button.addEventListener("click", () => selectChannel(channel));
+          return button;
+        }));
+        $("channel-title").textContent = `# ${active.name}`;
+        $("channel-subtitle").textContent = active.code_channel ? "Open SWE code channel · one task, one session" : "Team channel";
+        $("status").hidden = !active.code_channel;
+        $("status").className = `status ${active.status || "active"}`;
+        $("status-text").textContent = active.status || "active";
+        $("mention").checked = !active.code_channel;
+        $("mention").disabled = Boolean(active.code_channel);
+        $("mention-label").textContent = active.code_channel ? "Every message goes to Open SWE — no @mention needed" : "Mention Open SWE";
+        if (active.code_channel && $("text").value.includes("E2E_CODE_CHANNEL")) $("text").value = "What is the current status? E2E_CODE_CHANNEL_FOLLOWUP";
+        renderChrome(active);
+      }
+
+      async function pollMessages() {
+        const url = selectedIsCodeChannel ? `/mock/slack/messages?channel=${encodeURIComponent(selectedChannel)}` : "/mock/slack/messages";
+        const messages = await (await fetch(url)).json();
+        renderMessages(messages);
       }
 
       async function poll() {
-        try {
-          const res = await fetch("/mock/slack/messages");
-          render(await res.json());
-        } catch (_) {}
+        try { await pollState(); await pollMessages(); } catch (_) {}
       }
 
       $("send").addEventListener("click", async () => {
         await fetch("/mock/slack/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: $("text").value,
-            mention_bot: $("mention").checked,
-            user: $("user").value,
-          }),
+          body: JSON.stringify({ text: $("text").value, mention_bot: $("mention").checked, user: $("user").value, channel: selectedChannel }),
         });
-        poll();
+        await poll();
       });
-
+      $("text").addEventListener("keydown", (event) => { if (event.key === "Enter") $("send").click(); });
       $("reset").addEventListener("click", async () => {
         await fetch("/control/reset", { method: "POST" });
-        render([]);
+        selectedChannel = "C_DEMO";
+        selectedIsCodeChannel = false;
+        knownCodeChannels = 0;
+        $("text").value = "<@U0BOT> investigate the flaky CI failures — use a dedicated code channel if this warrants one E2E_CODE_CHANNEL";
+        await poll();
       });
-
-      loadUsers();
-      poll();
-      setInterval(poll, 1000);
+      loadUsers().then(poll);
+      setInterval(poll, 700);
     </script>
   </body>
 </html>

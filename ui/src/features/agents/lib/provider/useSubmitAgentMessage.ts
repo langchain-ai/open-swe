@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
-  invalidateAgentThreadLists,
+  setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
 /**
  * Construct the message content for the LangGraph run.
@@ -72,18 +72,24 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
  */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
-      const queue = async () => {
+      // `optimistic` is only safe when a run is known to be in flight. Idle
+      // sends still probe `/messages` first (a run may have started elsewhere),
+      // and that probe answers 409 — showing the bubble up front would flash a
+      // "Queued next" card for the length of the round trip.
+      const queue = async (optimistic: boolean) => {
         const queuedAt = Date.now()
         const queuedId = `queued-${queuedAt}-${Math.random().toString(36).slice(2)}`
-        queryClient.setQueryData<AgentThread>(
-          agentThreadKeys.detail(threadId),
-          (prev) =>
-            prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
-        )
+        const showQueued = () =>
+          queryClient.setQueryData<AgentThread>(
+            agentThreadKeys.detail(threadId),
+            (prev) =>
+              prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
+          )
+        if (optimistic) showQueued()
         try {
           await agentsApi.queueMessage(threadId, {
             content: vars.content,
@@ -93,21 +99,24 @@ export function useSubmitAgentMessage(threadId: string) {
             plan_mode: vars.plan_mode,
           })
         } catch (error) {
-          queryClient.setQueryData<AgentThread>(
-            agentThreadKeys.detail(threadId),
-            (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
-          )
+          if (optimistic) {
+            queryClient.setQueryData<AgentThread>(
+              agentThreadKeys.detail(threadId),
+              (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
+            )
+          }
           throw error
         }
+        if (!optimistic) showQueued()
       }
 
       if (stream.isLoading) {
-        await queue()
+        await queue(true)
         return
       }
 
       try {
-        await queue()
+        await queue(false)
         return
       } catch (error) {
         if (!(error instanceof AgentsApiError) || error.status !== 409) {
@@ -140,17 +149,11 @@ export function useSubmitAgentMessage(threadId: string) {
           // 409 active-run race), but `onSuccess` already optimistically set
           // `status: "running"`. Surface the failure and clear the busy state
           // instead of leaving the thread falsely running.
-          queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
-            prev ? { ...prev, status: "error" as const } : prev
-          )
-          invalidateAgentThreadLists(queryClient)
+          setAgentThreadStatus(queryClient, threadId, "error")
         })
     },
     onSuccess: () => {
-      queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
-        prev ? { ...prev, status: "running" as const } : prev
-      )
-      invalidateAgentThreadLists(queryClient)
+      setAgentThreadStatus(queryClient, threadId, "running")
     },
   })
 }

@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 import asyncio
+import hashlib
 from typing import Any, cast
 from unittest.mock import MagicMock
+from xml.etree import ElementTree
 
 import pytest
 from langchain.agents.middleware import AgentState
@@ -10,7 +10,9 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.middleware.prepare_run import BasePrepareRunMiddleware
+from agent.input_messages import human_input, system_introduction
+from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
 
 
@@ -91,7 +93,140 @@ async def test_prepare_prompt_injection():
         },
     )()
     await middleware.awrap_model_call(cast(ModelRequest[None], request), handler)
-    assert seen["system_prompt"] == "prepared prompt"
+    prompt = ElementTree.fromstring(seen["system_prompt"])
+    assert prompt.tag == "system-instructions"
+    entity = prompt.find("dynamic-context")
+    message = prompt.find("input-message")
+    assert entity is not None
+    assert message is not None
+    assert entity.attrib["id"] == "system:open-swe"
+    assert message.findtext("content") == "prepared prompt"
+
+
+def _sender_message(sender_id: str, text: str = "ship it") -> HumanMessage:
+    content = human_input(
+        text,
+        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+    )["content"]
+    return HumanMessage(content=cast(str, content))
+
+
+def _sender_context_introduction(sender_id: str, sender_context: str = "sender") -> HumanMessage:
+    content = system_introduction(
+        {
+            "id": "system:sender-context",
+            "display_name": "Sender context",
+            "platform": "open-swe",
+            "subject_id": sender_id,
+            "context_hash": hashlib.sha256(sender_context.encode()).hexdigest(),
+        }
+    )["content"]
+    return HumanMessage(content=cast(str, content))
+
+
+def test_sender_context_arrives_as_its_own_message():
+    latest = _sender_message("github:ramon")
+
+    messages = PrepareAgentRunMiddleware._sender_context_messages(
+        cast(PrepareRunState, {"messages": [latest]}),
+        "sender",
+    )
+
+    assert len(messages) == 2
+    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert introduction.findtext("subject_id") == "github:ramon"
+    assert introduction.findtext("context_hash") == hashlib.sha256(b"sender").hexdigest()
+    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
+    assert envelope.attrib["sender"] == "system:sender-context"
+    assert envelope.attrib["kind"] == "system"
+    assert envelope.findtext("content") == "sender"
+
+
+def test_sender_context_is_skipped_when_visible_for_same_sender():
+    state = cast(
+        PrepareRunState,
+        {
+            "messages": [
+                _sender_context_introduction("github:ramon"),
+                _sender_message("github:ramon", "again"),
+            ]
+        },
+    )
+
+    assert PrepareAgentRunMiddleware._sender_context_messages(state, "sender") == []
+
+
+def test_sender_context_is_added_when_same_sender_context_changes():
+    state = cast(
+        PrepareRunState,
+        {
+            "messages": [
+                _sender_context_introduction("github:ramon", "old sender"),
+                _sender_message("github:ramon", "again"),
+            ]
+        },
+    )
+
+    messages = PrepareAgentRunMiddleware._sender_context_messages(state, "new sender")
+    assert len(messages) == 2
+    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert introduction.findtext("subject_id") == "github:ramon"
+    assert introduction.findtext("context_hash") == hashlib.sha256(b"new sender").hexdigest()
+
+
+def test_sender_context_is_added_for_new_sender():
+    state = cast(
+        PrepareRunState,
+        {
+            "messages": [
+                _sender_context_introduction("github:ramon"),
+                _sender_message("github:alice"),
+            ]
+        },
+    )
+
+    messages = PrepareAgentRunMiddleware._sender_context_messages(state, "alice")
+    assert len(messages) == 2
+    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert introduction.findtext("subject_id") == "github:alice"
+
+
+def test_sender_context_is_restored_after_compaction():
+    state = cast(
+        PrepareRunState,
+        {
+            "messages": [
+                _sender_context_introduction("github:ramon"),
+                _sender_message("github:ramon", "again"),
+            ],
+            "_summarization_event": {"cutoff_index": 1},
+        },
+    )
+
+    assert len(PrepareAgentRunMiddleware._sender_context_messages(state, "sender")) == 2
+
+
+def test_sender_context_escapes_untrusted_identity_text():
+    message = _sender_message("slack:U1", "ship it <now> & fast")
+    original = message.content
+
+    messages = PrepareAgentRunMiddleware._sender_context_messages(
+        cast(PrepareRunState, {"messages": [message]}),
+        "identity: 'ramon' & <team>",
+    )
+
+    assert message.content == original
+    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
+    assert envelope.findtext("content") == "identity: 'ramon' & <team>"
+
+
+def test_sender_context_skipped_without_a_human_message():
+    assert (
+        PrepareAgentRunMiddleware._sender_context_messages(
+            cast(PrepareRunState, {"messages": []}), "sender"
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio

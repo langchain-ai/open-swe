@@ -7,20 +7,13 @@ re-enabled with ``@open-swe autofix on``), mirroring Cursor's
 agent thread so a disable command is honored even before any fix run exists.
 """
 
-from __future__ import annotations
-
 import logging
-from datetime import UTC, datetime
 
-from langgraph_sdk import get_client
+from agent.store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
 
 AUTOFIX_PR_STATE_NAMESPACE: list[str] = ["autofix_pr_state"]
-
-
-def _client():
-    return get_client()
 
 
 def _key(owner: str, repo: str, pr_number: int) -> str:
@@ -28,24 +21,24 @@ def _key(owner: str, repo: str, pr_number: int) -> str:
 
 
 async def is_pr_autofix_disabled(owner: str, repo: str, pr_number: int) -> bool:
-    """Return whether auto-fix has been turned off for a specific PR."""
+    """Return whether auto-fix has been turned off for a specific PR.
+
+    Fail-soft on purpose: this runs inside CI-failure webhook handling, and an
+    unreachable store must leave auto-fix at its configured default rather than
+    break the handler.
+    """
     try:
-        item = await _client().store.get_item(
-            AUTOFIX_PR_STATE_NAMESPACE, _key(owner, repo, pr_number)
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.debug("autofix PR state lookup failed: %s", e)
+        record = await get_value(AUTOFIX_PR_STATE_NAMESPACE, _key(owner, repo, pr_number))
+    except Exception:
+        logger.warning("autofix PR state lookup failed", exc_info=True)
         return False
-    if item is None:
-        return False
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return bool(value.get("disabled")) if isinstance(value, dict) else False
+    return bool(record.get("disabled")) if record else False
 
 
 async def set_pr_autofix_disabled(owner: str, repo: str, pr_number: int, disabled: bool) -> None:
     """Persist the per-PR auto-fix opt-out flag."""
-    await _client().store.put_item(
+    await put_value(
         AUTOFIX_PR_STATE_NAMESPACE,
         _key(owner, repo, pr_number),
-        {"disabled": disabled, "updated_at": datetime.now(UTC).isoformat()},
+        {"disabled": disabled, "updated_at": now_iso()},
     )

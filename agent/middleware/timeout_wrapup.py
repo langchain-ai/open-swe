@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import time
 from collections.abc import Awaitable, Callable
@@ -7,6 +5,8 @@ from typing import Any
 
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.messages import BaseMessage, SystemMessage
+
+from ..input_messages import wrap_system_prompt
 
 _DEFAULT_TIMEOUT_SECONDS = 45 * 60
 _WRAPUP_INSTRUCTION = """
@@ -56,7 +56,14 @@ class TimeoutWrapupMiddleware(AgentMiddleware):
     def _apply(self, request: ModelRequest) -> ModelRequest:
         if not self._should_wrapup():
             return request
-        content = _content_with_instruction(request.system_message, _WRAPUP_INSTRUCTION)
+        if request.system_message is None:
+            content = wrap_system_prompt("", additions=[_WRAPUP_INSTRUCTION.strip()])
+        elif isinstance(request.system_message.content, str):
+            content = wrap_system_prompt(
+                request.system_message.content, additions=[_WRAPUP_INSTRUCTION.strip()]
+            )
+        else:
+            content = _content_with_instruction(request.system_message, _WRAPUP_INSTRUCTION)
         return request.override(system_message=SystemMessage(content=content))
 
     async def awrap_model_call(

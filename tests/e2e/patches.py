@@ -10,8 +10,6 @@ Applied at import of both the graph entrypoint and the HTTP harness (same dev
 process), so it runs before the first run regardless of import order. Idempotent.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 
@@ -30,7 +28,8 @@ def apply() -> None:
     import importlib
 
     from agent import server
-    from agent.utils import auth, authorship
+    from agent.auth import resolve as auth
+    from agent.utils import authorship, slack_code_channels
     from agent.utils import slack as slack_utils
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
@@ -66,6 +65,7 @@ def apply() -> None:
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
+    slack_code_channels.SLACK_API_BASE_URL = FAKE_SLACK_API
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.
@@ -74,12 +74,61 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import profiles, thread_api
+    from agent.dashboard import profiles, pull_request_context, pull_request_status, thread_api
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
 
     profiles.get_valid_access_token = _dummy_user_token
     thread_api.get_valid_access_token = _dummy_user_token
+    pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
+    pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
+    pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
+
+    # Snapshot service: another external boundary. The E2E runs the local sandbox
+    # provider, so there is nothing to capture from — record the request in the
+    # fake store instead. The environment tools, store writes, name/tag scheme
+    # and status transitions all still run for real.
+    from agent.dashboard import environments as environments_store
+    from agent.integrations import langsmith as langsmith_integration
+
+    langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
+    # The capture path refuses to run off the langsmith provider; with that
+    # provider's snapshot API faked above, the E2E's local sandbox is capturable.
+    environments_store._require_capture_support = lambda: None
 
     _applied = True
+
+
+class _FakeSnapshot:
+    def __init__(self, snapshot_id: str, name: str) -> None:
+        self.id = snapshot_id
+        self.name = name
+        self.status = "ready"
+
+
+class _FakeSandboxClient:
+    """Stands in for ``AsyncSandboxClient`` for snapshot calls only."""
+
+    async def __aenter__(self) -> "_FakeSandboxClient":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
+    async def capture_snapshot(
+        self,
+        sandbox_name: str,
+        name: str,
+        *,
+        timeout: int = 60,  # noqa: ARG002
+        **_kwargs: object,
+    ) -> _FakeSnapshot:
+        import fakes
+
+        return _FakeSnapshot(fakes.record_snapshot_capture(sandbox_name, name), name)
+
+    async def delete_snapshot(self, snapshot_id: str) -> None:
+        import fakes
+
+        fakes.record_snapshot_delete(snapshot_id)

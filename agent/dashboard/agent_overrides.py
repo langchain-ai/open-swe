@@ -1,12 +1,9 @@
 """Profile lookup + override helpers consumed by ``agent.server.get_agent``."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
-import httpx
-from langgraph_sdk import get_client
+from agent.store import get_value
 
 from .options import (
     SUPPORTED_MODEL_IDS,
@@ -74,27 +71,25 @@ async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:
 
 
 async def load_profile(login: str) -> dict[str, Any] | None:
+    """The user's profile record, or ``None`` when it is missing or unreadable.
+
+    Fail-soft on purpose: every caller — ``agent.server.get_agent``,
+    :func:`get_profile_default_repo`, :func:`resolve_agent_model_id` — is on the
+    path that starts an agent run, and a store blip must cost the run its
+    per-user overrides, not the run itself. Dashboard reads that should surface
+    a failure use :func:`agent.dashboard.profiles.get_profile` instead.
+    """
     try:
-        item = await get_client().store.get_item(PROFILES_NAMESPACE, login)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return None
-        logger.warning("profile lookup failed for %s: %s", login, e)
+        return await get_value(PROFILES_NAMESPACE, login)
+    except Exception:
+        logger.warning("profile lookup failed for %s", login, exc_info=True)
         return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
 
 
-def profile_create_prs(profile: dict[str, Any] | None) -> bool:
-    """Return whether the agent should always open a PR. Defaults to False."""
-    if not isinstance(profile, dict):
-        return False
-    value = profile.get("create_prs")
-    if isinstance(value, bool):
-        return value
-    return False
+def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
+    """Return whether new PRs should be drafts. Defaults to True."""
+    value = profile.get("draft_prs") if isinstance(profile, dict) else None
+    return value if isinstance(value, bool) else True
 
 
 def _normalize_profile_model_pair(

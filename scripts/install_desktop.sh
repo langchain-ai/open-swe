@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "Open SWE Desktop can only be installed with this command on macOS." >&2
+  exit 1
+fi
+
+for command in node ditto; do
+  command -v "$command" >/dev/null || {
+    echo "Missing $command. Install Node.js, then try again." >&2
+    exit 1
+  }
+done
+
+command -v uv >/dev/null || {
+  echo "Missing uv. Install it from https://docs.astral.sh/uv/, then try again." >&2
+  exit 1
+}
+
+# Node 25 dropped the bundled corepack shim, so neither launcher is guaranteed.
+if command -v pnpm >/dev/null; then
+  pnpm=(pnpm)
+elif command -v corepack >/dev/null; then
+  pnpm=(corepack pnpm)
+else
+  echo "Missing pnpm. Install it from https://pnpm.io/installation, then try again." >&2
+  exit 1
+fi
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+"${pnpm[@]}" install --frozen-lockfile
+rm -rf desktop/dist
+"${pnpm[@]}" --dir desktop run pack
+
+apps=(desktop/dist/mac*/"Open SWE.app")
+if [[ ${#apps[@]} -ne 1 || ! -d "${apps[0]}" ]]; then
+  echo "Could not find the packaged Open SWE application." >&2
+  exit 1
+fi
+
+system_app="/Applications/Open SWE.app"
+user_app="$HOME/Applications/Open SWE.app"
+if [[ -w /Applications ]]; then
+  target="$system_app"
+else
+  mkdir -p "$HOME/Applications"
+  target="$user_app"
+fi
+
+staged="${target}.installing.$$"
+trap 'rm -rf "$staged"' EXIT
+ditto "${apps[0]}" "$staged"
+osascript -e 'tell application id "com.langchain.openswe" to quit' >/dev/null 2>&1 || true
+rm -rf "$target"
+mv "$staged" "$target"
+trap - EXIT
+open "$target"
+echo "Open SWE Desktop installed at $target"

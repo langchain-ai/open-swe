@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,6 +5,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
+from agent import store
 from agent.dashboard import repo_cache, routes
 
 
@@ -165,7 +164,7 @@ async def test_list_repos_refresh_bypasses_cache_and_writes_it(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_read_cached_repos_rejects_expired_and_malformed_entries(monkeypatch) -> None:
-    now_ms = repo_cache._now_ms()
+    now_ms = store.now_ms()
 
     async def fake_get_item(namespace: list[str], key: str) -> dict[str, object]:
         assert namespace == repo_cache.REPO_LIST_CACHE_NAMESPACE
@@ -179,9 +178,9 @@ async def test_read_cached_repos_rejects_expired_and_malformed_entries(monkeypat
         },
         "malformed": {"payload": "nope", "cached_at_ms": now_ms},
     }
-    store = MagicMock()
-    store.get_item = fake_get_item
-    monkeypatch.setattr(repo_cache, "_client", lambda: MagicMock(store=store))
+    fake_store = MagicMock()
+    fake_store.get_item = fake_get_item
+    monkeypatch.setattr(store, "store_client", lambda: MagicMock(store=fake_store))
 
     fresh = await repo_cache.read_cached_repos("fresh")
     assert fresh is not None and fresh[0] == {"repositories": []}
@@ -191,9 +190,9 @@ async def test_read_cached_repos_rejects_expired_and_malformed_entries(monkeypat
 
 @pytest.mark.asyncio
 async def test_read_cached_repos_swallows_store_failures(monkeypatch) -> None:
-    store = MagicMock()
-    store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
-    monkeypatch.setattr(repo_cache, "_client", lambda: MagicMock(store=store))
+    fake_store = MagicMock()
+    fake_store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
+    monkeypatch.setattr(store, "store_client", lambda: MagicMock(store=fake_store))
 
     assert await repo_cache.read_cached_repos("octocat") is None
 

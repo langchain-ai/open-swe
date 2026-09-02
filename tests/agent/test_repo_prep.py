@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from agent.utils.repo_prep import materialize_trusted_skills, prepare_review_repo
+from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 
 
 class _FakeSandboxBackend:
@@ -26,7 +24,7 @@ class _FakeSandboxBackend:
     def id(self) -> str:
         return "fake-sandbox"
 
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         del timeout
         if self._raise:
             raise RuntimeError("sandbox unreachable")

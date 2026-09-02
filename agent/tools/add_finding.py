@@ -1,11 +1,11 @@
 """Tool: ``add_finding``. Records one review finding on the reviewer thread."""
 
-from __future__ import annotations
-
 from typing import Annotated, Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+
+from agent.auth.thread_token import get_github_token
 
 from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..review.findings import (
@@ -24,7 +24,6 @@ from ..review.findings import (
     resolve_review_head_sha,
     thread_missing_tool_result,
 )
-from ..utils.github_token import get_github_token
 
 
 async def add_finding(

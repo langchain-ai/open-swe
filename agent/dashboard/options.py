@@ -1,7 +1,5 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
-from __future__ import annotations
-
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
@@ -56,13 +54,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
     {
         "id": "openai:gpt-5.6-luna",
         "label": "GPT-5.6 Luna",
-        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "xhigh",
         "supports_images": True,
     },
     {
-        "id": "google_genai:gemini-3.6-flash",
-        "label": "Gemini 3.6 Flash",
+        "id": "google_genai:gemini-3.8-flash",
+        "label": "Gemini 3.8 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
@@ -83,11 +81,18 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": False,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/glm-5p2",
-        "label": "GLM 5.2",
+        "id": "fireworks:accounts/fireworks/models/glm-5p3",
+        "label": "GLM 5.3",
         "efforts": ["none", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
+    },
+    {
+        "id": "baseten:zai-org/GLM-5.3-Flash",
+        "label": "GLM-5.3 Flash",
+        "efforts": ["low", "high", "max"],
+        "default_effort": "high",
+        "supports_images": True,
     },
 ]
 
@@ -97,37 +102,40 @@ FABLE_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
 )
 
-# Retired ids mapped to the model that replaces them. Stored selections (profiles,
-# team defaults, per-thread config, schedules) are migrated onto the replacement
-# instead of being discarded, so a user who never revisits their settings keeps an
-# equivalent model rather than silently inheriting the team default.
-DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
-    "anthropic:claude-opus-4-8": "anthropic:claude-opus-5",
-    "openai:gpt-5.5": "openai:gpt-5.6-sol",
-    "google_genai:gemini-3.5-flash": "google_genai:gemini-3.6-flash",
-    "fireworks:accounts/fireworks/models/kimi-k2p7-code": (
-        "fireworks:accounts/fireworks/models/kimi-k3"
-    ),
-    # Never a real Fireworks deployment: the K2.7 rename kept the `-code` suffix,
-    # which K3 does not use, so selections stored under it 404 at request time.
-    "fireworks:accounts/fireworks/models/kimi-k3-code": (
-        "fireworks:accounts/fireworks/models/kimi-k3"
-    ),
-}
+DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
+    {
+        "anthropic:claude-opus-4-8",
+        "openai:gpt-5.5",
+        "google_genai:gemini-3.5-flash",
+        "google_genai:gemini-3.6-flash",
+        "google_genai:gemini-3.7-flash",
+        "fireworks:accounts/fireworks/models/kimi-k2p7-code",
+        "fireworks:accounts/fireworks/models/kimi-k3-code",
+        "fireworks:accounts/fireworks/models/glm-5p2",
+    }
+)
+
+DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = dict.fromkeys(DEPRECATED_MODEL_IDS, "")
 
 ProfileLoader = Callable[[str], Mapping[str, object]]
 
 # LangChain partner packages expose ``_get_default_model_profile`` — the same
-# accessor that populates ``ChatModel.profile`` from bundled models.dev data —
-# so context windows come from LangChain profiles instead of hardcoded numbers.
+# accessor that populates ``ChatModel.profile`` from bundled models.dev data.
 _PROFILE_LOADER_MODULES: dict[str, str] = {
     "anthropic": "langchain_anthropic.chat_models",
     "fireworks": "langchain_fireworks.chat_models",
     "google_genai": "langchain_google_genai.chat_models",
     "openai": "langchain_openai.chat_models.base",
 }
+CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
+    "openai:gpt-5.6-sol": 272_000,
+    "openai:gpt-5.6-terra": 272_000,
+    "openai:gpt-5.6-luna": 272_000,
+}
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
-    "fireworks:accounts/fireworks/models/kimi-k3-code": 1_040_000,
+    "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
+    "fireworks:accounts/fireworks/models/glm-5p3": 1_048_576,
+    "baseten:zai-org/GLM-5.3-Flash": 1_000_000,
 }
 
 
@@ -146,8 +154,22 @@ def _profile_loader(provider: str) -> ProfileLoader | None:
     return cast(ProfileLoader, loader)
 
 
+def model_profile_with_context_override(model_id: str) -> dict[str, object] | None:
+    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
+    if context_window is None:
+        return None
+    provider, _, model_name = model_id.partition(":")
+    loader = _profile_loader(provider)
+    profile = dict(loader(model_name)) if loader is not None else {}
+    profile["max_input_tokens"] = context_window
+    return profile
+
+
 @lru_cache(maxsize=512)
 def model_profile_context_window(model_id: str) -> int | None:
+    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
+    if context_window is not None:
+        return context_window
     provider, _, model_name = model_id.partition(":")
     if not provider or not model_name:
         return None
@@ -246,21 +268,23 @@ def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
     return None
 
 
-def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
-    """Supported ``(model_id, effort)`` replacing a deprecated/renamed model id.
+def is_deprecated_model(model_id: object) -> bool:
+    return isinstance(model_id, str) and model_id in DEPRECATED_MODEL_IDS
 
-    Preserves ``effort`` when the replacement supports it, otherwise uses the
-    replacement's default effort. Returns ``None`` for ids that aren't deprecated.
-    """
-    if not isinstance(model_id, str):
-        return None
-    replacement = DEPRECATED_MODEL_REPLACEMENTS.get(model_id)
-    if replacement is None:
-        return None
-    for m in SUPPORTED_MODELS:
-        if m["id"] == replacement:
-            return replacement, _fallback_effort_for(m, effort) or m["default_effort"]
+
+def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
     return None
+
+
+def normalize_model_choice(model_id: object, effort: object) -> tuple[str | None, str | None]:
+    if (
+        not isinstance(model_id, str)
+        or model_id not in SUPPORTED_MODEL_IDS
+        or not isinstance(effort, str)
+        or not model_supports_effort(model_id, effort)
+    ):
+        return None, None
+    return model_id, effort
 
 
 def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
@@ -273,13 +297,10 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
     supports it, otherwise uses that model's default effort. Returns ``None`` when
     no supported model shares the provider.
 
-    Explicitly deprecated ids resolve to their mapped replacement first.
+    Explicitly deprecated ids inherit the team default instead.
     """
-    if not isinstance(model_id, str):
+    if not isinstance(model_id, str) or model_id in DEPRECATED_MODEL_IDS:
         return None
-    canonical = canonical_model_pair(model_id, effort)
-    if canonical is not None:
-        return canonical
     provider = _provider_of(model_id)
     if provider is None:
         return None

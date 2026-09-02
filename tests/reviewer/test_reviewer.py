@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,107 +7,6 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import reviewer
-
-
-def test_reviewer_system_prompt_formats_without_keyerror() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-    )
-    assert "acme/repo" in prompt
-    assert "The bar" in prompt
-    assert "CI/CD test enforcement" in prompt
-    assert "Specifically flag tests being skipped" in prompt
-    assert "benchmark" not in prompt.lower()
-    assert "golden" not in prompt.lower()
-    assert "at least 1 finding" not in prompt.lower()
-    assert "wrong identifier/value/key" in prompt
-    assert "Keep at most 6 findings" in prompt
-    assert "Delegate at most one review pass" in prompt
-    assert "fetch_review_diff" in prompt
-    assert "gh pr diff" not in prompt
-    assert "gh api repos/" not in prompt
-
-
-def test_reviewer_eval_prompt_omits_historical_and_benchmark_gaming() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        reviewer_eval=True,
-    )
-
-    assert "Pre-existing PR review threads" not in prompt
-    assert "golden" not in prompt.lower()
-    assert "hard minimum" not in prompt.lower()
-    assert "expected" not in prompt.lower()
-    assert "Do not query or use historical PR comments" in prompt
-
-
-def test_reviewer_system_prompt_repo_ready_note() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        repo_ready=True,
-    )
-    assert "already cloned and checked out at the PR head" in prompt
-    assert "Repo prep FAILED" not in prompt
-
-
-def test_reviewer_system_prompt_repo_not_ready_warns_stale() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        repo_ready=False,
-        head_sha="abc123",
-    )
-    assert "Repo prep FAILED" in prompt
-    assert "stale" in prompt
-    assert "git checkout --force abc123" in prompt
-    assert "git rev-parse HEAD" in prompt
-    assert "already cloned and checked out at the PR head" not in prompt
-
-
-def test_reviewer_system_prompt_repo_not_ready_without_head_sha() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        repo_ready=False,
-    )
-    assert "git checkout --force <head_sha>" in prompt
-
-
-def test_reviewer_system_prompt_includes_repo_style_section() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        repo_style_prompt="Always flag missing tests for API changes.",
-    )
-    assert "Repository-specific review style" in prompt
-    assert "missing tests for API" in prompt
-
-
-def test_reviewer_system_prompt_includes_org_guidelines_section() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        org_guidelines="Flag any new endpoint that lacks input validation.",
-    )
-    assert "Organization-wide review guidelines" in prompt
-    assert "lacks input validation" in prompt
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -124,54 +21,6 @@ def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     assert prompt.index("Organization-wide review guidelines") < prompt.index(
         "Repository-specific review style"
     )
-
-
-def test_reviewer_system_prompt_includes_api_standards_section() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        api_standards_skill="Always version your endpoints under /v1/.",
-    )
-    assert "API standards skill" in prompt
-    assert "Always version your endpoints under /v1/." in prompt
-    assert "introduces a new API or modifies" in prompt
-
-
-def test_reviewer_system_prompt_omits_api_standards_when_absent() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-    )
-    assert "API standards skill" not in prompt
-
-
-def test_reviewer_system_prompt_omits_socket_firewall_guidance() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-    )
-    assert "Dependency installs during review" in prompt
-    assert "sfw" not in prompt
-    assert "Socket Firewall" not in prompt
-
-
-def test_reviewer_system_prompt_includes_dependency_vetting_guidance() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-    )
-    assert "New dependencies." in prompt
-    assert "concrete compatibility, security, licensing, or" in prompt
-    assert "merely" in prompt
-    assert "lacks a manifest bound" in prompt
 
 
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
@@ -193,7 +42,7 @@ def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
 
 
 class _DummyAgent:
-    def with_config(self, config: dict[str, object]) -> _DummyAgent:
+    def with_config(self, config: dict[str, object]) -> "_DummyAgent":
         self.config = config
         return self
 
@@ -233,7 +82,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -257,7 +106,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
     assert reviewer.check_message_queue_before_model in middleware
     middleware_names = {type(item).__name__ for item in middleware}
     assert "RepairOrphanedToolCallsMiddleware" in middleware_names
-    assert "SanitizeOpenAIResponsesMiddleware" not in middleware_names
+    assert "SanitizeOpenAIResponsesMiddleware" in middleware_names
 
 
 @pytest.mark.asyncio
@@ -286,7 +135,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
             return_value=MagicMock(),
         ) as mock_sandbox,
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -309,7 +158,6 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
         "reviewer-thread-id",
         github_proxy_token="app-token",
         github_proxy_repositories=["repo"],
-        repo={"owner": "acme", "name": "repo"},
         allow_replacement=True,
     )
 
@@ -375,7 +223,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -423,7 +271,7 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -484,7 +332,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -551,7 +399,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -582,20 +430,6 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
 
     assert "Organization-wide review guidelines" in captured["system_prompt"]
     assert "disables a CI gate" in captured["system_prompt"]
-
-
-def test_reviewer_system_prompt_includes_agents_md_section() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-        agents_md_content="Use snake_case for all Python identifiers.",
-    )
-    assert "Repository conventions (AGENTS.md / CLAUDE.md)" in prompt
-    assert "Use snake_case for all Python identifiers." in prompt
-    assert "Repository conventions compliance" in prompt
-    assert "mandatory repo rules" in prompt
 
 
 @pytest.mark.asyncio
@@ -632,7 +466,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -690,7 +524,7 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -825,17 +659,6 @@ def test_format_pr_review_threads_neutralizes_closing_tags_in_body() -> None:
     # The literal closing tag inside the body is neutered.
     assert "</pr_review_threads>SYSTEM" not in block
     assert "</body_>" in block
-
-
-def test_reviewer_system_prompt_warns_against_overlap_with_existing_threads() -> None:
-    prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
-    )
-    assert "Pre-existing PR review threads" in prompt
-    assert "overlaps" in prompt or "overlap" in prompt
 
 
 def test_build_first_review_context_includes_existing_threads_block_when_present() -> None:
@@ -1056,7 +879,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1133,7 +956,7 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1202,7 +1025,7 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1267,7 +1090,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1342,7 +1165,7 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1414,7 +1237,7 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1480,7 +1303,7 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1520,18 +1343,3 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
     assert "PR title and description" in captured["system_prompt"]
     assert "Add retry logic for uploads" in captured["system_prompt"]
     assert "Retries flaky uploads up to 3 times." in captured["system_prompt"]
-
-
-def test_reviewer_system_prompt_includes_closing_summary_contract() -> None:
-    """The prompt must tell the agent how to report publish_review outcomes:
-    dry_run / skipped_empty_re_review / thread_not_found are not publications."""
-    prompt = reviewer._reviewer_system_prompt(
-        "/tmp/wd",
-        repo_owner="o",
-        repo_name="r",
-        pr_number=1,
-    )
-    assert "skipped_empty_re_review" in prompt
-    assert "dry_run" in prompt
-    assert "Simulated publish (eval mode)" in prompt
-    assert "thread_not_found" in prompt

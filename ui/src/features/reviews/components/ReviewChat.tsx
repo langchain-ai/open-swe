@@ -30,6 +30,10 @@ import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, reviewChatApiBase } from "@/lib/api"
+import {
+  collectStructuredEntities,
+  parseStructuredInput,
+} from "@/features/agents/lib/structuredInputMessages"
 import { cn } from "@/lib/utils"
 
 // --- Composer bridge ---------------------------------------------------------
@@ -101,9 +105,13 @@ function attachmentPillLabel(attachment: ChatAttachment): string {
 
 // Serialize attachments as fenced code blocks ahead of the prose so the model
 // receives the code as context. The UI renders pills instead (see parse below).
-function serializeMessage(text: string, attachments: Array<ChatAttachment>): string {
+function serializeMessage(
+  text: string,
+  attachments: Array<ChatAttachment>
+): string {
   const blocks = attachments.map(
-    (a) => `\`${a.path}:${a.lineLabel}\`\n\`\`\`${a.language}\n${a.snippet}\n\`\`\``
+    (a) =>
+      `\`${a.path}:${a.lineLabel}\`\n\`\`\`${a.language}\n${a.snippet}\n\`\`\``
   )
   return [...blocks, text.trim()].filter(Boolean).join("\n\n")
 }
@@ -146,7 +154,7 @@ function AttachmentPill({
   onRemove?: () => void
 }) {
   return (
-    <span className="inline-flex max-w-[200px] items-center gap-1 rounded-md border border-border bg-muted/60 py-0.5 pl-1.5 pr-1 text-[11px] text-foreground">
+    <span className="inline-flex max-w-[200px] items-center gap-1 rounded-md border border-border bg-muted/60 py-0.5 pr-1 pl-1.5 text-[11px] text-foreground">
       <CodeIcon className="size-3 shrink-0 text-muted-foreground" />
       <span className="truncate font-mono">{label}</span>
       {onRemove && (
@@ -236,7 +244,11 @@ function storageKey(owner: string, repo: string, number: number): string {
 }
 
 function newDraft(): Conversation {
-  return { id: crypto.randomUUID(), title: DEFAULT_TITLE, createdAt: Date.now() }
+  return {
+    id: crypto.randomUUID(),
+    title: DEFAULT_TITLE,
+    createdAt: Date.now(),
+  }
 }
 
 function isConversation(value: unknown): value is Conversation {
@@ -298,7 +310,7 @@ function useConversations(key: string) {
         return next
       })
     },
-    [key],
+    [key]
   )
 
   const select = useCallback(
@@ -310,7 +322,7 @@ function useConversations(key: string) {
         activeId: conversation.id,
       }))
     },
-    [update],
+    [update]
   )
 
   const newChat = useCallback(() => {
@@ -319,7 +331,10 @@ function useConversations(key: string) {
       // Reuse a pristine, never-sent draft instead of stacking empty tabs.
       if (active && active.title === DEFAULT_TITLE) return prev
       const draft = newDraft()
-      return { conversations: [...prev.conversations, draft], activeId: draft.id }
+      return {
+        conversations: [...prev.conversations, draft],
+        activeId: draft.id,
+      }
     })
   }, [update])
 
@@ -332,12 +347,12 @@ function useConversations(key: string) {
         return {
           ...prev,
           conversations: prev.conversations.map((c) =>
-            c.id === id ? { ...c, title } : c,
+            c.id === id ? { ...c, title } : c
           ),
         }
       })
     },
-    [update],
+    [update]
   )
 
   const close = useCallback(
@@ -357,7 +372,7 @@ function useConversations(key: string) {
         }
       })
     },
-    [update],
+    [update]
   )
 
   return { ...state, select, newChat, nameConversation, close }
@@ -450,13 +465,26 @@ function ChatBody({
       onUserSend(trimmed || (first ? attachmentPillLabel(first) : ""))
       void stream.submit({ messages: [{ type: "human", content }] })
     },
-    [busy, stream, onUserSend],
+    [busy, stream, onUserSend]
   )
 
-  const visible = messages.filter((message) => {
+  const structuredEntities = collectStructuredEntities(
+    messages
+      .filter((message) => messageType(message) === "human")
+      .map((message) => messageText(message.content))
+  )
+  const visible: Array<{
+    message: BaseMessage
+    content: string
+    structured?: ReturnType<typeof parseStructuredInput>
+  }> = messages.flatMap((message) => {
     const type = messageType(message)
-    if (type !== "human" && type !== "ai") return false
-    return messageText(message.content).trim().length > 0
+    if (type !== "human" && type !== "ai") return []
+    const content = messageText(message.content)
+    if (type === "ai") return content.trim() ? [{ message, content }] : []
+    const parsed = parseStructuredInput(content, structuredEntities)
+    if (parsed.type === "entity" || !parsed.content.trim()) return []
+    return [{ message, content: parsed.content, structured: parsed }]
   })
 
   const submitComposer = () => {
@@ -513,21 +541,36 @@ function ChatBody({
           ref={scrollRef}
           className="flex flex-1 flex-col gap-4 overflow-y-auto p-4"
         >
-          {visible.map((message, index) => {
+          {visible.map(({ message, content, structured }, index) => {
             const isUser = messageType(message) === "human"
             if (!isUser) {
               return (
                 <div key={message.id ?? index} className="flex justify-start">
                   <div className="w-full text-[13px] text-foreground">
-                    <Markdown content={messageText(message.content)} />
+                    <Markdown content={content} />
                   </div>
                 </div>
               )
             }
-            const parsed = parseUserMessage(messageText(message.content))
+            const parsed = parseUserMessage(content)
+            const isSystem =
+              structured?.type === "message" &&
+              structured.senderKind === "system"
             return (
-              <div key={message.id ?? index} className="flex justify-end">
-                <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+              <div
+                key={message.id ?? index}
+                className={isSystem ? "flex justify-start" : "flex justify-end"}
+                data-message-sender-kind={
+                  structured?.type === "message"
+                    ? structured.senderKind
+                    : undefined
+                }
+              >
+                <div
+                  className={`flex max-w-[85%] flex-col gap-1.5 ${
+                    isSystem ? "items-start" : "items-end"
+                  }`}
+                >
                   {parsed.attachments.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1">
                       {parsed.attachments.map((attachment, i) => (
@@ -536,7 +579,13 @@ function ChatBody({
                     </div>
                   )}
                   {parsed.text && (
-                    <span className="rounded-lg bg-muted px-3 py-2 text-[13px] whitespace-pre-wrap text-foreground">
+                    <span
+                      className={`rounded-lg px-3 py-2 text-[13px] whitespace-pre-wrap text-foreground ${
+                        isSystem
+                          ? "border border-border bg-muted/50"
+                          : "bg-muted"
+                      }`}
+                    >
                       {parsed.text}
                     </span>
                   )}
@@ -557,7 +606,7 @@ function ChatBody({
       <div className="p-3">
         <div className="flex flex-col gap-1.5 rounded-2xl border border-border bg-background px-1.5 py-1.5 transition-colors focus-within:border-ring/60">
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1 pl-2 pt-0.5">
+            <div className="flex flex-wrap gap-1 pt-0.5 pl-2">
               {attachments.map((attachment) => (
                 <AttachmentPill
                   key={attachment.id}
@@ -611,7 +660,7 @@ function ChatPanel({
   const qc = useQueryClient()
   const threadsKey = useMemo(
     () => ["review-chat-threads", owner, repo, number] as const,
-    [owner, repo, number],
+    [owner, repo, number]
   )
   const { conversations, activeId, select, newChat, nameConversation, close } =
     useConversations(storageKey(owner, repo, number))
@@ -622,7 +671,7 @@ function ChatPanel({
   })
   const serverThreads = useMemo(
     () => threadsQuery.data?.threads ?? [],
-    [threadsQuery.data],
+    [threadsQuery.data]
   )
 
   const invalidateThreads = useCallback(() => {
@@ -633,12 +682,15 @@ function ChatPanel({
     mutationFn: (id: string) =>
       api.deleteReviewChatThread(owner, repo, number, id),
     onMutate: (id: string) => {
-      qc.setQueryData<{ threads: Array<ReviewChatThread> }>(threadsKey, (old) =>
-        old ? { threads: old.threads.filter((t) => t.thread_id !== id) } : old,
+      qc.setQueryData<{ threads: Array<ReviewChatThread> }>(
+        threadsKey,
+        (old) =>
+          old ? { threads: old.threads.filter((t) => t.thread_id !== id) } : old
       )
     },
     onSettled: invalidateThreads,
   })
+  const { mutate: deleteThreadMutate } = deleteThread
 
   // Open tabs are the client's conversations (titles reconciled from the
   // server). The history dropdown is the full set — open tabs plus every other
@@ -662,25 +714,27 @@ function ChatPanel({
     }
     return {
       openTabs: conversations.map((c) => byId.get(c.id) ?? c),
-      historyItems: [...byId.values()].sort((a, b) => b.createdAt - a.createdAt),
+      historyItems: [...byId.values()].sort(
+        (a, b) => b.createdAt - a.createdAt
+      ),
     }
   }, [conversations, serverThreads])
 
   const handleClose = useCallback(
     (id: string) => {
       if (serverThreads.some((t) => t.thread_id === id)) {
-        deleteThread.mutate(id)
+        deleteThreadMutate(id)
       }
       close(id)
     },
-    [serverThreads, deleteThread, close],
+    [serverThreads, deleteThreadMutate, close]
   )
 
   const handleUserSend = useCallback(
     (text: string) => {
       nameConversation(activeId, deriveTitle(text))
     },
-    [nameConversation, activeId],
+    [nameConversation, activeId]
   )
 
   // Whether the active conversation should already have messages: it exists
@@ -700,10 +754,10 @@ function ChatPanel({
             <div
               key={tab.id}
               className={cn(
-                "flex shrink-0 items-center gap-1 rounded-md py-1 pl-2 pr-1 text-xs",
+                "flex shrink-0 items-center gap-1 rounded-md py-1 pr-1 pl-2 text-xs",
                 tab.id === activeId
                   ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:bg-muted/50",
+                  : "text-muted-foreground hover:bg-muted/50"
               )}
             >
               <button
@@ -753,7 +807,7 @@ function ChatPanel({
           />
           <Menu.Portal>
             <Menu.Positioner align="end" sideOffset={6} className="z-50">
-              <Menu.Popup className="origin-(--transform-origin) max-h-80 w-64 overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none">
+              <Menu.Popup className="max-h-80 w-64 origin-(--transform-origin) overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none">
                 {historyItems.length === 0 ? (
                   <div className="px-2 py-1.5 text-xs text-muted-foreground">
                     No conversations yet
@@ -766,7 +820,7 @@ function ChatPanel({
                     >
                       <Menu.Item
                         onClick={() => select(item)}
-                        className="flex flex-1 cursor-default items-center gap-2 rounded-md py-1.5 pl-2 pr-8 text-xs outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
+                        className="flex flex-1 cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-xs outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
                       >
                         {item.id === activeId ? (
                           <CheckIcon className="size-3.5 shrink-0" />
@@ -782,7 +836,7 @@ function ChatPanel({
                         variant="ghost"
                         size="icon-xs"
                         aria-label="Delete chat"
-                        className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/hist:opacity-100"
+                        className="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 group-hover/hist:opacity-100"
                         onClick={() => handleClose(item.id)}
                       >
                         <TrashIcon />

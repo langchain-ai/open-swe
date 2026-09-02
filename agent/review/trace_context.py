@@ -1,8 +1,5 @@
 """Best-effort author trace resolution for the reviewer graph."""
 
-from __future__ import annotations
-
-import asyncio
 import json
 import logging
 import os
@@ -207,15 +204,18 @@ async def _resolve_session(
     if pr_context is None:
         return None, "Missing repo owner/name or PR number.", project
 
-    client = _client(creds)
-    thread_id, evidence = await _resolve_thread(client, project, pr_context)
-    if thread_id is None:
-        detail = f"No coding-agent thread matched (tried {_attempted_keys(pr_context)})."
-        return None, detail, project
+    # ``async with`` so the client's connection pool is released here rather than
+    # whenever the cycle collector happens to run: httpcore's pool graph is
+    # cyclic, so dropping the client leaves its socket open until then.
+    async with _client(creds) as client:
+        thread_id, evidence = await _resolve_thread(client, project, pr_context)
+        if thread_id is None:
+            detail = f"No coding-agent thread matched (tried {_attempted_keys(pr_context)})."
+            return None, detail, project
 
-    runs = await _list_thread_runs(client, project, thread_id, limit=_MAX_SESSION_RUNS)
-    if not runs:
-        return None, f"Matched thread {thread_id} but it returned no runs.", project
+        runs = await _list_thread_runs(client, project, thread_id, limit=_MAX_SESSION_RUNS)
+        if not runs:
+            return None, f"Matched thread {thread_id} but it returned no runs.", project
 
     runs.sort(key=lambda r: _run_time(r, "start_time") or datetime.min.replace(tzinfo=UTC))
     confidence = 0.9 if evidence.startswith("branch:") else 0.85
@@ -225,7 +225,7 @@ async def _resolve_session(
         thread_id=thread_id,
         evidence=evidence,
         confidence=confidence,
-        trace_url=_trace_url(thread_id, project),
+        trace_url=await _trace_url(thread_id, project),
         runs=runs,
     )
     return session, "Resolved.", project
@@ -347,20 +347,17 @@ async def _list_thread_runs(client: Any, project: str, thread_id: str, *, limit:
 async def _list_runs(client: Any, project: str, filter_expr: str, *, limit: int) -> list[Any]:
     capped = max(1, min(limit, _MAX_SESSION_RUNS))
 
-    def _call() -> list[Any]:
-        kwargs: dict[str, Any] = {"filter": filter_expr, "limit": capped}
-        if _looks_uuid(project):
-            kwargs["project_id"] = project
-        else:
-            kwargs["project_name"] = project
-        try:
-            return list(client.list_runs(**kwargs))
-        except TypeError:
-            kwargs.pop("project_id", None)
-            kwargs["project_name"] = project
-            return list(client.list_runs(**kwargs))
-
-    return await asyncio.to_thread(_call)
+    kwargs: dict[str, Any] = {"filter": filter_expr, "limit": capped}
+    if _looks_uuid(project):
+        kwargs["project_id"] = project
+    else:
+        kwargs["project_name"] = project
+    try:
+        return [run async for run in client.list_runs(**kwargs)]
+    except TypeError:
+        kwargs.pop("project_id", None)
+        kwargs["project_name"] = project
+        return [run async for run in client.list_runs(**kwargs)]
 
 
 def _serialize_run(run: Any) -> dict[str, Any]:
@@ -469,8 +466,8 @@ def _is_specific_branch(branch: str) -> bool:
     return normalized not in _GENERIC_BRANCHES
 
 
-def _trace_url(thread_id: str, project: str) -> str | None:
-    resolved = get_langsmith_trace_url(thread_id, project_name=project)
+async def _trace_url(thread_id: str, project: str) -> str | None:
+    resolved = await get_langsmith_trace_url(thread_id, project_name=project)
     if resolved:
         return resolved
     tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")

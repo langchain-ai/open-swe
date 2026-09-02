@@ -1,6 +1,6 @@
 """Tests for the dashboard GitHub-org login gate (ALLOWED_GITHUB_ORGS)."""
 
-from __future__ import annotations
+import logging
 
 import pytest
 from fastapi import HTTPException
@@ -77,3 +77,52 @@ async def test_gate_rejects_when_member_of_no_configured_org(monkeypatch) -> Non
 
     assert exc.value.status_code == 403
     assert {org for _, org in seen["calls"]} == {"langchain-ai", "anthropics"}
+
+
+def _gate_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if "ALLOWED_GITHUB_ORGS is not configured" in record.getMessage()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gate_warns_once_when_unset(monkeypatch, caplog) -> None:
+    """The gate fails open when unset, so it has to say so — every other unset
+    secret in the codebase logs a warning, and those all fail closed."""
+    monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
+    oauth._warn_login_gate_disabled.cache_clear()
+    _stub_membership(monkeypatch, {})
+
+    with caplog.at_level(logging.WARNING, logger=oauth.logger.name):
+        await oauth.enforce_org_login_gate("anyone")
+        await oauth.enforce_org_login_gate("someone-else")
+
+    # Once per process, not once per call: the gate also runs from the thread
+    # tools, which would otherwise flood the log.
+    assert len(_gate_warnings(caplog)) == 1
+
+
+@pytest.mark.asyncio
+async def test_gate_warns_when_blank(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "  ,  ")
+    oauth._warn_login_gate_disabled.cache_clear()
+    _stub_membership(monkeypatch, {})
+
+    with caplog.at_level(logging.WARNING, logger=oauth.logger.name):
+        await oauth.enforce_org_login_gate("anyone")
+
+    assert len(_gate_warnings(caplog)) == 1
+
+
+@pytest.mark.asyncio
+async def test_gate_stays_quiet_when_configured(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
+    oauth._warn_login_gate_disabled.cache_clear()
+    _stub_membership(monkeypatch, {"langchain-ai": {"insider"}})
+
+    with caplog.at_level(logging.WARNING, logger=oauth.logger.name):
+        await oauth.enforce_org_login_gate("insider")
+
+    assert _gate_warnings(caplog) == []

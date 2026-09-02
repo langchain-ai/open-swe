@@ -1,0 +1,382 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:10f02792924ab86d1d2129d7e0f47626033ece68a48ee60b466da785288b1a4f",
+  "claims": [
+    {
+      "id": "claim_546378dd07a04b50822ce54a69069bb8",
+      "statement": "resolve_github_token routes GitHub token resolution by run source: sources carrying a mapped GitHub login (slack, linear, dashboard, schedule) prefer the triggering user's per-user OAuth token from the dashboard store — even in bot-token-only mode — so PRs and comments are attributed to that user.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/auth.py#L433-L453",
+          "version": "repo-lines-v1:sha256:852bb9a45a04f72f1aa2de05d037cbf54db101c74251490d119224d34e325799:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxNjkyYTFhZGU5NjRkOWQ2YzY5YTU5OTNhNmY3MTI0NGExMTdlYmY5ZjAyODU4Y2E3NTYzNmVkYzNjZDMwZGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI2ZTQ0NmRjMWQ5YTNiMzJkYmI1ZDMyZTdhNmFlZjRmMzUzOGYyNWQzZTlmZmRmZDI2NTg4MWJhYjUwZDVjNzkifQ"
+        },
+        {
+          "resource": "repo://agent/utils/auth.py#L473-L519",
+          "version": "repo-lines-v1:sha256:42b646d30d7f3b68d5821d87072a04a82d0a0de7e6e227c88bec2f03c8a36700:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyMTNmNDA4MGZhYmY5Yjk1MDA2ZDBlY2VhYzRmNTllYTExYmMyZGRlNmRmODM0MTdmYjkwNjc1YjFlMjAxODAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5ZjY0OTVhNmE0NGI3YzBjODUxNzE2Y2FhYzQyZjNhNjM2OGM4NTgyOThkODZlNjVkMDYwZWZjODY2MGJiNDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYwOTM5MDcyNjliMTBmZDJmODE0ZTNkYzdhMDFjMmRjZDZiNDdjOTc4M2RkNzAxY2Q0NjBkMDYwMDAyNWVmMTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d69edef1da0b4265a51a3eb7197a0e17",
+      "statement": "When no valid per-user GitHub token is available, resolve_github_token falls back to a GitHub App installation token only in bot-token-only mode; in interactive mode it instead raises GitHubUserAuthRequired to force (re-)authentication rather than silently acting as the bot.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/auth.py#L33-L44",
+          "version": "repo-lines-v1:sha256:3b232d85f55b26fbdbfeedf9b99e515a0bc8ef0b8540bcd107d071a9081e7794:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhZWE3N2ExYjg4NmIxNDRhZTk5MGY3YjFjYTUwNGI0MmQwMjY3ZGJlN2E2NDcyNTFlZDk0OTc4YTA0OGY4M2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyM2FjZDQ0M2IyNDhjMDJjZDYzYmI3NDQxZTI5MDEyNTI3YzAzYTc2NDVjZTVkYzQzMGJkMzM3ZTFlYjk0MGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4MzJkMzE2ZmM5YzRjNTA4NjUyYTA5MGYwZDg2NDg5NTBmZDYzZTMyZTdjNjllNGRmMDlmNzE5Y2I2Yzk0N2YiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5MTUyNDVlMmJlZTZkZjNjMzQ4MTMzN2Q4NzA5MWMyOGVjOGJmYjRiM2E0YjI1MGYyOTNkNDhmZGM0MmE1MDIifQ"
+        },
+        {
+          "resource": "repo://agent/utils/auth.py#L456-L471",
+          "version": "repo-lines-v1:sha256:dd3044bf6401c8f42dfea880132cc5361133027cbd4aacd95055a5d26c073532:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyMzMxMmFiZTRiM2FhNGY4MWY5YTJmMGYyNzYxMTA4Nzk5Y2RmZGI5MzU1NDgwOTkwMjQ3NTA1MGQwY2RhOWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzNTZiMjYxODM0MWViOGM5OWYxMGFmZTNiMTQzNTZmY2FmYjEzN2YxZTQ2YTFhNjBiOTYzN2M4MTVkYzA0MWEifQ"
+        },
+        {
+          "resource": "repo://agent/utils/auth.py#L513-L522",
+          "version": "repo-lines-v1:sha256:72deb3a695405c811f4934618fd3826fb5f402df592bd5f0c1033f48ab472a8e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxM2UzM2FkOGI3Njk5ODljYTQzM2Y2MGI3YzMxYjFmZWE2NGExM2IzMzY0YmVhYzRkZTRjMTM5NTExYTI4OWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2NDVjNDM0ZTBmMjU1ZmYxZTk5OWRlNDA2M2MwM2JlYzY1MmZiZWU5ZDk2YWE2ODcwMGJmZGEyNzI0YjRhY2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5MmNjNTk0ZDVmZmFlZWY2Njk3ZmM4MjA2YmM5NjM4MDc3ZWQ2ZGY5YmI2MTIwNjJkMmVmZjdkYTAzMGVmYjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlmNzYyOWRkY2JmNTZjODdkZjZkMDdiODYwOGJjNTNiMzI2OGQxYTZkY2Q0Nzc5NTFjMGQ1ZDZlNjA4ZmU3OTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_29cafb9b779f4eeea11cc3a63ad846e3",
+      "statement": "is_bot_token_only_mode() is true when LANGSMITH_API_KEY_PROD is set but neither X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning per-user OAuth tokens cannot be resolved and the GitHub App installation token is used for git operations.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/auth.py#L64-L72",
+          "version": "repo-lines-v1:sha256:dd0ae2e9eb0cd4e6a0dd69d9c93503e96c055861fc320cfc33223dc232e7d659:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTJjYjgzYjgxZjhiZDI3ZDMyMGM3MmNkYThkNWZhNWFiNzQ1NWU4ZWQxOTBmM2RkYzY0MzM3NzVhMzgxM2E3NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTM2NTFlYTVjMWVhYzQ0M2E3MmNmNzJhN2NiMDgyZjk1NmZjNzk0NTMyNWYzYWY3MmE0NjQ2ZGVjNTRjOTQyNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTk4YjA2M2Q5YjQ3ZTY1Mzc5NjI1NTcyY2NlMTk3NjY5ZDU3NjdlMTJjMThiZTA3NTY1MmI4Y2Q5ODFjZThkNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODMzYmE2OTg0NjFmYzIzOGM1ZTY1YjMwODY2MGRlNTI4MTNmMjZiZTM5YzFjMTNlNmZkZTM3ZWQ5OWNhOTE4MSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_16867de3ca5946d1b3de2199f82d880f",
+      "statement": "Resolved GitHub tokens are cached only in process memory keyed by (thread_id, principal), where the principal isolates one user's token from another (login:/email:) and a distinct bot principal isolates installation tokens; tokens are never persisted and caching an unbound user token with no principal is refused.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/github_token.py#L18-L53",
+          "version": "repo-lines-v1:sha256:48172156bf164c5eaf1685dfe000d1d9e3406f34d6aeec0b5949c5c58cbbc2a9:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1YTFlZThiZTU5Mjk0ZGM2NDI3MGI5YjcyYmU5OTM4YzRlZDk3ZWJhMzdhNGQxOTY2ZDI5NDhjN2JlY2JmOGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjllOWM0YjE1NDA3NDAzNDI2MzgyY2QwYjQxZDViYzg1NTI2YzIyY2E4ODU2YWM0NTBhZmFlMTRiMmM1YjhhODYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY0Nzk5NTA4ZWUyYjU2ZGU0NjE5MDlkNGY3NDY2ZDlkY2M1NjZjNmRlMWQ1M2MxNTQ0OGUxZjE0YWZkZWY5MmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIxYjY1OTFiNDhlYjEzNjhkNjgzNjcwMzc2NjEwOTI0MDRlYWQyNmVhMTNmN2ExN2ViNGI2MTc5Y2I4NTlkNmEifQ"
+        },
+        {
+          "resource": "repo://agent/utils/github_token.py#L23-L29",
+          "version": "repo-lines-v1:sha256:d5994f0a6d6766aa11c2e0ae791459effe68e094b913f6b4c4193fd0b447ed4d:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWYzMzZhOTNkNzQwNDZkYzQ0MzBiNzEwYTEwMjQ3N2JkZGRmMjU5OGQ1MjQzMmQ5MTg3N2ExMzA0OTY1NGI1YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg5NjAwYTczZDJlMDJmMzUyYjkwZmVmMWQ4ZDYzODExYmE0YThlZTBjMWJlYWE3YWU0NjU4ZjM2YWEyZTE5OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzVjODNhMjY1ZTcwZjUzMTFmNGE0ZjBiY2Q0NGU2MDc1MDIxYjIyYTNjNTY4NjZiOWM4YTVkOTZhNmRmODk5NCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYmQ4NzNiYTQyOGMyZTMxNGI4ZGU0YThmMGM5MWQ3NDBmOWM1YzEwMmRmNjE2Yzg1NTNhMGMzMjg0ZTVkYzNiMSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_f8240e927a2643c596f1050141df2633",
+      "statement": "Cached GitHub token entries expire on the token's own expiry (with a 60-second skew) or a hard 24-hour TTL cap, whichever comes first, and invalidate_cached_github_token clears a thread's entries when a stale/revoked token is detected.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/github_token.py#L12-L20",
+          "version": "repo-lines-v1:sha256:a2bc1bcf7bd0218ae9b0df9c9467c117c2b990bac4df1c15b161460d99030a42:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDA3MzY0YmQwOGQ4Y2ZmNjVlN2U0OTQ1NTY3MWU3ZWY1YjNmNmFkYzNkZTEyZGI5Yzg0ZWUxNTY0NTA3ODY1MiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDBiMTBlYmYzYjk4ODJlNWZhZmI3YmYwN2YzM2UzOGFkYWEzZWYxNDI4YjkzOTFhZTA4NDkyOTQyZTVkNjZhMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjMWM0NjJlMmEzOWQ3NDc1OWY1ZTFiMTI2Zjc2ODNhMmI3MzAxMThlMThmNTEyMmIwOGNlZGVlYjY1MGUyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNGY5NTlmZDQxZjA5YzkyMmMyYzVjMTUwZmQ1OWVjODhhNmFlMDA1YTdkODJiMTliYzE1MGE3Y2NmZWM0MGFkOSJ9"
+        },
+        {
+          "resource": "repo://agent/utils/github_token.py#L161-L165",
+          "version": "repo-lines-v1:sha256:a5235a58166837e1bfce56f47cfce057e74a21c30427f23307632e727c1ae370:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGFiY2VjNWZiZDBiMmUyNTRjN2VmNmM1MzVlNmNkNjg5MTJjYWZkYmFlZDQ2MTA5MThjZjVhNTE5MjI3YWRlZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjkxZGQzMjc3ZGMxYWU3OGE4MzgwOGY4M2FjOThiNmYyZWU1NmM2ODBiNWQ1MGUxODk1YTAyMTg2Njg3NDQ3MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTUyYjM0ZWNiYzQxMGU1NGQxZDhmYjBkMzBjMzgyY2NmNjkyMWNjYmFkM2NhYTY3MWFmNmM0OTIxM2JlNDc0NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://agent/utils/github_token.py#L87-L124",
+          "version": "repo-lines-v1:sha256:ce780a70cf8e125d142fb91be06aab32ae5fc194a71821d69a04f7b42eb8f51b:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4YjNmYWM4OGFlNWEzNTM0OTRlZDBjZTMxZmRhYjA1OTdmODY2ODcxZThkMTU4NDk3MGQwZjNlMzcxYjQwMjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc3ZGNlYmVjMGNiNTU0OTRiNGRlZDk4NWQ0OTg0OGEzNGQ5MjJmYzQ0NTc5Y2VmMDVjOTYzYzc4MGE5NGE4ZjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ4ZjNjNjQzMzExNDAxYmE5MDg3MGViN2RlOTYxN2ZjZjA2ZjAyMGM2Mjg5N2Q3YmMyYWYwZGQ1NTM5YjhjZGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhlYTFhMzY3YmZmYjA1NzY2ZmEyOGM0ZTM1NWQ1NGJiMWM2N2U1ZTZhZThkZjYyNzMzMmU1ZGUzOTQ4NTFhOTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c5aac94a3821482c83d8782d9e5e5a60",
+      "statement": "GitHub App installation tokens are minted by signing a short-lived RS256 JWT with the App private key and exchanging it for an installation access token, cached in-process by a scope key of installation id, repository ids/names, and permissions, and reused until within a 10-minute margin of expiry that exceeds the proxy refresh window.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/github_app.py#L168-L222",
+          "version": "repo-lines-v1:sha256:20e2da2e09b1cc1b6e751533b290f325f9099379f6f24406904e0ba96a4d9a90:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiNWVlNmIxOTg4NmQ4NjYyY2FiYmY4YzFlMzdjNDc4NDI5YjU4NjZjMWZmNzEzODhkMGI1OTVmMTYxMWFmNGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5YjliYTg3NGZjOGYwNmEyZTI5ZTYwNTA3ODQ0NzRjMWEyZjk0YjcxZTZjOWU0NjJkYjQwM2E3NDhjN2U5N2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZDdjMGM0MWQwNmE4NWI3MjRlN2FlYWVkMDc4MjM1YmY5M2E5ODY4NDkzMjliYTI2MzNhNmU5ZTQ0YmQ4ZjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNmZjU4NmE5YTEzMDQ5ZmYzM2M2MjU2MzhlYWM5YjM3ZmM5MWEzNzM5NmFhOTExZTkzODJmNTRiNGMzM2MxMjEifQ"
+        },
+        {
+          "resource": "repo://agent/utils/github_app.py#L21-L52",
+          "version": "repo-lines-v1:sha256:0debe8ec650c882d125b14ec44ac831a03fac2fe68efdb4479ff87f9cfa47da6:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkMDVkNzk5OTljMGViNTU0MWI5YWUzZTBiMjE2OTJmYjA2N2NkM2YzN2NjN2VjMjY5OWYwNzNjMmQzMzZmZjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU5N2YyOGQ3Mzg3MWNkYmI5NTc1ODgzYTdiZDBlZDE0MTMwYjQ0YTFiYjUyMDA3NmQ4Mjc1NmI5ZTkwNzBhZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIyYTBkOWUzYTZlZjg5M2VmZTM0NDMwMzRkZDBmYTA3ODM1ZmZjY2E5NTVmM2Q1NGUxOWNiYTdkZDZjNGE1MjAifQ"
+        },
+        {
+          "resource": "repo://agent/utils/github_app.py#L87-L96",
+          "version": "repo-lines-v1:sha256:a20a6c62ce633b7028010ad0fd2d24ee7ef8f75379581b50976abe62abe99f29:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlY2Y4YmJkMDI2ZGM3Y2Q4NzQzZWMzZGQxY2RjMTY4MWJhYjAyNzUyY2NkMTNhOTJkNjNiMDY5NDhhOTliODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyYmVhMzVkYjIxZDkxMWQ0ZjMyZTAyNDllY2JhOGExMGQ4ZDUzMzY2MDgxMjlhZWQxZjc5MTJiY2VjY2E1OTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJkNWQ2ZGZmN2QwOWJlYzRlYjA5NDdmYTgzNTM3Y2E5OWRlM2NiNTAyMzdhOWViZjRhYzRlZDA2YjVmNGFmMmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhNDFiNDQxNWU0ZGJlZmRkMmI2ZDE4NjM4YmVhNjQwZWNjMzc0OWMzODNjNmNkM2ZhM2Q2MTUzN2EyNmExY2UifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2c76e70d28184a25ad80db82593c874c",
+      "statement": "The resolved GitHub token powers the LangSmith GitHub proxy: proxy rules inject the real token on the wire as Authorization headers for api.github.com and github.com while the sandbox only sees a placeholder GH_TOKEN, and a before-model middleware refreshes the proxy token as it nears expiry.",
+      "evidence": [
+        {
+          "resource": "repo://agent/integrations/langsmith.py#L190-L218",
+          "version": "repo-lines-v1:sha256:37449046e486bcd1a3644d657a4d5a057cb0a7fbd8d1b11e70feae5371f2643e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzNzZiYmNjMzRiMGI2MjkxM2NlNmZjYzcwYmI5ZDIxNGVlNTU0YzliY2M0NDlhMzIxYWRjODNjMjExY2NjZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ4MmY4ZjcxZDVjYjZhYTBlZTVhMzJjZjQwYTFhY2RhMWU2MzRhOWFiOGE3MjI5ZTY4NzUwOGQ1OWZhMjQxMDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI0ZDhmNzlkZjY3OGU2ZTcwMjEzOWQxOGYyMTYxYTY5NTk1YWQ5NTJmNDNjMjExMWI1MTFkZDMxZmEyNTc2MjkifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/refresh_github_proxy.py#L17-L23",
+          "version": "repo-lines-v1:sha256:a712a98f386c4339988fa476e6c9097f2ff9a37c0263dfa5a143339a907308e0:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGFhYzUwMzc5M2FiNWRlMDY3MmE4NjI5YTBlMzY4MThkMjVhZjdkMjBhN2FkODcwNzM1NGFmYjgwMDBhNjJhNyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzI4MDY1MTBmZTVmZDIyYjQ5MGJlNTZiNzVjYjk2YjBmM2RlZjg2ZTIzNTZiMmUxMGE4MmMwZjRiMzI5ZDJkNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTkwZWE5MTc1Yzg0NTA5MGMzYWVlODllNjNmZTZhMzZmOWY4NDNhNDg3ZDRiMWE5YjRiZTdlOTA4YmRkNzBmNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTdlN2RkMThiZWUwZjFiZGUxNTgxMmY2OTc1Zjc1NzE0NzY1M2UxODNlZGQzZWFmOTI4OTI1NzViNDJiMDMzMCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_64ae31e64a9442cbb541d5b38f8372fe",
+      "statement": "The dashboard authenticates browsers via GitHub App OAuth and a HS256 session JWT stored in the osw_session cookie signed with DASHBOARD_JWT_SECRET, valid for 7 days; require_session rejects requests without a valid session cookie and /me returns the signed-in identity plus is_admin.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L189-L205",
+          "version": "repo-lines-v1:sha256:b906347ec7ed3514d93953237d617dae8cafa876e835a973aba04a94f38bee43:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJmNzJhNjg3MjEyNThlYTZhZTk4YjY2MThmOTMyYjUzYjc1MmUxMjkzYTVkYTBmOTE2NWMzZmNmOWY2ODdhOTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhN2YxMDE4MTIzYmRjOTg0ODBmM2FhNTM0ZGVlMTA1NDIzMDUwOGUzNDhmMGFhMGI0MTM3YjMyM2NmNjBkNzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmMWQ0YzJkMzJlOGYzY2M0ODI3NTY5OGQxOTdhZWJhYTA3ZDJiNjI2NjNiZDM0M2EzNGEwZmVjNTE4ZDNhMjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU3ZmU5NDVjZGI3YWZiZGM1OGE2ZWY4ZjZhNGFmMTNlOGI0ZTY5NTFlZDBhYjNjMTc2ZDBlMmFiYjVhNDUzZmMifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L27-L35",
+          "version": "repo-lines-v1:sha256:0d43b101ad29e3387354dc3598277642211965644c6541f8b5cde3854196b1df:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTJiMjVhOTc2YzEwYmUwMjUwZDQyNDdlZTU4MDEyMjhjYmFjMmI1YjhlZDE2YWZlOWRhYzhmZDhlMTkwZWQyZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTdlODZhMzg4MmMwZDlkYWExZTM4NmE4NzQwMTA4NmM1YTUzMGI2OGQyNDFlNWQ0MDkwMmEzMGMyM2ZmZGY1OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjMWM0NjJlMmEzOWQ3NDc1OWY1ZTFiMTI2Zjc2ODNhMmI3MzAxMThlMThmNTEyMmIwOGNlZGVlYjY1MGUyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDZhZDhiZGVhYTA2NTZmODJiMGNmMjNmZWEwYTE4MGMxMDlkYmIyNWVjYWQ3OTI2MWU1OTI3NTFkZDYzZGRkNCJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L342-L346",
+          "version": "repo-lines-v1:sha256:671f49a410c3e8bc006c36587c34dac6170f5297fcd5a3489bcbd6fc456540ef:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWM0YTAyZjRjM2VkYWE2ZmNiODk4MGJjZjlhOTdkZTMwNGJmZTViMmEzNGMwYzdmNTU2ZTc3NDdkOWFiZjdlZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODA4MzdlNjA5MGUzMzY2NWE1OGM5Y2NkNjI4OWM4MjYxNzY3YjM3YmEwN2M2M2ZmMTFiNmExZWZiZjcxNWUxNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTE2NTE4ZDAxNDk1NGQzZGQyNzkzZmI5Zjc1YTFhZTI3MTUwMWI0MDY2MGQ1MDhiNTVkMjZjMDhjNTdkZmE1MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGUyNzFiYTBlMzBjZWU0ZDZmMzg1Yzc3MmIwZWYwMTJkNzI1YjZjNjM2ODdkYzlkNTE4Y2Q0MzAzZTIyMGUxMiJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L565-L573",
+          "version": "repo-lines-v1:sha256:34b35dca3cdcb7e1fb9426f7fd0c3f16af64b3afdf299b816493492552c82f08:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTRkMjU5MDhiNTBjM2QwODhmZDJkY2EwMDM2OGQxZDRlYTIzMDRlOWYxN2E0OGRlYmFjZTg4ZmYzMjM1MjZhYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg5M2Y0MGUzNzgxZWI4OTZjODJkMDQ2YTA4MDY3YTExZTM1Y2RmMmYxZGZhZjI2ZmVhOTBiOGRiNjY3NjQxMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzMwMzI1Zjk4MGI0YWJlMGE1YmZkZWIyZDNlYjkzNDg3NmQzYTA0MzMyNTY0NDQ3MmMxMzZjY2EwMmI5YTgwYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjRmMGUwMDZlMzFmOTAzZTgyNmE4YzRmNWZjMzFhMzhkYjM2NDYxODMyYTc0YTk4MWVjOTNkZGNhYjUyYTk0ZSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_be58b0a576994be9b9832bbc8e629232",
+      "statement": "The OAuth login/callback flow binds a random state nonce to the browser: /auth/login stores the nonce's HMAC in a signed state JWT and the raw nonce in a cookie, and /auth/callback verifies them with a constant-time compare before exchanging the code, resolving the login, enforcing the org gate, and issuing the session.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L208-L248",
+          "version": "repo-lines-v1:sha256:89c015386683efdd4f6fa2df9cd9fa1f8af12f2523697ea1cc1c11ea8ad104ca:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlZGQwODg3OTcyYjA4YjcyYWI0MDAxNjBhOTU4YzExMGIwZDAwZjJhOWNhY2JiMWE4YjY0ZTE2OWRiOWIxZGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwNGFiMzY1Y2E2Y2I2MTJlMTAwYWNkNjI0ZjM3NjU4ZTQ1MTYxNWI1Yzc3YmU3ZDliZTNjMzE4YWJiODdkYTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEwZjI1ODhkMTRkMTVlNDA4NjZmN2UwZWMwM2UwNjc2ZTc4M2E1MDA2YmU5MDAzNmYyOGNkYTRkZTVjZjE4NTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU2ZGZkNmY1MGE0MzM0ZmQ5ZWU4ZjhiMzA4NDFmOTQxMjc0YTNiOGE1MWYxMjU1NDViNzU4OGNkMDMyNGExYzYifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L450-L541",
+          "version": "repo-lines-v1:sha256:ff70f8315a2b90cdca48ebca6a65ff4ac1ccb4b45f6571a91d27f48b6da4b357:eyJzZWxlY3RlZExpbmVDb3VudCI6OTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5MzI3ZjU2NTU1YjllZTA5MWZjMDYxNzY1NzYxNDU4OGRjNDA2ZTI5MjM3YTkwNWJmNjQ4NGY5NWMzMzEwY2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyMDg1MzI5MTBjZmNlZmU1ODcwM2Q0MzQ0NWE5YzIwMmIxMjQ4NzcyZjE2ZWY1YTE2MzBlNjJmMjVkZjAyNzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUyMDAyZTIxMmQwNTVmNTdlYjFlZGJkZTE1ODVkODM0NGJiNTdkNjY0NWI1YmIzZmVhMGJjYjBmZjcxNzMyMTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2ef547e39e2e47b7b219fb10492c2671",
+      "statement": "Post-login redirects are constrained by sanitize_redirect_to, which permits only same-origin relative paths or origins on the dashboard allowlist (DASHBOARD_BASE_URL plus DASHBOARD_ALLOWED_ORIGINS) and blocks known open-redirect paths, preventing a login link from being steered to an attacker origin.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L83-L155",
+          "version": "repo-lines-v1:sha256:58187a5f0dd558b9ee1ac942f6a71364fcdc7fbc808c4ec290c2e52cc920ea00:eyJzZWxlY3RlZExpbmVDb3VudCI6NzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxNTc5OWY1N2I1NmM2MGYyM2I4M2M0NmU0NjNhMWViNTA1NTExMjJkMmJkYWRhNjNmNjY3OTc5ZTU3ZjQ5NzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjMDU1ZWIyYTZhYmY3MTlhOGQ0NTE5YjhiYzg2M2ZiY2RlNzg5YzBiNzFmNTZhYmUwMWE5NWZmNmM1YWYzNjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI1MjU5YjY1OTA3NThmODllMzUwMzRkZmNkNjdiYjQwMjIwZDMxY2Y1ZjQzOTYzN2JjZThjMGI5MDk0NDM1ZTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEzMGVkZWNlYzA0MTdlY2VlMjg0NTJiYTU1MjdhMGVjNDE1OTk5M2NmY2YxYmZlZjRjYjc0MWQ2NzBiZTYzMmEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4b6072a42f794538a01173c5870118b9",
+      "statement": "enforce_org_login_gate rejects dashboard login for users outside ALLOWED_GITHUB_ORGS by checking org membership with the GitHub App installation token, failing closed on any API error, and is disabled (fail-open) when the allowlist is empty.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L158-L186",
+          "version": "repo-lines-v1:sha256:fc90fcb5a76e11b7106d8f57c76a637dae6894bbe419defcdfdab81ad7e9c305:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExMmY3OTdjNDE5YzFiNDRmMzI4NmNiMjc2YmEzNTZiODZlZTY1MTNhZDQ1ZjNiMGMyNTZhYWZhMDE5MGY4Y2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4NTBjMzNiOTZmMzMwMTlhYjQxMmQ1YTYwNWU4OWFjMmE2ODQ5OTdlYTRjNDgzNzEzZGFmMzc5YWFmMzFlYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDc0NDI3YzdlOWU3ZjkyMDFmZGM5NWRhNGM0NzAxZDFlNzE4NmI0NzlkZTY1ZDc3NTEwNWMwMWVmZjZkOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlhMDZiMjQwYjE4ZDA5N2ZmZWY2YTIzODQwYWIwZDc4NGE5ZDUyMmM1ZjZkOTg2M2E3MWY1Mzg2MWM0N2U5NDMifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L517-L519",
+          "version": "repo-lines-v1:sha256:9ff369b62b781ed2cf651bf82791d4801f7c730ad09fbe5f81ed2ef70f68db18:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZmM1NmQ4MWIzZmFlODBjZWU1NGUwNTVjNDNjMDRiYTA0OWEzZjM1NTI0NWJlYjRkN2VhYmUwOWRkNWI4OWQ3NCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWVlMjJhMjFjNmQzNTliNjhlMDNjZWYxODljZDZlNmQzMTFiZjZlNTg2ZDRlOGRkYWMyYjc0ODJjODJlZTYyNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTAyYTgxYWY4MzE0NjdmMDk1OWNlMTVkOWQ3NzMxMzUzY2U1MmNmZmVmZWU4NWM2YzMwODljM2M2Njg5ZjQ2NyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2IyZjZmYzUxZWQ4NmYxMGZjMTI2YzRmMmUyOGZmYmNkYzE2NDU2ODViNDI2ZjcyYmVkNjhiZWM5NTcwN2E3YiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_59a124937aed4d6a9e1b83504f22843b",
+      "statement": "Cookie-authenticated dashboard mutations are CSRF-protected by an origin allowlist (require_same_origin / require_same_origin_for_mutations): safe methods are exempt and a request whose only credential is an explicit bearer GitHub token without a session cookie is exempt because a browser cannot forge it.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L364-L401",
+          "version": "repo-lines-v1:sha256:5f9549985697afe54da821ef6dbeb870ef418e6494c07fc3fd32c0ed9af2d9f7:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyYTA5ZWNkNjYzNjY4NGQ4N2U0ZGViNTEyYTc1MTgzZGYxMjg2MjdhMjdjNDE3MmNjYzExNzliZDI3NTNhZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3YzJlY2JiMjA2ZmY2NjQzMWYzNTk3Yzk4NGFjMzJlYjk4NTk0ZmVlNGY5ZjZhNWI4YmMwOGRmNGUxMTllZGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFjNjA5MjRlYzUxMmQ3NTJiOWE3Y2RiNTIwZTNjNmZkNWQ5MzEzNTFiZGFhYjJhZWNiYWJhNDM2NDRhNjZmNWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a0be89a0c4f34888a49c6b5eea00e6ad",
+      "statement": "Desktop login uses PKCE so no session is placed on a loopback URL: the browser receives a short-lived handoff JWT carrying identity and the app's S256 challenge, and redeem_desktop_handoff mints the session only when presented the matching verifier via constant-time compare; cloud-terminal access uses a 60-second ticket bound to a specific thread_id and audience.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L277-L322",
+          "version": "repo-lines-v1:sha256:f34b461cfe96b8f70881d5388d2e5ead9c56839fd2ebe9027bc8db9f6b4943a0:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlY2Y0OTgyYTcyODI0MTg5ZjFjN2VjNjEyMThkNDJjZTc0ODAyNWY0NjFlMGY2YmI2MTUyYmExNjQ1YzE0ZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg4MTcxNWI5YmI1OTFlYmI0MDljYjhkMzY2Zjc0NzM5ZWY2MjJkZThkMDk3ODZlNjE5NjQ4ZDgxNDZjOTMxODEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFhMjVjOTkzNGNlYzljMDhhNGQ2OGNjZjFhNmNjNDAyN2ZlZDI0ZThmMGE4MDgzODkwYTM4ZGNlNDhhNTE1ZmMifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L38-L69",
+          "version": "repo-lines-v1:sha256:167a8ad8a53fe6f7fe3222a7cd58a6c854ae234a45b57d88f5018d56ed07afb5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1NmE2ZmZmNzg5YWQ2MTIyNDU1NmZhYWM3NGViZGIxODA4ZTM3MWU1NjIyODdmYWU3ZGZjZWE2MGZhMDFlMGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyNmM4YzY0MWE2MzVmMDU0YjQ0MjVmMWM5NjZlMGU0MzQwY2YzMzIzNWI1MWM0OWUwNGI0MGE3NGNkZDVmMjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIxOTlmMzVhNGE0ZWI0NTllNDIxZDc2NDVlOWU5MWRmZmE5N2VlMDM1OTg3MjU4NDhmZGU4NTZjMjRjNDJmMTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRhNDYyMjcyYzhkMGRkYzkzMDlmMWRjOTA2ZGM5NzU1Yjk0NjJkN2U0NmY2NDdiNmNiZjlkYWY0NGZmMmQ2YWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_52dd91aac0414b8d85ba63d7a5c22f30",
+      "statement": "Slack accounts are linked to GitHub identities through verified Slack OIDC, and verify_team refuses identities from a different workspace when SLACK_TEAM_ID is configured (cross-workspace / Slack Connect refusal).",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/slack_oauth.py#L65-L86",
+          "version": "repo-lines-v1:sha256:44c65d794074661a85b73a3a43c6bfa84fe7dacc72d0c20467abd99465961f33:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3ZmU1M2JlNDFiODcyYzcxNWQ1NDRiMmY1ODkzMWQ2NjRhOWQxMDlkYjY5ZTYyYTVhYThhYmI4OTM2MjVkMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4Mjk1N2QyNzg1ZjZjYjY2MGRiNjk4ZjI5M2RjNjc2ZTcyYjQ1MTkzYTk4MzRkOWE0NWFmMGIzZjExYzlkNTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3YzRlYjRkMGIxNWQ4ODdmNjkxZGEzNzc4MjZiNmM5MmM1MmE1MmIwMzQ3ZTliMTZmZjM0OWNmZWJiZTkyMzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhmYTJlOTM1OTEwYjUwY2IxOWQ1NzE0MmJlMDA4MDlmZWNiMjM2YjUyNmY3MWI3ZGVlNDk4MDA1ZTU0N2U1ZTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1a3069f12ec84f1088cab7d1de7714c8",
+      "statement": "Auth-failure notices posted into a shared Slack thread are token-free and link only to build_settings_url() rather than a per-user GitHub auth URL, so nobody else in the thread can complete auth and bind the wrong account.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L329-L339",
+          "version": "repo-lines-v1:sha256:010ddbba8dacc0186384444490708303ee03465970227668f00c72498393d570:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjNzI3MTFhZmQ3NTkxYjJlYTMyZjlhY2JkZWYxMmZiZjc1MmFlZjY1ZGQ3MjAwN2M1MTE1MDg0Mjk5YWNiMjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5ZmM5NmM1YTJkOWNlMjhjOGI5NzYxZjA1NzRhYTFiNWE2NjQ1OWQ1MDBlYWI4MjVmZmI4ZDQ4MWU4ODQ5YTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE2MjEzMWFkY2E1MWMxZjc2NDZhZDg5ZWU4OWRhYTI5MTE1MGU0OTNiZTZlY2I4ZTIwYzc5Njc2MTcwNzdkYzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyMmRlOGNkM2VmM2E4YTQ1MzQ4MDJmZTQ5NDhhMTE2YWQ5Yjc2OGY3YzdjODc0MWVjODkxYzY5NGIxNGFkODcifQ"
+        },
+        {
+          "resource": "repo://agent/utils/auth.py#L259-L296",
+          "version": "repo-lines-v1:sha256:5827e2e947fc82678a8508ba256787c7aaf94df94654311f54a62e01596e5785:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliMjE4NDQxNDMzYjU4Nzk3NDhiZDRlODk5MTYxYWM1ZGQ1MzQyYmVkZDdhNTYzYzY0NWE1N2VkOGJkNmY5ZTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNWM4MjYzMmZjODJkNGIyYzM0MGY0MjU1OGJhM2RmYTMxYzc2NTVkZjZmY2MxNjhiNGZkY2U1N2ZhYzYwNDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlmYjc4MDczODZlOTI5MmEwNjAyZmEzOGFkMGJmYjQ3M2Q3OGY0ODc3MjYzODEzYmUxMGI1YmMxNjdiYjI0YzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjViM2MyOGMyOTBhZTA4YTc4ZmNhNTZhZTgwZTQ0OGFhODNmNGE0ZWEzZmEwMDdkYmE0YjU5ZmNhZTllZDNkNjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_31a789110be54974a676a9e064f0a7eb",
+      "statement": "verify_github_signature authenticates GitHub webhooks by recomputing sha256=HMAC(GITHUB_WEBHOOK_SECRET, body) and comparing to X-Hub-Signature-256 with constant-time compare, failing closed (returns False) when the secret is unset, and is enforced by the GitHub webhook route.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/github_comments.py#L85-L104",
+          "version": "repo-lines-v1:sha256:b2e824c57d3f7b98d73ae56cf6e803fe2910263f32562900e0f3f8feeaccd7fe:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlZGU2ODBmMTNmNmUyZTVhMWE4ZDViZDkyZDM0OGYzMmMyMzA3MWJhYzljMzgxOTRiNjQ2ZTVhMDNiMWYyNDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5ZDdhNTFkY2E1NzM0YmI1NmM2MjhmZGI1YzUyNGEzNzZjMDY1OTNhNTA4MWQ4NzU1NmRlMWI0OWVkOGIwMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI0ZWVlMjA4MWUwODliNzdkMmY2MmRhMmQzNjQ4MDE4NjViZDgzNDdkNDVhNjUzODU4OGMzZjg5MDM0M2Q1YjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk2OGQ0YmY3OGQ5OTE2OGFmZTk0ZjhhZWJlYTYxMWMwZGU2YTZlNTQ3OWEzMzkwYzAzYWYxOWZiN2MyYmU0ZDQifQ"
+        },
+        {
+          "resource": "repo://agent/webhooks/github_routes.py#L19-L19",
+          "version": "repo-lines-v1:sha256:3978fe96d996bfcd024e7fd26e9297ecd3a76a41947f3405d6a92a72abfbb732:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzk3OGZlOTZkOTk2YmZjZDAyNGU3ZmQyNmU5Mjk3ZWNkM2E3NmE0MTk0N2YzNDA1ZDZhOTJhNzJhYmZiYjczMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzk3OGZlOTZkOTk2YmZjZDAyNGU3ZmQyNmU5Mjk3ZWNkM2E3NmE0MTk0N2YzNDA1ZDZhOTJhNzJhYmZiYjczMiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWQwZGFjOWM5Mzk0NTY1ODUyYjIzNzBlYzE1YzdmZDNiYzgzODk2NDUwZDA4MGFmNzNiODRlNGY5YjBhMTdkNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGRkMmE2OTY5MDA5YmUyNGNjZTRmZjE5NzZmMTkyOWU2NGYzMDcyNmU5OTgzMDgxNTNjM2Q3YmE3ZmQyZmYxMCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_cab1339caff247e18454aa10c3ec6a7c",
+      "statement": "verify_slack_signature validates the v0:timestamp:body HMAC against the Slack signature and additionally rejects requests whose timestamp is older than 300 seconds to block replay, failing closed when the signing secret is unset.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/slack.py#L153-L178",
+          "version": "repo-lines-v1:sha256:8257bedaca87d8906512e0f4d1a987259e7a999fef8f6e1e3d653dde2e49e8e4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2OTkxNDg5NWI5ODA4MDE5Y2M0OTQ0NmVhNTQ1ZDE1YTM4ZjA4YmUxZGZmYWM0ODk5NTkwOTc1NzYyOWRjMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5ZDdhNTFkY2E1NzM0YmI1NmM2MjhmZGI1YzUyNGEzNzZjMDY1OTNhNTA4MWQ4NzU1NmRlMWI0OWVkOGIwMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3N2M2MTA5NDY4ZTljYmNmMTIwMDRlYWVkYjVmODNkM2FmZjc0YzdkZTFjMjk4NzdkNTk4OTE1NGFjMzczNTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBkYzc5ZDdkYjNjZjdmNTM1MWM5YTA2ZmMyMmMwZTExMzg4NWQxYzI1OTVkNTBkNmMzNjVmZmM3NDNlY2JhZGQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7c8e769d826e4a2993a57e98e49b8f2d",
+      "statement": "verify_linear_signature authenticates Linear webhooks by comparing the raw-body HMAC-SHA256 against the Linear-Signature header with constant-time compare, failing closed when LINEAR_WEBHOOK_SECRET is unset.",
+      "evidence": [
+        {
+          "resource": "repo://agent/webhooks/common.py#L1015-L1035",
+          "version": "repo-lines-v1:sha256:d7bcea3cc07a03a71c874615b26b864dcf67875b23e696ad4a325ab3efa0ee10:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2YmQxMjg2MDg0NmMzYzAwN2E0ZWY4NWUwYWJjODMzNDA5YzUzNjM2ZWEzMTMzNjE1MDE4MTlhZDc1YmFmMTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5ZDdhNTFkY2E1NzM0YmI1NmM2MjhmZGI1YzUyNGEzNzZjMDY1OTNhNTA4MWQ4NzU1NmRlMWI0OWVkOGIwMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5Y2IwMjY1Mjk2MDQ3ODNlMjcxOTRjNDFmOGI2YWRhODc2ZjcxNjZmNWIxNWEyZTRlMWFkMTliZjQ5OGQzNTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk4YzAwMDA4NzUyMDRkZThhNGMwZTk1OWI1ZmQ1MmZlZTg2NDJkMDk4YjU4NWQxNDk0YjMxNjcxMGQ1NDU2MzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2e8415b38365453bb6edf385960a8395",
+      "statement": "The publicly reachable /webhooks/run-complete route is authenticated by verify_run_complete_token against a shared secret (RUN_COMPLETE_WEBHOOK_SECRET) using constant-time compare, and is fail-closed: when the secret is unset every call is rejected and run-failure replies are disabled.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/health.py#L17-L20",
+          "version": "repo-lines-v1:sha256:66e9f2cb833a546f8cc99f43ccfa6c8398530f17ef11412a7519b875cb72ba39:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjBmNmJmZjVlMTA5YTkyM2U3Njk1NzkwZTQ2MzBmOTM1MWFmOTQyYmRjMjZhNTQwMzNkNTZkYzRlNDQ2OWM3OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjljODQ1NWMzNDJiYzM0NjAxNWJlNjM0ZGE3ZmFmZjJjYTI4YzQwMzJhYTM2NzQwYmZjNWQ3YzcyMGQzODk5MyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTQ1MTA1NTI3N2M3ZmE3YTMyN2E0ZDFkNmQyODA1Mjc3ZTg5MjRiMThkYjVkNzdiOGMwYTIwOTM0MmJiZThlZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTczMzI1OWU0MDkzNjI1MjAwMmY0Yjc5YjQwMzA1ZTMyZTlmOTkzYWExYjE0MDUxYzU5NDIwMGQ3YmEyOWNiMCJ9"
+        },
+        {
+          "resource": "repo://agent/completion.py#L50-L71",
+          "version": "repo-lines-v1:sha256:fbf5fea31471c03dd2a2c8cf063002712a92cda3f54a9815a66fe7259a1d0bf4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRkYTlkYWJlNGRlYjQ5ZmI2MmY1ZGM4NjhkMWY4N2Q1ZmYyNDgzMGRmMDFjZDFjYWQ3ZjhmYTRiYWNkNWRjYmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViNzQxZjFkNDliZGVkOWQyZGU3ZjY2ZDU5Nzg0OTYyZWMyOTZiOGQ2ZDBkYTI3YTFmYjE2NWM3ZTZhYzk3N2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIwOTczOTcwYTAzYzcxNmYzM2FlZmI0Y2Y0MDBlNzY0MzFlM2NhMDRlNzM4NjIxOGRlYWJlYzQ3NDQwZGIxZmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYwMmQ0N2NmZTY2ZDFiMTlmNjBmMTlkOWFmYmUyZDIyNjYyMmVhMDA3YWJmNmYxOGUyMTM1ZTE4NDFiZWVjYzMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0627d13f900844ac842283f792251217",
+      "statement": "Persisted credentials are encrypted at rest with a MultiFernet built from TOKEN_ENCRYPTION_KEY, which may be a most-recent-first key list so the first key encrypts and every key is tried for decryption to enable rotation; decrypt_token degrades to an empty string on an invalid token or missing key rather than raising.",
+      "evidence": [
+        {
+          "resource": "repo://agent/encryption.py#L11-L71",
+          "version": "repo-lines-v1:sha256:4326c61fc6de2234a78d765fd6ddc96313f1a51c23ae6d3d248c090e7f5823a1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhNWMzMmU2NzQ4ZDc3YzhjYTg4MWI5ZjI1MjczNGQ2ODFmYmQ5NTZiNDM1NTA0ZWE4Zjg2MzY2NTE2NjZjMjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlYWFhYzdiOTVkNzAzNWMyYTEyY2RjNzMyZTc4YzA3MGQwMDQ4ZDA5Y2I1YzgyNmIxZjdkNmVlZWIxZjY1ZTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c485a112ddcd42b19519337f10f1477c",
+      "statement": "The dashboard credential stores encrypt tokens before persistence via encrypt_token/decrypt_token, including GitHub OAuth access and refresh tokens in profiles.py and per-user, team, and Notion credentials.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/profiles.py#L189-L221",
+          "version": "repo-lines-v1:sha256:f9c798cc59044c7144dc108edc879338d18f70c3a777004bd4e7dc3369b48c8a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3ZDg4OTMyM2UzMTg1MzhhNzVjMjQ4OTQ0NTY4OTljMjdjMTgwZWQwY2Y2NmU2MTAyMmVkZDgyNDVhNzY0ZmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJjYTBjNTAwM2NiOWZhMDA4YzA1ZmJkYjFjOTg1NDQ5ZTM2MDE4MzM4M2ZmMWRlNTE3YmU4NTM0OWRlOTZkM2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiMGUyOTY5N2ExZTVhZTkyMDQyZGNhNTE4MjEwNTFkZDNmODU2MmEzMjYzYmE5YTBiNTk2YjI0MTcwZDliNTYifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/team_credentials.py#L176-L197",
+          "version": "repo-lines-v1:sha256:06c1ce216bda047e528b8985653122cf368aef904be7b4226be0cd0df0dab8e0:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5M2ZjOTc4OTQxNDA2MjMwOTZjYTlkYjcxNTQ0MjJkNDA0NGNkZGJmYzk1YWQ0MGRhYTc4NWY5YjkzNDJjZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3MWY4ZWU5YTdlNmVkMTViZDU2N2ViMDI3Nzk1ZWYxMDgxM2VmMTI3YTQ0ODQ4NmMxYTExODhkZDVkNWZiZTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI4NDBmOThhZTI2ODZiOWViNWRiYjVhNGIzY2QwZDFmNDUwMjNiNmFhMzc0NjlmYzAyOTcwOWVjN2JmOWRkYWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY5OTgzNTllZmQxNWU2ZGQ1ZTNiMTA5YTE2NjA4ZWUwZDBlMWZkNzUzNWY3OTlkZmYzZTQ5YzJlMTA5NDBmZjgifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/user_credentials.py#L145-L173",
+          "version": "repo-lines-v1:sha256:ca956f72db5d57e600047eedf24584510931df57972d4ccda4ec7d941fe9eb0c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhNmZhNjc3YTg3YzJlZWM1MjkxM2NmNWEwNzU1YmZmOWVmNGY2NWJlNDVjZWY3ODdlZWJkMjBlMWUyYTM0NGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA4OTUzZTc3Nzk3MGFlZWNmMzk1MDY5MzNmNWQxOGZjNmUxNjkzMjJmZjc5Y2UzYjJjMmU2NzBmNTg1NDIxYzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNlZGY3ZGVmNTg4NjQ2OTMzYmM4ZTU4MDZkZDkwMWRiMGM0OGRkNGEwNTFiZDVjYmUyYzkxMzQxN2FiM2UyYTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRhYmQ1NGQ2NmFlNDk4Yzg4YjAyYjc4MDQ2NjM2OTE1Y2Y1ZDNiMzBlNDMwMTI0Y2ZkMmYzODdhOTRmNjUzMDYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_29f81b20cec447d786677dd5ab0cb634",
+      "statement": "When GitHub reports an unrecoverable refresh error (bad_refresh_token or unauthorized_client), the stored GitHub OAuth authorization is dropped so callers prompt a clean re-login instead of serving a known-stale access token.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L420-L431",
+          "version": "repo-lines-v1:sha256:d07a74292b1be3f7a4167a0f03bf7b7365630f4cd1e5170b1ec9fe3c73753a4f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM2YTlmNmQ3NTA4OWZhYjc0MjY2YzQ1NDY0ZjJjNWYzZjZiNzIxNWY1MGE0ODM3NDFiMTc2NDE3YTQxMWI2NWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI2NWVlM2IzYTQ1YmU1ZjgzNTM5ZWUwNmFkMTUwNzliM2RlZGU3YTg5MjUxZTU3NzZmNzg1NGE1NWI5M2QxY2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwNWQxZTVkYzQ5MzlhOWQxYTI2OTg1YTkyNzAzMTcyMTFhNGFmNWZhOTg0OTBjYzQ4OTJhMzFkNDE3MmEwN2UifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/profiles.py#L243-L249",
+          "version": "repo-lines-v1:sha256:6c432bdacd395381ec4d46fd48015f0d1a866e9fc7f09f697f49fb5d6e83eabb:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjY5NTA3MTUzMmVjNzc5NDFjNTUwN2IxMTBkNzY5ZjVkMGQyNmQxZDY5NDI5N2IzNTMyN2VlZGNmMmFjNjBjOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOWMyZGJiNDQwZjFjMmE4Yzc3MzYyOTg2ZTFkNjI2NWYxY2MwN2U2NTg2YzliY2QzYzI0ZGE0Zjc0MWNjYjFmZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGNjNGE3ZDFjYzc5NmFiYTNlNDY3MjMzMjdmNTE3ZTlmODExOTgyZDI1MGYwNzAyOTg2ZTRiNTc2NGFkOTU4OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDQ3MmY3OGRkNGFhZjZmMjEzOTAyY2VkZDJkODA4M2IyYTQ4MTUzNjQ3Y2NhMDUxNWQ2NTMyZDJlZWNmMTU0NCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_528ef8cd302b4de1855cddd2a38d229c",
+      "statement": "Admin identity is derived from CONFIGURED_ADMINS (matched case-insensitively on email or login), and require_admin re-checks the triggering user against it at tool-call time so a thread whose metadata claims admin status cannot act on behalf of a non-admin.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/admin.py#L6-L25",
+          "version": "repo-lines-v1:sha256:8b10feea94edddd71708dc98a407e991b3ee1b0c822921c2e7838b54c6a773f7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3MDU2ZTM4MTRlZGI2ZTEwMTdjYTFkZjIxY2ZkODczNDUyYjY0YzZjY2YyNjMwNDUzZGUyOTc3NWNkYjJhZmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4NGUxYzM5NTc1ZGYxMWQ3MTk3NzBjNTc1MzhhNzYzY2FjYmE4ZGM4M2ViN2M4OTUwZDhiODk3YmMyNDEzZjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNjM2QxYWYzNDhhZTgyYjQzMjBhMmQ5NzcyZGNiYjI4OThiMzgzNjA4ZmMxOWE2OWYzNjNmZTQ5ZDlhMDA0NmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE2ZjZmOTc3ODk0MDBiYTdmMjQ4NThjNmQ5NWMxOTI0ZTIyNTNlOTY3YTc5NTlhMGRiOGFlMGEwMjU3NjM2N2QifQ"
+        },
+        {
+          "resource": "repo://agent/tools/admin_gate.py#L23-L33",
+          "version": "repo-lines-v1:sha256:68c98d4cbbd74a819fb7f78c255f6bc3a336fb7204412d1f1b90965aa859c08f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiMTkxNmExMzE1ZjBiNDE1ZGFlMWY0Yjc0NGU5YWI5NmJjYmZiM2QzZjdhMTYxMGJlNjA2N2MyYzRlNmFhNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhMDM1MTRkMmEzMTljYzJlODA2Zjg0ODQzZWNhYWM1MWUzMmFmZTMyM2VhYmVjOGIwNmY4Y2VlZDFhZjFhNWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ1OGE2ODJkMWFmZTJmZjljZWFmMDdlYzdiYTY5OWU2YjVlZDRkMWZlMTQ3ZDBhNGIzZTY3NjE1Mzk4ZmRhNjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_36e82b07454a4850b3fa8bd6e6229571",
+      "statement": "is_observability_authorized grants team observability access to configured admins plus emails in OBSERVABILITY_AUTHORIZED_EMAILS, and the per-run gate _observability_authorized (kept uncached) decides whether team Datadog/LangSmith tools are exposed, so prompt-injected runs from untrusted contributors cannot reach the team's observability data.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/admin.py#L28-L35",
+          "version": "repo-lines-v1:sha256:9b763b317569678c78d1529ed0523f6c3e040f4a15593d5a3004348451be5ad4:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjQ0Y2NjYWNmODQ0NzljNjI5NjIyMjUzNTZjNmQwZDRmMTE3NWNkMDI5NjAzZmQyYTRkNzkyNDMyMDEzZjk4OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmI1NjMwOWZlYmE0YTQyNzRlNTU2NmJjOGNjZWJjNDYwODk0ZGJjZDY5ZDJmY2IxMzcxYTNkNGM5NDI5MTdhOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWU3NWFjOTQ5MWJhMTE4NDQxNGFmMGNlMmQ5Y2IzMjlhYjUwMDJkNWI1NDg3Y2M3MDc5YjhkMTQ1Nzk5Y2YzOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://agent/server.py#L1045-L1066",
+          "version": "repo-lines-v1:sha256:7ec4901417694970e74dab5ac31415e59c94d4f0b86aa622c61bfa052491bd8f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ0YjhkYjE4ZmJlN2RlZWIyNGQyOTg2MDYxYWZhODE5YmNlYTE0YTIzZWUxNzgwNzg0MDM4ZGVlMzAwYzFhMWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyMmI3M2UyYmU0OWI2Njk5YzVmN2U0ODVjM2Y1YTRmNWY5ODJlYjMwOWM4ZDAzZWYyMDIxMjQ4MWIyOTYxYmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5Yjg5M2Q0MDQ3OTc2ZWYyMjVlN2Q3YjgwMjM4YTZhNzk0YzhkN2M1NmY3NjA0Zjg0ZjhmOGVjN2JhMThjNGQifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L921-L939",
+          "version": "repo-lines-v1:sha256:7b0363da7da07d762b45cb9df67276e96c9f4d0b280a8993b74c16e3992c6743:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjODdmNzEzYmUyZTI2ZWUzYTk5Y2NmNjM5NzMyYTVmMmQ0ZDFmNWY1N2EzNDk2ZjBiZDI2M2NlZmJmN2NiODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRjYTkwNDEyZGNhYTE5YzM3OWQ4NTEwYzVkYWUxNmQwYzYwNTAwMzExYjhhODZmYTA3YzZhNWZlYzEyZTA3YmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZjZDExYTBiMDFiNGZiNGNlNmFmYzkxYzZmZGRmNDJjOGNjN2VjMzY0NTdjYTI3ZWY3ZDhiMDBkYTAyOWQ5NjUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e7106f0161994b659bb80cf3f1f005a1",
+      "statement": "Optional server-side observability and MCP tools (Datadog, LangSmith, Corridor) run in the LangGraph server process and never expose their credentials to the sandbox, with an intentionally read-only surface, because the content they return is attacker-influenceable and could carry prompt-injection payloads.",
+      "evidence": [
+        {
+          "resource": "repo://agent/integrations/corridor_mcp.py#L1-L6",
+          "version": "repo-lines-v1:sha256:976def297e20ac48870cfc580835662e1b32ddd23b8c81ed01f7a4f8ff97092b:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWJkMDMyNTMzMjU5ZmNhMDkwNWRmMzU0NmE3OGI5MTNiZjEwNjVkMTkwMzNhMmJjZjE0NTU5OGJhZjFkNmIwNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjliZWM0YTE5OTlhYjI3OGZjOTI2NWY4M2Q2ZjExZGZmZTcxMDQ2ZGMzNjM2MmFmMDQ3YWM1MDdmNjQ0YTYyOSJ9"
+        },
+        {
+          "resource": "repo://agent/integrations/corridor_mcp.py#L33-L34",
+          "version": "repo-lines-v1:sha256:089dd9d80ff7a2fa5e1aab27eccad716b16ecead8b5684cb589dde03781b7668:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGY2MTM2M2Q1YTFmYWQ5MDlhYmVjYjg3MjU4NDZiZWIzMjE4NDU1MWQ0MjM2M2FjMDY5ZDZjNDYyMWYwMzM0MiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmQxYjM0MjY5MGQ1MmZiOWQzMDU4ZDdmYzhlZDkwYTVhZWY5ZWIwZjRlNGU3MDMzZDI0ZTUwZDg3NGEyYzFjZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzcyMWMwMWU5ZTkzNDM2MTJiMThhM2ZjMTE5YjBiY2FlOGMwODYxZjgwN2UxZmViZWQxNTQ4YTMwODAzNzVhMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzBjZTNmMjRhYjQ3YzJmNWE5ZDMzN2YzNzdlZDg1NzNmYTU2NTg0MDc2NDAyZjFhZjA1NGEzZGVkNjE5NDYyZiJ9"
+        },
+        {
+          "resource": "repo://agent/integrations/langsmith_tools.py#L1-L7",
+          "version": "repo-lines-v1:sha256:0fa3a3a32c8abde23e04fd0007b3b5bfd97fdc10831a67c7adc1a6203babb450:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWU2NDhkMTc0NTFhNTVkODA5NzMxNDg4NjhlODkzM2Q5MjRiZDU5MGY0OTU3OTEwN2QyMWE4MTJjMTc2ZDcwZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWYwOTA2MGVhNzExZjBiN2RiNjEyMDM5YmQ4NGMxOTljOWRjMTMwOTY1ZGE3OThhM2ZhNjBlNWJiZWYyZDljOCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_df8a4658e5994aacaeafc7e7c096b2dc",
+      "statement": "Untrusted external GitHub comment content is wrapped in reserved <dangerous-external-untrusted-users-comment> trust tags, and sanitize_github_comment_body strips those reserved tags from raw comment bodies so external content cannot spoof the trust wrapper.",
+      "evidence": [
+        {
+          "resource": "repo://agent/prompt.py#L337-L337",
+          "version": "repo-lines-v1:sha256:0753014f27147146fa4dd629428649a26461df148de46e8f5770728d17be199f:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDc1MzAxNGYyNzE0NzE0NmZhNGRkNjI5NDI4NjQ5YTI2NDYxZGYxNDhkZTQ2ZThmNTc3MDcyOGQxN2JlMTk5ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDc1MzAxNGYyNzE0NzE0NmZhNGRkNjI5NDI4NjQ5YTI2NDYxZGYxNDhkZTQ2ZThmNTc3MDcyOGQxN2JlMTk5ZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzE4NGVmYmVlNjQzYjE2YmEzMjUyZjJmYThlNGJiMTNmYjcxYTBlYjU3N2I3ZjAxYmM3MzEzYTBjN2JmM2I2MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDU5YzY4MDY5ZDEzN2U5ZDg3MGMyYmM0ZWE1MWZhMGZkMjQ5ZTVkZjQ3M2UwZmU3NTk0MDM3ZGJiMWZlY2NkOCJ9"
+        },
+        {
+          "resource": "repo://agent/utils/github_comments.py#L118-L128",
+          "version": "repo-lines-v1:sha256:516b5cd822ace86e94dd4a7818cb45dc165383c44386e33684f04c649fab4b5e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiZTJlNmU2NTJjODM0NTBmMjZmZDkzOTA2YTJlMzk5YjQ2MTFkNmJmNDliY2QyYWU1NmIzOTc0YWEzMGJmNTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjllYTdmMTYyMTQ5MWJlNDliNWQ5YjhiOWU1ZTY1ZTA4NjA2MmMxOTY3NzdmMThlNDJhZTkxZWY2MDM2ZDljYzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3N2UxNTFjYmU0OGZmMTg5ZTg5NWJkMmM3NDJlMjkxZWQ4ZDliZjViYmE2ZDUwNmRhMmE5NmQwNmE1ZmQxMjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmNWFmNDA2Njg0NjY3ZDQyZDhhOTllOTg5Zjg1Zjc0MmExNTNkOGIxYzlkNGZhNWY2NWZlOTJjYmVjMzc5NzIifQ"
+        },
+        {
+          "resource": "repo://agent/utils/github_comments.py#L70-L73",
+          "version": "repo-lines-v1:sha256:88ab6908a750d3fe4138c59b9aa9303d5552e4a3b3c1841b15b9a85c9aed0f5b:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjQ4YjI1OTllMWJiMmUzZmQ1MjkxZDYyMWVmMWNmZjAwZDAyZTMyZjQ4ODkwMDE4NDhiMDU0ZDZkYWUyOTJhYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzY4ZjRlOGFiYzA5MmM2NzMzZWJhMTQ3NGZjODFjMjlmZWE1NjJhMzlkZTYyOGYwMWYxYzI3ZjFmNzk4Yjg0NyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmY1MTA0M2ZkYjRmMGVjNDFhNDliNWQ4MDc4NWQ3NzZiM2QzMDdjZjY0ZTFkOWZmODE2MDdlMGEzMTMwYzQyZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmQ3NWQ5YTQwOGMwZjE1ZTA4YmU4MzUzY2JhYmFiOWNiYzA2YzY4NWQwOTU3NDBlNTViNmNkODdhMTk1MTljMSJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-08-27T06:27:22.313Z"
+  }
+}

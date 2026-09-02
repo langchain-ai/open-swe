@@ -1,25 +1,23 @@
 """Tool: persist synthesized per-repo review style prompt."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
 from langgraph.config import get_config
 
 from ..dashboard.analyzer_cron import ensure_continual_cron
-from ..dashboard.review_styles import mark_analysis_completed, mark_analysis_failed
+from ..dashboard.review_styles import REVIEW_STYLES, ReviewStyle
 
 logger = logging.getLogger(__name__)
 
 
-async def _complete_and_register(full_name: str, **completed_kwargs: Any) -> dict[str, Any]:
+async def _complete_and_register(full_name: str, **completed_kwargs: Any) -> ReviewStyle:
     """Persist the prompt, then ensure the repo's nightly continual cron exists.
 
     Cron registration is idempotent, so continual runs completing later don't
     re-register it; it just guarantees a cron once a prompt first exists.
     """
-    record = await mark_analysis_completed(full_name, **completed_kwargs)
+    record = await REVIEW_STYLES.mark_completed(full_name, **completed_kwargs)
     try:
         await ensure_continual_cron(full_name)
     except Exception:
@@ -54,7 +52,7 @@ async def save_review_style_prompt(
     reviews_count = reviews_sampled or int(configurable.get("review_style_reviews_sampled") or 0)
 
     if not custom_prompt.strip():
-        await mark_analysis_failed(full_name, "custom_prompt was empty")
+        await REVIEW_STYLES.mark_failed(full_name, "custom_prompt was empty")
         return {"ok": False, "error": "custom_prompt cannot be empty"}
 
     record = await _complete_and_register(
@@ -65,4 +63,4 @@ async def save_review_style_prompt(
         prs_sampled=prs_count,
         reviews_sampled=reviews_count,
     )
-    return {"ok": True, "full_name": full_name, "status": record.get("status")}
+    return {"ok": True, "full_name": full_name, "status": record.status}

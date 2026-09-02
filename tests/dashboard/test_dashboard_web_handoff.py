@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 import pytest
@@ -175,7 +173,17 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
 
     assert client.threads.updates[0]["source"] == "dashboard"
     assert queued_messages == [
-        {"text": "continue in web", "source": "dashboard", "from_owner": True}
+        {
+            "text": "continue in web",
+            "source": "dashboard",
+            "surface": "web",
+            "sender": {
+                "id": "github:octocat",
+                "platform": "github",
+                "github_login": "octocat",
+                "email": "octocat@example.com",
+            },
+        }
     ]
 
 
@@ -224,7 +232,17 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
     )
 
     assert queued_messages == [
-        {"text": "continue in web", "source": "dashboard", "from_owner": True}
+        {
+            "text": "continue in web",
+            "source": "dashboard",
+            "surface": "web",
+            "sender": {
+                "id": "github:octocat",
+                "platform": "github",
+                "github_login": "octocat",
+                "email": "octocat@example.com",
+            },
+        }
     ]
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
@@ -317,7 +335,12 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         {
             "text": "continue in web",
             "source": "dashboard",
-            "from_owner": True,
+            "surface": "web",
+            "sender": {
+                "id": "github:octocat",
+                "platform": "github",
+                "github_login": "octocat",
+            },
             "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
         }
     ]

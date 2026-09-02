@@ -1,15 +1,9 @@
-from __future__ import annotations
-
 import shlex
 from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from agent.utils.sandbox_paths import (
-    aresolve_repo_dir,
-    resolve_repo_dir,
-    resolve_sandbox_work_dir,
-)
+from agent.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
 
 
 class _FakeProvider:
@@ -45,7 +39,7 @@ class _FakeSandboxBackend:
     def id(self) -> str:
         return "fake-sandbox"
 
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         del timeout
         self.commands.append(command)
 
@@ -64,19 +58,19 @@ class _FakeSandboxBackend:
         return ExecuteResponse(output="", exit_code=1, truncated=False)
 
 
-def test_resolve_repo_dir_uses_provider_work_dir() -> None:
+async def test_resolve_repo_dir_uses_provider_work_dir() -> None:
     backend = _FakeSandboxBackend(
         provider=_FakeProvider(work_dir="/workspace"),
         writable_dirs={"/workspace"},
     )
 
-    repo_dir = resolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
+    repo_dir = await resolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
 
     assert repo_dir == "/workspace/open-swe"
     assert backend.commands == ["test -d /workspace && test -w /workspace"]
 
 
-def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_writable() -> None:
+async def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_writable() -> None:
     backend = _FakeSandboxBackend(
         provider=_FakeProvider(work_dir="/workspace", home_dir="/home/daytona"),
         shell_paths={
@@ -86,7 +80,7 @@ def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_writab
         writable_dirs={"/home/daytona"},
     )
 
-    work_dir = resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
+    work_dir = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
 
     assert work_dir == "/home/daytona"
     assert backend.commands == [
@@ -96,27 +90,27 @@ def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_writab
     ]
 
 
-def test_resolve_sandbox_work_dir_caches_the_result() -> None:
+async def test_resolve_sandbox_work_dir_caches_the_result() -> None:
     backend = _FakeSandboxBackend(
         provider=_FakeProvider(work_dir="/workspace"),
         writable_dirs={"/workspace"},
     )
 
-    first = resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
-    second = resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
+    first = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
+    second = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
 
     assert first == "/workspace"
     assert second == "/workspace"
     assert backend.commands == ["test -d /workspace && test -w /workspace"]
 
 
-async def test_aresolve_repo_dir_offloads_sync_resolution() -> None:
+async def test_resolve_repo_dir_resolves_home_dir() -> None:
     backend = _FakeSandboxBackend(
         provider=_FakeProvider(work_dir="/home/daytona"),
         writable_dirs={"/home/daytona"},
     )
 
-    repo_dir = await aresolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
+    repo_dir = await resolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
 
     assert repo_dir == "/home/daytona/open-swe"
     assert backend.commands == ["test -d /home/daytona && test -w /home/daytona"]

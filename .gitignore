@@ -17,12 +17,15 @@
 
 # production
 /build
+/desktop/build
+/desktop/resources/local-backend/
 /dist
 **/dist
 .turbo/
 
 # misc
 .DS_Store
+node_modules/
 .vscode/
 *.pem
 *.key
@@ -35,6 +38,9 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# local sandbox git identity (never the developer's ~/.gitconfig)
+.gitconfig-sandbox
 
 # local env files
 .env*.local
@@ -69,4 +75,10 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# 
+#
+logs/
+
+# Playwright output written when run from the repo root
+test-results/
+playwright-report/
+blob-report/

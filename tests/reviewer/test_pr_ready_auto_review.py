@@ -1,7 +1,5 @@
 """Tests for the opened / ready_for_review auto-review webhook handlers."""
 
-from __future__ import annotations
-
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -209,7 +207,9 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     assert configurable["re_review"] is True
     assert configurable["last_reviewed_sha"] == "oldsha"
     assert configurable["head_sha"] == "headsha"
-    assert "marked ready for review" in kwargs["input"]["messages"][0]["content"]
+    assert any(
+        "marked ready for review" in message["content"] for message in kwargs["input"]["messages"]
+    )
     head_sha_writes = [
         c.kwargs.get("head_sha")
         for c in set_metadata.await_args_list

@@ -1,14 +1,12 @@
 import Editor from "@monaco-editor/react"
-import { useEffect, useState } from "react"
-
 import { Textarea } from "@/components/ui/textarea"
+import { useIsHydrated } from "@/lib/hydration"
 
 interface InstructionsEditorProps {
   value: string
   onChange: (value: string) => void
   disabled?: boolean
   placeholder?: string
-  language?: string
 }
 
 /** Monaco-backed code editor that falls back to a textarea before mount (SSR-safe). */
@@ -17,13 +15,8 @@ export function InstructionsEditor({
   onChange,
   disabled,
   placeholder,
-  language = "markdown",
 }: InstructionsEditorProps) {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const mounted = useIsHydrated()
 
   if (!mounted) {
     return (
@@ -41,7 +34,7 @@ export function InstructionsEditor({
     <div className="overflow-hidden rounded-md border border-border">
       <Editor
         height="360px"
-        language={language}
+        language="markdown"
         value={value}
         onChange={(v) => onChange(v ?? "")}
         options={{

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react"
 
-import type { Message } from "@/features/agents/lib/types";
+import type { Message } from "@/features/agents/lib/types"
 
 /** How long run-idle must persist before clearing the live markdown target. */
-const LIVE_MARKDOWN_CLEAR_MS = 2000;
+const LIVE_MARKDOWN_CLEAR_MS = 2000
 
 /**
  * Latches the agent message id that should stay in Streamdown "live" mode.
@@ -13,45 +13,50 @@ const LIVE_MARKDOWN_CLEAR_MS = 2000;
 export function useLiveMarkdownMessageId(
   visibleMessages: Array<Message>,
   streamIsLoading: boolean | undefined,
-  isStreaming: boolean,
+  isStreaming: boolean
 ): string | null {
-  const [liveMessageId, setLiveMessageId] = useState<string | null>(null);
-  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const runActive = Boolean(streamIsLoading || isStreaming);
+  const [liveMessageId, setLiveMessageId] = useState<string | null>(null)
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  )
+  const runActive = Boolean(streamIsLoading || isStreaming)
 
   useEffect(() => {
     if (runActive) {
       if (clearTimerRef.current) {
-        clearTimeout(clearTimerRef.current);
-        clearTimerRef.current = undefined;
+        clearTimeout(clearTimerRef.current)
+        clearTimerRef.current = undefined
       }
 
-      const lastMessage = visibleMessages[visibleMessages.length - 1];
+      const lastMessage = visibleMessages[visibleMessages.length - 1]
       // A new user prompt at the tail means the prior agent turn is done — keep it
       // static so Streamdown does not re-animate it while waiting for the reply.
       if (!lastMessage || lastMessage.author === "user") {
-        setLiveMessageId(null);
-        return;
+        // oxlint-disable-next-line react/set-state-in-effect
+        setLiveMessageId(null)
+        return
       }
 
       if (lastMessage.author === "agent") {
-        setLiveMessageId((prev) => (prev === lastMessage.id ? prev : lastMessage.id));
+        setLiveMessageId((prev) =>
+          prev === lastMessage.id ? prev : lastMessage.id
+        )
       }
-      return;
+      return
     }
 
     clearTimerRef.current = setTimeout(() => {
-      clearTimerRef.current = undefined;
-      setLiveMessageId(null);
-    }, LIVE_MARKDOWN_CLEAR_MS);
+      clearTimerRef.current = undefined
+      setLiveMessageId(null)
+    }, LIVE_MARKDOWN_CLEAR_MS)
 
     return () => {
       if (clearTimerRef.current) {
-        clearTimeout(clearTimerRef.current);
-        clearTimerRef.current = undefined;
+        clearTimeout(clearTimerRef.current)
+        clearTimerRef.current = undefined
       }
-    };
-  }, [runActive, visibleMessages]);
+    }
+  }, [runActive, visibleMessages])
 
-  return liveMessageId;
+  return liveMessageId
 }

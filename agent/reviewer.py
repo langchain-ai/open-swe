@@ -39,6 +39,12 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from agent.auth.github_app import get_github_app_installation_token_with_expiry
+from agent.auth.thread_token import cache_github_token_for_thread
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
+from agent.sandboxes.state import SandboxUnreachableError
+
 from .dashboard.options import gate_fable_model
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -52,9 +58,10 @@ from .middleware import (
     ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
-    SlackAssistantStatusMiddleware,
+    StableToolResultOrderMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -110,12 +117,7 @@ from .utils import ttl_cache
 from .utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token_with_expiry
-from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import SandboxUnreachableError
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review thread.** A
@@ -128,7 +130,7 @@ HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
 Sandbox: `{working_dir}`. Review target: `{repo_owner}/{repo_name}#{pr_number}`.
-Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 Call `fetch_review_diff` to materialize the current review range in the sandbox.
 It returns only the file path and bounded metadata. Inspect that file with `grep`
@@ -360,7 +362,10 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own
         # middleware never wraps their model calls.
-        "middleware": cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()]),
+        "middleware": cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        ),
     }
 
 
@@ -372,15 +377,15 @@ present but stale (at an old commit). Do NOT trust local files until you have
 re-prepped the tree yourself. Run:
 
 ```
-cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
-GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
+cd {working_dir} || {{ cd {parent_dir} && gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+git fetch origin {head_sha_or_placeholder} --quiet || git fetch origin refs/pull/{pr_number}/head --quiet
 git checkout --force {head_sha_or_placeholder} --quiet
 ```
 
 and verify `git rev-parse HEAD` matches the PR head before reading local
 files. If you cannot get the tree onto the PR head, rely exclusively on the
-diff and `gh api` file contents (`GH_TOKEN=dummy gh api
-repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>`) — never on
+diff and file contents from
+`gh api repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>` — never on
 the local checkout."""
 
 
@@ -891,7 +896,7 @@ async def _resolve_grouping_model(
 
 async def _cached_reviewer_team_defaults():
     return await ttl_cache.cached(
-        f"team-default-model-pair:reviewer:{id(get_team_default_model_pair)}",
+        "team-default-model-pair:reviewer",
         60,
         lambda: get_team_default_model_pair("reviewer"),
     )
@@ -899,7 +904,7 @@ async def _cached_reviewer_team_defaults():
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -907,7 +912,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_org_review_guidelines() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:org-guidelines:{id(get_org_review_guidelines)}",
+        "reviewer:org-guidelines",
         300,
         get_org_review_guidelines,
     )
@@ -915,7 +920,7 @@ async def _cached_org_review_guidelines() -> str | None:
 
 async def _cached_api_standards_skill() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:api-standards-skill:{id(fetch_api_standards_skill)}",
+        "reviewer:api-standards-skill",
         300,
         fetch_api_standards_skill,
     )
@@ -946,17 +951,11 @@ async def _ensure_reviewer_sandbox_for_thread(
         )
 
     repo_name_for_scope = str(repo_config.get("name") or "")
-    repo_for_snapshot = (
-        {"owner": str(repo_config["owner"]), "name": str(repo_config["name"])}
-        if repo_config.get("owner") and repo_config.get("name")
-        else None
-    )
     return (
         await ensure_sandbox_for_thread(
             thread_id,
             github_proxy_token=github_token,
             github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
-            repo=repo_for_snapshot,
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
@@ -1022,7 +1021,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 self._config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
             )
             raise
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
 
         repo_owner = str(repo_config.get("owner", ""))
         repo_name = str(repo_config.get("name", ""))
@@ -1429,11 +1428,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
-                SlackAssistantStatusMiddleware(),
                 TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
+                StableToolResultOrderMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,
             ],

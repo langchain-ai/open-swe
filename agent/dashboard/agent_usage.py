@@ -1,34 +1,40 @@
-"""Forward-looking Open SWE Agent usage telemetry."""
-
-from __future__ import annotations
+"""Open SWE Agent and Review usage telemetry."""
 
 import asyncio
+import hashlib
+import json
 import logging
+import weakref
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import httpx
 from langgraph_sdk import get_client
 
-from ..review.findings import REVIEWER_THREAD_KIND
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
+from agent.review.findings import coerce_finding, is_surfaced
 
-USAGE_THREAD_NAMESPACE: list[str] = ["agent_usage", "threads"]
-USAGE_PR_NAMESPACE: list[str] = ["agent_usage", "prs"]
-USAGE_LEADERBOARD_CACHE_NAMESPACE: list[str] = ["agent_usage", "leaderboard_cache"]
-REVIEWER_STATS_CACHE_NAMESPACE: list[str] = ["agent_usage", "reviewer_stats_cache"]
+from ..utils.json_types import as_json_object, thread_metadata
+
+AGENT_RUN_NAMESPACE = ["usage", "v2", "agent_runs"]
+AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]
+REVIEW_NAMESPACE = ["usage", "v2", "reviews"]
+REVIEW_FINDING_NAMESPACE = ["usage", "v2", "review_findings"]
 
 Period = Literal["7d", "30d", "all"]
-_AGENT_SOURCES = frozenset({"dashboard", "github", "slack", "linear"})
-_PR_REFRESH_INTERVAL_MS = 10 * 60 * 1000
-_MAX_PR_REFRESH_PER_REQUEST = 25
-_PR_REFRESH_CONCURRENCY = 5
-_CACHE_TTL_MS = 10 * 60 * 1000
-_CACHE_SEARCH_LIMIT = 1000
-_GITHUB_API = "https://api.github.com"
+_PAGE_SIZE = 1000
+_AGENT_SOURCES = frozenset({"dashboard", "github", "slack", "linear", "schedule"})
+_WRITE_LOCKS: weakref.WeakValueDictionary[tuple[tuple[str, ...], str, int], asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+_USAGE_CACHE: dict[tuple[str, str], tuple[int, dict[str, Any], dict[str, Any] | None]] = {}
+_USAGE_CACHE_TTL_MS = 60_000
+
+LEGACY_THREAD_NAMESPACE = ["agent_usage", "threads"]
+LEGACY_PR_NAMESPACE = ["agent_usage", "prs"]
+BACKFILL_NAMESPACE = ["usage", "v2", "backfill"]
+_BACKFILL_KEY = "legacy_v1"
 
 logger = logging.getLogger(__name__)
 
@@ -39,73 +45,6 @@ def _client():
 
 def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
-
-
-def _period_cutoff_ms(period: str) -> int | None:
-    now = datetime.now(UTC)
-    if period == "7d":
-        return int((now - timedelta(days=7)).timestamp() * 1000)
-    if period == "30d":
-        return int((now - timedelta(days=30)).timestamp() * 1000)
-    return None
-
-
-def _normalize_period(period: str | None) -> Period:
-    if period == "7d":
-        return "7d"
-    if period == "all":
-        return "all"
-    return "30d"
-
-
-def _record_from_item(item: Any) -> dict[str, Any] | None:
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
-
-
-async def _get_value(namespace: list[str], key: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(namespace, key)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return None
-        raise
-    return _record_from_item(item)
-
-
-async def _search_values(
-    namespace: list[str], *, limit: int = _CACHE_SEARCH_LIMIT
-) -> list[dict[str, Any]]:
-    result = await _client().store.search_items(namespace, limit=limit)
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    values: list[dict[str, Any]] = []
-    for item in items or []:
-        record = _record_from_item(item)
-        if record:
-            values.append(record)
-    return values
-
-
-def _user_key(github_login: str | None, email: str | None) -> str:
-    login = github_login.strip().lower() if isinstance(github_login, str) else ""
-    if login:
-        return f"github:{login}"
-    norm_email = email.strip().lower() if isinstance(email, str) else ""
-    if norm_email:
-        return f"email:{norm_email}"
-    return "unknown"
-
-
-def _coerce_int(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    return 0
 
 
 def _timestamp_ms(value: object) -> int:
@@ -128,56 +67,245 @@ def _timestamp_ms(value: object) -> int:
     return 0
 
 
-def _in_period(record: dict[str, Any], cutoff_ms: int | None) -> bool:
-    if cutoff_ms is None:
-        return True
-    created_at = _coerce_int(record.get("created_at_ms"))
-    return created_at >= cutoff_ms
+def _normalize_period(period: str | None) -> Period:
+    if period == "7d" or period == "all":
+        return period
+    return "30d"
 
 
-def _display_name(github_login: str, email: str) -> str:
-    if github_login:
-        return github_login
-    if email:
-        return email.split("@", 1)[0]
-    return "Unknown user"
+def _period_cutoff_ms(period: Period) -> int:
+    days = 7 if period == "7d" else 30 if period == "30d" else 0
+    return int((datetime.now(UTC) - timedelta(days=days)).timestamp() * 1000) if days else 0
 
 
-def _ensure_user(
-    users: dict[str, dict[str, Any]],
+def _store_key(*parts: object) -> str:
+    encoded = json.dumps(parts, separators=(",", ":"), ensure_ascii=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _record(item: Any) -> dict[str, Any] | None:
+    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+    return value if isinstance(value, dict) else None
+
+
+def _write_lock(namespace: list[str], key: str) -> asyncio.Lock:
+    lock_key = (tuple(namespace), key, id(asyncio.get_running_loop()))
+    lock = _WRITE_LOCKS.get(lock_key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _WRITE_LOCKS[lock_key] = lock
+    return lock
+
+
+async def _get(namespace: list[str], key: str) -> dict[str, Any] | None:
+    try:
+        return _record(await _client().store.get_item(namespace, key))
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return None
+        raise
+
+
+async def _mutate(
+    namespace: list[str], key: str, update: Callable[[dict[str, Any] | None], dict[str, Any]]
+) -> None:
+    async with _write_lock(namespace, key):
+        await _client().store.put_item(namespace, key, update(await _get(namespace, key)))
+
+
+async def _all(namespace: list[str]) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        result = await _client().store.search_items(namespace, limit=_PAGE_SIZE, offset=offset)
+        items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
+        page = list(items or [])
+        values.extend(value for item in page if (value := _record(item)) is not None)
+        if len(page) < _PAGE_SIZE:
+            return values
+        offset += len(page)
+
+
+def _login(value: object) -> str:
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def _email(value: object) -> str:
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def _int(value: object, fallback: object = 0) -> int:
+    return value if isinstance(value, int) else fallback if isinstance(fallback, int) else 0
+
+
+async def _backfill_legacy_agent_records() -> None:
+    legacy_threads, legacy_prs = await asyncio.gather(
+        _all(LEGACY_THREAD_NAMESPACE), _all(LEGACY_PR_NAMESPACE)
+    )
+    for record in legacy_threads:
+        thread_id = record.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            continue
+        if record.get("source") not in _AGENT_SOURCES:
+            continue
+        key = _store_key("run", f"legacy:{thread_id}")
+        if await _get(AGENT_RUN_NAMESPACE, key):
+            continue
+        await _client().store.put_item(
+            AGENT_RUN_NAMESPACE,
+            key,
+            {
+                "run_id": f"legacy:{thread_id}",
+                "thread_id": thread_id,
+                "github_login": _login(record.get("github_login")),
+                "user_email": _email(record.get("user_email")),
+                "model_id": record.get("model_id") or "",
+                "effort": record.get("effort") or "",
+                "source": record.get("source"),
+                "created_at_ms": _timestamp_ms(record.get("created_at_ms"))
+                or _timestamp_ms(record.get("updated_at_ms")),
+            },
+        )
+    for record in legacy_prs:
+        owner = record.get("owner")
+        repo = record.get("repo")
+        number = record.get("pr_number")
+        if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+            continue
+        key = _store_key("pr", owner.lower(), repo.lower(), number)
+        if await _get(AGENT_PR_NAMESPACE, key):
+            continue
+        await _client().store.put_item(
+            AGENT_PR_NAMESPACE,
+            key,
+            {
+                **record,
+                "github_login": _login(record.get("github_login")),
+                "user_email": _email(record.get("user_email")),
+                "created_at_ms": _timestamp_ms(record.get("created_at_ms"))
+                or _timestamp_ms(record.get("updated_at_ms")),
+                "merged_at_ms": 0,
+            },
+        )
+
+
+async def _backfill_legacy_reviews() -> None:
+    from ..review.findings import REVIEWER_THREAD_KIND
+
+    offset = 0
+    while True:
+        page = await _client().threads.search(
+            metadata={"kind": REVIEWER_THREAD_KIND}, limit=_PAGE_SIZE, offset=offset
+        )
+        threads = list(page or [])
+        for thread in threads:
+            metadata = thread_metadata(thread)
+            thread_id = thread.get("thread_id") if isinstance(thread, Mapping) else None
+            if not isinstance(thread_id, str) or not thread_id:
+                continue
+            findings = [item for item in metadata.get("findings") or [] if isinstance(item, dict)]
+            head_sha = metadata.get("last_reviewed_sha") or metadata.get("head_sha") or ""
+            reviewed_at_ms = _timestamp_ms(
+                metadata.get("created_at")
+                or (thread.get("created_at") if isinstance(thread, Mapping) else None)
+            )
+            await _backfill_legacy_review(
+                thread_id=thread_id,
+                metadata=metadata,
+                findings=findings,
+                head_sha=str(head_sha),
+                reviewed_at_ms=reviewed_at_ms,
+            )
+        if len(threads) < _PAGE_SIZE:
+            return
+        offset += len(threads)
+
+
+async def _backfill_legacy_review(
     *,
-    github_login: str | None,
-    email: str | None,
-) -> dict[str, Any]:
-    login = github_login.strip() if isinstance(github_login, str) else ""
-    norm_email = email.strip().lower() if isinstance(email, str) else ""
-    key = _user_key(login, norm_email)
-    user = users.get(key)
-    if user is None:
-        user = {
-            "key": key,
-            "github_login": login,
-            "email": norm_email,
-            "name": _display_name(login, norm_email),
-            "agent_runs": 0,
-            "prs_opened": 0,
-            "merged_prs": 0,
-            "agent_loc": 0,
-            "additions": 0,
-            "deletions": 0,
-            "model_counts": Counter(),
-        }
-        users[key] = user
-    elif login and not user.get("github_login"):
-        user["github_login"] = login
-        user["name"] = _display_name(login, norm_email)
-    if norm_email and not user.get("email"):
-        user["email"] = norm_email
-    return user
+    thread_id: str,
+    metadata: dict[str, Any],
+    findings: list[dict[str, Any]],
+    head_sha: str,
+    reviewed_at_ms: int,
+) -> None:
+    pr_meta = as_json_object(metadata.get("pr"))
+    owner = str(pr_meta.get("owner") or "")
+    repo = str(pr_meta.get("name") or "")
+    pr_number = pr_meta.get("number")
+    if not owner or not repo or not isinstance(pr_number, int):
+        return
+    review_key = _store_key("review", thread_id, head_sha)
+    if not await _get(REVIEW_NAMESPACE, review_key):
+        await _client().store.put_item(
+            REVIEW_NAMESPACE,
+            review_key,
+            {
+                "thread_id": thread_id,
+                "owner": owner,
+                "repo": repo,
+                "pr_number": pr_number,
+                "head_sha": head_sha,
+                "findings_recorded": len(findings),
+                "published_at_ms": reviewed_at_ms,
+            },
+        )
+    for finding in findings:
+        finding_id = finding.get("id")
+        if not isinstance(finding_id, str) or not finding_id:
+            continue
+        key = _store_key("finding", thread_id, finding_id)
+        if await _get(REVIEW_FINDING_NAMESPACE, key):
+            continue
+        status = finding.get("status") or "open"
+        surfaced = _finding_surfaced(finding)
+        await _client().store.put_item(
+            REVIEW_FINDING_NAMESPACE,
+            key,
+            {
+                "thread_id": thread_id,
+                "finding_id": finding_id,
+                "owner": owner,
+                "repo": repo,
+                "pr_number": pr_number,
+                "severity": finding.get("severity") or "",
+                "category": finding.get("category") or "",
+                "status": status,
+                "first_seen_sha": finding.get("first_seen_sha") or "",
+                "last_confirmed_sha": finding.get("last_confirmed_sha") or "",
+                "surfaced_at_ms": reviewed_at_ms if surfaced else 0,
+                "human_replies": _human_reply_count(finding),
+                "recorded_at_ms": reviewed_at_ms,
+                "updated_at_ms": reviewed_at_ms,
+                "resolved_at_ms": reviewed_at_ms if status == "resolved" else 0,
+                "resolved_sha": finding.get("last_confirmed_sha") or ""
+                if status == "resolved"
+                else "",
+            },
+        )
 
 
-async def record_agent_thread_usage(
+async def _backfill_legacy_usage() -> None:
+    """Migrate pre-v2 usage records into the event namespaces exactly once."""
+    if await _get(BACKFILL_NAMESPACE, _BACKFILL_KEY):
+        return
+    async with _write_lock(BACKFILL_NAMESPACE, _BACKFILL_KEY):
+        if await _get(BACKFILL_NAMESPACE, _BACKFILL_KEY):
+            return
+        try:
+            await _backfill_legacy_agent_records()
+            await _backfill_legacy_reviews()
+        except Exception:  # noqa: BLE001
+            logger.warning("Legacy usage backfill failed; retrying next read", exc_info=True)
+            return
+        await _client().store.put_item(
+            BACKFILL_NAMESPACE, _BACKFILL_KEY, {"completed_at_ms": _now_ms()}
+        )
+
+
+async def record_agent_run_usage(
     *,
+    run_id: str,
     thread_id: str,
     github_login: str | None,
     user_email: str | None,
@@ -185,28 +313,25 @@ async def record_agent_thread_usage(
     effort: str | None,
     source: str | None,
 ) -> None:
-    """Record one Open SWE Agent thread for leaderboard aggregation."""
-    if not thread_id:
+    """Record one actual Agent run, idempotently."""
+    if not run_id or not thread_id:
         return
-    source_value = source if isinstance(source, str) and source in _AGENT_SOURCES else "dashboard"
+    key = _store_key("run", run_id)
     now_ms = _now_ms()
-    existing = await _get_value(USAGE_THREAD_NAMESPACE, thread_id)
-    value = {
-        **(existing or {}),
-        "thread_id": thread_id,
-        "github_login": github_login.strip() if isinstance(github_login, str) else "",
-        "user_email": user_email.strip().lower() if isinstance(user_email, str) else "",
-        "model_id": model_id,
-        "effort": effort or "",
-        "source": source_value,
-        "agent_kind": "agent",
-        "updated_at_ms": now_ms,
-    }
-    if not existing:
-        value["created_at_ms"] = now_ms
-    elif not value.get("created_at_ms"):
-        value["created_at_ms"] = existing.get("created_at_ms") or now_ms
-    await _client().store.put_item(USAGE_THREAD_NAMESPACE, thread_id, value)
+
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        return existing or {
+            "run_id": run_id,
+            "thread_id": thread_id,
+            "github_login": _login(github_login),
+            "user_email": _email(user_email),
+            "model_id": model_id,
+            "effort": effort or "",
+            "source": source if source in _AGENT_SOURCES else "dashboard",
+            "created_at_ms": now_ms,
+        }
+
+    await _mutate(AGENT_RUN_NAMESPACE, key, update)
 
 
 async def record_agent_pr_usage(
@@ -225,465 +350,245 @@ async def record_agent_pr_usage(
     changed_files: int = 0,
     state: str | None = None,
     merged: bool = False,
+    created_at: object = None,
+    merged_at: object = None,
 ) -> None:
-    """Record one Open SWE Agent pull request for leaderboard aggregation."""
+    """Record an Agent-authored PR while preserving its original attribution."""
     if not owner or not repo or not pr_number:
         return
-    key = f"{owner}/{repo}#{pr_number}"
+    key = _store_key("pr", owner.lower(), repo.lower(), pr_number)
     now_ms = _now_ms()
-    existing = await _get_value(USAGE_PR_NAMESPACE, key)
-    value = {
-        **(existing or {}),
-        "key": key,
-        "thread_id": thread_id or "",
-        "github_login": github_login.strip() if isinstance(github_login, str) else "",
-        "user_email": user_email.strip().lower() if isinstance(user_email, str) else "",
-        "owner": owner,
-        "repo": repo,
-        "pr_number": pr_number,
-        "pr_url": pr_url or "",
-        "head": head,
-        "base": base,
-        "additions": max(0, additions),
-        "deletions": max(0, deletions),
-        "changed_files": max(0, changed_files),
-        "state": state or "open",
-        "merged": bool(merged),
-        "agent_kind": "agent",
-        "updated_at_ms": now_ms,
-    }
-    if not existing:
-        value["created_at_ms"] = now_ms
-    elif not value.get("created_at_ms"):
-        value["created_at_ms"] = existing.get("created_at_ms") or now_ms
-    await _client().store.put_item(USAGE_PR_NAMESPACE, key, value)
 
-
-def _github_headers(token: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
-async def _refresh_pr_record(
-    client: httpx.AsyncClient, token: str, record: dict[str, Any]
-) -> dict[str, Any]:
-    owner = record.get("owner")
-    repo = record.get("repo")
-    pr_number = record.get("pr_number")
-    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(pr_number, int):
-        return record
-    resp = await client.get(
-        f"{_GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
-        headers=_github_headers(token),
-    )
-    if resp.status_code != 200:
-        logger.debug(
-            "GitHub returned %s refreshing usage PR %s/%s#%s",
-            resp.status_code,
-            owner,
-            repo,
-            pr_number,
-        )
-        return record
-    data = resp.json()
-    if not isinstance(data, dict):
-        return record
-    updated = {
-        **record,
-        "pr_url": data.get("html_url") or record.get("pr_url") or "",
-        "state": data.get("state") if isinstance(data.get("state"), str) else record.get("state"),
-        "merged": bool(data.get("merged")),
-        "additions": data.get("additions") if isinstance(data.get("additions"), int) else 0,
-        "deletions": data.get("deletions") if isinstance(data.get("deletions"), int) else 0,
-        "changed_files": data.get("changed_files")
-        if isinstance(data.get("changed_files"), int)
-        else 0,
-        "updated_at_ms": _now_ms(),
-    }
-    key = updated.get("key")
-    if isinstance(key, str) and key:
-        await _client().store.put_item(USAGE_PR_NAMESPACE, key, updated)
-    return updated
-
-
-async def _refresh_pr_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    now_ms = _now_ms()
-    stale_indexes = [
-        index
-        for index, record in enumerate(records)
-        if not (updated_at := _coerce_int(record.get("updated_at_ms")))
-        or now_ms - updated_at >= _PR_REFRESH_INTERVAL_MS
-    ][:_MAX_PR_REFRESH_PER_REQUEST]
-    if not stale_indexes:
-        return records
-    token = await get_github_app_installation_token()
-    if not token:
-        return records
-
-    refreshed = list(records)
-    semaphore = asyncio.Semaphore(_PR_REFRESH_CONCURRENCY)
-
-    async def refresh_one(index: int, client: httpx.AsyncClient) -> tuple[int, dict[str, Any]]:
-        async with semaphore:
-            try:
-                return index, await _refresh_pr_record(client, token, records[index])
-            except Exception:
-                logger.debug("Failed to refresh usage PR record", exc_info=True)
-                return index, records[index]
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for index, record in await asyncio.gather(
-            *(refresh_one(index, client) for index in stale_indexes)
-        ):
-            refreshed[index] = record
-    return refreshed
-
-
-def _serialize_usage_user(index: int, user: dict[str, Any]) -> dict[str, Any]:
-    model_counts: Counter[str] = user.get("model_counts", Counter())
-    favorite_model = model_counts.most_common(1)[0][0] if model_counts else "default"
-    return {
-        "rank": index,
-        "key": user["key"],
-        "name": user.get("name") or "Unknown user",
-        "github_login": user.get("github_login") or None,
-        "email": user.get("email") or None,
-        "favorite_model": favorite_model,
-        "agent_runs": user["agent_runs"],
-        "prs_opened": user["prs_opened"],
-        "merged_prs": user["merged_prs"],
-        "agent_loc": user["agent_loc"],
-        "additions": user["additions"],
-        "deletions": user["deletions"],
-    }
-
-
-async def _build_usage_leaderboard_snapshot(period: Period) -> dict[str, Any]:
-    cutoff_ms = _period_cutoff_ms(period)
-    users: dict[str, dict[str, Any]] = {}
-
-    for thread in await _search_values(USAGE_THREAD_NAMESPACE):
-        if thread.get("agent_kind") != "agent" or thread.get("source") not in _AGENT_SOURCES:
-            continue
-        if not _in_period(thread, cutoff_ms):
-            continue
-        user = _ensure_user(
-            users,
-            github_login=thread.get("github_login"),
-            email=thread.get("user_email"),
-        )
-        user["agent_runs"] += 1
-        model_id = thread.get("model_id")
-        if isinstance(model_id, str) and model_id:
-            user["model_counts"][model_id] += 1
-
-    pr_records = [
-        pr
-        for pr in await _search_values(USAGE_PR_NAMESPACE)
-        if pr.get("agent_kind") == "agent" and _in_period(pr, cutoff_ms)
-    ]
-    for pr in await _refresh_pr_records(pr_records):
-        user = _ensure_user(
-            users,
-            github_login=pr.get("github_login"),
-            email=pr.get("user_email"),
-        )
-        additions = _coerce_int(pr.get("additions"))
-        deletions = _coerce_int(pr.get("deletions"))
-        user["prs_opened"] += 1
-        if pr.get("merged"):
-            user["merged_prs"] += 1
-        user["additions"] += additions
-        user["deletions"] += deletions
-        user["agent_loc"] += additions + deletions
-
-    sorted_users = sorted(
-        users.values(),
-        key=lambda item: (
-            -item["merged_prs"],
-            -item["agent_loc"],
-            -item["prs_opened"],
-            -item["agent_runs"],
-            item.get("name") or "",
-        ),
-    )
-    return {
-        "period": period,
-        "users": [_serialize_usage_user(index, user) for index, user in enumerate(sorted_users, 1)],
-        "total_members": len(sorted_users),
-    }
-
-
-async def refresh_usage_leaderboard_cache(period: str | None = "30d") -> dict[str, Any]:
-    normalized_period = _normalize_period(period)
-    snapshot = await _build_usage_leaderboard_snapshot(normalized_period)
-    await _client().store.put_item(
-        USAGE_LEADERBOARD_CACHE_NAMESPACE,
-        normalized_period,
-        {"generated_at_ms": _now_ms(), "snapshot": snapshot},
-    )
-    return snapshot
-
-
-def _is_finding_surfaced(finding: dict[str, Any]) -> bool:
-    surface = as_json_object(finding.get("surface"))
-    state = surface.get("state")
-    if state in {"surfaced", "resolve_pending", "resolved"}:
-        return True
-    if isinstance(finding.get("github_review_id"), int):
-        return True
-    if isinstance(finding.get("github_review_comment_id"), int):
-        return True
-    comment_ids = finding.get("github_review_comment_ids")
-    thread_ids = finding.get("github_review_thread_ids")
-    return bool(comment_ids or thread_ids)
-
-
-def _is_finding_resolved_by_us(finding: dict[str, Any]) -> bool:
-    if finding.get("status") != "resolved" or not _is_finding_surfaced(finding):
-        return False
-    surface = as_json_object(finding.get("surface"))
-    return bool(
-        surface.get("state") == "resolved"
-        or finding.get("github_thread_resolved")
-        or finding.get("github_resolved_thread_ids")
-        or finding.get("resolution_note")
-    )
-
-
-def _thread_created_at_ms(thread: ThreadLike, metadata: dict[str, Any]) -> int:
-    timestamp = _thread_explicit_created_at_ms(thread, metadata)
-    if timestamp:
-        return timestamp
-    for source in (
-        metadata.get("updated_at_ms"),
-        metadata.get("updated_at"),
-        thread.get("updated_at"),
-        thread.get("updatedAt"),
-    ):
-        timestamp = _timestamp_ms(source)
-        if timestamp:
-            return timestamp
-    return _now_ms()
-
-
-def _thread_explicit_created_at_ms(thread: ThreadLike, metadata: dict[str, Any]) -> int:
-    for source in (
-        metadata.get("created_at_ms"),
-        metadata.get("created_at"),
-        thread.get("created_at"),
-        thread.get("createdAt"),
-    ):
-        timestamp = _timestamp_ms(source)
-        if timestamp:
-            return timestamp
-    return 0
-
-
-def _counter_rows(counter: Counter[str], *, limit: int = 5) -> list[dict[str, Any]]:
-    return [{"name": name, "count": count} for name, count in counter.most_common(limit)]
-
-
-async def _iter_reviewer_thread_pages(cutoff_ms: int | None):
-    client = _client()
-    offset = 0
-    while True:
-        page = await client.threads.search(
-            metadata={"kind": REVIEWER_THREAD_KIND},
-            limit=_CACHE_SEARCH_LIMIT,
-            offset=offset,
-            sort_by="created_at",
-            sort_order="desc",
-        )
-        if not page:
-            return
-        yield page
-        if len(page) < _CACHE_SEARCH_LIMIT:
-            return
-        if cutoff_ms is not None:
-            last_thread = next(
-                (thread for thread in reversed(page) if isinstance(thread, dict)), None
-            )
-            if last_thread is not None:
-                metadata = thread_metadata(last_thread)
-                last_created_at_ms = _thread_explicit_created_at_ms(last_thread, metadata)
-                if last_created_at_ms and last_created_at_ms < cutoff_ms:
-                    return
-        offset += len(page)
-
-
-async def _build_reviewer_stats_snapshot(period: Period) -> dict[str, Any]:
-    cutoff_ms = _period_cutoff_ms(period)
-
-    reviewed_prs = 0
-    prs_with_findings = 0
-    findings_recorded = 0
-    surfaced_findings = 0
-    addressed_findings = 0
-    dismissed_findings = 0
-    human_replies = 0
-    resolved_after_update = 0
-    severity_counts: Counter[str] = Counter()
-    category_counts: Counter[str] = Counter()
-
-    async for page in _iter_reviewer_thread_pages(cutoff_ms):
-        for thread in page:
-            if not isinstance(thread, dict):
-                continue
-            metadata = thread_metadata(thread)
-            if cutoff_ms is not None and _thread_created_at_ms(thread, metadata) < cutoff_ms:
-                continue
-
-            reviewed_prs += 1
-            findings = metadata.get("findings")
-            if not isinstance(findings, list):
-                continue
-            valid_findings = [finding for finding in findings if isinstance(finding, dict)]
-            if valid_findings:
-                prs_with_findings += 1
-            for finding in valid_findings:
-                findings_recorded += 1
-                severity = finding.get("severity")
-                if isinstance(severity, str) and severity:
-                    severity_counts[severity] += 1
-                category = finding.get("category")
-                if isinstance(category, str) and category:
-                    category_counts[category] += 1
-                interactions = finding.get("interactions")
-                if isinstance(interactions, list):
-                    human_replies += sum(
-                        1
-                        for interaction in interactions
-                        if isinstance(interaction, dict)
-                        and interaction.get("kind") == "human_reply"
-                    )
-                elif finding.get("last_human_reply_at"):
-                    human_replies += 1
-
-                surfaced = _is_finding_surfaced(finding)
-                if surfaced:
-                    surfaced_findings += 1
-                if _is_finding_resolved_by_us(finding):
-                    addressed_findings += 1
-                    first_seen_sha = finding.get("first_seen_sha")
-                    head_sha = metadata.get("head_sha") or finding.get("last_confirmed_sha")
-                    if (
-                        isinstance(first_seen_sha, str)
-                        and isinstance(head_sha, str)
-                        and first_seen_sha != head_sha
-                    ):
-                        resolved_after_update += 1
-                if finding.get("status") == "dismissed":
-                    dismissed_findings += 1
-
-    unresolved_surfaced_findings = max(
-        0, surfaced_findings - addressed_findings - dismissed_findings
-    )
-    resolution_rate = addressed_findings / surfaced_findings if surfaced_findings else 0.0
-    return {
-        "period": period,
-        "reviewed_prs": reviewed_prs,
-        "prs_with_findings": prs_with_findings,
-        "findings_recorded": findings_recorded,
-        "surfaced_findings": surfaced_findings,
-        "addressed_findings": addressed_findings,
-        "resolved_after_update": resolved_after_update,
-        "dismissed_findings": dismissed_findings,
-        "unresolved_surfaced_findings": unresolved_surfaced_findings,
-        "resolution_rate": resolution_rate,
-        "human_replies": human_replies,
-        "severity_counts": dict(severity_counts),
-        "top_categories": _counter_rows(category_counts),
-    }
-
-
-async def refresh_reviewer_stats_cache(period: str | None = "30d") -> dict[str, Any]:
-    normalized_period = _normalize_period(period)
-    snapshot = await _build_reviewer_stats_snapshot(normalized_period)
-    await _client().store.put_item(
-        REVIEWER_STATS_CACHE_NAMESPACE,
-        normalized_period,
-        {"generated_at_ms": _now_ms(), "snapshot": snapshot},
-    )
-    return snapshot
-
-
-async def _cached_snapshot(
-    namespace: list[str],
-    period: Period,
-    refresh: Callable[[str | None], Awaitable[dict[str, Any]]],
-    *,
-    schedule_refresh: Callable[[Period], None] | None = None,
-) -> tuple[dict[str, Any], int | None]:
-    cached = await _get_value(namespace, period)
-    if cached:
-        snapshot = cached.get("snapshot")
-        generated_at_ms = _coerce_int(cached.get("generated_at_ms"))
-        if isinstance(snapshot, dict):
-            if not generated_at_ms or _now_ms() - generated_at_ms <= _CACHE_TTL_MS:
-                return snapshot, generated_at_ms or None
-            if schedule_refresh is not None:
-                schedule_refresh(period)
-                return snapshot, generated_at_ms
-    return await refresh(period), _now_ms()
-
-
-def _usage_payload_from_snapshot(
-    snapshot: dict[str, Any],
-    *,
-    limit: int,
-    current_login: str | None,
-    current_email: str | None,
-    generated_at_ms: int | None,
-) -> dict[str, Any]:
-    safe_limit = min(max(limit, 1), 100)
-    current_keys = {
-        _user_key(current_login, current_email),
-        _user_key(current_login, None),
-        _user_key(None, current_email),
-    }
-    rows: list[dict[str, Any]] = []
-    current_user_row: dict[str, Any] | None = None
-    for user in snapshot.get("users", []):
-        if not isinstance(user, dict):
-            continue
-        github_login = (
-            user.get("github_login") if isinstance(user.get("github_login"), str) else None
-        )
-        is_current_user = user.get("key") in current_keys
-        row = {
-            "rank": _coerce_int(user.get("rank")),
-            "user": {
-                "name": user.get("name") if is_current_user or github_login else "Open SWE user",
-                "github_login": github_login,
-                "email": (user.get("email") or None) if is_current_user else None,
-            },
-            "favorite_model": user.get("favorite_model") or "default",
-            "agent_runs": _coerce_int(user.get("agent_runs")),
-            "prs_opened": _coerce_int(user.get("prs_opened")),
-            "merged_prs": _coerce_int(user.get("merged_prs")),
-            "agent_loc": _coerce_int(user.get("agent_loc")),
-            "additions": _coerce_int(user.get("additions")),
-            "deletions": _coerce_int(user.get("deletions")),
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        was_merged = bool((existing or {}).get("merged"))
+        value = {
+            **(existing or {}),
+            "owner": owner,
+            "repo": repo,
+            "pr_number": pr_number,
+            "pr_url": pr_url or (existing or {}).get("pr_url", ""),
+            "head": head,
+            "base": base,
+            "additions": max(0, additions),
+            "deletions": max(0, deletions),
+            "changed_files": max(0, changed_files),
+            "state": "closed" if was_merged else state or "open",
+            "merged": was_merged or bool(merged),
+            "merged_at_ms": _timestamp_ms(merged_at) or (existing or {}).get("merged_at_ms", 0),
+            "updated_at_ms": now_ms,
         }
-        if is_current_user:
-            current_user_row = row
-        if len(rows) < safe_limit:
-            rows.append(row)
+        if not existing:
+            value.update(
+                thread_id=thread_id or "",
+                github_login=_login(github_login),
+                user_email=_email(user_email),
+                created_at_ms=_timestamp_ms(created_at) or now_ms,
+            )
+        return value
 
-    if current_user_row and all(row["rank"] != current_user_row["rank"] for row in rows):
-        rows.append(current_user_row)
+    await _mutate(AGENT_PR_NAMESPACE, key, update)
 
+
+async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
+    """Update a known Agent PR from a verified GitHub webhook payload."""
+    pr = payload.get("pull_request")
+    repo_payload = payload.get("repository")
+    if not isinstance(pr, dict) or not isinstance(repo_payload, dict):
+        return
+    owner_payload = repo_payload.get("owner")
+    owner = owner_payload.get("login") if isinstance(owner_payload, dict) else None
+    repo = repo_payload.get("name")
+    number = pr.get("number")
+    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+        return
+    key = _store_key("pr", owner.lower(), repo.lower(), number)
+    existing = await _get(AGENT_PR_NAMESPACE, key)
+    if not existing:
+        return
+    await record_agent_pr_usage(
+        thread_id=existing.get("thread_id") if isinstance(existing.get("thread_id"), str) else None,
+        github_login=existing.get("github_login"),
+        user_email=existing.get("user_email"),
+        owner=owner,
+        repo=repo,
+        pr_number=number,
+        pr_url=pr.get("html_url"),
+        head=as_json_object(pr.get("head")).get("ref") or existing.get("head", ""),
+        base=as_json_object(pr.get("base")).get("ref") or existing.get("base", ""),
+        additions=_int(pr.get("additions"), existing.get("additions")),
+        deletions=_int(pr.get("deletions"), existing.get("deletions")),
+        changed_files=_int(pr.get("changed_files"), existing.get("changed_files")),
+        state=pr.get("state") if isinstance(pr.get("state"), str) else existing.get("state"),
+        merged=bool(pr.get("merged")),
+        created_at=pr.get("created_at"),
+        merged_at=pr.get("merged_at"),
+    )
+
+
+def _finding_surfaced(finding: Mapping[str, Any]) -> bool:
+    record = coerce_finding(dict(finding))
+    return record is not None and is_surfaced(record)
+
+
+async def record_reviewer_publication(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    findings: Sequence[Mapping[str, Any]],
+) -> None:
+    """Record a completed review and its finding cohort."""
+    now_ms = _now_ms()
+
+    def update_review(existing: dict[str, Any] | None) -> dict[str, Any]:
+        return {
+            **(existing or {}),
+            "thread_id": thread_id,
+            "owner": owner,
+            "repo": repo,
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "findings_recorded": sum(
+                1 for finding in findings if finding.get("first_seen_sha") == head_sha
+            ),
+            "published_at_ms": (existing or {}).get("published_at_ms") or now_ms,
+        }
+
+    await _mutate(REVIEW_NAMESPACE, _store_key("review", thread_id, head_sha), update_review)
+    for finding in findings:
+        finding_id = finding.get("id")
+        if not isinstance(finding_id, str) or not finding_id:
+            continue
+        key = _store_key("finding", thread_id, finding_id)
+        surfaced = _finding_surfaced(finding)
+
+        def update(
+            existing: dict[str, Any] | None,
+            finding: Mapping[str, Any] = finding,
+            finding_id: str = finding_id,
+            surfaced: bool = surfaced,
+        ) -> dict[str, Any]:
+            value = {
+                **(existing or {}),
+                "thread_id": thread_id,
+                "finding_id": finding_id,
+                "owner": owner,
+                "repo": repo,
+                "pr_number": pr_number,
+                "severity": finding.get("severity") or "",
+                "category": finding.get("category") or "",
+                "status": finding.get("status") or "open",
+                "first_seen_sha": finding.get("first_seen_sha") or "",
+                "last_confirmed_sha": finding.get("last_confirmed_sha") or "",
+                "surfaced_at_ms": (existing or {}).get("surfaced_at_ms")
+                or (now_ms if surfaced else 0),
+                "human_replies": _human_reply_count(finding),
+                "updated_at_ms": now_ms,
+            }
+            if not existing:
+                value["recorded_at_ms"] = now_ms
+            if value["status"] == "resolved" and not value.get("resolved_at_ms"):
+                value["resolved_at_ms"] = now_ms
+                value["resolved_sha"] = value["last_confirmed_sha"]
+            return value
+
+        await _mutate(REVIEW_FINDING_NAMESPACE, key, update)
+
+
+def _human_reply_count(finding: Mapping[str, Any]) -> int:
+    interactions = finding.get("interactions")
+    if isinstance(interactions, list):
+        return sum(
+            1
+            for interaction in interactions
+            if isinstance(interaction, dict) and interaction.get("kind") == "human_reply"
+        )
+    return int(bool(finding.get("last_human_reply_at")))
+
+
+async def record_reviewer_finding_state(thread_id: str, finding: Mapping[str, Any]) -> None:
+    """Update an already-published finding's outcome state."""
+    finding_id = finding.get("id")
+    if not isinstance(finding_id, str) or not finding_id:
+        return
+    key = _store_key("finding", thread_id, finding_id)
+    now_ms = _now_ms()
+
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        if not existing:
+            return {}
+        status = finding.get("status") or "open"
+        value = {
+            **existing,
+            "status": status,
+            "severity": finding.get("severity") or existing.get("severity", ""),
+            "category": finding.get("category") or existing.get("category", ""),
+            "last_confirmed_sha": finding.get("last_confirmed_sha") or "",
+            "human_replies": _human_reply_count(finding),
+            "updated_at_ms": now_ms,
+        }
+        if _finding_surfaced(finding) and not value.get("surfaced_at_ms"):
+            value["surfaced_at_ms"] = now_ms
+        if status == "resolved" and not value.get("resolved_at_ms"):
+            value["resolved_at_ms"] = now_ms
+            value["resolved_sha"] = value["last_confirmed_sha"]
+        return value
+
+    async with _write_lock(REVIEW_FINDING_NAMESPACE, key):
+        existing = await _get(REVIEW_FINDING_NAMESPACE, key)
+        if existing:
+            await _client().store.put_item(REVIEW_FINDING_NAMESPACE, key, update(existing))
+
+
+def _aliases(records: list[dict[str, Any]]) -> dict[str, str]:
     return {
-        "period": snapshot.get("period") or "30d",
-        "rows": rows,
-        "total_members": _coerce_int(snapshot.get("total_members")),
-        "current_user_rank": current_user_row["rank"] if current_user_row else None,
-        "generated_at_ms": generated_at_ms,
+        email: login
+        for record in records
+        if (email := _email(record.get("user_email")))
+        and (login := _login(record.get("github_login")))
     }
+
+
+def _user_key(record: dict[str, Any], aliases: dict[str, str]) -> str | None:
+    login = _login(record.get("github_login")) or aliases.get(_email(record.get("user_email")), "")
+    if login:
+        return f"github:{login}"
+    email = _email(record.get("user_email"))
+    return f"email:{email}" if email else None
+
+
+def _new_user(key: str, record: dict[str, Any], aliases: dict[str, str]) -> dict[str, Any]:
+    login = _login(record.get("github_login")) or aliases.get(_email(record.get("user_email")), "")
+    email = _email(record.get("user_email"))
+    return {
+        "key": key,
+        "github_login": login,
+        "email": email,
+        "name": login or email.split("@", 1)[0],
+        "agent_runs": 0,
+        "prs_opened": 0,
+        "merged_prs": 0,
+        "agent_loc": 0,
+        "additions": 0,
+        "deletions": 0,
+        "models": Counter(),
+    }
+
+
+def _limited_rows(
+    rows: list[dict[str, Any]], current_row: dict[str, Any] | None, limit: int
+) -> list[dict[str, Any]]:
+    limited = rows[: min(max(limit, 1), 100)]
+    if current_row and all(row["rank"] != current_row["rank"] for row in limited):
+        return [*limited, current_row]
+    return limited
+
+
+def _in_period(record: dict[str, Any], field: str, cutoff_ms: int) -> bool:
+    timestamp = _timestamp_ms(record.get(field))
+    return timestamp > 0 and timestamp >= cutoff_ms
 
 
 async def list_agent_usage_leaderboard(
@@ -692,29 +597,152 @@ async def list_agent_usage_leaderboard(
     limit: int,
     current_login: str | None,
     current_email: str | None,
-    schedule_usage_refresh: Callable[[Period], None] | None = None,
-    schedule_reviewer_refresh: Callable[[Period], None] | None = None,
 ) -> dict[str, Any]:
-    """Return cached Open SWE Agent and reviewer usage stats."""
-    normalized_period = _normalize_period(period)
-    usage_snapshot, generated_at_ms = await _cached_snapshot(
-        USAGE_LEADERBOARD_CACHE_NAMESPACE,
-        normalized_period,
-        refresh_usage_leaderboard_cache,
-        schedule_refresh=schedule_usage_refresh,
+    """Aggregate current usage from complete, paginated telemetry."""
+    normalized = _normalize_period(period)
+    cache_key = (normalized, _login(current_login) or _email(current_email))
+    cached = _USAGE_CACHE.get(cache_key)
+    if cached and _now_ms() - cached[0] < _USAGE_CACHE_TTL_MS:
+        payload = dict(cached[1])
+        payload["rows"] = _limited_rows(payload["rows"], cached[2], limit)
+        return payload
+    await _backfill_legacy_usage()
+    cutoff_ms = _period_cutoff_ms(normalized)
+    runs, prs, review_records, finding_records = await asyncio.gather(
+        _all(AGENT_RUN_NAMESPACE),
+        _all(AGENT_PR_NAMESPACE),
+        _all(REVIEW_NAMESPACE),
+        _all(REVIEW_FINDING_NAMESPACE),
     )
-    reviewer_stats, reviewer_generated_at_ms = await _cached_snapshot(
-        REVIEWER_STATS_CACHE_NAMESPACE,
-        normalized_period,
-        refresh_reviewer_stats_cache,
-        schedule_refresh=schedule_reviewer_refresh,
+    aliases = _aliases(runs + prs)
+    users: dict[str, dict[str, Any]] = {}
+
+    for record in runs:
+        if not _in_period(record, "created_at_ms", cutoff_ms):
+            continue
+        key = _user_key(record, aliases)
+        if not key:
+            continue
+        user = users.setdefault(key, _new_user(key, record, aliases))
+        user["agent_runs"] += 1
+        model = record.get("model_id")
+        if isinstance(model, str) and model:
+            user["models"][model] += 1
+
+    for record in prs:
+        if not _in_period(record, "created_at_ms", cutoff_ms):
+            continue
+        key = _user_key(record, aliases)
+        if not key:
+            continue
+        user = users.setdefault(key, _new_user(key, record, aliases))
+        additions = int(record.get("additions") or 0)
+        deletions = int(record.get("deletions") or 0)
+        user["prs_opened"] += 1
+        user["merged_prs"] += int(bool(record.get("merged")))
+        user["additions"] += additions
+        user["deletions"] += deletions
+        user["agent_loc"] += additions + deletions
+
+    ordered = sorted(
+        users.values(),
+        key=lambda user: (
+            -user["merged_prs"],
+            -user["agent_loc"],
+            -user["prs_opened"],
+            -user["agent_runs"],
+            user["name"],
+        ),
     )
-    payload = _usage_payload_from_snapshot(
-        usage_snapshot,
-        limit=limit,
-        current_login=current_login,
-        current_email=current_email,
-        generated_at_ms=generated_at_ms,
+    current_keys = {
+        f"github:{_login(current_login)}" if _login(current_login) else "",
+        f"email:{_email(current_email)}" if _email(current_email) else "",
+    }
+    rows: list[dict[str, Any]] = []
+    current_row: dict[str, Any] | None = None
+    for rank, user in enumerate(ordered, 1):
+        models: Counter[str] = user["models"]
+        is_current = user["key"] in current_keys
+        row = {
+            "rank": rank,
+            "user": {
+                "name": user["name"] if is_current or user["github_login"] else "Open SWE user",
+                "github_login": user["github_login"] or None,
+                "email": (user["email"] or None) if is_current else None,
+            },
+            "favorite_model": models.most_common(1)[0][0] if models else "default",
+            **{
+                key: user[key]
+                for key in (
+                    "agent_runs",
+                    "prs_opened",
+                    "merged_prs",
+                    "agent_loc",
+                    "additions",
+                    "deletions",
+                )
+            },
+        }
+        if is_current:
+            current_row = row
+        if len(rows) < 100:
+            rows.append(row)
+
+    reviews = [
+        record for record in review_records if _in_period(record, "published_at_ms", cutoff_ms)
+    ]
+    findings = [
+        record for record in finding_records if _in_period(record, "recorded_at_ms", cutoff_ms)
+    ]
+    surfaced = [
+        record for record in finding_records if _in_period(record, "surfaced_at_ms", cutoff_ms)
+    ]
+    reviewed_prs = {(r.get("owner"), r.get("repo"), r.get("pr_number")) for r in reviews}
+    prs_with_findings = {
+        (r.get("owner"), r.get("repo"), r.get("pr_number"))
+        for r in reviews
+        if int(r.get("findings_recorded") or 0) > 0
+    }
+    addressed = [record for record in surfaced if record.get("status") == "resolved"]
+    dismissed = [record for record in surfaced if record.get("status") == "dismissed"]
+    unresolved = [record for record in surfaced if record.get("status") == "open"]
+    severity = Counter(str(record.get("severity")) for record in findings if record.get("severity"))
+    categories = Counter(
+        str(record.get("category")) for record in findings if record.get("category")
     )
-    payload["reviewer_stats"] = {**reviewer_stats, "generated_at_ms": reviewer_generated_at_ms}
-    return payload
+    now_ms = _now_ms()
+    reviewer_stats = {
+        "period": normalized,
+        "reviewed_prs": len(reviewed_prs),
+        "prs_with_findings": len(prs_with_findings),
+        "findings_recorded": len(findings),
+        "surfaced_findings": len(surfaced),
+        "addressed_findings": len(addressed),
+        "resolved_after_update": sum(
+            1
+            for record in addressed
+            if record.get("resolved_sha")
+            and record.get("resolved_sha") != record.get("first_seen_sha")
+        ),
+        "dismissed_findings": len(dismissed),
+        "unresolved_surfaced_findings": len(unresolved),
+        "resolution_rate": len(addressed) / len(surfaced) if surfaced else 0.0,
+        "human_replies": sum(int(record.get("human_replies") or 0) for record in surfaced),
+        "severity_counts": dict(severity),
+        "top_categories": [
+            {"name": name, "count": count} for name, count in categories.most_common(5)
+        ],
+        "generated_at_ms": now_ms,
+    }
+    payload = {
+        "period": normalized,
+        "rows": rows,
+        "total_members": len(ordered),
+        "current_user_rank": current_row["rank"] if current_row else None,
+        "generated_at_ms": now_ms,
+        "reviewer_stats": reviewer_stats,
+    }
+    _USAGE_CACHE[cache_key] = (now_ms, payload, current_row)
+    result = dict(payload)
+    result["rows"] = _limited_rows(rows, current_row, limit)
+    return result

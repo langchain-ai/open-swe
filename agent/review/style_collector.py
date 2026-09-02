@@ -1,9 +1,6 @@
 """Collect historical PR review samples from GitHub for style analysis."""
 
-from __future__ import annotations
-
 import logging
-import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,11 +15,6 @@ DEFAULT_MAX_SAMPLES_PER_REVIEWER = 6
 MIN_COMMENT_CHARS = 20
 GITHUB_API = "https://api.github.com"
 _BOT_SUFFIX = "[bot]"
-
-
-def generate_review_style_thread_id(owner: str, repo: str) -> str:
-    stable_key = f"{owner}/{repo}/review-style"
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
 @dataclass
@@ -297,7 +289,7 @@ def format_samples_for_analyzer(samples: ReviewStyleSamples) -> str:
     if not samples.samples:
         lines.append(
             "Pre-collection found no substantive review text on recent merged PRs. "
-            "You must browse merged PRs yourself with `GH_TOKEN=dummy gh` (reviews, "
+            "You must browse merged PRs yourself with `gh` (reviews, "
             "pull comments, and issue comments) before saving."
         )
         return "\n".join(lines)

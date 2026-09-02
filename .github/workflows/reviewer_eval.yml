@@ -15,7 +15,7 @@ on:
       model_id:
         description: Reviewer model id
         type: string
-        default: google_genai:gemini-3.5-flash
+        default: google_genai:gemini-3.7-flash
       reasoning_effort:
         description: Reasoning effort
         type: string
@@ -78,8 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked
       - name: Run reviewer eval

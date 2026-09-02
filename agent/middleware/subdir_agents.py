@@ -1,7 +1,5 @@
 """Auto-load applicable ``AGENTS.md`` files after file reads."""
 
-from __future__ import annotations
-
 import logging
 import posixpath
 from collections import defaultdict
@@ -14,7 +12,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from ..utils.sandbox_state import SANDBOX_BACKENDS
+from agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 

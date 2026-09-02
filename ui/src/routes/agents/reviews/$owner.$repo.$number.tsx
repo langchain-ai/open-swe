@@ -28,11 +28,20 @@ function ReviewDetailPage() {
     null
   )
   const closeActiveComment = useCallback(() => setActiveComment(null), [])
+  const updateActiveComment = useCallback(
+    (comment: PrReviewComment) =>
+      setActiveComment((current) =>
+        current?.id === comment.id ? comment : current
+      ),
+    []
+  )
 
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
   const sidebarRef = useRef(sidebar)
-  sidebarRef.current = sidebar
+  useEffect(() => {
+    sidebarRef.current = sidebar
+  }, [sidebar])
   useEffect(() => {
     const controls = sidebarRef.current
     if (!controls || controls.collapsed) return
@@ -127,6 +136,7 @@ function ReviewDetailPage() {
           detail={detail.data}
           diffFiles={diff.data?.files ?? null}
           openComment={activeComment}
+          onUpdateOpenComment={updateActiveComment}
           onCloseOpenComment={closeActiveComment}
         />
       )}

@@ -18,8 +18,8 @@ jobs:
     name: Agent lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run lint
@@ -29,54 +29,244 @@ jobs:
     name: Agent format check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run format check
         run: make format-check
 
+  typecheck:
+    name: Agent typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Run typecheck
+        run: make typecheck
+
   unit-tests:
     name: Agent unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run unit tests
         run: make test
 
-  e2e:
-    name: Playwright E2E
+  js-format:
+    name: JS format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      # oxfmt reads the files straight off disk, so only the root package's own
+      # devDependencies are needed here.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      - name: Run format check
+        run: pnpm run format:check
+
+  js-lint:
+    name: JS lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      - name: Run lint
+        run: pnpm run lint
+
+  ui-tests:
+    name: UI unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      - name: Run tests
+        run: pnpm --filter open-swe-dashboard run test
+
+  ui-typecheck:
+    name: UI typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      # `js-lint` is oxlint and `build` is Vite, which strips types via esbuild
+      # without checking them, so this is the only job that runs tsc over ui/.
+      - name: Run typecheck
+        run: pnpm --filter open-swe-dashboard run typecheck
+
+  desktop:
+    name: Desktop checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+      - name: Install workspace dependencies
+        env:
+          # `pnpm run check` only syntax-checks the sources, runs node tests, and
+          # builds the UI — none of it launches Electron, so downloading ~100 MB
+          # of binary here buys nothing and fails the job whenever the fetch does.
+          # The release workflow, which actually packages the app, still gets it.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile
+      - name: Run desktop checks
+        run: pnpm run check
+
+  e2e-changes:
+    name: Detect E2E changes
+    runs-on: ubuntu-latest
+    outputs:
+      browser: ${{ steps.changes.outputs.browser }}
+      desktop: ${{ steps.changes.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "browser=true" >> "$GITHUB_OUTPUT"
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          paths=(agent ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
+          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
+            echo "browser=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "browser=true" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}" desktop; then
+            echo "desktop=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  browser-e2e:
+    name: Browser E2E (${{ matrix.shard }}/3)
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
+          node-version: 24
       - name: Install Python deps (langgraph dev runtime)
         run: uv sync --locked
-      - name: Install Playwright + Chromium
-        working-directory: tests/e2e
+      - run: corepack enable
+      # Chromium and the dashboard build are identical across the three shards
+      # and change only with their own inputs, so all three restore them rather
+      # than each spending ~50s redoing the work. Both keys are computed before
+      # `pnpm install` writes ui/node_modules, which would otherwise dominate
+      # the ui/** hash and never hit.
+      - name: Cache Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/e2e/package.json', 'pnpm-lock.yaml') }}
+      - name: Cache dashboard build
+        uses: actions/cache@v6
+        with:
+          path: ui/.output
+          key: ui-output-${{ runner.os }}-${{ hashFiles('ui/**', 'pnpm-lock.yaml') }}
+      - name: Install workspace dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe --filter open-swe-e2e
+      - name: Install Chromium
         run: |
-          npm ci
           sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
-          npx playwright install --with-deps chromium
-      # Playwright's webServer boots `langgraph dev`; globalSetup builds the real
-      # ui/ SPA. The fake LLM/GitHub/Slack boundaries need no secrets.
-      - name: Run E2E
-        working-directory: tests/e2e
-        run: npx playwright test
+          pnpm run test:e2e:install
+      - name: Run browser E2E
+        run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             tests/e2e/playwright-report
             tests/e2e/test-results
           retention-days: 7
+
+  desktop-e2e:
+    name: Desktop E2E
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.desktop == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - name: Install Python deps (langgraph dev runtime)
+        run: uv sync --locked
+      - run: corepack enable
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run Desktop E2E
+        run: xvfb-run --auto-servernum pnpm run test:e2e:desktop
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-desktop
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          retention-days: 7
+
+  e2e:
+    name: Playwright E2E
+    if: ${{ always() }}
+    needs: [e2e-changes, browser-e2e, desktop-e2e]
+    runs-on: ubuntu-latest
+    env:
+      CHANGES_RESULT: ${{ needs.e2e-changes.result }}
+      BROWSER_RESULT: ${{ needs.browser-e2e.result }}
+      DESKTOP_RESULT: ${{ needs.desktop-e2e.result }}
+    steps:
+      - run: |
+          test "$CHANGES_RESULT" = success
+          test "$BROWSER_RESULT" = success || test "$BROWSER_RESULT" = skipped
+          test "$DESKTOP_RESULT" = success || test "$DESKTOP_RESULT" = skipped

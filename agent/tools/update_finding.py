@@ -1,7 +1,5 @@
 """Tool: ``update_finding``. Mutate an existing finding by id."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config
@@ -12,18 +10,16 @@ from ..review.findings import (
     Finding,
     ReviewerThreadMissingError,
     clip_suggestion,
+    comment_ids_for_finding,
     get_thread_id_from_runtime,
     list_findings,
     normalize_finding_title,
     resolve_review_head_sha,
+    thread_ids_for_finding,
     thread_missing_tool_result,
     update_finding_fields,
 )
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
-
-
-def _is_non_empty_str(value: Any) -> bool:
-    return isinstance(value, str) and bool(value)
 
 
 def _normalize_note(note: str | None) -> str | None:
@@ -34,20 +30,7 @@ def _normalize_note(note: str | None) -> str | None:
 
 
 def _has_published_github_surface(finding: Finding) -> bool:
-    surface = finding.get("surface")
-    if isinstance(surface, dict) and (
-        isinstance(surface.get("github_review_comment_id"), int)
-        or _is_non_empty_str(surface.get("github_review_thread_id"))
-    ):
-        return True
-    comment_ids = finding.get("github_review_comment_ids")
-    thread_ids = finding.get("github_review_thread_ids")
-    return (
-        isinstance(finding.get("github_review_comment_id"), int)
-        or _is_non_empty_str(finding.get("github_review_thread_id"))
-        or (isinstance(comment_ids, list) and any(isinstance(item, int) for item in comment_ids))
-        or (isinstance(thread_ids, list) and any(_is_non_empty_str(item) for item in thread_ids))
-    )
+    return bool(comment_ids_for_finding(finding) or thread_ids_for_finding(finding))
 
 
 async def update_finding(
@@ -130,13 +113,6 @@ async def update_finding(
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    if status == "open":
-        try:
-            head_sha = await resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
-        except ReviewerThreadMissingError as exc:
-            return thread_missing_tool_result(exc)
-        if head_sha:
-            updates["last_confirmed_sha"] = head_sha
 
     if not updates:
         if suggestion_dropped:
@@ -205,6 +181,14 @@ async def update_finding(
                 )
             return result
 
+    if status is not None and not delegated_resolution:
+        try:
+            head_sha = await resolve_review_head_sha(thread_id, configurable)
+        except ReviewerThreadMissingError as exc:
+            return thread_missing_tool_result(exc)
+        if head_sha:
+            updates["last_confirmed_sha"] = head_sha
+
     try:
         updated = await update_finding_fields(thread_id, finding_id, updates)
     except ReviewerThreadMissingError as exc:
@@ -212,7 +196,9 @@ async def update_finding(
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     if status in {"resolved", "dismissed"} and not delegated_resolution:
-        emit_finding_status_outcome(updated, status, configurable=configurable, thread_id=thread_id)
+        await emit_finding_status_outcome(
+            updated, status, configurable=configurable, thread_id=thread_id
+        )
     result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True

@@ -14,8 +14,6 @@ GitHub-backed tools never receive a user credential.
 """
 # ruff: noqa: E402
 
-from __future__ import annotations
-
 import logging
 import warnings
 from typing import Any, cast
@@ -34,6 +32,8 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from agent.auth.github_app import get_github_app_installation_token
+
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -50,6 +50,7 @@ from .middleware import (
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
@@ -69,7 +70,6 @@ from .tools import (
 )
 from .utils import ttl_cache
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
@@ -96,6 +96,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
+                SanitizeOpenAIResponsesMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
         ),
@@ -125,6 +126,7 @@ with severity, confidence, and resolution notes.
 Guidance:
 - Be concrete and cite specific files and line numbers from the diff.
 - Ground claims about the review in the actual findings; don't invent issues.
+- If repository access fails, disclose it and qualify claims that require unread source.
 - When you propose a change, describe it precisely — you cannot apply it yourself.
 - Keep answers focused and skimmable. Match the depth of the question.
 """
@@ -132,7 +134,7 @@ Guidance:
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -140,7 +142,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_team_chat_model() -> tuple[str, str]:
     return await ttl_cache.cached(
-        f"team-default-model:chat:{id(get_team_default_model)}",
+        "team-default-model:chat",
         60,
         lambda: get_team_default_model("chat"),
     )
@@ -254,6 +256,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],

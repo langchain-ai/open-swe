@@ -9,8 +9,6 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 :func:`agent.utils.model.make_model`.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 
@@ -29,6 +27,7 @@ DEFAULT_GATEWAY_BASE_URL = "https://gateway.smith.langchain.com"
 _GATEWAY_PROVIDER_PATHS: dict[str, str] = {
     "openai": "/openai/v1",
     "anthropic": "/anthropic",
+    "baseten": "/baseten/v1",
     "fireworks": "/fireworks",
     "google_genai": "/gemini",
 }

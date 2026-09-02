@@ -7,8 +7,6 @@ would hang "in progress" on the PR forever. This hook closes it as neutral —
 the review not completing is reviewer infrastructure failing, not the PR.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -16,9 +14,10 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from agent.auth.thread_token import get_github_token
+
 from ..review.findings import get_thread_metadata
 from ..review.publish import settle_review_check_run
-from ..utils.github_token import get_github_token
 
 logger = logging.getLogger(__name__)
 

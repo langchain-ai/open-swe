@@ -1,34 +1,38 @@
-import type { Chunk } from "@/features/agents/lib/types";
-import type { ApprovalCallbacks } from "./types";
-import { CodeBlock } from "@/features/agents/components/chat/CodeBlock";
-import { Markdown } from "@/features/agents/components/chat/Markdown";
-import { ToolExecution } from "@/features/agents/components/chat/ToolExecution";
+import type { Chunk } from "@/features/agents/lib/types"
+import type { ApprovalCallbacks } from "./types"
+import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
+import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { ToolExecution } from "@/features/agents/components/chat/ToolExecution"
 
 export function ChunkRenderer({
   chunk,
   projectPath,
   isMarkdownLive,
   ...callbacks
-}: { chunk: Chunk; projectPath?: string; isMarkdownLive?: boolean } & ApprovalCallbacks) {
+}: {
+  chunk: Chunk
+  projectPath?: string
+  isMarkdownLive?: boolean
+} & ApprovalCallbacks) {
   switch (chunk.kind) {
     case "text":
       return (
-        <div className="text-[color:var(--ui-text)]">
+        <div className="text-foreground">
           <Markdown content={chunk.text} isLive={isMarkdownLive} />
         </div>
-      );
+      )
     case "code":
-      return <CodeBlock text={chunk.text} language={chunk.language} />;
+      return <CodeBlock text={chunk.text} language={chunk.language} />
     case "error":
-      return <span className="text-red-400">{chunk.text}</span>;
+      return <span className="text-destructive">{chunk.text}</span>
     case "list":
       return (
-        <div className="text-[color:var(--ui-text-muted)] ml-2">
+        <div className="ml-2 text-muted-foreground">
           {chunk.lines.map((line, i) => (
             <div key={i}>- {line}</div>
           ))}
         </div>
-      );
+      )
     case "tool-execution":
       return (
         <ToolExecution
@@ -37,16 +41,15 @@ export function ChunkRenderer({
           onApprove={callbacks.onApprove}
           onReject={callbacks.onReject}
           onAutoApprove={callbacks.onAutoApprove}
-          onOpenDiff={callbacks.onOpenDiff}
         />
-      );
+      )
     case "image":
       return (
         <img
           src={`data:${chunk.mimeType};base64,${chunk.base64}`}
           alt={chunk.fileName || "image"}
-          className="max-w-48 max-h-48 rounded border border-gray-600"
+          className="max-h-48 max-w-48 rounded border border-border"
         />
-      );
+      )
   }
 }

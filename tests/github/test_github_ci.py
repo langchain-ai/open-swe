@@ -1,7 +1,5 @@
 """Unit tests for GitHub CI read helpers used by the auto-fix flow."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import httpx
@@ -31,7 +29,7 @@ class _FakeClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> _FakeClient:
+    async def __aenter__(self) -> "_FakeClient":
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -108,6 +106,23 @@ async def test_list_failing_check_runs_returns_none_on_error(
 ) -> None:
     _patch(monkeypatch, {}, error=True)
     assert await github_ci.list_failing_check_runs(owner="o", repo="r", ref="s", token="t") is None
+
+
+@pytest.mark.asyncio
+async def test_list_commit_statuses_keeps_latest_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch(
+        monkeypatch,
+        {
+            "statuses": [
+                {"id": 2, "context": "ci", "state": "success"},
+                {"id": 1, "context": "ci", "state": "failure"},
+            ]
+        },
+    )
+
+    statuses = await github_ci.list_commit_statuses(owner="o", repo="r", ref="s", token="t")
+
+    assert statuses == [{"id": 2, "context": "ci", "state": "success"}]
 
 
 @pytest.mark.asyncio

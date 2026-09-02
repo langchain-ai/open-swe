@@ -1,5 +1,6 @@
 import { memo } from "react"
 import { MessageCircle } from "lucide-react"
+import { SlackMrkdwn } from "../messages/SlackMrkdwn"
 import { Markdown } from "./Markdown"
 import type { ReactNode } from "react"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
@@ -16,10 +17,6 @@ function headerLabel(
   if (isLinear) return pending ? "Commenting on Linear…" : "Commented on Linear"
   return pending ? "Replying in Slack…" : "Replied in Slack"
 }
-
-const SLACK_TOKEN = /<([^>]+)>/g
-const LINK_CLASS =
-  "text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
 
 type SlackTextObject = { type?: string; text?: string }
 type SlackBlock = {
@@ -41,56 +38,6 @@ function isSlackBlockArray(value: unknown): value is Array<SlackBlock> {
     Array.isArray(value) &&
     value.every((block) => !!block && typeof block === "object")
   )
-}
-
-// Slack mrkdwn isn't standard Markdown — rewrite its link/mention syntax for display
-// rather than feeding it to the Markdown renderer (which mis-renders *bold* etc.).
-function renderSlackBody(text: string): Array<ReactNode> {
-  const nodes: Array<ReactNode> = []
-  let lastIndex = 0
-  let key = 0
-  SLACK_TOKEN.lastIndex = 0
-  for (
-    let match = SLACK_TOKEN.exec(text);
-    match;
-    match = SLACK_TOKEN.exec(text)
-  ) {
-    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index))
-    const token = match[1] ?? ""
-    const sep = token.indexOf("|")
-    const target = sep === -1 ? token : token.slice(0, sep)
-    const label = sep === -1 ? "" : token.slice(sep + 1)
-    if (target.startsWith("@") || target.startsWith("#")) {
-      const sigil = target[0]
-      nodes.push(
-        <span key={key++} className="text-[color:var(--ui-accent)]">
-          {sigil}
-          {label || target.slice(1)}
-        </span>
-      )
-    } else if (target.startsWith("!")) {
-      nodes.push(
-        <span key={key++} className="text-[color:var(--ui-accent)]">
-          @{label || target.slice(1)}
-        </span>
-      )
-    } else {
-      nodes.push(
-        <a
-          key={key++}
-          href={target}
-          target="_blank"
-          rel="noreferrer"
-          className={LINK_CLASS}
-        >
-          {label || target}
-        </a>
-      )
-    }
-    lastIndex = match.index + match[0].length
-  }
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex))
-  return nodes
 }
 
 function blocksFromOptions(
@@ -128,7 +75,11 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
               key={index}
               className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
             >
-              {renderSlackBody(block.text.text ?? "")}
+              {block.text.type === "mrkdwn" ? (
+                <SlackMrkdwn text={block.text.text ?? ""} />
+              ) : (
+                block.text.text
+              )}
             </div>
           )
         }
@@ -142,7 +93,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
                 return (
                   <span
                     key={elementIndex}
-                    className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-2 py-1 text-[12px] text-[color:var(--ui-text)]"
+                    className="rounded-md border border-border bg-card px-2 py-1 text-[12px] text-foreground"
                   >
                     {label}
                   </span>
@@ -152,12 +103,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
           )
         }
         if (block.type === "divider") {
-          return (
-            <div
-              key={index}
-              className="border-t border-[var(--ui-border-subtle)]"
-            />
-          )
+          return <div key={index} className="border-t border-border/60" />
         }
         return null
       })}
@@ -178,20 +124,20 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
 
   return (
     <div className="my-1">
-      <div className="flex items-center gap-1.5 py-1 text-[12px] text-[color:var(--ui-text-muted)]">
+      <div className="flex items-center gap-1.5 py-1 text-[12px] text-muted-foreground">
         <MessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span>{headerLabel(isLinear, chunk.status)}</span>
       </div>
       {body && (
-        <div className="overflow-hidden rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)]">
-          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[13px] text-[color:var(--ui-text)]">
+        <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/40">
+          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[14px] text-foreground">
             {isLinear ? (
               <Markdown content={body} />
             ) : blocks ? (
               renderSlackBlocks(blocks)
             ) : (
               <div className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap">
-                {renderSlackBody(body)}
+                <SlackMrkdwn text={body} />
               </div>
             )}
           </div>

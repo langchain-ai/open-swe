@@ -1,7 +1,5 @@
 """CSRF defenses for cookie-authenticated dashboard mutations."""
 
-from __future__ import annotations
-
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -24,6 +22,8 @@ def _request(
         headers.append((b"referer", referer.encode()))
     scope = {
         "type": "http",
+        "scheme": "https",
+        "server": ("backend.example", 443),
         "method": method,
         "path": path,
         "headers": headers,
@@ -54,6 +54,20 @@ async def test_require_same_origin_allows_configured_origin(monkeypatch) -> None
 
     oauth.require_same_origin(_request(origin="https://dashboard.example"))
     oauth.require_same_origin(_request(origin="https://preview.example"))
+
+
+@pytest.mark.asyncio
+async def test_require_same_origin_allows_backend_origin(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+
+    oauth.require_same_origin(_request(origin="https://backend.example"))
+
+
+@pytest.mark.asyncio
+async def test_require_same_origin_allows_desktop_origin(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+
+    oauth.require_same_origin(_request(origin="open-swe://app"))
 
 
 @pytest.mark.asyncio

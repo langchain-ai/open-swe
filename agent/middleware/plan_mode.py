@@ -9,8 +9,6 @@ tool list is recomputed on every model call), rather than only affecting a futur
 run.
 """
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable
 from typing import Any, NotRequired
 

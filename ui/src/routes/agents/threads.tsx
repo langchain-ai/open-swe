@@ -1,7 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import type { AgentSource, AgentStatus } from "@/features/agents/lib/types"
-import type { ThreadsPageFilters } from "@/features/agents/components/AgentsThreadsPage";
+import type { ThreadsPageFilters } from "@/features/agents/components/AgentsThreadsPage"
+import type {
+  ThreadGrouping,
+  ThreadsLayout,
+} from "@/features/agents/lib/threadViews"
 import { AgentsThreadsPage } from "@/features/agents/components/AgentsThreadsPage"
 
 const SOURCES: ReadonlyArray<AgentSource> = [
@@ -9,7 +13,6 @@ const SOURCES: ReadonlyArray<AgentSource> = [
   "github",
   "slack",
   "linear",
-  "schedule",
 ]
 const STATUSES: ReadonlyArray<AgentStatus> = [
   "idle",
@@ -17,6 +20,15 @@ const STATUSES: ReadonlyArray<AgentStatus> = [
   "finished",
   "interrupted",
   "error",
+]
+const LAYOUTS: ReadonlyArray<ThreadsLayout> = ["board", "list"]
+const GROUPINGS: ReadonlyArray<ThreadGrouping> = [
+  "focus",
+  "status",
+  "repo",
+  "source",
+  "pr",
+  "none",
 ]
 
 function parseBool(value: unknown): boolean | undefined {
@@ -41,6 +53,16 @@ export const Route = createFileRoute("/agents/threads")({
       typeof search.page === "number" && search.page >= 1
         ? Math.floor(search.page)
         : 1
+    const layout =
+      typeof search.layout === "string" &&
+      LAYOUTS.includes(search.layout as ThreadsLayout)
+        ? (search.layout as ThreadsLayout)
+        : "board"
+    const group =
+      typeof search.group === "string" &&
+      GROUPINGS.includes(search.group as ThreadGrouping)
+        ? (search.group as ThreadGrouping)
+        : "focus"
     return {
       resolved: parseBool(search.resolved),
       viewed: parseBool(search.viewed),
@@ -48,6 +70,12 @@ export const Route = createFileRoute("/agents/threads")({
       status,
       q: typeof search.q === "string" && search.q ? search.q : undefined,
       page,
+      layout,
+      group,
+      order:
+        typeof search.order === "string" && search.order
+          ? search.order
+          : undefined,
     }
   },
   component: AgentsThreadsRoute,
@@ -69,6 +97,9 @@ function AgentsThreadsRoute() {
             status: next.status,
             q: next.q,
             page: next.page,
+            layout: next.layout,
+            group: next.group,
+            order: next.order,
           },
         })
       }

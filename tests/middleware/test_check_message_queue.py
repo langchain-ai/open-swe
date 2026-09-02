@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
+from xml.etree import ElementTree
 
 import pytest
 
 from agent.middleware.check_message_queue import (
-    DASHBOARD_HANDOFF_MARKER,
     LinearNotifyState,
     _build_blocks_from_payload,
     check_message_queue_before_model,
@@ -31,13 +29,31 @@ class _FakeStore:
         self.deleted.append((namespace, key))
 
 
+def _envelope(message: dict) -> str:
+    """The message's envelope text, whether its content is a string or blocks."""
+    content = message["content"]
+    if isinstance(content, str):
+        return content
+    return "".join(block["text"] for block in content if block.get("type") == "text")
+
+
 @pytest.mark.asyncio
 async def test_check_message_queue_injects_dashboard_handoff_instruction() -> None:
     store = _FakeStore(
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
-                    {"content": {"text": "continue in web", "source": "dashboard"}},
+                    {
+                        "content": {
+                            "text": "continue in web",
+                            "source": "dashboard",
+                            "sender": {
+                                "id": "github:octocat",
+                                "platform": "github",
+                                "github_login": "octocat",
+                            },
+                        }
+                    },
                 ]
             }
         }
@@ -51,44 +67,28 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
         result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
+            cast(LinearNotifyState, {"messages": []}),
+            MagicMock(),
         )
 
     assert result is not None
-    message = result["messages"][0]
-    assert message["role"] == "user"
-    assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
-    assert message["content"][1] == {"type": "text", "text": "continue in web"}
-    assert result["plan_approval_blocked"] is True
+    messages = result["messages"]
+    # One envelope per message: the transcript parses them individually, so a
+    # concatenation would render as raw XML.
+    assert [message["role"] for message in messages] == ["user"] * 4
+    handoff_entity = ElementTree.fromstring(_envelope(messages[0]))
+    handoff_message = ElementTree.fromstring(_envelope(messages[1]))
+    user_entity = ElementTree.fromstring(_envelope(messages[2]))
+    user_message = ElementTree.fromstring(_envelope(messages[3]))
+    assert handoff_entity.attrib["id"] == "system:dashboard-handoff"
+    assert handoff_message.attrib["kind"] == "system"
+    assert "conversation has moved to Web" in (handoff_message.findtext("content") or "")
+    assert user_entity.attrib["id"] == "github:octocat"
+    assert user_message.findtext("content") == "continue in web"
+    # The handoff is carried by the injected message alone. Rewriting the system
+    # prompt would say the same thing while invalidating the whole cached prefix.
+    assert "rendered_system_prompt" not in result
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
-
-
-@pytest.mark.asyncio
-async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
-    store = _FakeStore(
-        {
-            (("queue", "thread-1"), "pending_messages"): {
-                "messages": [
-                    {"content": {"text": "go ahead", "source": "dashboard", "from_owner": True}},
-                ]
-            }
-        }
-    )
-
-    with (
-        patch(
-            "agent.middleware.check_message_queue.get_config",
-            return_value={"configurable": {"thread_id": "thread-1"}},
-        ),
-        patch("agent.middleware.check_message_queue.get_store", return_value=store),
-    ):
-        result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
-        )
-
-    assert result is not None
-    assert result["plan_approval_blocked"] is False
-    assert result["messages"][0]["content"][1] == {"type": "text", "text": "go ahead"}
 
 
 @pytest.mark.asyncio
@@ -114,9 +114,11 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
         )
 
     assert result is not None
-    message = result["messages"][0]
-    assert message["role"] == "user"
-    text = message["content"][0]["text"]
+    entity = ElementTree.fromstring(_envelope(result["messages"][0]))
+    message = ElementTree.fromstring(_envelope(result["messages"][-1]))
+    assert entity.attrib["id"] == "system:thread-queue"
+    assert message.attrib["kind"] == "system"
+    text = message.findtext("content") or ""
     assert "PR babysitting event arrived" in text
     # The reviewer's actual comment is carried through, not dropped for a generic nudge.
     assert "rename to userId" in text

@@ -8,8 +8,6 @@ Everything here only configures *boundaries* (which sandbox, which fake API
 URLs, where git writes its global config). The agent code itself is unchanged.
 """
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 
@@ -23,6 +21,10 @@ BASE_BRANCH = "main"
 FEATURE_BRANCH = "add-greet"
 PR_TITLE = "Add greet() helper"
 FEATURE_FILE = "greet.py"
+SECOND_OWNER = "anotherorg"
+SECOND_REPO = "companion"
+SECOND_FEATURE_BRANCH = "add-integration"
+SECOND_PR_TITLE = "Add companion integration"
 
 # Fixed Slack identifiers so the mock UI and assertions are deterministic.
 BOT_USER_ID = "U0BOT"
@@ -36,6 +38,7 @@ BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
 _GH_DIR = TMP / "github"
 _WORK_DIR = TMP / "work"
 BARE_REMOTE = _GH_DIR / f"{OWNER}__{REPO}.git"
+SECOND_BARE_REMOTE = _GH_DIR / f"{SECOND_OWNER}__{SECOND_REPO}.git"
 
 _DEFAULTS = {
     # Sandbox: real local provider, rooted in a throwaway temp dir.
@@ -46,12 +49,14 @@ _DEFAULTS = {
     "GIT_CONFIG_SYSTEM": "/dev/null",
     # Path the scripted agent clones from (a local bare repo = "fake GitHub").
     "E2E_REMOTE": str(BARE_REMOTE),
+    "E2E_SECOND_REMOTE": str(SECOND_BARE_REMOTE),
     # Webhook signing + bot identity.
     "GITHUB_WEBHOOK_SECRET": "test-github-secret",
     "SLACK_SIGNING_SECRET": "test-slack-secret",
     "SLACK_BOT_TOKEN": "xoxb-test-token",
     "SLACK_BOT_USER_ID": BOT_USER_ID,
     "SLACK_BOT_USERNAME": BOT_USERNAME,
+    "SLACK_TEAM_ID": "T_TEST",
     # Slack runs resolve the repo from this when the channel/thread carry none.
     "DEFAULT_REPO_OWNER": OWNER,
     "DEFAULT_REPO_NAME": REPO,
@@ -63,7 +68,7 @@ _DEFAULTS = {
     # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
     "DASHBOARD_BASE_URL": BASE_URL,
     "DASHBOARD_API_BASE_URL": BASE_URL,
-    "DASHBOARD_ALLOWED_ORIGINS": BASE_URL,
+    "DASHBOARD_ALLOWED_ORIGINS": f"{BASE_URL},open-swe://app",
     "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret",
 }
 
@@ -76,6 +81,11 @@ TEST_USERS = [
     {"name": "Alice", "slack_id": "U_ALICE", "login": "alice", "email": "alice@example.com"},
     {"name": "Bob", "slack_id": "U_BOB", "login": "bob", "email": "bob@example.com"},
 ]
+
+# Alice is the workspace admin (so admin threads + the environments dashboard are
+# reachable); Bob is a plain member, which is what the deny-side assertions use.
+ADMIN_USER = TEST_USERS[0]
+_DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
 
 # The default Slack sender / thread owner; a session with this email may continue
 # the thread on the web. Any other logged-in user is read-only.

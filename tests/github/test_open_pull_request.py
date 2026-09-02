@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import asyncio
 import sys
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,11 +10,26 @@ import agent.tools.open_pull_request  # noqa: F401
 opr = sys.modules["agent.tools.open_pull_request"]
 
 
+class _FakeRequest:
+    def __init__(self, method: str, url: str) -> None:
+        self.method = method
+        self.url = url
+
+
 class _FakeResponse:
-    def __init__(self, status_code: int, payload: Any = None, text: str = "") -> None:
+    def __init__(
+        self,
+        status_code: int,
+        payload: Any = None,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+        request: _FakeRequest | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         self.text = text
+        self.headers = headers or {}
+        self.request = request
 
     def json(self) -> Any:
         return self._payload
@@ -28,7 +42,7 @@ class _FakeClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> _FakeClient:
+    async def __aenter__(self) -> "_FakeClient":
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -58,7 +72,7 @@ class _RoutingClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> _RoutingClient:
+    async def __aenter__(self) -> "_RoutingClient":
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -88,13 +102,13 @@ def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -
     monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable})
 
 
-def _open() -> dict[str, Any]:
+def _open(base: str = "main") -> dict[str, Any]:
     return asyncio.run(
         opr._open_pull_request(
             owner="langchain-ai",
             repo="open-swe",
             head="open-swe/feature",
-            base="main",
+            base=base,
             title="feat: x",
             body="body",
             draft=True,
@@ -141,6 +155,23 @@ def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -
         "body": "body",
         "draft": True,
     }
+
+
+def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117", "draft_prs": False})
+    _stub_token(monkeypatch)
+    client = _FakeClient(
+        post=_FakeResponse(
+            201,
+            {"html_url": "https://x/pull/1", "number": 1, "user": {"login": "johannes117"}},
+        )
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is True
+    assert client.post_calls[0]["json"]["draft"] is False
 
 
 def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,10 +299,9 @@ def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _open()
 
     assert result["success"] is False
-    assert result["code"] == "github_pr_create_failed"
-    assert result["recoverable_by_agent"] is False
-    assert result["pr_created"] is False
+    assert set(result) == {"success", "error"}
     assert "403" in result["error"]
+    assert "PR created: no" in result["error"]
 
 
 def test_404_create_returns_actionable_access_diagnostic(
@@ -285,16 +315,9 @@ def test_404_create_returns_actionable_access_diagnostic(
     result = _open()
 
     assert result["success"] is False
-    assert result["code"] == "github_app_access_missing_or_repo_not_found"
-    assert result["recoverable_by_agent"] is False
-    assert result["owner"] == "langchain-ai"
-    assert result["repo"] == "open-swe"
-    assert result["head"] == "open-swe/feature"
-    assert result["base"] == "main"
-    assert result["branch_pushed"] is True
-    assert result["pr_created"] is False
-    assert "install or grant" in result["suggested_action"]
+    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (yes)" in result["error"]
     assert "PR created: no" in result["error"]
+    assert "not installed on, granted access" in result["error"]
     assert (
         "open_pull_request_failed code=github_app_access_missing_or_repo_not_found" in caplog.text
     )
@@ -320,10 +343,44 @@ def test_preflight_head_branch_404_reports_branch_not_pushed(
     result = _open()
 
     assert result["success"] is False
-    assert result["code"] == "github_pr_branch_not_visible"
-    assert result["branch_pushed"] is False
-    assert result["head_branch_visible"] is False
-    assert result["failed_step"] == "preflight_head_branch"
+    assert "head branch `open-swe/feature`" in result["error"]
+    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (no)" in result["error"]
+    assert client.post_calls == []
+
+
+def test_preflight_base_branch_redirect_surfaces_raw_github_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    redirect = _FakeResponse(
+        301,
+        {"message": "Moved Permanently"},
+        text='{"message":"Moved Permanently"}',
+        headers={"location": "https://api.github.com/repos/langchain-ai/open-swe/branches/main"},
+        request=_FakeRequest(
+            "GET", "https://api.github.com/repos/langchain-ai/open-swe/branches/master"
+        ),
+    )
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={
+            "/repos/langchain-ai/open-swe/branches/master": redirect,
+            "/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True}),
+        },
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open(base="master")
+
+    assert result["success"] is False
+    error = result["error"]
+    assert (
+        "GitHub responded to GET "
+        "https://api.github.com/repos/langchain-ai/open-swe/branches/master with 301" in error
+    )
+    assert "location: https://api.github.com/repos/langchain-ai/open-swe/branches/main" in error
+    assert 'response body: {"message":"Moved Permanently"}' in error
     assert client.post_calls == []
 
 
@@ -413,7 +470,13 @@ def test_appends_plan_reference_from_thread_id(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+    _stub_plan(
+        monkeypatch,
+        {
+            "html": "<html><head><title>Plan</title></head><body>step 1</body></html>",
+            "status": "ready",
+        },
+    )
 
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
     _install_client(monkeypatch, client)
@@ -441,11 +504,11 @@ def test_omits_plan_reference_when_no_plan_exists(monkeypatch: pytest.MonkeyPatc
     assert client.post_calls
 
 
-def test_omits_plan_reference_when_plan_markdown_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_omits_plan_reference_when_plan_html_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "   \n  ", "status": "ready"})
+    _stub_plan(monkeypatch, {"html": "   \n  ", "status": "ready"})
 
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
     _install_client(monkeypatch, client)
@@ -488,7 +551,13 @@ def test_plan_reference_survives_source_reference_failure(
         },
     )
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+    _stub_plan(
+        monkeypatch,
+        {
+            "html": "<html><head><title>Plan</title></head><body>step 1</body></html>",
+            "status": "ready",
+        },
+    )
 
     async def fail_permalink(*_args: Any, **_kwargs: Any) -> str:
         raise RuntimeError("slack failed")
@@ -541,7 +610,13 @@ def test_public_repo_appends_plan_but_not_slack_reference(
         },
     )
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+    _stub_plan(
+        monkeypatch,
+        {
+            "html": "<html><head><title>Plan</title></head><body>step 1</body></html>",
+            "status": "ready",
+        },
+    )
     monkeypatch.setattr(
         opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
     )
@@ -636,6 +711,77 @@ def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch)
 
     assert client.post_calls[0]["json"]["body"] == "body\n\n## References\n- existing"
     assert client.post_calls
+
+
+@pytest.mark.asyncio
+async def test_thread_pull_requests_seeds_legacy_metadata() -> None:
+    fake_client = MagicMock()
+    fake_client.threads.get = AsyncMock(
+        return_value={
+            "metadata": {
+                "pr_url": "https://github.com/langchain-ai/open-swe/pull/42",
+                "pr_number": 42,
+                "pr_title": "Legacy PR",
+                "pr_state": "draft",
+                "branch_name": "feature/legacy",
+                "base_branch": "main",
+                "diff_stats": {"files": 2, "additions": 5, "deletions": 1},
+            }
+        }
+    )
+
+    with patch.object(opr, "get_client", return_value=fake_client):
+        records = await opr._thread_pull_requests("thread-1")
+
+    assert records == [
+        {
+            "repo_full_name": "langchain-ai/open-swe",
+            "number": 42,
+            "url": "https://github.com/langchain-ai/open-swe/pull/42",
+            "title": "Legacy PR",
+            "state": "draft",
+            "head_ref": "feature/legacy",
+            "base_ref": "main",
+            "author": "",
+            "author_avatar_url": "",
+            "created_at": "",
+            "diff_stats": {"files": 2, "additions": 5, "deletions": 1},
+        }
+    ]
+
+
+def test_upsert_pull_request_keeps_multiple_repositories() -> None:
+    first = {
+        "repo_full_name": "langchain-ai/open-swe",
+        "number": 42,
+        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+        "title": "Open SWE",
+    }
+    second = {
+        "repo_full_name": "langchain-ai/langchain",
+        "number": 42,
+        "url": "https://github.com/langchain-ai/langchain/pull/42",
+        "title": "LangChain",
+    }
+
+    assert opr._upsert_pull_request([first], second) == [first, second]
+
+
+def test_upsert_pull_request_replaces_duplicate_and_moves_it_latest() -> None:
+    first = {
+        "repo_full_name": "langchain-ai/open-swe",
+        "number": 42,
+        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+        "state": "draft",
+    }
+    other = {
+        "repo_full_name": "langchain-ai/langchain",
+        "number": 7,
+        "url": "https://github.com/langchain-ai/langchain/pull/7",
+    }
+    updated = {**first, "state": "open"}
+
+    assert opr._upsert_pull_request([first, other], updated) == [other, updated]
 
 
 def test_derive_pr_state_prefers_merged() -> None:

@@ -1,22 +1,26 @@
-import os
+import asyncio
 import re
+import uuid
 from typing import Any
 
 from fastapi import HTTPException
 from langgraph.config import get_config
-from langgraph_sdk import get_client
+
+from agent.source_context import SourceContext
 
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
-from ..utils.thread_ids import generate_thread_id_from_slack_thread
-from ..webhooks.common import _is_repo_allowed
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
+from ..utils.slack import (
+    bind_slack_thread_id,
+    get_active_slack_thread,
+    post_slack_thread_reply_with_ts,
+    post_slack_top_level_message_with_ts,
+    store_slack_run_mapping,
 )
+from ..utils.thread_ops import langgraph_client
+from ..webhooks.common import _is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
@@ -39,6 +43,19 @@ def _failure_hint(slack_error: str | None) -> str:
     if slack_error and slack_error.startswith("http_error:"):
         return "Slack posting hit an HTTP error; retry once."
     return "Slack post failed; retry once with concise instructions."
+
+
+def _rate_limit_delay(slack_error: str | None) -> float | None:
+    if slack_error == "rate_limited":
+        return 1
+    prefix = "rate_limited: "
+    if not slack_error or not slack_error.startswith(prefix):
+        return None
+    try:
+        delay = float(slack_error.removeprefix(prefix))
+    except ValueError:
+        return None
+    return delay if 0 <= delay <= 60 else None
 
 
 def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str, Any]:
@@ -79,17 +96,18 @@ def _truncate_for_slack(text: str) -> str:
     return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Open SWE thread received the full instructions."
 
 
-def _visible_message(title: str, instructions: str, repo: dict[str, str] | None) -> str:
-    repo_line = f"\n*Repository:* `{repo['owner']}/{repo['name']}`" if repo else ""
-    return (
-        f"*Open SWE breakout thread:* {title}{repo_line}\n\n"
-        f"*Instructions for the new thread:*\n{_truncate_for_slack(instructions)}"
-    )
+def _visible_message(title: str) -> str:
+    return f"*Open SWE breakout thread:* {title}"
 
 
-def _run_links_section(thread_id: str) -> str:
+def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
+    repo_line = f"*Repository:* `{repo['owner']}/{repo['name']}`\n\n" if repo else ""
+    return f"{repo_line}*Instructions for the new thread:*\n{_truncate_for_slack(instructions)}"
+
+
+async def _run_links_section(thread_id: str) -> str:
     dashboard_url = dashboard_thread_url(thread_id)
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     lines = ["## Open SWE Links"]
     if dashboard_url:
         lines.append(f"- Web: {dashboard_url}")
@@ -101,7 +119,7 @@ def _run_links_section(thread_id: str) -> str:
     return "\n".join(lines)
 
 
-def _run_prompt(
+async def _run_prompt(
     title: str,
     instructions: str,
     repo: dict[str, str] | None,
@@ -118,8 +136,9 @@ def _run_prompt(
         "Use this repository unless the instructions below clearly identify a different repository.\n\n"
         "## Source Slack Thread\n"
         f"- Channel: {channel_id}\n"
-        f"- Thread TS: {thread_ts}\n\n"
-        f"{_run_links_section(thread_id)}\n\n"
+        f"- Thread TS: {thread_ts}\n"
+        "- Thread version: 0\n\n"
+        f"{await _run_links_section(thread_id)}\n\n"
         "## Breakout Instructions\n"
         f"{instructions}"
     )
@@ -146,12 +165,21 @@ async def slack_start_new_thread(
     instructions: str,
     default_repo: str | None = None,
 ) -> dict[str, Any]:
-    """Start a new Open SWE thread in a top-level Slack message in the current channel."""
+    """Start a Slack thread with a headline root and instructions as the first reply."""
     config = get_config()
     configurable = config.get("configurable", {})
-    current_slack_thread = configurable.get("slack_thread")
-    if not isinstance(current_slack_thread, dict):
+    configured_slack_thread = configurable.get("slack_thread")
+    if not isinstance(configured_slack_thread, dict):
         return {"success": False, "error": "Missing slack_thread config"}
+    client = langgraph_client()
+    thread_id_value = configurable.get("thread_id")
+    current_slack_thread = await get_active_slack_thread(
+        client,
+        thread_id_value if isinstance(thread_id_value, str) else None,
+        configured_slack_thread,
+    )
+    if not current_slack_thread:
+        return {"success": False, "error": "Current Slack location is unavailable"}
 
     channel_id = current_slack_thread.get("channel_id")
     current_thread_ts = current_slack_thread.get("thread_ts")
@@ -210,9 +238,10 @@ async def slack_start_new_thread(
                 ),
             }
 
+    clean_channel_id = channel_id.strip()
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
-        channel_id.strip(),
-        _visible_message(clean_title, clean_instructions, repo),
+        clean_channel_id,
+        _visible_message(clean_title),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -224,14 +253,39 @@ async def slack_start_new_thread(
             "hint": _failure_hint(slack_error),
         }
 
-    thread_id = generate_thread_id_from_slack_thread(channel_id.strip(), message_ts)
+    details_ts: str | None = None
+    details_error: str | None = None
+    for attempt in range(2):
+        details_ts, details_error = await post_slack_thread_reply_with_ts(
+            clean_channel_id,
+            message_ts,
+            _thread_details(clean_instructions, repo),
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        if details_ts is not None:
+            break
+        delay = _rate_limit_delay(details_error)
+        if attempt or delay is None:
+            break
+        await asyncio.sleep(delay)
+    if details_ts is None:
+        return {
+            "success": False,
+            "error": details_error or "thread details post failed",
+            "slack_error": details_error,
+            "hint": _failure_hint(details_error),
+        }
+
+    thread_id = str(uuid.uuid4())
+    await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(
         current_slack_thread,
-        channel_id=channel_id.strip(),
+        channel_id=clean_channel_id,
         thread_ts=message_ts,
     )
     breakout_from = {
-        "channel_id": channel_id.strip(),
+        "channel_id": clean_channel_id,
         "thread_ts": current_thread_ts or "",
         "message_ts": current_slack_thread.get("triggering_event_ts", ""),
     }
@@ -239,10 +293,9 @@ async def slack_start_new_thread(
     metadata: dict[str, Any] = {
         "source": "slack",
         "title": clean_title[:80],
-        "source_context": {
-            "slack_thread": new_slack_thread,
-            "breakout_from": breakout_from,
-        },
+        "source_context": SourceContext.parse(
+            {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
+        ).dump(),
     }
     if repo:
         metadata.update(
@@ -270,13 +323,12 @@ async def slack_start_new_thread(
         if value:
             new_configurable[key] = value
 
-    client = get_client(url=LANGGRAPH_URL)
     await client.threads.create(thread_id=thread_id, if_exists="do_nothing", metadata=metadata)
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     run = await dispatch_agent_run(
         thread_id,
-        _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
+        await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
         new_configurable,
         source="slack",
         client=client,
@@ -285,7 +337,7 @@ async def slack_start_new_thread(
     if isinstance(run_id, str) and run_id:
         await store_slack_run_mapping(
             client,
-            channel_id.strip(),
+            clean_channel_id,
             message_ts,
             run_id,
             message_ts=message_ts,

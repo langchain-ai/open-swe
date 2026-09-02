@@ -17,7 +17,6 @@ return create_deep_agent(
     middleware=[
         ToolErrorMiddleware(),
         check_message_queue_before_model,
-        ensure_no_empty_msg,
         notify_step_limit_reached,
     ],
 )
@@ -34,18 +33,17 @@ By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.
 Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
-DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required unless an admin sets the base snapshot at runtime
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, default 128 GiB
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, default 7200 (2 h); 0 disables
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, default 2592000 (30 d); 0 disables
-REPO_SNAPSHOT_BASE_IMAGE="<registry>/<open-swe-sandbox-image>"      # Optional; required for admin-generated repo snapshot templates
 ```
 
-This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
-`REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot (typically the image built from this repository's `Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
+`DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Sandbox** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
@@ -69,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and repo snapshot builds — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
+For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and environment snapshot captures — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
 
 ### Adding a new sandbox provider
 
@@ -114,6 +112,7 @@ The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbo
 from deepagents.backends.sandbox import BaseSandbox
 from deepagents.backends.protocol import ExecuteResponse
 
+
 class MySandbox(BaseSandbox):
     def __init__(self, connection):
         self._conn = connection
@@ -154,13 +153,13 @@ Use the `provider:model` format:
 
 ```python
 # Anthropic
-model=make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model=make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
-model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
 ```
 
 The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
@@ -209,21 +208,22 @@ Routing is opt-in and off by default. Enable it either way:
 
 The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
 
-Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
+Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
-**Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic and Fireworks are unaffected.
+**Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic, Baseten, and Fireworks are unaffected.
 
 ---
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `GH_TOKEN=dummy gh` inside the sandbox.
+Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `gh` inside the sandbox.
 
 | Tool | File | Purpose |
 |---|---|---|
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
+| `slack_attach_html` | `agent/tools/slack_attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
 
 ### Adding a tool
@@ -236,6 +236,7 @@ Create a new file in `agent/tools/`, define a function, and add it to the tools 
 # agent/tools/datadog_search.py
 import requests
 from typing import Any
+
 
 def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     """Search Datadog logs for debugging context.
@@ -292,22 +293,19 @@ else:
 return create_deep_agent(tools=tools, ...)
 ```
 
-### Browser automation (Stagehand + Browserbase)
+### Browser automation (Stagehand)
 
-A `browser` subagent drives a real Chromium via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. The main agent delegates to it for tasks that need live interaction or JS-rendered pages (logging in, clicking flows, reproducing UI bugs, scraping structured data); static reads should still use `fetch_url`.
+The main agent can dynamically load `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close` to drive Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
 
-The tools are added in `agent/server.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
+The browser schemas appear in the `load_integration_tools` catalog only when the tools are available, and remain out of the model context until loaded. The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `STAGEHAND_ENV` | `LOCAL` | `LOCAL` runs a local Chromium in-process; `BROWSERBASE` runs the browser on Browserbase cloud. |
-| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | LLM key Stagehand uses for `act`/`observe`/`extract`. Required for `LOCAL`; optional for `BROWSERBASE` (the hosted Stagehand API ships with model support). |
-| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Model Stagehand uses. |
-| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | — | `BROWSERBASE_API_KEY` is required when `STAGEHAND_ENV=BROWSERBASE`; `BROWSERBASE_PROJECT_ID` is forwarded when set. |
-| `STAGEHAND_LOCAL_CHROME_PATH` | `/usr/bin/chromium` in Docker | Path to the Chrome/Chromium binary for `LOCAL` mode. |
-| `STAGEHAND_HEADLESS` | `true` | Run the local browser headless. |
+| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | Model key used by Stagehand. |
+| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
+| `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
 
-For `LOCAL` mode the sandbox image in `Dockerfile.sandbox` installs `chromium`; for `BROWSERBASE` mode no browser binary is needed in the image.
+The sandbox snapshot must include Chromium and Stagehand, install `agent/resources/stagehand_runtime.py` at `/opt/open-swe/stagehand_runtime.py`, and set `STAGEHAND_LOCAL_CHROME_PATH` to the Chromium executable (usually `/usr/bin/chromium`).
 
 ---
 
@@ -406,16 +404,18 @@ async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks
 async def process_my_trigger(task_description: str, repo_config: dict):
     thread_id = generate_deterministic_id(task_description)
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": task_description}]},
-        config={"configurable": {
-            "repo": repo_config,
-            "source": "my-trigger",
-            "user_email": "user@example.com",
-        }},
+        config={
+            "configurable": {
+                "repo": repo_config,
+                "source": "my-trigger",
+                "user_email": "user@example.com",
+            }
+        },
         if_not_exists="create",
     )
 ```
@@ -503,7 +503,6 @@ Middleware hooks run around the agent loop. Open SWE includes:
 |---|---|---|
 | `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
 | `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
-| `ensure_no_empty_msg` | After model | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
 | `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
@@ -516,6 +515,7 @@ Add custom middleware by appending to the middleware list in `get_agent()`. See 
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
 
+
 @after_agent
 async def run_ci_check(state: AgentState, runtime: Runtime):
     """Run CI checks after the agent finishes."""
@@ -526,11 +526,10 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
 Then add it to the middleware list:
 
 ```python
-middleware=[
+middleware = [
     ToolErrorMiddleware(),
     check_message_queue_before_model,
-    ensure_no_empty_msg,
     notify_step_limit_reached,
     run_ci_check,  # new middleware
-],
+]
 ```

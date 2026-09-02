@@ -41,6 +41,7 @@ function PullRequestReviewLinkPage() {
   const triggerReview = useMutation({
     mutationFn: () => api.reReview(owner, repo, prNumber),
   })
+  const { mutate: triggerReviewMutate } = triggerReview
 
   useEffect(() => {
     if (!session.data || !Number.isFinite(prNumber)) return
@@ -50,7 +51,7 @@ function PullRequestReviewLinkPage() {
     const key = `${owner}/${repo}#${prNumber}`
     if (triggerRef.current === key) return
     triggerRef.current = key
-    triggerReview.mutate()
+    triggerReviewMutate()
   }, [
     existingReview.data?.status,
     existingReview.isLoading,
@@ -58,7 +59,7 @@ function PullRequestReviewLinkPage() {
     repo,
     prNumber,
     session.data,
-    triggerReview,
+    triggerReviewMutate,
   ])
 
   if (session.isLoading) {

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from typing import Any, cast
 
@@ -73,7 +71,7 @@ async def test_github_reaction_added_creates_langsmith_feedback(
     client = _FakeClient()
     created: dict[str, Any] = {}
 
-    def fake_create_feedback(
+    async def fake_create_feedback(
         run_id: str,
         key: str,
         *,
@@ -98,7 +96,7 @@ async def test_github_reaction_added_creates_langsmith_feedback(
         return [
             {
                 "id": "f1",
-                "github_review_comment_id": 123,
+                "github_review_comment_ids": [123],
                 "github_review_run_id": "run-1",
             }
         ]
@@ -136,7 +134,7 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
     }
     deleted: dict[str, str] = {}
 
-    def fake_delete_feedback(run_id: str, key: str) -> bool:
+    async def fake_delete_feedback(run_id: str, key: str) -> bool:
         deleted["run_id"] = run_id
         deleted["key"] = key
         return True
@@ -147,7 +145,7 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
         return [
             {
                 "id": "f1",
-                "github_review_comment_id": 123,
+                "github_review_comment_ids": [123],
                 "github_review_run_id": "run-1",
             }
         ]

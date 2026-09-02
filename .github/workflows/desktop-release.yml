@@ -1,0 +1,204 @@
+name: Release Desktop
+
+on:
+  workflow_call:
+    inputs:
+      release_ref:
+        type: string
+        default: main
+      nightly:
+        type: boolean
+        default: false
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  release-desktop:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Resolve desktop release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY: ${{ inputs.nightly }}
+        run: |
+          stable_version=$(node -p "require('./desktop/package.json').version")
+          [[ "$stable_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          if [ "$NIGHTLY" = "true" ]; then
+            timestamp=$(date -u +%Y%m%d%H%M%S)
+            version="${stable_version}-nightly.${timestamp}"
+            tag="desktop-v${version}"
+            prerelease=true
+            label="Open SWE Desktop Nightly ${timestamp}"
+          else
+            tag="desktop-v${stable_version}"
+            version="$stable_version"
+            prerelease=false
+            label="Open SWE Desktop v${version}"
+            if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
+              if gh release view "$tag" --json assets | jq -e --arg v "$version" '
+                [.assets[].name] as $names |
+                ($names | index("Open SWE-\($v).app.zip")) != null and
+                ($names | index("latest-mac.yml")) != null and
+                any($names[]; test("^Open SWE-\($v)-.*-mac\\.zip$")) and
+                any($names[]; test("^Open SWE-\($v)-.*\\.dmg$")) and
+                any($names[]; test("^Open SWE-\($v)-.*-mac\\.zip\\.blockmap$"))
+              ' >/dev/null; then
+                echo "$tag already has a complete release"
+                exit 1
+              fi
+              git checkout --detach "$tag"
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
+      - name: Set build version
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          node -e "const fs=require('fs'); const path='desktop/package.json'; const pkg=require('./'+path); pkg.version=process.env.VERSION; fs.writeFileSync(path, JSON.stringify(pkg, null, 2)+'\n')"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - run: corepack enable
+
+      - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+
+      - name: Install workspace dependencies
+        env:
+          ELECTRON_GET_USE_PROXY: "true"
+        run: pnpm install --frozen-lockfile
+
+      - name: Import signing certificate
+        env:
+          SIGNING_CERT_B64: ${{ secrets.APPLE_SIGNING_CERT }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.APPLE_SIGNING_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          printf '%s' "$SIGNING_CERT_B64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/signing.p12" -P "$SIGNING_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "CSC_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - name: Build macOS distribution
+        env:
+          APPLE_API_KEY: ${{ env.APPLE_API_KEY_PATH }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          pnpm run build
+          pnpm --filter open-swe-desktop run build:local-backend
+          pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never
+
+      - name: Verify and package release assets
+        id: assets
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          shopt -s nullglob
+          mac_zips=(desktop/dist/"Open SWE-${VERSION}"-*-mac.zip)
+          mac_dmgs=(desktop/dist/"Open SWE-${VERSION}"-*.dmg)
+
+          if [ "${#mac_zips[@]}" -ne 1 ] || [ "${#mac_dmgs[@]}" -ne 1 ]; then
+            echo "Expected one macOS zip and one DMG for version ${VERSION}"
+            ls -la desktop/dist
+            exit 1
+          fi
+
+          unpacked="desktop/dist/release-unpacked"
+          mkdir -p "$unpacked"
+          ditto -x -k "${mac_zips[0]}" "$unpacked"
+
+          apps=("$unpacked"/*.app)
+          if [ "${#apps[@]}" -ne 1 ]; then
+            echo "Expected one app bundle in ${mac_zips[0]}"
+            ls -la "$unpacked"
+            exit 1
+          fi
+
+          test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
+          codesign --verify --deep --strict --verbose=2 "${apps[0]}"
+          xcrun stapler validate "${apps[0]}"
+          spctl --assess --type execute --verbose=2 "${apps[0]}"
+          hdiutil verify "${mac_dmgs[0]}"
+
+          app_zip="desktop/dist/Open SWE-${VERSION}.app.zip"
+          ditto -c -k --sequesterRsrc --keepParent "${apps[0]}" "$app_zip"
+
+          echo "mac_zip=${mac_zips[0]}" >> "$GITHUB_OUTPUT"
+          echo "mac_dmg=${mac_dmgs[0]}" >> "$GITHUB_OUTPUT"
+          echo "app_zip=$app_zip" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.release.outputs.prerelease }}" = "false" ]; then
+            test -f desktop/dist/latest-mac.yml
+            test -f "${mac_zips[0]}.blockmap"
+            echo "update_metadata=desktop/dist/latest-mac.yml" >> "$GITHUB_OUTPUT"
+            echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag desktop version
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.label }}
+          prerelease: ${{ steps.release.outputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.assets.outputs.mac_zip }}
+            ${{ steps.assets.outputs.mac_dmg }}
+            ${{ steps.assets.outputs.app_zip }}
+            ${{ steps.assets.outputs.update_metadata }}
+            ${{ steps.assets.outputs.update_blockmap }}
+
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/AuthKey.p8"

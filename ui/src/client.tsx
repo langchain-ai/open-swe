@@ -1,12 +1,10 @@
 import { StartClient } from "@tanstack/react-start/client"
-import { hydrateRoot } from "react-dom/client"
-import { registerSW } from "virtual:pwa-register"
+import { createRoot, hydrateRoot } from "react-dom/client"
 
-// prompt mode: a new SW installs in the background and takes over on the next
-// load, so deploys never reload a tab mid-agent-run. Skip in dev — the SW
-// precaches production-only build artifacts that 404 against the dev server.
-if (import.meta.env.PROD) {
-  registerSW()
-}
+import { initializeDatadogRum } from "./lib/datadog"
 
-hydrateRoot(document, <StartClient />)
+void initializeDatadogRum()
+
+const app = <StartClient />
+if (window.openSweDesktop) createRoot(document).render(app)
+else hydrateRoot(document, app)

@@ -4,10 +4,13 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
-from ..dashboard.options import DEFAULT_MODEL_ID
+from agent.auth.openai_oauth import build_desktop_openai_oauth_model, desktop_openai_oauth_available
+
+from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from .gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
+BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
@@ -19,7 +22,13 @@ DEFAULT_MAX_RETRIES = 6
 # max-effort reasoning on a long context, and let ``max_retries`` above turn a
 # stall into a retry instead of a dead run.
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
-_TIMEOUT_PROVIDER_PREFIXES = ("openai:", "anthropic:", "google_genai:", "fireworks:")
+_TIMEOUT_PROVIDER_PREFIXES = (
+    "openai:",
+    "anthropic:",
+    "baseten:",
+    "google_genai:",
+    "fireworks:",
+)
 
 _MODEL_CACHE: dict[
     tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
@@ -54,7 +63,7 @@ async def close_cached_models() -> None:
                 await result
 
 
-OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
+OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
 # summary is requested; without it, reasoning happens silently (billed in
 # output tokens) and the reasoning content block arrives empty.
@@ -134,20 +143,51 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
     if model_id.startswith("openai:"):
-        # Direct-provider default: Responses API over the OpenAI websocket base.
-        # Gateway routing overrides this below (an HTTP(S) proxy can't carry wss).
-        model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
+        model_kwargs["base_url"] = (
+            os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENAI_API_BASE")
+            or OPENAI_RESPONSES_WS_BASE_URL
+        )
         model_kwargs["use_responses_api"] = True
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
+    gateway_applied = False
+    oauth_applied = False
     if enabled:
         overrides = gateway_overrides(model_id)
         if overrides is not None:
             model_kwargs.update(overrides)
+            gateway_applied = True
+
+    if (
+        model_id.startswith("openai:")
+        and not gateway_applied
+        and not os.environ.get("OPENAI_API_KEY")
+        and desktop_openai_oauth_available()
+    ):
+        model_kwargs.pop("base_url", None)
+        oauth_applied = True
 
     if model_id.startswith("openai:"):
+        if oauth_applied:
+            model_kwargs.pop("max_tokens", None)
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
+
+    init_model_id = model_id
+    if model_id.startswith("baseten:"):
+        init_model_id = model_id.split(":", 1)[1]
+        model_kwargs["model_provider"] = "openai"
+        if not gateway_applied:
+            api_key = os.environ.get("BASETEN_API_KEY")
+            if not api_key:
+                raise ValueError("BASETEN_API_KEY is required when Gateway routing is disabled")
+            model_kwargs["base_url"] = BASETEN_BASE_URL
+            model_kwargs["api_key"] = api_key
+
+    profile_override = model_profile_with_context_override(model_id)
+    if profile_override is not None:
+        model_kwargs["profile"] = profile_override
 
     max_tokens = model_kwargs.get("max_tokens")
     max_tokens_key = max_tokens if type(max_tokens) is int else None
@@ -161,7 +201,12 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     cached = _MODEL_CACHE.get(key)
     if cached is not None:
         return cached
-    model = init_chat_model(model=model_id, **cast(dict[str, Any], model_kwargs))
+    if oauth_applied:
+        model = build_desktop_openai_oauth_model(
+            model_id.split(":", 1)[1], **cast(dict[str, Any], model_kwargs)
+        )
+    else:
+        model = init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
     _MODEL_CACHE[key] = model
     return model
 
@@ -207,6 +252,8 @@ def openai_reasoning_for(
         return {"effort": "high", "summary": "auto"}
     if effort == "xhigh":
         return {"effort": "xhigh", "summary": "auto"}
+    if effort == "max":
+        return {"effort": "max", "summary": "auto"}
     return None
 
 
@@ -292,6 +339,8 @@ def provider_model_kwargs(
         effort = fireworks_reasoning_effort_for(profile_effort)
         if effort is not None:
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
+    elif model_id.startswith("baseten:") and profile_effort in ("low", "high", "max"):
+        kwargs["reasoning_effort"] = profile_effort
     return kwargs
 
 
@@ -309,7 +358,11 @@ def validate_local_dev_llm_config() -> None:
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
 
-    if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
+    if (
+        model_id.startswith("openai:")
+        and not os.environ.get("OPENAI_API_KEY")
+        and not desktop_openai_oauth_available()
+    ):
         raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
     elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
         raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")

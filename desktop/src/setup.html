@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; form-action open-swe-setup:"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configure Open SWE</title>
+    <style>
+      :root { font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+      main { width: min(440px, calc(100vw - 48px)); }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 0 0 24px; color: GrayText; line-height: 1.5; }
+      label { display: block; margin-bottom: 8px; font-weight: 600; }
+      input { width: 100%; border: 1px solid GrayText; border-radius: 8px; padding: 11px 12px; background: Field; color: FieldText; font: inherit; }
+      button { width: 100%; margin-top: 12px; border: 0; border-radius: 8px; padding: 11px 12px; background: AccentColor; color: AccentColorText; font: inherit; font-weight: 600; cursor: pointer; }
+      aside { margin-top: 20px; font-size: 12px; color: GrayText; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Connect to your Open SWE backend</h1>
+      <p>The web interface is included in this app. Enter your organization's backend URL.</p>
+      <form action="open-swe-setup://configure" method="get">
+        <label for="url">Backend URL</label>
+        <input id="url" name="url" type="url" placeholder="https://open-swe-api.example.com" required autofocus />
+        <button type="submit">Continue</button>
+      </form>
+      <aside>
+        The desktop wrapper is experimental. The web UI remains the recommended way to use
+        Open SWE. Signing in will authenticate against the backend configured above.
+      </aside>
+    </main>
+  </body>
+</html>

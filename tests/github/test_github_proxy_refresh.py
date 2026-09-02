@@ -1,7 +1,5 @@
 """Tests for mid-run GitHub proxy token refresh."""
 
-from __future__ import annotations
-
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -10,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain.agents.middleware import AgentState
 
-from agent.utils import github_proxy
-from agent.utils.github_proxy import (
+from agent.auth import proxy as github_proxy
+from agent.auth.proxy import (
     PROXY_TOKEN_FALLBACK_TTL,
     clear_proxy_token_expiry,
     maybe_refresh_proxy_token,
@@ -23,8 +21,10 @@ from agent.utils.github_proxy import (
 @pytest.fixture(autouse=True)
 def _clear_state() -> Generator[None, None, None]:
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
+    github_proxy._PROXY_BASE_CONFIGS.clear()
     yield
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
+    github_proxy._PROXY_BASE_CONFIGS.clear()
 
 
 class TestProxyTokenNeedsRefresh:
@@ -99,7 +99,7 @@ class TestMaybeRefreshProxyToken:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
             patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
                 new=AsyncMock(return_value=("ghs_new", new_expiry)),
             ),
             patch(
@@ -116,6 +116,39 @@ class TestMaybeRefreshProxyToken:
         assert permissions == ()
 
     @pytest.mark.asyncio
+    async def test_preserves_base_proxy_config_on_refresh(self) -> None:
+        now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        base_proxy_config = {"rules": [{"name": "public-api", "match_hosts": ["example.com"]}]}
+        record_proxy_token_expiry(
+            "thread-1",
+            now + timedelta(minutes=1),
+            base_proxy_config=base_proxy_config,
+        )
+        backend = MagicMock(id="sb-1")
+
+        with (
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+            patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
+            patch(
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
+                new=AsyncMock(return_value=("ghs_new", "2025-01-01T13:00:00Z")),
+            ),
+            patch(
+                "agent.integrations.langsmith._configure_github_proxy",
+                new_callable=AsyncMock,
+            ) as mock_configure,
+        ):
+            result = await maybe_refresh_proxy_token("thread-1", now=now)
+
+        assert result is True
+        mock_configure.assert_awaited_once_with(
+            "sb-1",
+            "ghs_new",
+            base_proxy_config=base_proxy_config,
+        )
+        assert github_proxy._PROXY_BASE_CONFIGS["thread-1"] == base_proxy_config
+
+    @pytest.mark.asyncio
     async def test_preserves_repo_scope_on_refresh(self) -> None:
         now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         record_proxy_token_expiry("thread-1", now + timedelta(minutes=1), repositories=["open-swe"])
@@ -126,7 +159,7 @@ class TestMaybeRefreshProxyToken:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
             patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
                 new=token_mock,
             ),
             patch(
@@ -152,7 +185,7 @@ class TestMaybeRefreshProxyToken:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
             patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.auth.proxy.get_github_app_installation_token_with_expiry",
                 new=AsyncMock(return_value=(None, None)),
             ),
             patch("agent.integrations.langsmith._configure_github_proxy") as mock_configure,

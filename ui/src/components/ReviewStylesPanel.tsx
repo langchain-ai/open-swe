@@ -1,9 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 
-import type { ReviewStyle } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import type { ReviewStyle } from "@/lib/api"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Combobox,
   ComboboxContent,
@@ -11,151 +11,164 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-} from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import { api, isGithubReauthError, loginUrl } from "@/lib/api";
-import { useRepos } from "@/lib/profile";
-import { normalizeRepoFullName } from "@/lib/repo";
+} from "@/components/ui/combobox"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
+import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { useRepos } from "@/lib/profile"
+import { normalizeRepoFullName } from "@/lib/repo"
 
 function formatMutationError(e: Error): string {
   return isGithubReauthError(e)
     ? "GitHub token expired — sign in again using the link above."
-    : e.message;
+    : e.message
 }
 
 function statusVariant(status: ReviewStyle["status"]) {
   switch (status) {
     case "completed":
-      return "default" as const;
+      return "default" as const
     case "running":
-      return "secondary" as const;
+      return "secondary" as const
     case "failed":
-      return "destructive" as const;
+      return "destructive" as const
     default:
-      return "outline" as const;
+      return "outline" as const
   }
 }
 
 export function ReviewStylesPanel() {
-  const qc = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
-  const [addRepo, setAddRepo] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [draftPrompt, setDraftPrompt] = useState("");
+  const qc = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const [addRepo, setAddRepo] = useState("")
+  const [selected, setSelected] = useState<string | null>(null)
+  const [draftPrompt, setDraftPrompt] = useState("")
 
   const styles = useQuery({
     queryKey: ["reviewStyles"],
     queryFn: api.listReviewStyles,
     refetchInterval: (q) => {
-      const hasRunning = (q.state.data ?? []).some((r) => r.status === "running");
-      return hasRunning ? 4000 : false;
+      const hasRunning = (q.state.data ?? []).some(
+        (r) => r.status === "running"
+      )
+      return hasRunning ? 4000 : false
     },
-  });
+  })
 
-  const repos = useRepos();
+  const repos = useRepos()
 
   const detail = useQuery({
     queryKey: ["reviewStyle", selected],
     queryFn: () => api.getReviewStyle(selected!),
     enabled: !!selected,
     refetchInterval: (q) => (q.state.data?.status === "running" ? 4000 : false),
-  });
+  })
 
   useEffect(() => {
     if (detail.data?.custom_prompt != null) {
-      setDraftPrompt(detail.data.custom_prompt);
+      // oxlint-disable-next-line react/set-state-in-effect
+      setDraftPrompt(detail.data.custom_prompt)
     } else if (detail.data) {
-      setDraftPrompt("");
+      setDraftPrompt("")
     }
-  }, [detail.data?.custom_prompt, detail.data?.full_name]);
+  }, [detail.data?.custom_prompt, detail.data?.full_name])
 
   const createStyle = useMutation({
     mutationFn: (full_name: string) => api.createReviewStyle(full_name),
     onSuccess: (record) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] });
-      setSelected(record.full_name);
-      setError(null);
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      setSelected(record.full_name)
+      setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
-  });
+  })
 
   const analyze = useMutation({
     mutationFn: (full_name: string) => api.analyzeReviewStyle(full_name),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] });
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] });
-      setError(null);
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
+      setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
-  });
+  })
 
   const savePrompt = useMutation({
-    mutationFn: ({ full_name, custom_prompt }: { full_name: string; custom_prompt: string }) =>
-      api.saveReviewStylePrompt(full_name, custom_prompt),
+    mutationFn: ({
+      full_name,
+      custom_prompt,
+    }: {
+      full_name: string
+      custom_prompt: string
+    }) => api.saveReviewStylePrompt(full_name, custom_prompt),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] });
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] });
-      setError(null);
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
+      setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
-  });
+  })
 
   const cancelAnalysis = useMutation({
     mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] });
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] });
-      setError(null);
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
+      setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
-  });
+  })
 
   const removeStyle = useMutation({
     mutationFn: (full_name: string) => api.deleteReviewStyle(full_name),
     onSuccess: (_data, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] });
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
       if (selected === full_name) {
-        setSelected(null);
-        setDraftPrompt("");
+        setSelected(null)
+        setDraftPrompt("")
       }
-      setError(null);
+      setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
-  });
+  })
 
   if (styles.isLoading) {
-    return <Skeleton className="h-40" />;
+    return <Skeleton className="h-40" />
   }
 
-  const configured = new Set((styles.data ?? []).map((s) => s.full_name));
+  const configured = new Set((styles.data ?? []).map((s) => s.full_name))
   const suggestedRepos = (repos.data?.repositories ?? []).filter(
-    (r) => !configured.has(r.full_name),
-  );
-  const normalizedAddRepo = normalizeRepoFullName(addRepo);
-  const canAdd = normalizedAddRepo !== null && !configured.has(normalizedAddRepo);
-  const active = detail.data ?? styles.data?.find((s) => s.full_name === selected) ?? null;
+    (r) => !configured.has(r.full_name)
+  )
+  const normalizedAddRepo = normalizeRepoFullName(addRepo)
+  const canAdd =
+    normalizedAddRepo !== null && !configured.has(normalizedAddRepo)
+  const active =
+    detail.data ?? styles.data?.find((s) => s.full_name === selected) ?? null
 
   const handleAdd = () => {
-    if (!normalizedAddRepo || !canAdd) return;
+    if (!normalizedAddRepo || !canAdd) return
     void createStyle
       .mutateAsync(normalizedAddRepo)
       .then(() => setAddRepo(""))
-      .catch(() => undefined);
-  };
+      .catch(() => undefined)
+  }
 
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
-    (error !== null && /github token|re-login required/i.test(error));
+    (error !== null && /github token|re-login required/i.test(error))
 
   return (
     <div className="flex flex-col gap-6 p-4">
       {githubReauth && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           Your GitHub connection expired.{" "}
-          <a href={loginUrl()} className="font-medium underline underline-offset-2">
+          <a
+            href={loginUrl()}
+            className="font-medium underline underline-offset-2"
+          >
             Sign in with GitHub again
           </a>{" "}
           to list installed repos and run style analysis.
@@ -172,8 +185,8 @@ export function ReviewStylesPanel() {
               onChange={(e) => setAddRepo(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAdd();
+                  e.preventDefault()
+                  handleAdd()
                 }
               }}
               className="sm:flex-1"
@@ -220,7 +233,9 @@ export function ReviewStylesPanel() {
         <div className="space-y-2">
           <p className="text-xs font-medium text-foreground">Repositories</p>
           {(styles.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">No repositories yet.</p>
+            <p className="text-xs text-muted-foreground">
+              No repositories yet.
+            </p>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {(styles.data ?? []).map((s) => (
@@ -235,7 +250,10 @@ export function ReviewStylesPanel() {
                     onClick={() => setSelected(s.full_name)}
                   >
                     <span className="truncate">{s.full_name}</span>
-                    <Badge variant={statusVariant(s.status)} className="shrink-0">
+                    <Badge
+                      variant={statusVariant(s.status)}
+                      className="shrink-0"
+                    >
                       {s.status}
                     </Badge>
                   </button>
@@ -255,9 +273,13 @@ export function ReviewStylesPanel() {
           </p>
         ) : (
           <>
-            <p className="text-sm font-medium text-foreground">{active.full_name}</p>
+            <p className="text-sm font-medium text-foreground">
+              {active.full_name}
+            </p>
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant={statusVariant(active.status)}>{active.status}</Badge>
+              <Badge variant={statusVariant(active.status)}>
+                {active.status}
+              </Badge>
               {active.top_reviewers.length > 0 && (
                 <span className="text-muted-foreground">
                   Reviewers: {active.top_reviewers.join(", ")}
@@ -265,21 +287,28 @@ export function ReviewStylesPanel() {
               )}
               {active.prs_sampled > 0 && (
                 <span className="text-muted-foreground">
-                  {active.prs_sampled} PRs · {active.reviews_sampled} reviews sampled
+                  {active.prs_sampled} PRs · {active.reviews_sampled} reviews
+                  sampled
                 </span>
               )}
             </div>
             {active.analysis_summary && (
-              <p className="text-xs text-muted-foreground">{active.analysis_summary}</p>
+              <p className="text-xs text-muted-foreground">
+                {active.analysis_summary}
+              </p>
             )}
-            {active.error && <p className="text-xs text-destructive">{active.error}</p>}
+            {active.error && (
+              <p className="text-xs text-destructive">{active.error}</p>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="secondary"
                 disabled={active.status === "running" || analyze.isPending}
                 onClick={() => {
-                  void analyze.mutateAsync(active.full_name).catch(() => undefined);
+                  void analyze
+                    .mutateAsync(active.full_name)
+                    .catch(() => undefined)
                 }}
               >
                 {active.status === "running" ? "Analyzing…" : "Run analysis"}
@@ -289,7 +318,9 @@ export function ReviewStylesPanel() {
                   size="sm"
                   variant="outline"
                   disabled={cancelAnalysis.isPending}
-                  onClick={() => void cancelAnalysis.mutateAsync(active.full_name)}
+                  onClick={() =>
+                    void cancelAnalysis.mutateAsync(active.full_name)
+                  }
                 >
                   Cancel
                 </Button>
@@ -313,12 +344,12 @@ export function ReviewStylesPanel() {
                 onClick={() => {
                   if (
                     !window.confirm(
-                      `Remove ${active.full_name} from review style prompts? This cannot be undone.`,
+                      `Remove ${active.full_name} from review style prompts? This cannot be undone.`
                     )
                   ) {
-                    return;
+                    return
                   }
-                  void removeStyle.mutateAsync(active.full_name);
+                  void removeStyle.mutateAsync(active.full_name)
                 }}
               >
                 Remove
@@ -340,5 +371,5 @@ export function ReviewStylesPanel() {
         {error && <p className="text-xs text-destructive">{error}</p>}
       </section>
     </div>
-  );
+  )
 }

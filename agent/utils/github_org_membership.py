@@ -1,16 +1,26 @@
 """GitHub organization membership checks for webhook gating."""
 
-from __future__ import annotations
-
 import logging
+import os
+from urllib.parse import quote
 
 import httpx
 
-from .github_app import get_github_app_installation_token
+from agent.auth.github_app import (
+    get_github_app_installation_id_for_org,
+    get_github_app_installation_token,
+)
 
 logger = logging.getLogger(__name__)
 
-INTERNAL_BOT_LOGINS: frozenset[str] = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
+INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
+    {"open-swe[bot]", "openswe-dev[bot]"}
+    | {
+        login.strip()
+        for login in os.environ.get("EXTRA_INTERNAL_BOT_LOGINS", "").split(",")
+        if login.strip()
+    }
+)
 
 
 async def is_user_active_org_member(username: str, org: str) -> bool:
@@ -28,14 +38,24 @@ async def is_user_active_org_member(username: str, org: str) -> bool:
     if not username or not org:
         return False
 
-    token = await get_github_app_installation_token()
+    installation_id = await get_github_app_installation_id_for_org(org)
+    token = (
+        await get_github_app_installation_token(
+            installation_id=installation_id,
+            permissions={"members": "read"},
+        )
+        if installation_id
+        else None
+    )
     if not token:
         logger.warning(
             "GitHub App token unavailable; cannot verify org membership for %s", username
         )
         return False
 
-    url = f"https://api.github.com/orgs/{org}/memberships/{username}"
+    url = (
+        f"https://api.github.com/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}"
+    )
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(

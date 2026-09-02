@@ -5,8 +5,6 @@ Credentials are read from environment variables and attached as an
 LangGraph server process. The sandbox never holds Corridor credentials.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from dataclasses import dataclass
@@ -33,6 +31,7 @@ _URL_ENV_NAMES = (
     "CORRIDOR_MCP_SERVER_URL",
 )
 _ALLOWED_TOOL_NAMES = frozenset({"analyzePlan"})
+CORRIDOR_TOOL_NAMES = tuple(sorted(_ALLOWED_TOOL_NAMES))
 
 
 @dataclass(frozen=True)
@@ -105,6 +104,11 @@ async def _build_mcp_tools(config: CorridorMCPConfig) -> list[BaseTool]:
         )
     )
     return await client.get_tools()
+
+
+def corridor_configured() -> bool:
+    """Whether Corridor MCP is set up, without opening a session to find out."""
+    return load_corridor_mcp_config() is not None
 
 
 async def load_corridor_tools() -> list[BaseTool]:

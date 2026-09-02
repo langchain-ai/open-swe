@@ -1,8 +1,8 @@
 """Helpers for collaborative commit and PR attribution."""
 
-from __future__ import annotations
-
+import asyncio
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -149,6 +149,28 @@ def resolve_triggering_user_identity(
     """
 
     return _identity_from_github_token(github_token) or _identity_from_config(config)
+
+
+async def resolve_participant_identities(logins: Iterable[str]) -> list[CollaboratorIdentity]:
+    """Git identities for thread participants the agent may author commits as."""
+    from ..dashboard.user_mappings import email_for_login
+
+    unique = sorted({login.strip() for login in logins if isinstance(login, str) and login.strip()})
+    emails = await asyncio.gather(*(email_for_login(login) for login in unique))
+    identities: list[CollaboratorIdentity] = []
+    for login, email in zip(unique, emails, strict=True):
+        commit_email = _github_noreply_email(login) or _normalize_text(email)
+        if not commit_email:
+            continue
+        identities.append(
+            CollaboratorIdentity(
+                display_name=login,
+                commit_name=login,
+                commit_email=commit_email,
+                github_login=login,
+            )
+        )
+    return identities
 
 
 def add_bot_coauthor_trailer(commit_message: str) -> str:

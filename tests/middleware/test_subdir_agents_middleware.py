@@ -1,7 +1,5 @@
 """Tests for subdirectory AGENTS.md auto-loading on read_file."""
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,7 +7,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
-from agent.utils import sandbox_state
+from agent.sandboxes import state as sandbox_state
 
 
 class FakeReadResult:

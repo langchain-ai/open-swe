@@ -1,9 +1,8 @@
-from __future__ import annotations
-
 from typing import Any
 
 import pytest
 
+from agent import store as agent_store
 from agent.dashboard import user_mappings as um
 
 
@@ -23,10 +22,17 @@ class _FakeStore:
     async def delete_item(self, namespace: list[str], key: str) -> None:
         self.items.pop((tuple(namespace), key), None)
 
-    async def search_items(self, namespace: list[str], *, limit: int = 1000):
+    async def search_items(
+        self,
+        namespace: list[str],
+        *,
+        filter: dict[str, Any] | None = None,
+        limit: int = 1000,
+        offset: int = 0,
+    ):
         ns = tuple(namespace)
         items = [{"value": v} for (n, _k), v in self.items.items() if n == ns]
-        return {"items": items[:limit]}
+        return {"items": items[offset : offset + limit]}
 
 
 class _FakeClient:
@@ -37,7 +43,7 @@ class _FakeClient:
 @pytest.fixture()
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
     store = _FakeStore()
-    monkeypatch.setattr(um, "_client", lambda: _FakeClient(store))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
     um.clear_cache()
     return store
 

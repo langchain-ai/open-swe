@@ -10,16 +10,14 @@ Each upsert only touches its own namespace, so the two flows can't clobber
 each other's fields even when they interleave.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
-from langgraph_sdk import get_client
 from pydantic import BaseModel, model_validator
+
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 from ..encryption import decrypt_token, encrypt_token
 from .oauth import (
@@ -27,7 +25,12 @@ from .oauth import (
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
 )
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
+from .options import (
+    DEPRECATED_MODEL_IDS,
+    SUPPORTED_MODEL_IDS,
+    model_supports_effort,
+    provider_fallback_pair,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +47,11 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
-    create_prs: bool = False
+    draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
     @model_validator(mode="after")
-    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
+    def _normalize_stale_model_pairs(self) -> "ProfileUpdate":
         model, effort = _normalize_stale_model_pair(
             self.default_model,
             self.reasoning_effort,
@@ -97,44 +100,30 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
-    model = value.get("default_model")
-    effort = value.get("reasoning_effort")
-    if isinstance(model, str):
-        value["default_model"], value["reasoning_effort"] = _normalize_stale_model_pair(
-            model,
-            effort if isinstance(effort, str) else None,
-        )
-    subagent_model = value.get("default_subagent_model")
-    subagent_effort = value.get("subagent_reasoning_effort")
-    if isinstance(subagent_model, str):
-        value["default_subagent_model"], value["subagent_reasoning_effort"] = (
-            _normalize_stale_model_pair(
-                subagent_model,
-                subagent_effort if isinstance(subagent_effort, str) else None,
+    value.pop("create_prs", None)
+    for model_field, effort_field in (
+        ("default_model", "reasoning_effort"),
+        ("default_subagent_model", "subagent_reasoning_effort"),
+    ):
+        model = value.get(model_field)
+        effort = value.get(effort_field)
+        if model in DEPRECATED_MODEL_IDS:
+            value.pop(model_field, None)
+            value.pop(effort_field, None)
+        elif isinstance(model, str):
+            value[model_field], value[effort_field] = _normalize_stale_model_pair(
+                model, effort if isinstance(effort, str) else None
             )
-        )
     return value
 
 
-def _client():
-    return get_client()
-
-
-async def _get_value(namespace: list[str], key: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(namespace, key)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return None
-        raise
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
-
-
 async def get_profile(login: str) -> dict[str, Any] | None:
-    return await _get_value(PROFILES_NAMESPACE, login)
+    return await get_value(PROFILES_NAMESPACE, login)
+
+
+async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
+    """The raw encrypted-token record, for callers that need its expiry metadata."""
+    return await get_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
@@ -157,9 +146,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
-        "create_prs": update.create_prs,
+        "draft_prs": (
+            update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
+        ),
         "review_draft_prs": update.review_draft_prs,
-        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_at": now_iso(),
     }
     for stale_field in (
         "first_name",
@@ -167,9 +158,10 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "allow_artifacts",
         "slack_notifications",
         "preferred_pr_destination",
+        "create_prs",
     ):
         value.pop(stale_field, None)
-    await _client().store.put_item(PROFILES_NAMESPACE, login, value)
+    await put_value(PROFILES_NAMESPACE, login, value)
     return value
 
 
@@ -212,12 +204,12 @@ async def upsert_access_token(
     """
     if not access_token:
         return
-    existing = await _get_value(OAUTH_TOKENS_NAMESPACE, login) or {}
+    existing = await get_value(OAUTH_TOKENS_NAMESPACE, login) or {}
     value: dict[str, Any] = {
         "login": login,
         "email": email or existing.get("email", ""),
         "encrypted_gh_token": encrypt_token(access_token),
-        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_at": now_iso(),
     }
     if refresh_token:
         value["encrypted_gh_refresh_token"] = encrypt_token(refresh_token)
@@ -227,7 +219,7 @@ async def upsert_access_token(
         value["token_expires_at"] = token_expires_at
     if refresh_token_expires_at:
         value["refresh_token_expires_at"] = refresh_token_expires_at
-    await _client().store.put_item(OAUTH_TOKENS_NAMESPACE, login, value)
+    await put_value(OAUTH_TOKENS_NAMESPACE, login, value)
 
 
 async def upsert_access_token_from_github_response(
@@ -256,11 +248,7 @@ async def delete_access_token(login: str) -> None:
     Used when a refresh token is permanently dead so we stop handing out a
     known-stale access token and callers prompt a clean re-login instead.
     """
-    try:
-        await _client().store.delete_item(OAUTH_TOKENS_NAMESPACE, login)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 404:
-            raise
+    await delete_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
 def _decrypt_access_token(record: dict[str, Any]) -> str | None:
@@ -301,7 +289,7 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
 
 async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> str | None:
     """Return a GitHub access token, refreshing proactively when near expiry."""
-    record = await _get_value(OAUTH_TOKENS_NAMESPACE, login)
+    record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
     if not record:
         return None
 
@@ -316,7 +304,7 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
         return access_token
 
     async with _refresh_lock(login):
-        record = await _get_value(OAUTH_TOKENS_NAMESPACE, login)
+        record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
         if not record:
             return None
         access_token = _decrypt_access_token(record)
@@ -334,7 +322,7 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
             # The OAuth callback can write a fresh authorization while the
             # refresh request is in flight (it doesn't take this lock), so only
             # delete if the stored record is still the one that failed.
-            latest = await _get_value(OAUTH_TOKENS_NAMESPACE, login)
+            latest = await get_value(OAUTH_TOKENS_NAMESPACE, login)
             if latest and latest.get("encrypted_gh_refresh_token") != record.get(
                 "encrypted_gh_refresh_token"
             ):
@@ -356,15 +344,8 @@ async def has_access_token_record(login: str) -> bool:
     "the stored authorization is present but no longer usable" (record exists
     but won't decrypt / was revoked), so callers can prompt accurately.
     """
-    return bool(await _get_value(OAUTH_TOKENS_NAMESPACE, login))
+    return bool(await get_value(OAUTH_TOKENS_NAMESPACE, login))
 
 
 async def list_profiles() -> list[dict[str, Any]]:
-    result = await _client().store.search_items(PROFILES_NAMESPACE, limit=1000)
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    out: list[dict[str, Any]] = []
-    for item in items or []:
-        value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-        if isinstance(value, dict):
-            out.append(value)
-    return out
+    return await search_values(PROFILES_NAMESPACE, limit=1000)

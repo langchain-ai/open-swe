@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web desktop install-desktop install-checkout
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -8,10 +8,25 @@ all: help
 ######################
 
 dev:
-	uv run langgraph dev
+	uv run langgraph dev --no-browser --port 2024
+
+web:
+	pnpm run dev
 
 run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
+
+desktop:
+	pnpm run dev:desktop
+
+install-desktop:
+	@test -z "$$(git status --porcelain)" || { echo 'Commit or stash repository changes first.' >&2; exit 1; }
+	@git switch main
+	@git pull --ff-only origin main
+	@./scripts/install_desktop.sh
+
+install-checkout:
+	@./scripts/install_desktop.sh
 
 install:
 	uv sync --extra dev
@@ -54,7 +69,7 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	npx --yes basedpyright agent tests
+	uv run basedpyright agent tests
 
 ######################
 # HELP
@@ -63,7 +78,11 @@ typecheck:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
+	@echo 'web                          - run the dashboard web server'
 	@echo 'run                          - run webhook server'
+	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
+	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
+	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'

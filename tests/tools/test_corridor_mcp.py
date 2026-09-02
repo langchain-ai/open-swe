@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -134,7 +132,7 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
 
         return _DummyAgent()
 
-    async def run_with_corridor_tools(corridor_tools: list[object]) -> bool:
+    async def run_with_corridor(configured: bool) -> bool:
         with (
             patch.object(
                 server,
@@ -151,7 +149,7 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             ),
             patch.object(
                 server,
-                "aresolve_sandbox_work_dir",
+                "resolve_sandbox_work_dir",
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
@@ -172,22 +170,40 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
                 new_callable=AsyncMock,
                 return_value=False,
             ),
+            patch.object(server, "corridor_configured", return_value=configured),
             patch.object(
                 server,
                 "_load_corridor_mcp_tools",
                 new_callable=AsyncMock,
-                return_value=corridor_tools,
-            ),
+                return_value=[_FakeTool("analyzePlan")],
+            ) as load_corridor,
             patch.object(server, "construct_system_prompt", return_value="prompt") as prompt,
             patch.object(server, "create_deep_agent", side_effect=fake_create_deep_agent),
         ):
             await server.get_agent(cast(RunnableConfig, config))
-            prepare = cast(AgentMiddleware, cast(list[object], captured["middleware"])[0])
+            middleware = cast(list[object], captured["middleware"])
+            prepare = cast(
+                AgentMiddleware,
+                next(
+                    item
+                    for item in middleware
+                    if type(item).__name__ == "PrepareAgentRunMiddleware"
+                ),
+            )
             await prepare.abefore_agent(
                 cast(AgentState[object], {"messages": []}),
                 cast(Runtime[None], MagicMock()),
             )
+            # The catalog is a static allowlist, so nothing opens an MCP session
+            # before the run's first model call.
+            load_corridor.assert_not_awaited()
+            if configured:
+                names = {
+                    getattr(tool, "name", None) for tool in cast(list[object], captured["tools"])
+                }
+                assert "analyzePlan" not in names
+                assert "DynamicToolMiddleware" in {type(item).__name__ for item in middleware}
         return bool(prompt.call_args.kwargs["corridor_enabled"])
 
-    assert await run_with_corridor_tools([]) is False
-    assert await run_with_corridor_tools([_FakeTool("analyzePlan")]) is True
+    assert await run_with_corridor(False) is False
+    assert await run_with_corridor(True) is True

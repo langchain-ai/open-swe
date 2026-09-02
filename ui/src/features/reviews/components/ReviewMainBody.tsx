@@ -27,6 +27,7 @@ import {
   ListBulletsIcon,
   ListChecksIcon,
   ListNumbersIcon,
+  PencilSimpleIcon,
   QuotesIcon,
   RowsIcon,
   SquareSplitHorizontalIcon,
@@ -92,6 +93,7 @@ import { IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
+import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 type SideTab = "info" | "chat"
@@ -555,6 +557,7 @@ export interface ReviewMainBodyProps {
   onExpand?: () => void
   // A PR comment opened from the comments dropdown: shown inline at its line.
   openComment?: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }
 
@@ -564,6 +567,7 @@ export function ReviewMainBody({
   variant = "full",
   onExpand,
   openComment,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: ReviewMainBodyProps) {
   // The composer provider lives here so it remounts in lockstep with the
@@ -586,6 +590,7 @@ export function ReviewMainBody({
         diffFiles={diffFiles}
         variant="full"
         openComment={openComment ?? null}
+        onUpdateOpenComment={onUpdateOpenComment}
         onCloseOpenComment={onCloseOpenComment}
       />
     </ReviewChatComposerProvider>
@@ -598,6 +603,7 @@ function ReviewBodyInner({
   variant,
   onExpand,
   openComment = null,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: {
   detail: ReviewDetail
@@ -605,6 +611,7 @@ function ReviewBodyInner({
   variant: ReviewMainBodyVariant
   onExpand?: () => void
   openComment?: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }) {
   const embedded = variant === "embedded"
@@ -663,7 +670,9 @@ function ReviewBodyInner({
     [detail.findings, expandedId]
   )
   const expandedFindingRef = useRef(expandedFinding)
-  expandedFindingRef.current = expandedFinding
+  useEffect(() => {
+    expandedFindingRef.current = expandedFinding
+  }, [expandedFinding])
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -676,9 +685,11 @@ function ReviewBodyInner({
     }
   })
   const viewedRef = useRef(viewed)
-  viewedRef.current = viewed
   const expandedRef = useRef(expandedFiles)
-  expandedRef.current = expandedFiles
+  useEffect(() => {
+    viewedRef.current = viewed
+    expandedRef.current = expandedFiles
+  }, [viewed, expandedFiles])
 
   const toggleViewed = useCallback(
     (path: string) => {
@@ -859,6 +870,7 @@ function ReviewBodyInner({
   // diff scroller and surface it as the active agenda row (Google-Docs outline).
   useEffect(() => {
     if (view !== "ai" || !groupedView || groupedView.length === 0) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setActiveGroup(null)
       return
     }
@@ -895,7 +907,9 @@ function ReviewBodyInner({
     [diffFiles]
   )
   const filesByPathRef = useRef(filesByPath)
-  filesByPathRef.current = filesByPath
+  useEffect(() => {
+    filesByPathRef.current = filesByPath
+  }, [filesByPath])
 
   // The Virtualizer doesn't forward a ref; grab its scroll element (the
   // grandparent of this hidden probe, which lives in its content div) so
@@ -969,7 +983,9 @@ function ReviewBodyInner({
 
   // ⌘L / Ctrl+L adds the current line selection to the chat (Cursor-style).
   const userSelectionRef = useRef(userSelection)
-  userSelectionRef.current = userSelection
+  useEffect(() => {
+    userSelectionRef.current = userSelection
+  }, [userSelection])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
@@ -1064,7 +1080,9 @@ function ReviewBodyInner({
   // center (mirrors openFromPanel). Comments whose file/line aren't in the
   // current diff (e.g. outdated) have no inline anchor, so fall back to GitHub.
   const closeOpenCommentRef = useRef(onCloseOpenComment)
-  closeOpenCommentRef.current = onCloseOpenComment
+  useEffect(() => {
+    closeOpenCommentRef.current = onCloseOpenComment
+  }, [onCloseOpenComment])
   useEffect(() => {
     if (!openComment) return
     const { path, line } = openComment
@@ -1161,6 +1179,7 @@ function ReviewBodyInner({
         onStartComment={embedded ? undefined : startComment}
         onCloseComment={closeComment}
         openComment={openComment?.path === file.path ? openComment : null}
+        onUpdateOpenComment={onUpdateOpenComment}
         onCloseOpenComment={onCloseOpenComment}
       />
     )
@@ -1217,7 +1236,7 @@ function ReviewBodyInner({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="relative flex min-h-0 min-w-0 flex-1">
           {!embedded && (
-            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-[var(--ui-sidebar)] lg:flex">
+            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
               <ReviewSidebarPanel data={sidebarData} />
             </div>
           )}
@@ -1266,7 +1285,7 @@ function ReviewBodyInner({
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",
-                    embedded ? "bg-[var(--ui-surface)]" : "bg-card"
+                    embedded ? "bg-card" : "bg-card"
                   )}
                 >
                   {detail.pr.body ? (
@@ -1436,7 +1455,7 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   return (
     <div className="sticky top-0 z-[5] border-b border-border bg-background py-2">
       <div className="flex items-center gap-2">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-accent text-[11px] font-medium text-muted-foreground">
           {group.index}
         </span>
         <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
@@ -1478,6 +1497,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onStartComment,
   onCloseComment,
   openComment,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: {
   file: ReviewDiffFile
@@ -1502,6 +1522,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onStartComment?: (path: string, range: SelectedLineRange) => void
   onCloseComment: () => void
   openComment: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
@@ -1618,26 +1639,16 @@ const FileDiffCard = memo(function FileDiffCard({
     if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
   }, [selectable, file.path, onSelectLines])
 
+  const visiblePopup = selectedLines && !commentDraftRange ? popup : null
+
   const addPopupToChat = useCallback(() => {
-    if (popup) onAddToChat?.(file.path, popup.range)
+    if (visiblePopup) onAddToChat?.(file.path, visiblePopup.range)
     setPopup(null)
     // Clear the lingering native highlight once added.
     readDiffSelection(
       diffWrapperRef.current?.querySelector("diffs-container")
     )?.removeAllRanges()
-  }, [popup, onAddToChat, file.path])
-
-  // Drop the popup once the selection clears (e.g. added via ⌘L, or a finding
-  // took focus) so it can't add the same range twice.
-  useEffect(() => {
-    if (!selectedLines) setPopup(null)
-  }, [selectedLines])
-
-  // Opening a comment draft owns the "+"; never show "Add to Chat" alongside it
-  // (a single "+" click can otherwise both open the composer and arm the popup).
-  useEffect(() => {
-    if (commentDraftRange) setPopup(null)
-  }, [commentDraftRange])
+  }, [visiblePopup, onAddToChat, file.path])
 
   const oldFile = useMemo<FileContents>(
     () => ({
@@ -1672,7 +1683,11 @@ const FileDiffCard = memo(function FileDiffCard({
       if (meta.kind === "comment")
         return (
           <InlineComment
+            owner={owner}
+            repo={repo}
+            prNumber={prNumber}
             comment={meta.comment}
+            onUpdate={onUpdateOpenComment}
             onClose={onCloseOpenComment ?? (() => undefined)}
           />
         )
@@ -1687,15 +1702,22 @@ const FileDiffCard = memo(function FileDiffCard({
         />
       )
     },
-    [owner, repo, prNumber, onCloseComment, onCloseOpenComment]
+    [
+      owner,
+      repo,
+      prNumber,
+      onCloseComment,
+      onUpdateOpenComment,
+      onCloseOpenComment,
+    ]
   )
 
   return (
     <div
       ref={sectionRef}
-      className="scroll-mt-4 overflow-hidden rounded-lg border border-[var(--ui-border)]"
+      className="scroll-mt-4 overflow-hidden rounded-lg border border-border"
     >
-      <div className="flex items-center gap-2 bg-[var(--ui-panel-2)] px-3 py-2 text-xs">
+      <div className="flex items-center gap-2 bg-accent px-3 py-2 text-xs">
         <button
           type="button"
           onClick={() => onToggleExpanded(file.path)}
@@ -1737,7 +1759,7 @@ const FileDiffCard = memo(function FileDiffCard({
       </div>
       {expanded &&
         (file.unrenderable ? (
-          <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+          <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
             Binary or large file — diff not shown.
           </div>
         ) : (
@@ -1747,7 +1769,7 @@ const FileDiffCard = memo(function FileDiffCard({
               lastPointerRef.current = { x: event.clientX, y: event.clientY }
             }}
             onMouseUp={handleTextSelection}
-            className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5"
+            className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
           >
             <MultiFileDiff<ReviewAnnotation>
               oldFile={oldFile}
@@ -1758,10 +1780,10 @@ const FileDiffCard = memo(function FileDiffCard({
               selectedLines={selectedLines}
               renderAnnotation={renderAnnotation}
             />
-            {popup && !commentDraftRange && (
+            {visiblePopup && (
               <AddToChatPopup
-                x={popup.x}
-                y={popup.y}
+                x={visiblePopup.x}
+                y={visiblePopup.y}
                 onAdd={addPopupToChat}
                 onDismiss={() => setPopup(null)}
               />
@@ -1957,6 +1979,7 @@ function CommentComposer({
   const [value, setValue] = useState("")
   const [mode, setMode] = useState<"write" | "preview">("write")
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const queryClient = useQueryClient()
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
@@ -1968,6 +1991,10 @@ function CommentComposer({
         prNumber,
         buildCommentPayload(path, range, body)
       ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["reviewComments", owner, repo, prNumber],
+      }),
   })
   const submit = () => {
     const body = value.trim()
@@ -1994,13 +2021,13 @@ function CommentComposer({
     cn(
       "rounded px-2 py-0.5 text-[11px]",
       active
-        ? "bg-[var(--ui-panel-2)] font-medium text-foreground"
+        ? "bg-accent font-medium text-foreground"
         : "text-muted-foreground hover:text-foreground"
     )
   return (
     <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
-        <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
+      <div className="overflow-hidden rounded-md border border-border bg-card">
+        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
           <ChatCircleIcon className="size-3 text-muted-foreground" />
           <span className="font-medium">
             Add a comment on line {commentRangeLabel(range)}
@@ -2032,7 +2059,7 @@ function CommentComposer({
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-1 border-b border-[var(--ui-border)] px-1.5 py-1">
+            <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
               <button
                 type="button"
                 onClick={() => setMode("write")}
@@ -2054,7 +2081,7 @@ function CommentComposer({
                   {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
                     <Fragment key={group[0]?.action ?? groupIndex}>
                       {groupIndex > 0 && (
-                        <span className="mx-0.5 h-4 w-px bg-[var(--ui-border)]" />
+                        <span className="mx-0.5 h-4 w-px bg-border" />
                       )}
                       {group.map(({ action, label, Icon }) => (
                         <IconButton
@@ -2145,21 +2172,64 @@ function CommentComposer({
 // node is registered so the dropdown can scroll it into view. Links to the
 // full thread on GitHub.
 function InlineComment({
+  owner,
+  repo,
+  prNumber,
   comment,
+  onUpdate,
   onClose,
 }: {
+  owner: string
+  repo: string
+  prNumber: number
   comment: PrReviewComment
+  onUpdate?: (comment: PrReviewComment) => void
   onClose: () => void
 }) {
   const { registerAnnotation } = useExpandedFinding()
+  const session = useSession()
+  const queryClient = useQueryClient()
+  const [body, setBody] = useState(comment.body)
+  const [draft, setDraft] = useState(comment.body)
+  const [editing, setEditing] = useState(false)
   const sideLabel = comment.side === "LEFT" ? "L" : "R"
+  const editable =
+    session.data?.login.toLowerCase() === comment.author.toLowerCase()
+  const mutation = useMutation({
+    mutationFn: (next: string) =>
+      api.updateReviewComment(owner, repo, prNumber, comment.id, next),
+    onSuccess: (_, next) => {
+      setBody(next)
+      setDraft(next)
+      setEditing(false)
+      onUpdate?.({ ...comment, body: next })
+      void queryClient.invalidateQueries({
+        queryKey: ["reviewComments", owner, repo, prNumber],
+      })
+    },
+  })
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setBody(comment.body)
+    setDraft(comment.body)
+    setEditing(false)
+  }, [comment.id, comment.body])
+  const submit = () => {
+    const next = draft.trim()
+    if (next && next !== body && !mutation.isPending) mutation.mutate(next)
+  }
+  const cancel = () => {
+    setDraft(body)
+    setEditing(false)
+    mutation.reset()
+  }
   return (
     <div
       ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
-        <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
+      <div className="overflow-hidden rounded-md border border-border bg-card">
+        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
           {comment.author_avatar_url ? (
             <img
               src={comment.author_avatar_url}
@@ -2177,6 +2247,17 @@ function InlineComment({
             </span>
           )}
           <div className="ml-auto flex items-center gap-0.5">
+            {editable && !editing && (
+              <IconButton
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Edit comment"
+                onClick={() => setEditing(true)}
+              >
+                <PencilSimpleIcon />
+              </IconButton>
+            )}
             <a
               href={comment.html_url}
               target="_blank"
@@ -2198,9 +2279,56 @@ function InlineComment({
             </IconButton>
           </div>
         </div>
-        <div className="px-3 py-2.5 text-xs text-muted-foreground">
-          <Markdown content={comment.body} />
-        </div>
+        {editing ? (
+          <div className="p-2">
+            <Textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault()
+                  submit()
+                } else if (event.key === "Escape") {
+                  event.preventDefault()
+                  cancel()
+                }
+              }}
+              rows={3}
+              className="resize-y text-xs"
+              autoFocus
+            />
+            {mutation.isError && (
+              <p className="mt-1.5 text-[11px] text-destructive">
+                {mutation.error instanceof Error
+                  ? mutation.error.message
+                  : "Failed to update comment"}
+              </p>
+            )}
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancel}
+                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={
+                  !draft.trim() || draft.trim() === body || mutation.isPending
+                }
+                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+              >
+                {mutation.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="px-3 py-2.5 text-xs text-muted-foreground">
+            <Markdown content={body} />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -2221,7 +2349,7 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
       ref={(node) => registerAnnotation(finding.id, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
+      <div className="overflow-hidden rounded-md border border-border bg-card">
         <button
           type="button"
           onClick={() => toggle(finding)}
@@ -2276,7 +2404,7 @@ function FindingDetails({
   }
 
   return (
-    <div className="border-t border-[var(--ui-border)] px-3 py-2.5 font-sans">
+    <div className="border-t border-border px-3 py-2.5 font-sans">
       <div className="text-xs text-muted-foreground">
         <Markdown content={finding.description} />
       </div>

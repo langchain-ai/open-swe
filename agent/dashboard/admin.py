@@ -1,7 +1,5 @@
 """Admin gate driven by the CONFIGURED_ADMINS env var."""
 
-from __future__ import annotations
-
 import os
 
 
