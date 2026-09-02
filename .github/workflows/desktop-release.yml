@@ -73,6 +73,8 @@ jobs:
         with:
           node-version: "24"
 
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
       - run: corepack enable
 
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
@@ -116,6 +118,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           pnpm run build
+          pnpm --filter open-swe-desktop run build:local-backend
           pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never
 
       - name: Verify and package release assets
@@ -144,6 +147,7 @@ jobs:
             exit 1
           fi
 
+          test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
           codesign --verify --deep --strict --verbose=2 "${apps[0]}"
           xcrun stapler validate "${apps[0]}"
           spctl --assess --type execute --verbose=2 "${apps[0]}"
