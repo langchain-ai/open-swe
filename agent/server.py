@@ -338,7 +338,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "background_execute",
         "background_task",
         "browser_act",
-        "browser_close",
         "browser_extract",
         "browser_navigate",
         "browser_observe",
