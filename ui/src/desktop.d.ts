@@ -111,6 +111,11 @@ export type DesktopTerminalMetadataEvent =
   | { type: "upsert"; terminal: DesktopTerminalSummary }
   | (DesktopTerminalTarget & { type: "remove" })
 
+export type DesktopUpdateState = {
+  status: "idle" | "downloading" | "ready"
+  version?: string
+}
+
 export interface DesktopTerminalBridge {
   attach: (
     input: DesktopTerminalTarget & {
@@ -166,6 +171,12 @@ declare global {
       }) => Promise<DesktopLocalThreadSummary | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
+      getVersion: () => Promise<string>
+      getUpdateState: () => Promise<DesktopUpdateState>
+      installUpdate: () => Promise<boolean>
+      onUpdateState: (
+        callback: (state: DesktopUpdateState) => void
+      ) => () => void
       onProjectsChanged: (
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void

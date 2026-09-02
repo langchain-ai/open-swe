@@ -20,6 +20,11 @@
   "build": {
     "appId": "com.langchain.openswe",
     "productName": "Open SWE",
+    "publish": {
+      "provider": "github",
+      "owner": "langchain-ai",
+      "repo": "open-swe"
+    },
     "asar": true,
     "asarUnpack": [
       "node_modules/node-pty/**/*"
@@ -105,6 +110,7 @@
     "typescript": "5.9.3"
   },
   "dependencies": {
+    "electron-updater": "6.8.9",
     "node-pty": "1.1.0"
   }
 }

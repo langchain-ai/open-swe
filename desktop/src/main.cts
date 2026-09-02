@@ -15,6 +15,7 @@ const {
   session,
   shell,
 } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { BackendSupervisor } = require("./backend-supervisor.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
@@ -101,6 +102,36 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
+let updateState = { status: "idle" };
+
+function setUpdateState(status, version) {
+  updateState = { status, ...(version ? { version } : {}) };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("desktop:update-state", updateState);
+  }
+}
+
+function configureAutoUpdater() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.on("update-available", (info) =>
+    setUpdateState("downloading", info.version),
+  );
+  autoUpdater.on("update-downloaded", (info) =>
+    setUpdateState("ready", info.version),
+  );
+  autoUpdater.on("error", (error) => {
+    console.warn("Desktop update failed", error);
+    setUpdateState("idle", undefined);
+  });
+  void autoUpdater
+    .checkForUpdates()
+    .catch((error) =>
+      console.warn("Could not check for desktop updates", error),
+    );
+}
 
 function sendDesktopCommand(commandId) {
   if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
@@ -322,6 +353,27 @@ async function discardThreadWorktree(thread) {
 }
 
 function configureDesktopIpc() {
+  ipcMain.handle("desktop:version", (event) => {
+    requireTrustedDesktopIpc(event);
+    return app.getVersion();
+  });
+  ipcMain.handle("desktop:update-state", (event) => {
+    requireTrustedDesktopIpc(event);
+    return updateState;
+  });
+  ipcMain.handle("desktop:install-update", async (event) => {
+    requireTrustedDesktopIpc(event);
+    if (updateState.status !== "ready") return false;
+    quitting = true;
+    await Promise.all([
+      closeAllTerminals(),
+      backendSupervisor?.close(),
+      openAiOAuth?.close(),
+    ]);
+    autoUpdater.quitAndInstall(false, true);
+    return true;
+  });
+
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
     return listProjects();
@@ -1208,6 +1260,7 @@ if (!hasSingleInstanceLock) {
     configureDesktopIpc();
     createMenu();
     createWindow();
+    configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,

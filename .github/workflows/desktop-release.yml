@@ -50,7 +50,14 @@ jobs:
             prerelease=false
             label="Open SWE Desktop v${version}"
             if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
-              if gh release view "$tag" --json assets --jq '.assets | length >= 3' | grep -qx true; then
+              if gh release view "$tag" --json assets | jq -e --arg v "$version" '
+                [.assets[].name] as $names |
+                ($names | index("Open SWE-\($v).app.zip")) != null and
+                ($names | index("latest-mac.yml")) != null and
+                any($names[]; test("^Open SWE-\($v)-.*-mac\\.zip$")) and
+                any($names[]; test("^Open SWE-\($v)-.*\\.dmg$")) and
+                any($names[]; test("^Open SWE-\($v)-.*-mac\\.zip\\.blockmap$"))
+              ' >/dev/null; then
                 echo "$tag already has a complete release"
                 exit 1
               fi
@@ -159,6 +166,12 @@ jobs:
           echo "mac_zip=${mac_zips[0]}" >> "$GITHUB_OUTPUT"
           echo "mac_dmg=${mac_dmgs[0]}" >> "$GITHUB_OUTPUT"
           echo "app_zip=$app_zip" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.release.outputs.prerelease }}" = "false" ]; then
+            test -f desktop/dist/latest-mac.yml
+            test -f "${mac_zips[0]}.blockmap"
+            echo "update_metadata=desktop/dist/latest-mac.yml" >> "$GITHUB_OUTPUT"
+            echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Tag desktop version
         env:
@@ -181,6 +194,8 @@ jobs:
             ${{ steps.assets.outputs.mac_zip }}
             ${{ steps.assets.outputs.mac_dmg }}
             ${{ steps.assets.outputs.app_zip }}
+            ${{ steps.assets.outputs.update_metadata }}
+            ${{ steps.assets.outputs.update_blockmap }}
 
       - name: Remove signing credentials
         if: always()
