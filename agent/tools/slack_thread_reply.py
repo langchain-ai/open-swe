@@ -5,6 +5,9 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from agent.source_context import SlackThreadRef
+from agent.surfaces import slack_surface
+
 from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.slack import (
     convert_mentions_to_slack_format,
@@ -80,14 +83,8 @@ async def slack_thread_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    from ..utils.slack_code_channels import is_code_channel_session
-
-    reply_thread_ts = active.get("reply_thread_ts")
-    post_thread_ts = (
-        str(reply_thread_ts)
-        if is_code_channel_session(str(thread_ts)) and isinstance(reply_thread_ts, str)
-        else str(thread_ts)
-    )
+    surface = slack_surface(SlackThreadRef.parse(active))
+    post_thread_ts = surface.reply_target() or str(thread_ts)
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         message = convert_mentions_to_slack_format(message)
@@ -100,9 +97,7 @@ async def slack_thread_reply(
             blocks=slack_blocks,
             usage=usage,
             post_thread_ts=post_thread_ts,
-            agent_thread_id=(
-                None if is_code_channel_session(str(thread_ts)) else str(thread_id or "") or None
-            ),
+            agent_thread_id=surface.web_link_thread_id(str(thread_id or "")),
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(configurable),

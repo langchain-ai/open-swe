@@ -8,19 +8,15 @@ import httpx
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.source_context import SlackThreadRef
+from agent.surfaces import slack_surface
+
 from ..dashboard.agent_usage import record_agent_pr_usage
 from ..dashboard.plan_store import get_plan_content
-from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
-from ..utils.slack_code_channels import (
-    is_code_channel_session,
-    repo_context_bar_items,
-    set_agent_resource,
-    set_context_bar,
-    set_view,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -643,20 +639,16 @@ async def _record_pr_telemetry(
                 thread_id,
                 slack_thread if isinstance(slack_thread, dict) else None,
             )
-            if active and is_code_channel_session(str(active.get("thread_ts") or "")):
-                channel_id = str(active.get("channel_id") or "")
-                await set_context_bar(
-                    channel_id,
-                    repo_context_bar_items(
-                        {"owner": owner, "name": repo},
-                        branch=head,
-                        pr_url=pr_url if isinstance(pr_url, str) else "",
-                        dashboard_url=dashboard_thread_url(thread_id) or "",
-                    ),
+            surface = slack_surface(SlackThreadRef.parse(active))
+            if surface.has_chrome:
+                await surface.sync_context(
+                    repo={"owner": owner, "name": repo},
+                    thread_id=thread_id,
+                    branch=head,
+                    pr_url=pr_url if isinstance(pr_url, str) else "",
                 )
                 if isinstance(pr_url, str):
-                    await set_agent_resource(
-                        channel_id,
+                    await surface.set_resource(
                         {
                             "url": pr_url,
                             "resource_type": "pull_request",
@@ -666,20 +658,14 @@ async def _record_pr_telemetry(
                                 else "Pull request"
                             ),
                             "provider": "GitHub",
-                        },
+                        }
                     )
                 response = await client.get(
                     f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
                     headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},
                 )
                 if response.status_code == 200 and response.text.strip():
-                    await set_view(
-                        channel_id,
-                        "diff",
-                        content=response.text,
-                        base_branch=base,
-                        head_branch=head,
-                    )
+                    await surface.publish_diff(response.text, base_branch=base, head_branch=head)
     except Exception:
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True

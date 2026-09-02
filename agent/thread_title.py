@@ -14,8 +14,7 @@ from .input_messages import (
     input_message_text,
     wrap_system_prompt,
 )
-from .source_context import SourceContext
-from .utils.slack_code_channels import CODE_CHANNEL_SESSION_TS, rename_session
+from .surfaces import surface_from_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +130,9 @@ async def generate_and_store_thread_title(
         metadata={"title": title, "title_seed": None},
     )
     # Re-read after the update: the pre-update snapshot can be stale if the
-    # thread was promoted to a code channel between the check and the update.
+    # thread moved to a surface with a title between the check and the update.
     latest = await client.threads.get(thread_id=thread_id)
-    context = SourceContext.from_metadata(_thread_metadata(latest))
-    if context.slack_location and context.slack_location[1] == CODE_CHANNEL_SESSION_TS:
-        await rename_session(context.slack_location[0], title)
+    await surface_from_metadata(_thread_metadata(latest)).set_title(title)
 
 
 def schedule_thread_title_generation(

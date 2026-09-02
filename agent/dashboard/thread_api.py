@@ -19,6 +19,7 @@ from langchain_core.messages.content import ImageContentBlock, create_image_bloc
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.source_context import SourceContext
+from agent.surfaces import slack_surface
 
 from ..dispatch import dispatch_agent_run
 from ..input_messages import (
@@ -41,7 +42,6 @@ from ..utils.slack import (
     parse_github_pr_url,
     update_slack_trace_reply_for_web_handoff,
 )
-from ..utils.slack_code_channels import CODE_CHANNEL_SESSION_TS
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -395,7 +395,7 @@ def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
 
 def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
+    if slack_thread is None or slack_surface(slack_thread).kind != "slack_channel":
         return None
     channel_id = slack_thread.channel_id.strip()
     team_id = SLACK_TEAM_ID.strip()

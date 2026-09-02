@@ -20,11 +20,16 @@ an empty one, because losing the Slack thread of a run is better than failing it
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
+
+#: Slack's two session kinds: a thread inside a shared channel, and a code
+#: channel that is one session end to end.
+SlackSurface = Literal["slack_thread", "slack_channel"]
+_SLACK_SURFACES: frozenset[str] = frozenset(("slack_thread", "slack_channel"))
 
 
 class SlackThreadRef(BaseModel):
@@ -33,8 +38,42 @@ class SlackThreadRef(BaseModel):
     channel_id: str = ""
     thread_ts: str = ""
     triggering_user_id: str = ""
+    triggering_user_name: str = ""
+    triggering_user_email: str | None = None
+    triggering_user_timezone: str = ""
     triggering_event_ts: str = ""
     permalink: str = ""
+    channel_context: dict[str, Any] | None = None
+    # None on locations written before this field existed, and on a kind this
+    # deployment does not know; `agent.surfaces` falls back to `thread_ts` there.
+    surface: SlackSurface | None = None
+    # A thread the user started inside a code channel, which the agent answers
+    # in rather than at channel level.
+    reply_thread_ts: str = ""
+
+    # An unknown kind makes the kind unknown, not the whole location worth
+    # discarding — see the parsing rule in the module docstring.
+    @field_validator("surface", mode="before")
+    @classmethod
+    def _known_surface(cls, value: Any) -> Any:
+        return value if value in _SLACK_SURFACES else None
+
+    @classmethod
+    def parse(cls, raw: Any) -> "SlackThreadRef | None":
+        """A ref from an untyped Slack location, or None if there is nothing usable."""
+        if isinstance(raw, SlackThreadRef):
+            return raw
+        if not isinstance(raw, Mapping):
+            return None
+        try:
+            return cls.model_validate(dict(raw))
+        except ValidationError:
+            logger.warning("Unparseable Slack thread ref, ignoring", exc_info=True)
+            return None
+
+    def dump(self) -> dict[str, Any]:
+        """The JSON value to store, preserving exactly the keys that were set."""
+        return self.model_dump(mode="json", exclude_unset=True)
 
     @property
     def location(self) -> tuple[str, str] | None:

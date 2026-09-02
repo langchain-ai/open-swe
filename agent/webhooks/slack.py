@@ -26,6 +26,7 @@ from agent.input_messages import (
 )
 from agent.slack_thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.surfaces import slack_surface
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -52,14 +53,6 @@ _UNTAGGED_REPLY_PREAMBLE = (
     "including no reaction. Staying silent is the right outcome; an unwanted reply or reaction "
     "from an untagged message is worse than no reply. If it is "
     "addressed to you, handle it exactly as you would a direct mention.\n\n"
-)
-
-_CODE_CHANNEL_CONTEXT = (
-    "## Slack Code Channel\n"
-    "The whole channel is one session. Treat messages as addressed to you unless clearly aimed "
-    "at someone else; replies post top-level unless the user started a Slack thread. Use "
-    "`manage_code_channel` for session "
-    "status, title, context, runtime commands, HTML/diff/Block Kit/canvas views, and archival."
 )
 
 _MESSAGE_UPDATE_PREAMBLE = (
@@ -649,6 +642,14 @@ async def _process_slack_mention_impl(
     treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
     untagged_reply = bool(event_data.get("untagged_reply"))
     code_channel = bool(event_data.get("code_channel"))
+    surface = slack_surface(
+        SlackThreadRef(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            surface="slack_channel" if code_channel else "slack_thread",
+            reply_thread_ts=reply_thread_ts if code_channel else "",
+        )
+    )
     context_messages, context_mode = common.select_slack_context_messages(
         thread_messages,
         event_ts,
@@ -721,7 +722,7 @@ async def _process_slack_mention_impl(
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
-        + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
+        + (f"\n\n{surface_section}" if (surface_section := surface.prompt_section()) else "")
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
@@ -813,19 +814,18 @@ async def _process_slack_mention_impl(
             )
         return
 
-    slack_thread_context: dict[str, Any] = {
-        "channel_id": channel_id,
-        "channel_context": channel_context,
-        "thread_ts": thread_ts,
-        "triggering_user_id": user_id,
-        "triggering_user_name": user_name,
-        "triggering_user_email": user_email,
-        "triggering_event_ts": event_ts,
-    }
-    if user_timezone:
-        slack_thread_context["triggering_user_timezone"] = user_timezone
-    if code_channel and reply_thread_ts:
-        slack_thread_context["reply_thread_ts"] = reply_thread_ts
+    slack_thread_context = SlackThreadRef(
+        channel_id=channel_id,
+        channel_context=channel_context,
+        thread_ts=thread_ts,
+        surface="slack_channel" if code_channel else "slack_thread",
+        triggering_user_id=user_id,
+        triggering_user_name=user_name,
+        triggering_user_email=user_email,
+        triggering_user_timezone=user_timezone,
+        triggering_event_ts=event_ts,
+        reply_thread_ts=reply_thread_ts if code_channel else "",
+    ).dump()
 
     configurable: dict[str, Any] = {
         "repo": repo_config,
@@ -897,16 +897,9 @@ async def _process_slack_mention_impl(
         request_blocks=content_blocks,
         operational_context=operational_context,
     )
-    if code_channel:
-        await common.set_session_status(channel_id, "processing")
-        if is_first_mention:
-            await common.set_context_bar(
-                channel_id,
-                common.repo_context_bar_items(
-                    repo_config, dashboard_url=common.dashboard_thread_url(thread_id) or ""
-                ),
-            )
-            await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    await surface.begin_turn()
+    if is_first_mention:
+        await surface.start_session(repo=repo_config, thread_id=thread_id)
     try:
         run = await _dispatch_or_queue_slack_run(
             langgraph_client,
@@ -918,8 +911,7 @@ async def _process_slack_mention_impl(
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear
         # the loading UI this turn switched on.
-        if code_channel:
-            await common.set_session_status(channel_id, "active")
+        await surface.end_turn()
         raise
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
