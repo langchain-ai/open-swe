@@ -141,6 +141,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [models, threadEffort, threadModelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
+  const streamRef = useRef(stream)
+  useEffect(() => {
+    streamRef.current = stream
+  }, [stream])
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [queuedState, setQueuedState] = useState<{
@@ -406,14 +410,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
-        if (await submit(pending.prompt, pending.images, pending.skills)) {
-          const updated =
-            await window.openSweDesktop?.clearLocalPrompt(sessionId)
-          if (updated)
-            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        } else {
+        // The pending prompt is only cleared once its run finishes, so a
+        // remount mid-run would otherwise submit it a second time. A thread
+        // that already has a run is past its initial prompt.
+        const started =
+          streamRef.current.isLoading || streamRef.current.messages.length > 0
+        if (
+          !started &&
+          !(await submit(pending.prompt, pending.images, pending.skills))
+        ) {
           initialPromptRef.current = null
+          return
         }
+        const updated = await window.openSweDesktop?.clearLocalPrompt(sessionId)
+        if (updated)
+          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
       })
       .catch((cause) => {
         initialPromptRef.current = null
