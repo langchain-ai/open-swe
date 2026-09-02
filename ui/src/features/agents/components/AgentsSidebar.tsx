@@ -1070,12 +1070,14 @@ export function AgentsShell({
   localOnly = false,
   activeThreadId,
   activeLocalSessionId,
+  chat,
   children,
 }: {
   user: SessionUser | null
   localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
+  chat: boolean
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -1169,7 +1171,12 @@ export function AgentsShell({
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
-        <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-black">
+        <main
+          className={cn(
+            "surface-grain relative flex min-w-0 flex-1 overflow-hidden",
+            chat ? "bg-black" : "bg-background"
+          )}
+        >
           {children}
         </main>
       </div>

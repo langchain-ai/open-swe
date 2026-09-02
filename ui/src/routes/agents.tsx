@@ -69,6 +69,7 @@ function AgentsLayout() {
       localOnly={localOnly}
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
+      chat={Boolean(activeThreadId || activeLocalSessionId)}
     >
       <AgentThreadStreamProvider
         threadId={activeLocalSessionId ?? activeThreadId ?? null}
