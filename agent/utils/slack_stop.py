@@ -3,6 +3,7 @@
 import logging
 import os
 from collections.abc import Mapping
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,7 +13,12 @@ from langgraph_sdk.client import LangGraphClient
 from agent.dispatch import dispatch_agent_run
 from agent.source_context import SourceContext
 
-from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
+from .slack import (
+    lookup_slack_run_mapping,
+    lookup_slack_thread_id,
+    stop_slack_stream,
+    store_slack_run_mapping,
+)
 from .slack_code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from .slack_events import claim_slack_event
 
@@ -250,6 +256,13 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     run_ids = await _active_run_ids(client, thread_id)
     if run_ids:
         await client.runs.cancel_many(thread_id=thread_id, run_ids=run_ids, action="interrupt")
+    # The event names every message this app still has streaming in the session;
+    # cancelling the run does not close them.
+    streaming = event.get("streaming_message_ts")
+    for message_ts in streaming if isinstance(streaming, list) else []:
+        if isinstance(message_ts, str) and message_ts:
+            with suppress(Exception):
+                await stop_slack_stream(channel_id, message_ts)
     await _clear_deferred_work(client, thread_id)
     await client.threads.update(
         thread_id=thread_id,

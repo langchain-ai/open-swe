@@ -37,6 +37,7 @@ class SlackThreadRef(BaseModel):
 
     channel_id: str = ""
     thread_ts: str = ""
+    team_id: str = ""
     triggering_user_id: str = ""
     triggering_user_name: str = ""
     triggering_user_email: str | None = None

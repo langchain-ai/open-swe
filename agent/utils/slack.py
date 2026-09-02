@@ -713,14 +713,20 @@ async def start_slack_stream(
     *,
     recipient_user_id: str = "",
     recipient_team_id: str = "",
+    task_display_mode: str = "plan",
 ) -> str:
-    """Start a Slack Thinking Steps stream and return its message timestamp."""
+    """Start a Slack streaming message and return its timestamp.
+
+    ``task_display_mode`` decides how task cards sit against streamed text:
+    ``plan`` groups them into a block, ``timeline`` interleaves them where they
+    happened.
+    """
     from .slack_code_channels import is_code_channel_session
 
     payload: dict[str, Any] = {
         "channel": channel_id,
         "chunks": chunks,
-        "task_display_mode": "plan",
+        "task_display_mode": task_display_mode,
     }
     if not is_code_channel_session(thread_ts):
         payload["thread_ts"] = thread_ts

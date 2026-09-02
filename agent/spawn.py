@@ -90,6 +90,7 @@ def _new_location(destination: SpawnDestination, origin: SpawnOrigin) -> SlackTh
     return SlackThreadRef(
         channel_id=destination.channel_id,
         thread_ts=destination.thread_ts,
+        team_id=parent.team_id,
         surface=destination.surface,
         triggering_user_id=parent.triggering_user_id,
         triggering_user_name=parent.triggering_user_name,

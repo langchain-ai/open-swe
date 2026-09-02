@@ -23,6 +23,10 @@ class Surface:
     #: to be told when a turn starts and ends.
     reports_activity: bool = False
 
+    #: Whether the agent's own words reach this surface without a posting tool,
+    #: because something mirrors the run into it.
+    projects_transcript: bool = False
+
     #: Whether the surface renders session chrome — context, resources, views —
     #: that the work has to be published into. Callers check this before doing
     #: work whose only purpose is to fill it.

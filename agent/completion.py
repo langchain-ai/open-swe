@@ -14,12 +14,14 @@ missing ids degrade dedupe instead of silencing failure replies.
 import hmac
 import logging
 import os
+from contextlib import suppress
 from typing import Any
 
 from langgraph_sdk.client import LangGraphClient
 
 from agent.source_context import SourceContext
 from agent.surfaces import surface_from_metadata
+from agent.surfaces.projector import close_projection
 
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
@@ -216,16 +218,22 @@ def _prepare_run_id(payload: dict[str, Any]) -> str | None:
 
 
 async def _settle_surface_activity(
-    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
+    client: LangGraphClient, thread_id: str, metadata: dict[str, Any], run_id: str | None = None
 ) -> None:
-    """Return a surface to idle once its work stops.
+    """Close out a finished run on its surface, and idle the surface if it is done.
 
-    A later message can already have started another run, so a completion that
-    arrives out of order must not clear the loading UI that run is relying on.
+    The transcript of *this* run is closed either way — a projection lost to a
+    restart would otherwise leave a Slack message streaming forever. Going idle
+    is separate: a later message can already have started another run, so a
+    completion that arrives out of order must not clear that run's loading UI.
     """
     surface = surface_from_metadata(metadata)
     if not surface.reports_activity:
         return
+    location = SourceContext.from_metadata(metadata).slack_thread
+    if run_id and surface.projects_transcript and location is not None:
+        with suppress(Exception):
+            await close_projection(client, channel_id=location.channel_id, run_id=run_id)
     try:
         for status in ("pending", "running"):
             if await client.runs.list(thread_id, status=status, limit=1):
@@ -251,7 +259,7 @@ async def _schedule_success_cost_refresh(
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
-    await _settle_surface_activity(client, thread_id, metadata)
+    await _settle_surface_activity(client, thread_id, metadata, run_id)
     prepare_run_id = _prepare_run_id(payload)
     if prepare_run_id is None:
         return {"status": "ignored", "reason": "missing prepare_run_id"}
@@ -321,7 +329,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     await _settle_failed_reviewer_check(thread_id, metadata)
-    await _settle_surface_activity(client, thread_id, metadata)
+    await _settle_surface_activity(client, thread_id, metadata, run_id)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

@@ -44,6 +44,7 @@ class SlackChannelSurface(Surface):
     kind = "slack_channel"
     reports_activity = True
     has_chrome = True
+    projects_transcript = True
 
     def __init__(self, channel_id: str, reply_thread_ts: str = "") -> None:
         self.channel_id = channel_id
