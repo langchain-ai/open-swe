@@ -116,6 +116,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           pnpm run build
+          pnpm --filter open-swe-desktop run build:local-backend
           pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never
 
       - name: Verify and package release assets
@@ -144,6 +145,7 @@ jobs:
             exit 1
           fi
 
+          test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
           codesign --verify --deep --strict --verbose=2 "${apps[0]}"
           xcrun stapler validate "${apps[0]}"
           spctl --assess --type execute --verbose=2 "${apps[0]}"
