@@ -699,10 +699,16 @@ def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) 
     )
 
 
+def _projects_transcript(configurable: dict[str, Any]) -> bool:
+    """Whether this run's surface carries the agent's words on its own."""
+    location = SlackThreadRef.parse(configurable.get("slack_thread"))
+    return location is not None and slack_surface(location).projects_transcript
+
+
 def _transcript_middleware(configurable: dict[str, Any], thread_id: str) -> list[Any]:
     """Deliver the run's words to surfaces that have to be told about them."""
     location = SlackThreadRef.parse(configurable.get("slack_thread"))
-    if location is None or not slack_surface(location).projects_transcript:
+    if location is None or not _projects_transcript(configurable):
         return []
     # `prepare_run_id` is minted per dispatch and stored in the run's config, so a
     # resumed run keeps writing into the message it already opened.
@@ -966,6 +972,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),
+                code_channel=_projects_transcript(configurable),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
             ),
         }

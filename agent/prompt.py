@@ -167,6 +167,15 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - When a task warrants its own dedicated Slack channel, use `manage_code_channel` to open one and hand the task to the session that runs in it. Inside a code channel, use that tool for status, title, context and resources, runtime commands, HTML/diff/Block Kit/canvas views, canvas comments and revisions, and archival with a closing summary. Keep stable `view_key` values so view updates replace existing tabs.
 - When a plan is ready, ask with `ask_user_choice`, passing the concise summary and review link as the question and `options=["Approve & implement", "Request changes"]`; invite manual feedback too, and never construct custom Block Kit for a choice."""
 
+SLACK_CODE_CHANNEL_SOURCE_GUIDANCE = """This run is the session of a Slack code channel.
+- The whole channel is one session with you, and this task is already yours: it was handed to you when the channel was opened. Never hand it on again, and never try to open another code channel for it.
+- Everything you say reaches the channel as you say it — your replies are the transcript, so just answer. Never repeat yourself to "send" a message, and never end a turn silently: say what you did or found.
+- Write in Slack mrkdwn (*bold*, _italic_, <url|link text>, bullets with "• ", ```code blocks```), not standard Markdown, and keep it short enough to read in a channel. Never paste long output, diffs, or file listings; publish detail with `save_plan` and link it.
+- Use `slack_reply_to_message` only to answer under one specific earlier message, and `ask_user_choice` when you are blocked on a decision with known answers — including a ready plan, with `options=["Approve & implement", "Request changes"]`.
+- Use `manage_code_channel` for this channel's status, title, context and resources, runtime commands, HTML/diff/Block Kit/canvas views, canvas comments and revisions, and archival with a closing summary. Keep stable `view_key` values so view updates replace existing tabs.
+- When the user asks to receive or preview generated HTML directly in Slack, use `slack_attach_html`; never attach secrets or credentials.
+- For follow-ups that require action, use `slack_add_reaction` instead of a perfunctory status reply, then follow up with the outcome. Never use `white_check_mark`, because teams use it to indicate that a pull request is approved."""
+
 LINEAR_SOURCE_GUIDANCE = """This run was triggered from Linear.
 - Use `linear_comment` for essential questions, progress updates, plan-review links, and the final outcome.
 - For information-only requests, put the complete answer in the Linear comment and do not duplicate it in the final assistant response."""
@@ -200,9 +209,9 @@ using the previous surface's messaging tools until another announcement moves th
 conversation back."""
 
 
-def _render_source_guidance(source: str, slack_context: bool) -> str:
+def _render_source_guidance(source: str, slack_context: bool, code_channel: bool = False) -> str:
     if source == "slack" and slack_context:
-        guidance = SLACK_SOURCE_GUIDANCE
+        guidance = SLACK_CODE_CHANNEL_SOURCE_GUIDANCE if code_channel else SLACK_SOURCE_GUIDANCE
     elif source == "linear":
         guidance = LINEAR_SOURCE_GUIDANCE
     elif source == "github":
@@ -562,6 +571,7 @@ def construct_system_prompt(
     admin_environments: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
+    code_channel: bool = False,
     sandbox_file_downloads: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
@@ -577,7 +587,7 @@ def construct_system_prompt(
             DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
         ),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
-        source_guidance=_render_source_guidance(source, slack_context),
+        source_guidance=_render_source_guidance(source, slack_context, code_channel),
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         plan_review_url=plan_url or "(the dashboard plan-review page)",

@@ -709,6 +709,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             {"action": "status", "status": "processing"},
             "call-code-channel-session-status",
         ),
+        _tool_step(
+            "Looking at what the checkout holds.",
+            "ls",
+            {"path": "/workspace"},
+            "call-code-channel-session-ls",
+        ),
         StepSpec(
             content="Picking up the flaky CI investigation in this channel.",
         ),
@@ -718,12 +724,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     # A tool call the agent gets wrong, so the card has to show the failure.
     "code_channel_tool_failure": (
         _tool_step(
-            "Trying an action that does not exist.",
-            "manage_code_channel",
-            {"action": "not-a-real-action"},
+            "Reading a file without saying which.",
+            "read_file",
+            {},
             "call-code-channel-bogus",
         ),
-        StepSpec(content="That action was rejected."),
+        StepSpec(content="That call was rejected."),
     ),
     "code_channel_followup": (
         StepSpec(

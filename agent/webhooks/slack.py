@@ -29,6 +29,7 @@ from agent.surfaces import slack_surface
 from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.slack_code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
@@ -640,7 +641,9 @@ async def _process_slack_mention_impl(
 
     treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
     untagged_reply = bool(event_data.get("untagged_reply"))
-    code_channel = bool(event_data.get("code_channel"))
+    # Interactions carry no flag of their own, and a location at the session
+    # timestamp is a code channel whether or not the caller said so.
+    code_channel = bool(event_data.get("code_channel")) or thread_ts == CODE_CHANNEL_SESSION_TS
     surface = slack_surface(
         SlackThreadRef(
             channel_id=channel_id,

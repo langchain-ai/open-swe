@@ -87,19 +87,24 @@ test.describe("Slack code channel transcript", () => {
     const channel = await channelWithSession(page);
     const [stream] = await streams(page.request, channel.id);
 
-    // The stream opens with a placeholder card before the agent has said
-    // anything; what matters is that the words announcing a tool call arrive
-    // before that call's own card.
+    // Nothing is carded before the agent has spoken, and the words announcing a
+    // tool call arrive before that call's card.
     const spoken = stream.timeline.findIndex(
       (entry) =>
-        entry.kind === "text" &&
-        (entry.text ?? "").includes("Publishing the diff view"),
+        entry.kind === "text" && (entry.text ?? "").includes("Looking at what the checkout"),
     );
-    const announced = stream.timeline.findIndex(
-      (entry) => entry.kind === "task" && entry.title === "Using manage code channel",
+    const carded = stream.timeline.findIndex(
+      (entry) => entry.kind === "task" && entry.title === "Inspecting repository files",
     );
-    expect(spoken).toBeGreaterThanOrEqual(0);
-    expect(announced).toBeGreaterThan(spoken);
+    expect(spoken).toBe(1);
+    expect(carded).toBeGreaterThan(spoken);
+
+    // A Slack tool's whole effect is this channel, so it draws no card.
+    expect(
+      stream.timeline.filter(
+        (entry) => entry.kind === "task" && (entry.title ?? "").includes("manage code channel"),
+      ),
+    ).toEqual([]);
   });
 
   test("the transcript is one top-level streaming message per turn", async ({

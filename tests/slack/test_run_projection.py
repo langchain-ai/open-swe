@@ -42,8 +42,10 @@ class FakeTranscript:
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
         self.run_id = kwargs["run_id"]
+        self.channel_id = kwargs["channel_id"]
         self.message_ts: str | None = None
         self.streamed_chars = 0
+        self.pending: list[dict[str, Any]] = []
         self.said: list[str] = []
         self.cards: list[tuple[str, str]] = []
         self.stopped: str | None = None
@@ -67,6 +69,7 @@ class FakeTranscript:
 
     async def flush(self, *, force: bool = False) -> None:
         self.streamed_chars = sum(len(text) for text in self.said)
+        self.pending = []
 
     async def stop(self, status: str) -> None:
         self.stopped = status
@@ -290,3 +293,24 @@ def test_the_projector_no_longer_watches_from_outside() -> None:
     """Delivery lives in the run; nothing external subscribes to it."""
     assert not hasattr(projector, "project_run_into_slack")
     assert not hasattr(projector, "start_projection")
+
+
+async def test_a_tool_whose_effect_is_the_channel_gets_no_card(slack: FakeStore) -> None:
+    """A card describing a Slack post would describe what the reader is looking at."""
+    transcript = _middleware()
+    await transcript.abefore_agent(_state(), None)  # type: ignore[arg-type]
+    request = type(
+        "Request",
+        (),
+        {
+            "tool_call": {"id": "call-1", "name": "slack_reply_to_message", "args": {}},
+            "state": _state(),
+        },
+    )()
+
+    async def handler(_request: Any) -> ToolMessage:
+        return ToolMessage(content="ok", tool_call_id="call-1")
+
+    await transcript.awrap_tool_call(request, handler)  # type: ignore[arg-type]
+
+    assert [t.cards for t in FakeTranscript.instances] in ([], [[]])

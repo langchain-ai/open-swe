@@ -17,6 +17,7 @@ rehydrates them and keeps appending to the message it was already writing.
 
 import hashlib
 import logging
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import PurePath
@@ -28,14 +29,20 @@ from langgraph_sdk.client import LangGraphClient
 from agent.utils.slack import (
     SlackStreamError,
     append_slack_stream,
-    lookup_slack_run_message_mapping,
     start_slack_stream,
     stop_slack_stream,
     store_slack_message_run_mapping,
-    store_slack_run_mapping,
 )
 
 logger = logging.getLogger(__name__)
+
+TRANSCRIPT_NAMESPACE = "slack_transcript"
+
+
+def transcript_namespace(thread_id: str) -> tuple[str, str]:
+    """Where a thread's per-turn transcript records live."""
+    return (TRANSCRIPT_NAMESPACE, thread_id)
+
 
 StepStatus = Literal["in_progress", "complete", "error"]
 _FLUSH_INTERVAL_SECONDS = 1.0
@@ -106,6 +113,15 @@ def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
         "analyzePlan": ("Checking implementation security", "Security analysis"),
     }
     return labels.get(name, (f"Using {name.replace('_', ' ')}", "Tool call"))
+
+
+#: Tools whose whole effect lands in this Slack session — a card for them would
+#: describe something the reader is already looking at.
+_SELF_EVIDENT_TOOLS = frozenset({"ask_user_choice", "manage_code_channel"})
+
+
+def shows_its_own_effect(tool_name: str) -> bool:
+    return tool_name.startswith("slack_") or tool_name in _SELF_EVIDENT_TOOLS
 
 
 def _step_id(run_id: str, namespace: tuple[str, ...], call_id: str) -> str:
@@ -179,14 +195,16 @@ class SlackTranscript:
             text = text[_STREAM_TEXT_LIMIT:]
 
     async def start(self) -> bool:
-        initial = Step(
-            _step_id(self.run_id, (), "startup"), "Preparing the agent workspace", "in_progress"
-        )
+        """Open the message this turn is written into, with nothing in it yet.
+
+        The session's own status already shows the agent as working, so an
+        opening placeholder card would just repeat that once a turn.
+        """
         try:
             self.message_ts = await start_slack_stream(
                 self.channel_id,
                 self.thread_ts,
-                [initial.chunk()],
+                [],
                 recipient_user_id=self.recipient_user_id,
                 recipient_team_id=self.recipient_team_id,
                 task_display_mode="timeline",
@@ -194,41 +212,21 @@ class SlackTranscript:
         except SlackStreamError as exc:
             logger.info("Slack run projection unavailable for run %s: %s", self.run_id, exc.code)
             return False
-        self.steps[((), "startup")] = initial
-        await store_slack_run_mapping(
-            self.client,
-            self.channel_id,
-            self.mapping_thread_ts,
-            self.run_id,
-            message_ts=self.original_message_ts,
-            triggering_user_id=self.recipient_user_id,
-            agent_thread_id=self.thread_id,
-            thinking_message_ts=self.message_ts,
-        )
         await self._map_message(self.message_ts)
         return True
 
     async def _map_message(self, message_ts: str) -> None:
-        """Point this run's mappings at the message it is streaming into.
+        """Map the message being streamed into to the run behind it.
 
-        The message mapping is what lets a reaction on the transcript resolve to
-        the run behind it; `thinking_message_ts` is what closing out stops.
+        No run id is passed: the thread's existing mapping holds the platform run
+        id, and `run_id` here is a dispatch-scoped key that feedback and run
+        lookups would misread as a LangSmith run.
         """
-        await store_slack_run_mapping(
-            self.client,
-            self.channel_id,
-            self.mapping_thread_ts,
-            self.run_id,
-            triggering_user_id=self.recipient_user_id,
-            agent_thread_id=self.thread_id,
-            thinking_message_ts=message_ts,
-        )
         await store_slack_message_run_mapping(
             self.client,
             self.channel_id,
             self.mapping_thread_ts,
             message_ts,
-            run_id=self.run_id,
             triggering_user_id=self.recipient_user_id or None,
         )
 
@@ -237,10 +235,6 @@ class SlackTranscript:
         self._queue_text(text)
 
     def tool_started(self, call_id: str, tool_name: str, tool_input: Any) -> None:
-        startup = self.steps.get(((), "startup"))
-        if startup and startup.status == "in_progress":
-            startup.status = "complete"
-            self._queue_step(startup)
         title, details = _tool_step(tool_name, tool_input)
         step = Step(_step_id(self.run_id, (), call_id), title, "in_progress", details)
         self.steps[((), call_id)] = step
@@ -341,15 +335,25 @@ class SlackTranscript:
                 self.pending_steps.clear()
 
 
-async def close_projection(client: LangGraphClient, *, channel_id: str, run_id: str) -> None:
-    """Close out a run's streaming message, whatever happened to its projection.
+async def close_transcript(client: LangGraphClient, *, thread_id: str, run_key: str) -> None:
+    """Close out a turn's streaming message, whatever happened to the run.
 
-    Stopping a stream that has already stopped is not an error, so this is safe
-    to call after a projection ended on its own.
+    Read from the middleware's own record rather than the Slack run mappings:
+    the run key is the dispatch id the transcript is stored under, and stopping
+    a stream that has already stopped is not an error.
     """
-    mapping = await lookup_slack_run_message_mapping(client, channel_id, run_id)
-    message_ts = (mapping or {}).get("thinking_message_ts")
-    if not isinstance(message_ts, str) or not message_ts:
+    try:
+        item = await client.store.get_item(transcript_namespace(thread_id), key=run_key)
+    except Exception:  # noqa: BLE001
+        logger.debug("No transcript record for %s", run_key, exc_info=True)
+        return
+    value = item.get("value") if isinstance(item, Mapping) else None
+    record = value if isinstance(value, dict) else {}
+    message_ts = record.get("message_ts")
+    channel_id = record.get("channel_id")
+    if not isinstance(message_ts, str) or not isinstance(channel_id, str):
+        return
+    if not message_ts or not channel_id or record.get("done"):
         return
     with suppress(SlackStreamError):
         await stop_slack_stream(channel_id, message_ts)

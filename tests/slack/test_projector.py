@@ -1,4 +1,6 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from agent.surfaces import projector
 
@@ -80,17 +82,18 @@ def test_a_tool_input_is_summarized_not_echoed() -> None:
     assert stream.pending[0]["title"] == "Running a development command"
 
 
-async def test_the_first_tool_call_completes_the_startup_card(monkeypatch) -> None:
-    monkeypatch.setattr(projector, "start_slack_stream", AsyncMock(return_value="2.0"))
-    monkeypatch.setattr(projector, "store_slack_run_mapping", AsyncMock())
+async def test_a_turn_opens_its_message_with_nothing_in_it(monkeypatch) -> None:
+    """Nothing is said until the agent says it; the session status shows the wait."""
+    start = AsyncMock(return_value="2.0")
+    monkeypatch.setattr(projector, "start_slack_stream", start)
     monkeypatch.setattr(projector, "store_slack_message_run_mapping", AsyncMock())
     stream = _stream()
+
     assert await stream.start() is True
 
-    stream.tool_started("call-1", "read_file", {"file_path": "/workspace/a.py"})
-
-    assert stream.pending[0]["status"] == "complete"
-    assert stream.pending[0]["title"] == "Preparing the agent workspace"
+    assert start.await_args is not None
+    assert start.await_args.args[2] == []
+    assert stream.pending == []
 
 
 async def test_stop_finishes_whatever_was_still_running(monkeypatch) -> None:
@@ -139,7 +142,6 @@ async def test_a_long_transcript_continues_in_a_second_message(monkeypatch) -> N
     monkeypatch.setattr(projector, "append_slack_stream", append)
     monkeypatch.setattr(projector, "start_slack_stream", start)
     monkeypatch.setattr(projector, "stop_slack_stream", stop)
-    monkeypatch.setattr(projector, "store_slack_run_mapping", AsyncMock())
     monkeypatch.setattr(projector, "store_slack_message_run_mapping", AsyncMock())
     stream = _stream()
     stream.message_ts = "2.0"
@@ -153,19 +155,17 @@ async def test_a_long_transcript_continues_in_a_second_message(monkeypatch) -> N
     assert [call.args[1] for call in append.await_args_list] == ["2.0", "2.0", "3.0"]
 
 
-async def test_the_streamed_message_is_mapped_to_its_run(monkeypatch) -> None:
-    """Reactions land on the transcript, so that message has to resolve to the run."""
+async def test_the_streamed_message_is_mapped_without_a_run_id(monkeypatch) -> None:
+    """Reactions resolve through the thread's mapping, which holds the real run."""
     monkeypatch.setattr(projector, "start_slack_stream", AsyncMock(return_value="2.0"))
-    run_mapping = AsyncMock()
     message_mapping = AsyncMock()
-    monkeypatch.setattr(projector, "store_slack_run_mapping", run_mapping)
     monkeypatch.setattr(projector, "store_slack_message_run_mapping", message_mapping)
 
     assert await _stream().start() is True
 
-    assert message_mapping.await_args_list[0].args[3] == "2.0"
-    assert message_mapping.await_args_list[0].kwargs["run_id"] == "run-1"
-    assert run_mapping.await_args_list[-1].kwargs["thinking_message_ts"] == "2.0"
+    assert message_mapping.await_args is not None
+    assert message_mapping.await_args.args[3] == "2.0"
+    assert "run_id" not in message_mapping.await_args.kwargs
 
 
 async def test_a_channel_that_will_not_stream_is_not_fatal(monkeypatch) -> None:
@@ -178,26 +178,36 @@ async def test_a_channel_that_will_not_stream_is_not_fatal(monkeypatch) -> None:
     assert await _stream().start() is False
 
 
-async def test_closing_out_stops_a_transcript_left_open(monkeypatch) -> None:
-    monkeypatch.setattr(
-        projector,
-        "lookup_slack_run_message_mapping",
-        AsyncMock(return_value={"thinking_message_ts": "2.0"}),
-    )
+async def test_closing_out_stops_a_transcript_left_open() -> None:
+    client = AsyncMock()
+    client.store.get_item.return_value = {"value": {"message_ts": "2.0", "channel_id": "C1"}}
     stop = AsyncMock()
-    monkeypatch.setattr(projector, "stop_slack_stream", stop)
-
-    await projector.close_projection(AsyncMock(), channel_id="C1", run_id="run-1")
+    with patch.object(projector, "stop_slack_stream", stop):
+        await projector.close_transcript(client, thread_id="thread-1", run_key="prepare-1")
 
     stop.assert_awaited_once_with("C1", "2.0")
+    assert client.store.get_item.await_args.args[0] == ("slack_transcript", "thread-1")
 
 
-async def test_closing_out_a_run_with_no_transcript_does_nothing(monkeypatch) -> None:
-    monkeypatch.setattr(projector, "lookup_slack_run_message_mapping", AsyncMock(return_value=None))
+@pytest.mark.parametrize(
+    "record",
+    [
+        None,
+        {},
+        {"message_ts": "2.0"},
+        {"channel_id": "C1"},
+        {"message_ts": "2.0", "channel_id": "C1", "done": True},
+    ],
+    ids=["no record", "empty", "no channel", "no message", "already closed"],
+)
+async def test_closing_out_leaves_alone_what_it_cannot_or_need_not_stop(
+    record: dict[str, object] | None,
+) -> None:
+    client = AsyncMock()
+    client.store.get_item.return_value = {"value": record} if record is not None else None
     stop = AsyncMock()
-    monkeypatch.setattr(projector, "stop_slack_stream", stop)
-
-    await projector.close_projection(AsyncMock(), channel_id="C1", run_id="run-1")
+    with patch.object(projector, "stop_slack_stream", stop):
+        await projector.close_transcript(client, thread_id="thread-1", run_key="prepare-1")
 
     stop.assert_not_awaited()
 
@@ -234,7 +244,6 @@ async def test_no_message_is_left_over_slacks_text_cap(monkeypatch) -> None:
         projector, "start_slack_stream", AsyncMock(side_effect=lambda *a, **k: next(starts))
     )
     monkeypatch.setattr(projector, "stop_slack_stream", AsyncMock())
-    monkeypatch.setattr(projector, "store_slack_run_mapping", AsyncMock())
     monkeypatch.setattr(projector, "store_slack_message_run_mapping", AsyncMock())
     stream = _stream()
     stream.message_ts = "2.0"

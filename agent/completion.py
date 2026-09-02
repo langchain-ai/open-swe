@@ -22,7 +22,7 @@ from langgraph_sdk.client import LangGraphClient
 from agent.auth.github_app import get_github_app_installation_token
 from agent.source_context import SourceContext
 from agent.surfaces import surface_from_metadata
-from agent.surfaces.projector import close_projection
+from agent.surfaces.projector import close_transcript
 
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
@@ -218,7 +218,7 @@ def _prepare_run_id(payload: dict[str, Any]) -> str | None:
 
 
 async def _settle_surface_activity(
-    client: LangGraphClient, thread_id: str, metadata: dict[str, Any], run_id: str | None = None
+    client: LangGraphClient, thread_id: str, metadata: dict[str, Any], run_key: str | None = None
 ) -> None:
     """Close out a finished run on its surface, and idle the surface if it is done.
 
@@ -230,10 +230,9 @@ async def _settle_surface_activity(
     surface = surface_from_metadata(metadata)
     if not surface.reports_activity:
         return
-    location = SourceContext.from_metadata(metadata).slack_thread
-    if run_id and surface.projects_transcript and location is not None:
+    if run_key and surface.projects_transcript:
         with suppress(Exception):
-            await close_projection(client, channel_id=location.channel_id, run_id=run_id)
+            await close_transcript(client, thread_id=thread_id, run_key=run_key)
     try:
         for status in ("pending", "running"):
             if await client.runs.list(thread_id, status=status, limit=1):
@@ -259,7 +258,7 @@ async def _schedule_success_cost_refresh(
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
-    await _settle_surface_activity(client, thread_id, metadata, run_id)
+    await _settle_surface_activity(client, thread_id, metadata, _prepare_run_id(payload))
     prepare_run_id = _prepare_run_id(payload)
     if prepare_run_id is None:
         return {"status": "ignored", "reason": "missing prepare_run_id"}
@@ -329,7 +328,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     await _settle_failed_reviewer_check(thread_id, metadata)
-    await _settle_surface_activity(client, thread_id, metadata, run_id)
+    await _settle_surface_activity(client, thread_id, metadata, _prepare_run_id(payload))
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

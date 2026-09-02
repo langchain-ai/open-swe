@@ -678,6 +678,8 @@ async def slack_interactivity(
         if not channel_id or not thread_ts or not fingerprint:
             return {"status": "ignored", "reason": "Missing workflow approval context"}
 
+        if await common.is_code_channel(channel_id):
+            thread_ts = common.CODE_CHANNEL_SESSION_TS
         thread_id = await common.lookup_slack_thread_id(
             get_langgraph_client(), channel_id, thread_ts
         )
@@ -759,6 +761,8 @@ async def slack_interactivity(
         if not channel_id or not thread_ts:
             return {"status": "ignored", "reason": "Missing Slack action context"}
 
+        if await common.is_code_channel(channel_id):
+            thread_ts = common.CODE_CHANNEL_SESSION_TS
         thread_id = await common.lookup_slack_thread_id(
             get_langgraph_client(), channel_id, thread_ts
         )
@@ -830,6 +834,11 @@ async def slack_interactivity(
     if not channel_id or not thread_ts or not event_ts or not user_id:
         return {"status": "ignored", "reason": "Missing Slack action context"}
 
+    # A code channel is one session for the whole channel, so an action on a
+    # channel-level message belongs to that session rather than to a thread
+    # hanging off the message it was clicked on.
+    if await common.is_code_channel(channel_id):
+        thread_ts = common.CODE_CHANNEL_SESSION_TS
     thread_id = await common.lookup_slack_thread_id(get_langgraph_client(), channel_id, thread_ts)
     if not thread_id:
         return {"status": "ignored", "reason": "Slack thread is not associated"}

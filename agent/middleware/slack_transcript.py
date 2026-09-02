@@ -30,20 +30,18 @@ from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 
 from agent.middleware.message_content import content_to_text
-from agent.surfaces.projector import SlackTranscript
+from agent.surfaces.projector import (
+    SlackTranscript,
+    shows_its_own_effect,
+    transcript_namespace,
+)
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
-TRANSCRIPT_NAMESPACE = "slack_transcript"
-
 
 def _failed(result: Any) -> bool:
     return isinstance(result, ToolMessage) and getattr(result, "status", "") == "error"
-
-
-def transcript_namespace(thread_id: str) -> tuple[str, str]:
-    return (TRANSCRIPT_NAMESPACE, thread_id)
 
 
 class SlackTranscriptMiddleware(AgentMiddleware[Any, Any, Any]):
@@ -125,18 +123,33 @@ class SlackTranscriptMiddleware(AgentMiddleware[Any, Any, Any]):
             transcript.message_ts = message_ts
             streamed = record.get("streamed_chars")
             transcript.streamed_chars = streamed if isinstance(streamed, int) else 0
+            pending = record.get("pending")
+            transcript.pending = (
+                [chunk for chunk in pending if isinstance(chunk, dict)]
+                if isinstance(pending, list)
+                else []
+            )
         elif not await transcript.start():
             return None
         else:
             record["message_ts"] = transcript.message_ts
+            record["channel_id"] = transcript.channel_id
             await self._save(record)
         self._transcript = transcript
         return transcript, record
 
     async def _flush(self, transcript: SlackTranscript, record: dict[str, Any]) -> None:
+        """Push what is queued, and record what Slack has not taken yet.
+
+        `flush` holds chunks back on a rate limit rather than failing, so the
+        queue is part of the turn's durable state: without it a resumed run
+        would treat rate-limited words as delivered and never say them.
+        """
         await transcript.flush(force=True)
         record["message_ts"] = transcript.message_ts
         record["streamed_chars"] = transcript.streamed_chars
+        record["pending"] = transcript.pending
+        record["channel_id"] = transcript.channel_id
         await self._save(record)
 
     def _unsent(self, state: AgentState, record: dict[str, Any]) -> list[tuple[str, str]]:
@@ -208,7 +221,7 @@ class SlackTranscriptMiddleware(AgentMiddleware[Any, Any, Any]):
         # The message asking for this call is checkpointed by now, so saying it
         # here puts the agent's words ahead of the card they explain.
         await self._say_committed(state)
-        prepared = await self._ensure()
+        prepared = None if shows_its_own_effect(name) else await self._ensure()
         if prepared is not None:
             prepared[0].tool_started(call_id, name, call.get("args"))
             await self._flush(*prepared)
