@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   CircleNotchIcon,
+  DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
@@ -16,6 +17,7 @@ import {
 import { Kanban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
 import type {
   PullRequestSnapshot,
@@ -204,6 +206,15 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
+    status: "idle",
+  })
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    if (!desktop) return
+    void desktop.getUpdateState().then(setUpdateState)
+    return desktop.onUpdateState(setUpdateState)
+  }, [])
   const projectMode = prefs.organize === "project"
   const includeAutomations =
     prefs.filters.includeAutomations ||
@@ -800,6 +811,29 @@ export function AgentsSidebar({
       </TooltipProvider>
 
       <div className="p-2">
+        {updateState.status !== "idle" && (
+          <button
+            type="button"
+            title={
+              updateState.status === "ready" ? "Update" : "Downloading update…"
+            }
+            aria-label={
+              updateState.status === "ready" ? "Update" : "Downloading update"
+            }
+            disabled={updateState.status !== "ready"}
+            onClick={() => void window.openSweDesktop?.installUpdate()}
+            className="group mb-1 flex h-9 w-full items-center justify-end rounded-md px-2 text-primary hover:bg-sidebar-accent disabled:opacity-60"
+          >
+            <span className="mr-2 hidden text-xs font-medium group-hover:inline">
+              {updateState.status === "ready" ? "Update" : "Downloading…"}
+            </span>
+            {updateState.status === "downloading" ? (
+              <CircleNotchIcon className="size-5 animate-spin" />
+            ) : (
+              <DownloadSimpleIcon className="size-5" />
+            )}
+          </button>
+        )}
         <div className="min-w-0">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
