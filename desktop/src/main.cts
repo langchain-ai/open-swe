@@ -97,10 +97,7 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
-const localUpdateUrl = process.env.OPEN_SWE_DESKTOP_UPDATE_URL?.trim();
-let updateState = isDevelopment
-  ? { status: "ready", version: "local-test" }
-  : { status: "idle" };
+let updateState = { status: "idle" };
 
 function setUpdateState(status, version) {
   updateState = { status, ...(version ? { version } : {}) };
@@ -114,10 +111,6 @@ function configureAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
-  if (localUpdateUrl) {
-    autoUpdater.setFeedURL({ provider: "generic", url: localUpdateUrl });
-    setUpdateState("downloading", "local-test");
-  }
   autoUpdater.on("update-available", (info) =>
     setUpdateState("downloading", info.version),
   );
@@ -244,7 +237,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
-    if (updateState.status !== "ready" || !app.isPackaged) return false;
+    if (updateState.status !== "ready") return false;
     quitting = true;
     await Promise.all([
       closeAllTerminals(),
