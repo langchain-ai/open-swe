@@ -1,6 +1,12 @@
+/** @vitest-environment jsdom */
+
 import { describe, expect, it, vi } from "vitest"
 
-import { createNewThreadCommand, resolveAppCommands } from "./appCommands"
+import {
+  commandAcceptsKeyboardEvent,
+  createNewThreadCommand,
+  resolveAppCommands,
+} from "./appCommands"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "./appCommands"
@@ -17,6 +23,19 @@ describe("app commands", () => {
     expect(newThread.shortcuts).toEqual(["c", "mod+n", "mod+shift+o"])
     expect(newThread.desktopShortcuts).toBeUndefined()
     expect(newThread.desktopId).toBe("new-thread")
+  })
+
+  it("only accepts repeated keydowns for commands that opt in", () => {
+    const event = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      repeat: true,
+    })
+    const next = { ...command("next"), shortcuts: ["arrowdown"] }
+
+    expect(commandAcceptsKeyboardEvent(next, event)).toBe(false)
+    expect(
+      commandAcceptsKeyboardEvent({ ...next, allowRepeat: true }, event)
+    ).toBe(true)
   })
 
   it("lets the latest contextual registration replace a command", () => {

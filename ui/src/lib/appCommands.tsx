@@ -21,6 +21,7 @@ export interface AppCommand {
   label: string
   aliases?: ReadonlyArray<string>
   shortcuts?: ReadonlyArray<string>
+  allowRepeat?: boolean
   group: string
   run?: () => void | Promise<void>
   available?: boolean
@@ -54,6 +55,22 @@ interface AppCommandsContextValue {
 }
 
 const AppCommandsContext = createContext<AppCommandsContextValue | null>(null)
+
+export function commandAcceptsKeyboardEvent(
+  command: AppCommand,
+  event: KeyboardEvent,
+  desktop = false
+): boolean {
+  return Boolean(
+    command.run &&
+    (!event.repeat || command.allowRepeat) &&
+    command.shortcuts?.some(
+      (shortcut) =>
+        !(desktop && command.desktopShortcuts?.includes(shortcut)) &&
+        eventMatchesShortcut(event, shortcut)
+    )
+  )
+}
 
 export function resolveAppCommands(
   globalCommands: ReadonlyArray<AppCommand>,
@@ -197,16 +214,10 @@ export function AppCommandProvider({
   useEffect(() => {
     if (!enabled || paletteOpen || shortcutReferenceOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (shouldIgnoreHotkey(event)) return
+      if (shouldIgnoreHotkey(event, false, false)) return
       const desktop = Boolean(window.openSweDesktop)
-      const command = commandsRef.current.find(
-        (candidate) =>
-          candidate.run &&
-          candidate.shortcuts?.some(
-            (shortcut) =>
-              !(desktop && candidate.desktopShortcuts?.includes(shortcut)) &&
-              eventMatchesShortcut(event, shortcut)
-          )
+      const command = commandsRef.current.find((candidate) =>
+        commandAcceptsKeyboardEvent(candidate, event, desktop)
       )
       if (!command?.run) return
       event.preventDefault()
