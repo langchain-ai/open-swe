@@ -45,7 +45,6 @@ export function slackAppManifest(codeChannelsEnabled = false) {
     features,
     oauth_config: {
       redirect_urls: [
-        "https://smith.langchain.com/host-oauth-callback/<your-provider-id>",
         "http://localhost:2024/dashboard/api/slack/callback",
       ],
       scopes: {

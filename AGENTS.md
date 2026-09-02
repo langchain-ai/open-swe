@@ -14,7 +14,7 @@ Dependencies are managed with **uv**. Tests use pytest (`asyncio_mode = "auto"`)
 
 ```bash
 make install            # uv sync --extra dev (pytest, ruff, …)
-make dev                # uv run langgraph dev — serves all three graphs + the FastAPI app from langgraph.json
+make dev                # uv run langgraph dev — serves all five graphs + the FastAPI app from langgraph.json
 make run                # uvicorn agent.webapp:app --reload --port 8000 (FastAPI only, no LangGraph runtime)
 make test               # uv run pytest -vvv tests/
 make test TEST_FILE=tests/github/test_open_pull_request.py    # single test file
@@ -24,14 +24,15 @@ make format             # ruff format + ruff check --fix
 make typecheck          # basedpyright agent tests
 ```
 
-`langgraph.json` declares three graph entrypoints and the FastAPI app, all served together by `langgraph dev`:
+`langgraph.json` declares five graph entrypoints and the FastAPI app, all served together by `langgraph dev`:
 
 | Graph | Entrypoint | Purpose |
 |---|---|---|
-| `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
-| `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
-| `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
-| `scheduler` | `agent.scheduler:get_scheduler` | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
+| `agent` | `agent.graphs.agent:traced_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
+| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
+| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
+| `chat` | `agent.graphs.chat:traced_chat_agent` | Read-only "chat with this PR" agent for the review UI. No sandbox. |
+| `scheduler` | `agent.graphs.scheduler:get_scheduler` | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
 
 The FastAPI app is `agent.webapp:app`.
 

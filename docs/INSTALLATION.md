@@ -5,8 +5,8 @@ This guide walks you through setting up Open SWE end-to-end: local development, 
 
 Open SWE has two runnable pieces:
 
-- **The backend** — a LangGraph app (three graphs: `agent`, `reviewer`, `analyzer`) plus a FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API. Both are served together by `langgraph dev`.
-- **The dashboard** — a TanStack Start + Vite web app in `ui/` (package name `open-swe-dashboard`). It's a thin client over the FastAPI dashboard API (`/dashboard/api/*`): GitHub-login, per-user model/profile settings, team defaults, enabled-repo and review-style management, user mappings, and the Agents chat UI. It's optional for pure webhook-driven use, but recommended.
+- **The backend** — a LangGraph app (five graphs: `agent`, `reviewer`, `analyzer`, `chat`, `scheduler`) plus a FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API. Both are served together by `langgraph dev`.
+- **The dashboard** — a TanStack Start + Vite web app in `ui/` (package name `open-swe-dashboard`). It's a thin client over the FastAPI dashboard API (`/dashboard/api/*`): GitHub-login, per-user model/profile settings, team defaults, enabled-repo and review-style management, user mappings, and the Agents chat UI. It is also where users sign in with GitHub, which is how the deployment obtains the per-user tokens agent runs are resolved against — so it is part of the deployment, not an add-on.
 
 > **The steps are ordered to avoid forward references.** Each step only depends on things you've already completed.
 
@@ -46,25 +46,13 @@ Copy the HTTPS URL you set, or if you didn't pass `--url`, the one ngrok gives y
 
 Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creating-github-apps) to clone repos, push branches, and open PRs.
 
-### 3a. Choose your OAuth provider ID
-
-Before creating the app you need to decide on an **OAuth provider ID** — this is a short string you'll use in both GitHub and LangSmith to link the two. Pick something memorable, for example:
-
-```
-your-org-github-oauth
-```
-
-Write this down. You'll use it in the callback URL below and again in step 4 when configuring LangSmith.
-
-### 3b. Create the app
+### 3a. Create the app
 
 1. Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → [New GitHub App](https://github.com/settings/apps/new)**
 2. Fill in:
    - **App name**: `Open SWE` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
-   - **Callback URL**: GitHub Apps allow multiple callback URLs (one per line). Add **both**:
-     1. `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`). This is the **agent-runtime** OAuth callback, brokered by LangSmith (step 4b).
-     2. `http://localhost:2024/dashboard/api/auth/callback` — the **dashboard-login** OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. If you distribute the desktop app, add `https://<your-backend-url>/dashboard/api/auth/callback` as well. This is a separate, direct GitHub OAuth flow (not via LangSmith), so it needs its own callback URL.
+   - **Callback URL**: `http://localhost:2024/dashboard/api/auth/callback` — the dashboard OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. If you distribute the desktop app, add `https://<your-backend-url>/dashboard/api/auth/callback` as well. GitHub Apps allow multiple callback URLs, one per line.
    - **Request user authorization (OAuth) during installation**: ✅ Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` — use the ngrok URL from step 2
    - **Webhook secret**: generate one and save it — you'll need it later as `GITHUB_WEBHOOK_SECRET`:
@@ -93,7 +81,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
    - `Status` — optional; covers integrations that report via the legacy commit-status API
 5. Click **Create GitHub App**
 
-### 3c. Collect credentials
+### 3b. Collect credentials
 
 After creating the app:
 
@@ -102,9 +90,9 @@ After creating the app:
 3. **Client ID** — shown near the top of the app's settings page (starts with `Iv...`). Save this as `GITHUB_APP_CLIENT_ID`.
 4. **Client secret** — under **Client secrets** → **Generate a new client secret**. Save it as `GITHUB_APP_CLIENT_SECRET`.
 
-> `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` power the **dashboard login** flow (the direct GitHub OAuth in 3b's second callback URL). They are independent of the LangSmith OAuth provider in step 4b — the dashboard talks to GitHub directly, while the agent runtime resolves per-user tokens through LangSmith.
+> `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` are **required**, not optional. They drive the GitHub OAuth flow behind the callback URL above, which is how the dashboard obtains and stores each user's GitHub token. `resolve_github_token` reads that store on every run, so it is what lets Slack-, Linear-, and dashboard-triggered runs act as the person who triggered them. Without them the deployment can only ever act as the GitHub App bot.
 
-### 3d. Install the app on your repositories
+### 3c. Install the app on your repositories
 
 1. From your app's settings page, click **Install App** in the sidebar
 2. Select your org or personal account
@@ -138,24 +126,7 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 
 > **Note on per-graph tracing projects.** The graphs trace into separate projects by name — `open-swe-agent` (main agent) and `open-swe-review` (reviewer/analyzer). "View trace" links resolve the correct project ID from these names automatically (via the `LANGSMITH_API_KEY_PROD` client), so make sure projects with these names exist in your tenant. If a name can't be resolved, links fall back to `LANGSMITH_TRACING_PROJECT_ID_PROD`, so set it to whichever project you want links to point at by default.
 
-### 4b. Configure GitHub OAuth (optional but recommended)
-
-This is the **agent-runtime** OAuth provider: it lets each agent run authenticate with the triggering user's own GitHub account, brokered by LangSmith. (It is separate from the dashboard-login OAuth, which uses `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` directly — see step 3c.) Without it, all agent operations use the GitHub App's installation token (a shared bot identity).
-
-**What this affects:**
-- **With per-user OAuth**: PRs and commits show the triggering user's identity; each user's GitHub permissions are respected
-- **Without it (bot-token-only mode)**: all PRs and commits appear as the GitHub App bot; the app's installation-level permissions are used for everything
-
-To set up per-user OAuth:
-
-1. In LangSmith, go to **Settings → OAuth Providers → Add Provider**
-2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `your-org-github-oauth`)
-3. Enter the **Client ID** and **Client Secret** from your GitHub App (found on the GitHub App settings page under **OAuth credentials**)
-4. Enter the **Authorization URL** as `https://github.com/login/oauth/authorize` and the **Token URL** as `https://github.com/login/oauth/access_token`.
-5. Leave "Enable PKCE" unchecked.
-6. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
-
-### 4c. Sandbox snapshots
+### 4b. Sandbox snapshots
 
 LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
@@ -275,7 +246,7 @@ For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level
 
 > **Observability access**: when team LangSmith credentials are connected, every active member of an organization in `ALLOWED_GITHUB_ORGS` can use the read-only LangSmith trace tools. Only list organizations whose full active membership may access team-level trace data. This does not grant Datadog access.
 
-> **Required GitHub App installation and permission**: install the App in every organization listed in `ALLOWED_GITHUB_ORGS` and grant **Organization → Members: Read-only** (see step 3b). Membership checks resolve each organization's installation and call `GET /orgs/{org}/memberships/{username}`. Missing installations, unapproved permissions, and API errors fail closed. `GITHUB_APP_INSTALLATION_ID` remains the default installation for ordinary GitHub operations.
+> **Required GitHub App installation and permission**: install the App in every organization listed in `ALLOWED_GITHUB_ORGS` and grant **Organization → Members: Read-only** (see step 3a). Membership checks resolve each organization's installation and call `GET /orgs/{org}/memberships/{username}`. Missing installations, unapproved permissions, and API errors fail closed. `GITHUB_APP_INSTALLATION_ID` remains the default installation for ordinary GitHub operations.
 
 ### Linear (optional)
 
@@ -321,9 +292,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 **Create a Slack App:**
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
-2. Copy the manifest below, replacing the two placeholder URLs:
-   - Replace `<your-provider-id>` with the OAuth provider ID from step 3a
-   - Replace `<your-ngrok-url>` with the backend URL from step 2 (or your deployed LangGraph/FastAPI URL in production)
+2. Copy the manifest below, replacing `<your-ngrok-url>` with the backend URL from step 2 (or your deployed LangGraph/FastAPI URL in production)
 
 <details>
 <summary>Slack App Manifest</summary>
@@ -348,7 +317,6 @@ Users can also override the team/project mapping per-comment by including `repo:
     },
     "oauth_config": {
         "redirect_urls": [
-            "https://smith.langchain.com/host-oauth-callback/<your-provider-id>",
             "http://localhost:2024/dashboard/api/slack/callback"
         ],
         "scopes": {
@@ -460,15 +428,15 @@ FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks
 # Admins choose its transcription model in the dashboard Admin page.
 
 # === GitHub App (required) ===
-GITHUB_APP_ID=""                       # From step 3c
+GITHUB_APP_ID=""                       # From step 3b
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
 ...
 -----END RSA PRIVATE KEY-----
 "
-GITHUB_APP_INSTALLATION_ID=""          # From step 3d
+GITHUB_APP_INSTALLATION_ID=""          # From step 3c
 
 # === GitHub Webhook (required) ===
-GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
+GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3a
 
 # === Mention handles (optional) ===
 # Comma-separated handles this deployment answers to, across GitHub, Linear and Slack.
@@ -479,18 +447,11 @@ OPEN_SWE_MENTION_TAGS=""               # e.g. "@openswe-staging"
 # these repos.
 EXTRA_INTERNAL_BOT_LOGINS=""           # e.g. "openswe-staging[bot]"
 
-# === Dashboard GitHub OAuth (required for the dashboard) ===
-# Direct GitHub OAuth used by the dashboard login flow (not via LangSmith).
-GITHUB_APP_CLIENT_ID=""                # From step 3c
-GITHUB_APP_CLIENT_SECRET=""            # From step 3c
-
-# === Agent-runtime GitHub OAuth via LangSmith (optional) ===
-# Without these, all agent operations use the GitHub App's bot token.
-# With these, each agent run authenticates as the triggering user.
-GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
-# Secret used to mint short-lived service JWTs that ask LangSmith to resolve a
-# specific user's GitHub token. Needed for per-user token resolution in deployed mode.
-X_SERVICE_AUTH_JWT_SECRET=""
+# === Dashboard GitHub OAuth (required) ===
+# Drives dashboard login and the per-user GitHub tokens agent runs are resolved
+# against. Without these the deployment can only act as the GitHub App bot.
+GITHUB_APP_CLIENT_ID=""                # From step 3b
+GITHUB_APP_CLIENT_SECRET=""            # From step 3b
 
 # === Repo Allowlist (optional) ===
 # Comma-separated list of GitHub orgs allowed by the GitHub/Linear webhook filter.
@@ -528,7 +489,7 @@ DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"  # prod: your frontend origin(
 # Empty => nobody is an admin.
 CONFIGURED_ADMINS=""                   # e.g. "alice,bob@my-org.com"
 # Optional; lets a GitHub Actions workflow act as an admin over the API via OIDC
-# (see step 4c). Empty => off.
+# (see step 4b). Empty => off.
 ADMIN_OIDC_SUBJECTS=""                 # e.g. "acme/sandbox-images" or "repo:acme/sandbox-images:ref:refs/heads/main"
 ADMIN_OIDC_AUDIENCE=""                 # audience the workflow must request; defaults to "open-swe"
 # URL of the LangGraph server the FastAPI side calls to trigger/stream runs.
@@ -566,7 +527,7 @@ PUBLIC_REPO_ORG_GATE=""
 # === Sandbox (optional) ===
 # Provider: langsmith (default), modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
 SANDBOX_TYPE="langsmith"
-DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith unless set at runtime by an admin (see step 4c)
+DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith unless set at runtime by an admin (see step 4b)
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 128 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
@@ -610,7 +571,7 @@ Make sure ngrok is still running from step 2, then start the backend in a second
 make dev          # uv run langgraph dev --no-browser --port 2024
 ```
 
-`langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
+`langgraph dev` serves **all five graphs** (`agent`, `reviewer`, `analyzer`, `chat`, `scheduler`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
 
 | Endpoint | Purpose |
 |---|---|
@@ -621,15 +582,19 @@ make dev          # uv run langgraph dev --no-browser --port 2024
 | `POST /webhooks/slack/interactivity` | Slack Block Kit button interactions |
 | `GET /webhooks/slack` | Slack webhook verification |
 | `GET /dashboard/api/auth/login` | Dashboard GitHub OAuth login |
-| `GET /dashboard/api/auth/callback` | Dashboard GitHub OAuth callback (registered on the App in step 3b) |
+| `GET /dashboard/api/auth/callback` | Dashboard GitHub OAuth callback (registered on the App in step 3a) |
 | `GET /dashboard/api/*` | Dashboard API (profiles, team settings, repos, review styles, threads, …) |
 | `GET /health` | Health check |
 
 > `make run` (`uvicorn agent.webapp:app --port 8000`) serves the FastAPI app **without** the LangGraph runtime, on port 8000. The dashboard's Agents chat features call LangGraph, so for full local dev use `make dev` on `:2024`, not `make run`.
 
-## 8. Run the dashboard (optional)
+## 8. Run the dashboard
 
-The dashboard is the web app in `ui/`. It's a server-rendered TanStack Start app that calls the FastAPI dashboard API from step 7. Run it in a third terminal:
+The dashboard is the web app in `ui/`. It's a server-rendered TanStack Start app that calls the FastAPI dashboard API from step 7.
+
+You can skip it while smoke-testing a webhook, but not in a real deployment: signing in here is what stores a user's GitHub token, and `resolve_github_token` reads that store on every run. Without it the agent can only act as the GitHub App bot, and there is no way to manage user mappings, model defaults, enabled repos, review styles, or environments.
+
+Run it in a third terminal:
 
 ```bash
 pnpm install          # from the repo root: ui/ and desktop/ are one pnpm workspace
@@ -644,7 +609,7 @@ Because the browser only ever talks to `http://localhost:3000`, no **CORS** pref
 
 The `osw_session` cookie has to be set on the dashboard origin too: set `DASHBOARD_API_BASE_URL="http://localhost:3000"` and register `http://localhost:3000/dashboard/api/auth/callback` as a GitHub App callback URL. Keep it on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
 
-For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
+For the dashboard login to succeed, you need (from steps 3b / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 `pnpm run build`, `pnpm run typecheck` and `pnpm run test` run the same task across the workspace through Turborepo; scope one to a package with `pnpm --filter open-swe-dashboard run <script>`. `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) are not Turborepo tasks — they run once from the root over every JS and TS file in the repo, `ui/`, `desktop/` and `tests/e2e/` alike, so there is no per-package variant to scope to.
 
@@ -771,8 +736,8 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 
 ### Dashboard login fails or won't stay logged in
 
-- `500 GITHUB_APP_CLIENT_ID not configured` (or client secret): set `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` (step 3c) and `DASHBOARD_JWT_SECRET`.
-- OAuth `redirect_uri` mismatch: the GitHub App must list `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/callback` as a callback URL (step 3b). Locally that's `http://localhost:2024/dashboard/api/auth/callback`.
+- `500 GITHUB_APP_CLIENT_ID not configured` (or client secret): set `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` (step 3b) and `DASHBOARD_JWT_SECRET`.
+- OAuth `redirect_uri` mismatch: the GitHub App must list `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/callback` as a callback URL (step 3a). Locally that's `http://localhost:2024/dashboard/api/auth/callback`.
 - Login redirects but the session doesn't stick: this is almost always a cookie problem. Locally, keep `DASHBOARD_API_BASE_URL` on `http://` (so cookies are `SameSite=Lax`); in prod use `https://` for both API and frontend and add the frontend origin to `DASHBOARD_ALLOWED_ORIGINS`.
 - Login rejected with an org error: `ALLOWED_GITHUB_ORGS` gates dashboard login (and requires the App's Organization → Members: Read-only permission). See step 5.
 - Admin pages 403: add your GitHub login or email to `CONFIGURED_ADMINS`.
@@ -786,7 +751,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If sandbox creation fails with `No base snapshot configured`, build a snapshot (see step 4c) and either export its UUID as `DEFAULT_SANDBOX_SNAPSHOT_ID` or set it as the base snapshot on the admin **Sandbox** page
+- If sandbox creation fails with `No base snapshot configured`, build a snapshot (see step 4b) and either export its UUID as `DEFAULT_SANDBOX_SNAPSHOT_ID` or set it as the base snapshot on the admin **Sandbox** page
 - If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
 - If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 
