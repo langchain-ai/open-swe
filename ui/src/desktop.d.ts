@@ -104,7 +104,7 @@ export type DesktopUpdateState = {
   version?: string
 }
 
-interface DesktopTerminalBridge {
+export interface DesktopTerminalBridge {
   attach: (
     input: DesktopTerminalTarget & {
       cwd?: string
