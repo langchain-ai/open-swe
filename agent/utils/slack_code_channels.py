@@ -136,8 +136,8 @@ async def create_code_channel(
     *,
     name: str,
     session_id: str,
-    origin_channel_id: str,
-    origin_message_ts: str,
+    origin_channel_id: str = "",
+    origin_message_ts: str = "",
     team_id: str = "",
     is_private: bool = False,
 ) -> tuple[str | None, str | None]:
@@ -146,12 +146,12 @@ async def create_code_channel(
         return None, "invalid_name"
     if not session_id or len(session_id) > 64:
         return None, "invalid_session_id"
-    payload: dict[str, Any] = {
-        "name": name.strip(),
-        "session_id": session_id,
-        "origin_channel_id": origin_channel_id,
-        "origin_message_ts": origin_message_ts,
-    }
+    payload: dict[str, Any] = {"name": name.strip(), "session_id": session_id}
+    # The origin link is a pair or nothing: sending it empty is not the same as
+    # leaving it out, and Slack rejects the call as `invalid_origin_link`.
+    if origin_channel_id and origin_message_ts:
+        payload["origin_channel_id"] = origin_channel_id
+        payload["origin_message_ts"] = origin_message_ts
     if team_id:
         payload["team_id"] = team_id
     payload["is_private"] = is_private

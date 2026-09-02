@@ -131,6 +131,39 @@ async def test_create_code_channel_sets_visibility(
     assert call.await_args_list[0].args[1]["is_private"] is is_private
 
 
+@pytest.mark.parametrize(
+    ("origin_channel_id", "origin_message_ts", "sent"),
+    [
+        ("C-origin", "1.000", True),
+        ("C-origin", "", False),
+        ("", "1.000", False),
+        ("", "", False),
+    ],
+    ids=["a pair", "no message", "no channel", "neither"],
+)
+async def test_the_origin_link_is_left_out_unless_it_is_a_pair(
+    monkeypatch: pytest.MonkeyPatch,
+    origin_channel_id: str,
+    origin_message_ts: str,
+    sent: bool,
+) -> None:
+    """Slack rejects an empty origin link, which is not the same as no link."""
+    call = AsyncMock(return_value=({"channel": {"id": "C-code"}}, None))
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    channel_id, error = await slack_code_channels.create_code_channel(
+        name="Fix flaky tests",
+        session_id="thread-1",
+        origin_channel_id=origin_channel_id,
+        origin_message_ts=origin_message_ts,
+    )
+
+    assert (channel_id, error) == ("C-code", None)
+    payload = call.await_args_list[0].args[1]
+    assert ("origin_channel_id" in payload) is sent
+    assert ("origin_message_ts" in payload) is sent
+
+
 async def test_set_view_rejects_content_over_one_megabyte(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
