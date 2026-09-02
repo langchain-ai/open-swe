@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:10f02792924ab86d1d2129d7e0f47626033ece68a48ee60b466da785288b1a4f",
+  "pageVersion": "sha256:4781c95101ad4224563c62b37acf0b21427f54eaac16c2ad23eabb6235f665c7",
   "claims": [
     {
       "id": "claim_546378dd07a04b50822ce54a69069bb8",
@@ -156,15 +156,23 @@
     },
     {
       "id": "claim_4b6072a42f794538a01173c5870118b9",
-      "statement": "enforce_org_login_gate rejects dashboard login for users outside ALLOWED_GITHUB_ORGS by checking org membership with the GitHub App installation token, failing closed on any API error, and is disabled (fail-open) when the allowlist is empty.",
+      "statement": "enforce_org_login_gate treats a nonempty ALLOWED_GITHUB_ORGS allowlist as fail-closed: it allows only an active member of at least one listed org, checking membership with a GitHub App installation token and rejecting API/token/membership failures; when the allowlist is empty it intentionally fails open but logs once per process that any GitHub account may log in and all logged-in users can read surfaced threads.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/oauth.py#L158-L186",
-          "version": "repo-lines-v1:sha256:fc90fcb5a76e11b7106d8f57c76a637dae6894bbe419defcdfdab81ad7e9c305:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExMmY3OTdjNDE5YzFiNDRmMzI4NmNiMjc2YmEzNTZiODZlZTY1MTNhZDQ1ZjNiMGMyNTZhYWZhMDE5MGY4Y2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4NTBjMzNiOTZmMzMwMTlhYjQxMmQ1YTYwNWU4OWFjMmE2ODQ5OTdlYTRjNDgzNzEzZGFmMzc5YWFmMzFlYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDc0NDI3YzdlOWU3ZjkyMDFmZGM5NWRhNGM0NzAxZDFlNzE4NmI0NzlkZTY1ZDc3NTEwNWMwMWVmZjZkOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlhMDZiMjQwYjE4ZDA5N2ZmZWY2YTIzODQwYWIwZDc4NGE5ZDUyMmM1ZjZkOTg2M2E3MWY1Mzg2MWM0N2U5NDMifQ"
+          "resource": "repo://agent/dashboard/oauth.py#L159-L210",
+          "version": "repo-lines-v1:sha256:58836ffa285bb76ff6df57d3f6349e8c9b9da2881e7b2011af3f6df1d12e867b:eyJzZWxlY3RlZExpbmVDb3VudCI6NTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExMmY3OTdjNDE5YzFiNDRmMzI4NmNiMjc2YmEzNTZiODZlZTY1MTNhZDQ1ZjNiMGMyNTZhYWZhMDE5MGY4Y2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4NTBjMzNiOTZmMzMwMTlhYjQxMmQ1YTYwNWU4OWFjMmE2ODQ5OTdlYTRjNDgzNzEzZGFmMzc5YWFmMzFlYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDc0NDI3YzdlOWU3ZjkyMDFmZGM5NWRhNGM0NzAxZDFlNzE4NmI0NzlkZTY1ZDc3NTEwNWMwMWVmZjZkOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlhMDZiMjQwYjE4ZDA5N2ZmZWY2YTIzODQwYWIwZDc4NGE5ZDUyMmM1ZjZkOTg2M2E3MWY1Mzg2MWM0N2U5NDMifQ"
         },
         {
-          "resource": "repo://agent/dashboard/routes.py#L517-L519",
-          "version": "repo-lines-v1:sha256:9ff369b62b781ed2cf651bf82791d4801f7c730ad09fbe5f81ed2ef70f68db18:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZmM1NmQ4MWIzZmFlODBjZWU1NGUwNTVjNDNjMDRiYTA0OWEzZjM1NTI0NWJlYjRkN2VhYmUwOWRkNWI4OWQ3NCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWVlMjJhMjFjNmQzNTliNjhlMDNjZWYxODljZDZlNmQzMTFiZjZlNTg2ZDRlOGRkYWMyYjc0ODJjODJlZTYyNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTAyYTgxYWY4MzE0NjdmMDk1OWNlMTVkOWQ3NzMxMzUzY2U1MmNmZmVmZWU4NWM2YzMwODljM2M2Njg5ZjQ2NyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2IyZjZmYzUxZWQ4NmYxMGZjMTI2YzRmMmUyOGZmYmNkYzE2NDU2ODViNDI2ZjcyYmVkNjhiZWM5NTcwN2E3YiJ9"
+          "resource": "repo://agent/dashboard/routes.py#L492-L544",
+          "version": "repo-lines-v1:sha256:286b531466655b5f9dddecb966d1e5497c74d1a5aad257f11a625c5f7841396d:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5ODIyMjFiMGU1MGU1OTMyM2VhNDY1ZTI3NzZiZjQ2OTkwMjZkMTIxZmI1OGFlZGNjYjJiNjAxMzJlYzk5ODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyMDg1MzI5MTBjZmNlZmU1ODcwM2Q0MzQ0NWE5YzIwMmIxMjQ4NzcyZjE2ZWY1YTE2MzBlNjJmMjVkZjAyNzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjczMDMyNWY5ODBiNGFiZTBhNWJmZGViMmQzZWI5MzQ4NzZkM2EwNDMzMjU2NDQ0NzJjMTM2Y2NhMDJiOWE4MGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUyMDAyZTIxMmQwNTVmNTdlYjFlZGJkZTE1ODVkODM0NGJiNTdkNjY0NWI1YmIzZmVhMGJjYjBmZjcxNzMyMTcifQ"
+        },
+        {
+          "resource": "repo://agent/utils/github_org_membership.py#L26-L89",
+          "version": "repo-lines-v1:sha256:fe4087d8a694ea0d6f97770d8d68127ec186da7748600c3d5c94244074b39e90:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5NDFiZmY5ZmQ0NjQyNjM1OTI2ODlmZTk4NWUwMzljYjFkOTllY2YzMjg1NGIxM2IwM2VjOTFjOGE5NDhlMWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjljM2UwNmJkZDgxM2M0Mzc1OTNlNzMyYzRhNGQ5YjlmOTlmZDEzNWU2NDA0ZmE5MTllYzhmNGIxMDQzZGU1ODEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_org_login_gate.py#L23-L128",
+          "version": "repo-lines-v1:sha256:fd54d2020b5cf3b34f9cc49414cfeae1492901280fa0fd34ab72bdcbe85dbcbf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiZDk5NDJkZWI3ZGJhYmMxMTRiMWM0OGQwMmRhNDYzODZlOWFjYTUxNWE1MmZiN2IzYzQxMmRjNjI3OTIxYjA4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MmRhNmI3MWI3YWRmOTIzNmQ4NDU3YmMyM2UwNGUyMzM3OTJiZjBkM2VmNDI3ODk2ODY3OTFhMDJkZWRkN2FkIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmMTVjZTI4ZmI2YzQ1N2ZkMzA1YzY1NzRiOGJkYzY2OWUxZjM0ZjllMTE5NDEwMWQ2M2U4ZGFjYzMzMjFkYzc5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
         }
       ]
     },
@@ -373,10 +381,56 @@
           "version": "repo-lines-v1:sha256:88ab6908a750d3fe4138c59b9aa9303d5552e4a3b3c1841b15b9a85c9aed0f5b:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjQ4YjI1OTllMWJiMmUzZmQ1MjkxZDYyMWVmMWNmZjAwZDAyZTMyZjQ4ODkwMDE4NDhiMDU0ZDZkYWUyOTJhYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzY4ZjRlOGFiYzA5MmM2NzMzZWJhMTQ3NGZjODFjMjlmZWE1NjJhMzlkZTYyOGYwMWYxYzI3ZjFmNzk4Yjg0NyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmY1MTA0M2ZkYjRmMGVjNDFhNDliNWQ4MDc4NWQ3NzZiM2QzMDdjZjY0ZTFkOWZmODE2MDdlMGEzMTMwYzQyZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmQ3NWQ5YTQwOGMwZjE1ZTA4YmU4MzUzY2JhYmFiOWNiYzA2YzY4NWQwOTU3NDBlNTViNmNkODdhMTk1MTljMSJ9"
         }
       ]
+    },
+    {
+      "id": "claim_6d04b663af33413489a30bdd48e4635d",
+      "statement": "Dashboard origin enforcement has an explicit local-development fail-open default: require_same_origin does nothing if no DASHBOARD_BASE_URL or DASHBOARD_ALLOWED_ORIGINS origin is configured; otherwise unsafe cookie-authenticated requests need an allowed Origin/Referer, while create_app enables credentialed CORS only for configured origins and rejects a wildcard origin.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L38-L64",
+          "version": "repo-lines-v1:sha256:5c89840205d5e1ad6f74e52d173ea3eada05b30a1c76cf3151a9924efa558f36:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L388-L425",
+          "version": "repo-lines-v1:sha256:5f9549985697afe54da821ef6dbeb870ef418e6494c07fc3fd32c0ed9af2d9f7:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyYTA5ZWNkNjYzNjY4NGQ4N2U0ZGViNTEyYTc1MTgzZGYxMjg2MjdhMjdjNDE3MmNjYzExNzliZDI3NTNhZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3YzJlY2JiMjA2ZmY2NjQzMWYzNTk3Yzk4NGFjMzJlYjk4NTk0ZmVlNGY5ZjZhNWI4YmMwOGRmNGUxMTllZGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFjNjA5MjRlYzUxMmQ3NTJiOWE3Y2RiNTIwZTNjNmZkNWQ5MzEzNTFiZGFhYjJhZWNiYWJhNDM2NDRhNjZmNWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4d046de408424db195703778195217c1",
+      "statement": "Dashboard session cookies are HttpOnly; HTTPS DASHBOARD_API_BASE_URL produces Secure, SameSite=None session cookies for cross-origin dashboard use, while local HTTP uses non-secure SameSite=Lax, and the OAuth state cookie is HttpOnly, SameSite=Lax, auth-path scoped, and limited to the state TTL.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/oauth.py#L28-L35",
+          "version": "repo-lines-v1:sha256:7c189c7bde85d47ba925342d114b32145cb62617396d8da2528905acd6faa105:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTJiMjVhOTc2YzEwYmUwMjUwZDQyNDdlZTU4MDEyMjhjYmFjMmI1YjhlZDE2YWZlOWRhYzhmZDhlMTkwZWQyZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiN2U3ZjkwODBiNTBlMzc2YWQ1NzNhNjViODY4NGJiNDdlMmExNjhiZTczODI1NzhjMTIyYzAyM2U0NDk3ZGYxZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjMWM0NjJlMmEzOWQ3NDc1OWY1ZTFiMTI2Zjc2ODNhMmI3MzAxMThlMThmNTEyMmIwOGNlZGVlYjY1MGUyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjE5OWYzNWE0YTRlYjQ1OWU0MjFkNzY0NWU5ZTkxZGZmYTk3ZWUwMzU5ODcyNTg0OGZkZTg1NmMyNGM0MmYxNCJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L363-L410",
+          "version": "repo-lines-v1:sha256:ec5873f8d2da6712b7d0cf11c9679bf06eeb62bd0ef0f3e52a1ce1c7b2619050:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5ZDg2YjBjZDAzM2JiOThkMDdmNmRjMDRmYjg5OGIyZTAzNGY5ZjA2NjhlYTBiNmY5NThkMDkyMDhkZDM0NzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlmY2ZkMDU4YzNjOWI5YTJlMzEyZmIxN2FiNDMwODZmNDM4N2M1MmNmNGU1NGIwN2VlYTU5ZTY3MThmYTVlNjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiYzcyNzRjODBmNzAzNjVhN2JkMDNjOGM1YzkwZmEzMGI2YjNjYWIwZmEwMWZjNmRmOTdjZDJlNjQxNWFjZDgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4cecaedc9caf450da26973e07cf72b90",
+      "statement": "Focused dashboard tests verify redirect allowlisting and state/PKCE protections, while organization-gate tests cover configured membership decisions, multi-org allowlisting, blank or unset fail-open behavior, and the once-per-process warning.",
+      "evidence": [
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_oauth_redirect.py#L14-L60",
+          "version": "repo-lines-v1:sha256:05ae0f10fd6c1d72f9fc6e7b1783406ee4d5c6398a91f7b66da2bc4ec805ae15:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJmZTlkMmQ5NWI4YjQwYWI5NGI5MmY2ZWFjMTk0YzJkMDI0ODkyNjBmNjE0OGRiMWM5ZTM2NjA0MTY1YmY3ZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkZTRmYTVkMWE5MzNlNzJmYmUyMzEwMTFiODYzYTQ2NTk3MDUzOTAxODA0YjQwMmU1ZTAxYWEyMGE5ZDBmMGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU2ZDUzNmMxMDQ4NTlmMmYxZjYzNjIxY2JkOGZiZmU1YWViM2E5YWY0ZjRhMjFlNTJiNzI4ODViYzBkMDg0ZDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZhNmM0MDMwMTIxYjcyMmI0MzlmNDY3OWU0ODk5NmVkMTQ3NmE5MDM0NjE2OTA3YzFiNDU4NzFkYjUwOTA3NGIifQ"
+        },
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_oauth_redirect.py#L230-L383",
+          "version": "repo-lines-v1:sha256:27a760f0f667d80d041b328f56b0b7670b124d02a295b760beece1f27246db1c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTU0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJmNDJjNTc5MjI0OGQ2NDllYzIzZjc2YmRjMjhkZjk3NzliZjNjMWFmMjA4YzAyMWJhYzgzZjcyMWM0NDJjNDdhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzM2I4N2U5ZjQ0YzYwODdhYzIyOTg5Zjc0ZWJhOTlhZGE2NzAzZWZkMTFiNGExNjQ4NTk0OTE0YWIwN2Y5MGE2IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4Y2M0YTdkMWNjNzk2YWJhM2U0NjcyMzMyN2Y1MTdlOWY4MTE5ODJkMjUwZjA3MDI5ODZlNGI1NzY0YWQ5NTg5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MjJlNTVjYWFjOTM1NDEzOWZjM2E4NGIwOGQ2OTg4NDE2MTQ5MWMyOTgzM2VjZjVkMzY1ZDI3ZDdhMjM3ZGM2In0"
+        },
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_org_login_gate.py#L23-L128",
+          "version": "repo-lines-v1:sha256:fd54d2020b5cf3b34f9cc49414cfeae1492901280fa0fd34ab72bdcbe85dbcbf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiZDk5NDJkZWI3ZGJhYmMxMTRiMWM0OGQwMmRhNDYzODZlOWFjYTUxNWE1MmZiN2IzYzQxMmRjNjI3OTIxYjA4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MmRhNmI3MWI3YWRmOTIzNmQ4NDU3YmMyM2UwNGUyMzM3OTJiZjBkM2VmNDI3ODk2ODY3OTFhMDJkZWRkN2FkIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmMTVjZTI4ZmI2YzQ1N2ZkMzA1YzY1NzRiOGJkYzY2OWUxZjM0ZjllMTE5NDEwMWQ2M2U4ZGFjYzMzMjFkYzc5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-27T06:27:22.313Z"
+    "at": "2026-09-02T08:15:43.727Z"
   }
 }
