@@ -492,46 +492,78 @@ def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
     return False
 
 
-async def _resolve_thread_id(locator: str, actor: _Actor) -> str | dict[str, Any]:
-    if thread_id := dashboard_thread_id(locator):
-        return thread_id
-    pr_ref = parse_github_pr_url(locator)
-    if pr_ref is None:
-        return _failure("locator must be a thread ID, Open SWE thread URL, or GitHub PR URL")
+async def search_threads(
+    query: str,
+    all_users: bool = False,
+    limit: int = 25,
+    offset: int = 0,
+    scope: ThreadScope = "all",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
+) -> dict[str, Any]:
+    """Search Open SWE threads by URL, ID, PR, title, repository, or branch."""
+    actor = await _actor(state)
+    if actor is None:
+        return _failure("No verified triggering user is available")
+    query = query.strip()
+    if not query:
+        return _failure("query is required")
+    if all_users and not actor.admin:
+        return _failure("Only workspace admins can search other users' threads")
+    if scope not in {"all", "interactive", "automation"}:
+        return _failure("scope must be all, interactive, or automation")
+
+    thread_id = dashboard_thread_id(query)
+    if thread_id:
+        try:
+            summary = await get_dashboard_thread(
+                thread_id,
+                actor.login,
+                email=actor.email,
+                mark_viewed=False,
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404 or "/" in query:
+                return _http_failure(exc)
+        except Exception:
+            logger.exception("Could not search for thread %s", thread_id)
+            return _failure("Could not search threads")
+        else:
+            return {
+                "success": True,
+                "items": [_list_item(summary)],
+                "limit": 1,
+                "offset": 0,
+                "has_more": False,
+            }
+
+    pr_ref = parse_github_pr_url(query)
+    normalized_query = pr_ref.url if pr_ref else query
     try:
         page = await list_dashboard_threads_page(
             actor.login,
             email=actor.email,
-            limit=100,
-            offset=0,
-            include_all=actor.admin,
-            query=pr_ref.url,
+            limit=limit,
+            offset=offset,
+            include_all=all_users,
+            query=normalized_query,
+            scope=scope,
             surfaced_only=True,
         )
     except HTTPException as exc:
         return _http_failure(exc)
     except Exception:
-        logger.exception("Could not resolve thread from pull request %s", pr_ref.url)
-        return _failure("Could not resolve thread from GitHub PR URL")
-    matches = [
-        item
-        for item in page.get("items", [])
-        if isinstance(item, Mapping) and _summary_matches_pr(item, pr_ref.url)
-    ]
-    if not matches:
-        return _failure(f"No Open SWE thread found for {pr_ref.url}")
-    if len(matches) > 1 or page.get("hasMore") is True:
-        return {
-            **_failure(f"Multiple Open SWE threads found for {pr_ref.url}"),
-            "candidates": [_list_item(item) for item in matches[:10]],
-            "candidates_truncated": len(matches) > 10 or page.get("hasMore") is True,
-        }
-    thread_id = matches[0].get("id")
-    return (
-        thread_id
-        if isinstance(thread_id, str) and thread_id
-        else _failure("Matching Open SWE thread has no thread ID")
-    )
+        logger.exception("Could not search threads")
+        return _failure("Could not search threads")
+    items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
+    if pr_ref:
+        items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
+    return {
+        "success": True,
+        "items": [_list_item(item) for item in items],
+        "limit": page.get("limit"),
+        "offset": page.get("offset"),
+        "has_more": page.get("hasMore", False),
+    }
 
 
 def _available_actions(
@@ -568,15 +600,14 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Inspect an Open SWE thread identified by ID, dashboard URL, or GitHub PR URL."""
+    """Inspect an Open SWE thread from its exact thread ID or dashboard URL."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
     locator = thread_id.strip()
-    resolved = await _resolve_thread_id(locator, actor)
-    if isinstance(resolved, dict):
-        return resolved
-    thread_id = resolved
+    thread_id = dashboard_thread_id(locator) or ""
+    if not thread_id:
+        return _failure("thread_id must be an exact thread ID or Open SWE dashboard URL")
     try:
         summary = await get_dashboard_thread(
             thread_id,

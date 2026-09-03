@@ -346,8 +346,25 @@ async def test_get_thread_accepts_dashboard_url(monkeypatch: pytest.MonkeyPatch)
     client.threads.get_state.assert_awaited_once_with("thread-1")
 
 
-async def test_get_thread_resolves_github_pr_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _DetailClient()
+async def test_search_threads_resolves_exact_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    get_dashboard_thread = AsyncMock(
+        return_value={"id": "thread-1", "title": "Fix race", "messages": []}
+    )
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+
+    result = await threads_tool.search_threads("https://dev.open-swe.langchain.dev/agents/thread-1")
+
+    assert result["items"][0]["id"] == "thread-1"
+    get_dashboard_thread.assert_awaited_once_with(
+        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
+    )
+
+
+async def test_search_threads_normalizes_and_filters_github_pr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     page = AsyncMock(
         return_value={
@@ -356,71 +373,76 @@ async def test_get_thread_resolves_github_pr_url(monkeypatch: pytest.MonkeyPatch
                     "id": "thread-1",
                     "title": "Fix race",
                     "pr": {"url": "https://github.com/Acme/Repo/pull/42"},
-                }
+                },
+                {
+                    "id": "thread-2",
+                    "title": "Other",
+                    "pr": {"url": "https://github.com/acme/repo/pull/420"},
+                },
             ],
+            "limit": 25,
+            "offset": 0,
             "hasMore": False,
         }
     )
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
-    monkeypatch.setattr(
-        threads_tool,
-        "get_dashboard_thread",
-        AsyncMock(return_value={"id": "thread-1", "status": "finished"}),
+
+    result = await threads_tool.search_threads(
+        "https://github.com/acme/repo/pull/42/files?diff=split"
     )
-    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
-    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
-    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
-    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
 
-    result = await threads_tool.get_thread("https://github.com/acme/repo/pull/42/files?diff=split")
-
-    assert result["success"] is True
-    assert result["thread"]["id"] == "thread-1"
+    assert [item["id"] for item in result["items"]] == ["thread-1"]
     page.assert_awaited_once_with(
         "octocat",
         email="octocat@example.com",
-        limit=100,
+        limit=25,
         offset=0,
         include_all=False,
         query="https://github.com/acme/repo/pull/42",
+        scope="all",
         surfaced_only=True,
     )
 
 
-async def test_get_thread_reports_ambiguous_github_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_search_threads_uses_general_query_and_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
-    monkeypatch.setattr(
-        threads_tool,
-        "list_dashboard_threads_page",
-        AsyncMock(
-            return_value={
-                "items": [
-                    {
-                        "id": "thread-1",
-                        "messages": [],
-                        "pr": {"url": "https://github.com/acme/repo/pull/42"},
-                    },
-                    {
-                        "id": "thread-2",
-                        "messages": [],
-                        "pullRequests": [{"url": "https://github.com/acme/repo/pull/42"}],
-                    },
-                ],
-                "hasMore": False,
-            }
-        ),
+    page = AsyncMock(
+        return_value={
+            "items": [{"id": "thread-2", "title": "Payments bug", "messages": []}],
+            "limit": 10,
+            "offset": 20,
+            "hasMore": True,
+        }
     )
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.search_threads(
+        "payments", all_users=True, limit=10, offset=20, scope="interactive"
+    )
+
+    assert result["items"][0]["id"] == "thread-2"
+    assert result["has_more"] is True
+    assert page.await_args.kwargs["include_all"] is True
+    assert page.await_args.kwargs["query"] == "payments"
+    assert page.await_args.kwargs["scope"] == "interactive"
+
+
+async def test_get_thread_rejects_pr_locator_before_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get_dashboard_thread = AsyncMock()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
 
     result = await threads_tool.get_thread("https://github.com/acme/repo/pull/42")
 
-    assert result["success"] is False
-    assert result["error"] == (
-        "Multiple Open SWE threads found for https://github.com/acme/repo/pull/42"
-    )
-    assert [candidate["id"] for candidate in result["candidates"]] == [
-        "thread-1",
-        "thread-2",
-    ]
+    assert result == {
+        "success": False,
+        "error": "thread_id must be an exact thread ID or Open SWE dashboard URL",
+    }
+    get_dashboard_thread.assert_not_awaited()
 
 
 async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
@@ -435,7 +457,7 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
 
     assert result == {
         "success": False,
-        "error": "locator must be a thread ID, Open SWE thread URL, or GitHub PR URL",
+        "error": "thread_id must be an exact thread ID or Open SWE dashboard URL",
     }
     get_dashboard_thread.assert_not_awaited()
 
