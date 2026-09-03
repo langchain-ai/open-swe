@@ -43,9 +43,14 @@ export function RunTargetSelector({
   const Icon = value === "local" ? Laptop : Cloud
   return (
     <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
+      <MenuTrigger
+        aria-label={value === "local" ? "This Mac" : "Cloud"}
+        className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80"
+      >
         <Icon className="size-3.5 shrink-0" />
-        <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+        <span className="@max-[760px]:hidden">
+          {value === "local" ? "This Mac" : "Cloud"}
+        </span>
         <ComposerControlChevron />
       </MenuTrigger>
       <MenuPopup align="start" className="w-44" sideOffset={7}>
@@ -177,9 +182,12 @@ export function LocalWorkspaceSelector({
     )
   return (
     <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
+      <MenuTrigger
+        aria-label={label}
+        className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80"
+      >
         <Icon className="size-3.5 shrink-0" />
-        <span>{label}</span>
+        <span className="@max-[760px]:hidden">{label}</span>
         <ComposerControlChevron />
       </MenuTrigger>
       <MenuPopup align="start" className="w-52" sideOffset={7}>
