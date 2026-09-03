@@ -112,7 +112,7 @@ export type DesktopTerminalMetadataEvent =
   | (DesktopTerminalTarget & { type: "remove" })
 
 export type DesktopUpdateState = {
-  status: "idle" | "downloading" | "ready"
+  status: "idle" | "downloading" | "ready" | "installing"
   version?: string
 }
 

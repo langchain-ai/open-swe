@@ -106,9 +106,16 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
-let updateState = { status: "idle" };
+type DesktopUpdateState = {
+  status: "idle" | "downloading" | "ready" | "installing";
+  version?: string;
+};
+let updateState: DesktopUpdateState = { status: "idle" };
 
-function setUpdateState(status, version) {
+function setUpdateState(
+  status: DesktopUpdateState["status"],
+  version?: string,
+) {
   updateState = { status, ...(version ? { version } : {}) };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:update-state", updateState);
@@ -367,15 +374,24 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
+    if (updateState.status === "installing") return true;
     if (updateState.status !== "ready") return false;
+    const version = updateState.version;
+    setUpdateState("installing", version);
     quitting = true;
-    await Promise.all([
-      closeAllTerminals(),
-      backendSupervisor?.close(),
-      openAiOAuth?.close(),
-    ]);
-    autoUpdater.quitAndInstall(false, true);
-    return true;
+    try {
+      await Promise.all([
+        closeAllTerminals(),
+        backendSupervisor?.close(),
+        openAiOAuth?.close(),
+      ]);
+      autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (error) {
+      quitting = false;
+      setUpdateState("ready", version);
+      throw error;
+    }
   });
 
   ipcMain.handle("desktop:projects", (event) => {
