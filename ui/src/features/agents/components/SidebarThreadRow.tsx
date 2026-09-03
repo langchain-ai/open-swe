@@ -438,7 +438,7 @@ export function SidebarThreadRow({
                   target="_blank"
                   rel="noreferrer"
                   closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+                  className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                 >
                   <TreeStructureIcon className="size-3.5" />
                   Open trace
@@ -448,7 +448,7 @@ export function SidebarThreadRow({
                 <ContextMenu.LinkItem
                   href={thread.sourceAppUrl ?? thread.sourceUrl}
                   closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+                  className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                 >
                   <IoLogoSlack className="size-3.5" />
                   Open in Slack

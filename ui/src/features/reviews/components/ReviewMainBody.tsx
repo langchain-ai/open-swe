@@ -1741,21 +1741,23 @@ const FileDiffCard = memo(function FileDiffCard({
             {findings.length}
           </span>
         )}
-        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={viewed}
+          onClick={() => onToggleViewed(file.path)}
+          className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"
+        >
           Mark as viewed
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={viewed}
-            onClick={() => onToggleViewed(file.path)}
+          <span
             className={cn(
               "flex size-4 items-center justify-center rounded border border-border",
               viewed && "bg-foreground text-background"
             )}
           >
             {viewed && <CheckIcon className="size-3" />}
-          </button>
-        </label>
+          </span>
+        </button>
       </div>
       {expanded &&
         (file.unrenderable ? (
