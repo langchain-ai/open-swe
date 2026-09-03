@@ -1,6 +1,6 @@
 """Tool: ``add_finding``. Records one review finding on the reviewer thread."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from langgraph.prebuilt import InjectedState
 
@@ -204,12 +204,12 @@ async def _resolve_diff_context(
 
 
 def _cast_severity(value: str) -> Severity:
-    return value  # type: ignore[return-value]
+    return cast(Severity, value)
 
 
 def _cast_confidence(value: str) -> Confidence:
-    return value  # type: ignore[return-value]
+    return cast(Confidence, value)
 
 
 def _cast_side(value: str) -> DiffSide:
-    return value  # type: ignore[return-value]
+    return cast(DiffSide, value)

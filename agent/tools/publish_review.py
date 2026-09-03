@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
@@ -181,7 +181,7 @@ async def publish_review(
 
 
 def _cast_severity(value: str) -> Severity:
-    return value  # type: ignore[return-value]
+    return cast(Severity, value)
 
 
 async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:

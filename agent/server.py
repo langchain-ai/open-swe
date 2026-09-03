@@ -421,7 +421,7 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": [
+        "middleware": [  # ty: ignore[invalid-argument-type]
             *([dynamic_tools] if dynamic_tools else []),
             ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
             *_subagent_model_middleware(),

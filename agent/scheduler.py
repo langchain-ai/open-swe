@@ -56,7 +56,7 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
 
 
 def get_scheduler(config: RunnableConfig | None = None):
-    builder = StateGraph(SchedulerState)
+    builder = StateGraph(SchedulerState)  # ty: ignore[invalid-argument-type]
     builder.add_node("launch", _launch)
     builder.add_edge(START, "launch")
     builder.add_edge("launch", END)

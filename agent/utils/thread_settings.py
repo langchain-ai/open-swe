@@ -59,8 +59,7 @@ async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
         thread = await client.threads.get(thread_id=thread_id)
         metadata = thread.get("metadata") or {}
         stored = metadata.get(THREAD_SETTINGS_KEY)
-        settings: ThreadSettings = dict(stored) if isinstance(stored, dict) else {}  # type: ignore[assignment]
-        return settings
+        return cast(ThreadSettings, dict(stored)) if isinstance(stored, dict) else {}
 
     try:
         return await ttl_cache.cached(_cache_key(thread_id), _CACHE_TTL_SECONDS, _load)
