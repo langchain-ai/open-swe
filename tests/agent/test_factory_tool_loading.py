@@ -19,7 +19,7 @@ _START_TIMEOUT_SECONDS = 2.0
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
+    def with_config(self, config: RunnableConfig) -> _DummyAgent:
         return self
 
 

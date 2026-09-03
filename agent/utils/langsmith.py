@@ -186,7 +186,7 @@ async def get_langsmith_thread_cost(
         return None
     try:
         total_cost = float(raw_cost)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
     target_end_time = max(target_times)

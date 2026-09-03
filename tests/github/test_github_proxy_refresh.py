@@ -19,7 +19,7 @@ from agent.github.proxy import (
 
 
 @pytest.fixture(autouse=True)
-def _clear_state() -> Generator[None, None, None]:
+def _clear_state() -> Generator[None]:
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
     github_proxy._PROXY_BASE_CONFIGS.clear()
     yield

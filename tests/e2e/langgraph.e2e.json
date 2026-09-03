@@ -1,6 +1,6 @@
 {
   "$schema": "https://langgra.ph/schema.json",
-  "python_version": "3.12",
+  "python_version": "3.14",
   "dependencies": ["."],
   "graphs": {
     "agent": "./tests/e2e/agent_entrypoint.py:traced_agent"

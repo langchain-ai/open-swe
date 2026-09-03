@@ -165,7 +165,7 @@ class _MockHttpxClient:
         self.posts: list[dict[str, Any]] = []
         self.gets: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_MockHttpxClient":
+    async def __aenter__(self) -> _MockHttpxClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:

@@ -64,7 +64,7 @@ def _is_expired(expires_at: Any, *, now: datetime | None = None) -> bool:
     if isinstance(expires_at, int | float):
         try:
             parsed = datetime.fromtimestamp(float(expires_at), tz=UTC)
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             return False
     elif isinstance(expires_at, str):
         raw = expires_at.strip()

@@ -360,7 +360,7 @@ class _FakeAsyncClient:
     def __init__(self, response) -> None:
         self._response = response
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, *_args) -> None:
