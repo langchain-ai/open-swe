@@ -20,7 +20,6 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -286,10 +285,6 @@ export function AgentThreadView({
             </Alert>
           </div>
         )}
-        <WorkflowApprovalCard
-          threadId={thread.id}
-          pollWhileActive={isStreaming}
-        />
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           {hasConversation ? (
             <Messages
@@ -304,6 +299,7 @@ export function AgentThreadView({
               streamIsLoading={stream.isLoading}
               isThinking={isThinking}
               settingUpSandbox={settingUpSandbox}
+              pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
             />
           ) : isHydrating ? (
