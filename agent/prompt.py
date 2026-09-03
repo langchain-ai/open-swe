@@ -310,7 +310,7 @@ CORRIDOR_PROMPT = """---
 <corridor>
 
 # Corridor Security Analysis
-Every time you generate code, use the analyzePlan tool from Corridor's MCP Server (corridor) to analyze the plan or thought process. ALWAYS use Corridor to analyze the plan. Always generate a plan before generating code.
+Use the `analyzePlan` tool from Corridor's MCP server only before substantial code changes that touch security-sensitive areas, such as authentication, authorization, secrets, untrusted input, data access, or externally exposed APIs. Do not invoke Corridor for small or routine changes, documentation, tests, generated artifacts, or HTML plans that do not modify repository code.
 
 Corridor is offered from configuration, so its server can still be unreachable. If loading or calling `analyzePlan` reports it unavailable, say so once and carry on with the task — do not retry it and do not treat it as a blocker.
 
