@@ -121,6 +121,23 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_langsmith_sandbox_uses_root_snapshot_when_unset() -> None:
+    provider = MagicMock()
+    provider.get_or_create = AsyncMock(return_value=MagicMock())
+    with (
+        patch(
+            "agent.integrations.langsmith._get_sandbox_snapshot_config",
+            return_value=(None, 100, 2, 200, 300, 400),
+        ),
+        patch("agent.integrations.langsmith.LangSmithProvider", return_value=provider),
+    ):
+        await create_langsmith_sandbox()
+
+    assert provider.get_or_create.await_args is not None
+    assert provider.get_or_create.await_args.kwargs["snapshot_id"] == ""
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("overrides", "expected_vcpus", "expected_mem_bytes"),
     [
@@ -221,6 +238,30 @@ class _FakeSandboxClient:
         if self.calls <= self.failures:
             raise _RetryableCreateError("try again")
         return {"sandbox": kwargs["snapshot_id"]}
+
+
+@pytest.mark.asyncio
+async def test_provider_passes_empty_snapshot_id_to_api() -> None:
+    sandbox = MagicMock()
+    sandbox.to_sync.return_value = MagicMock()
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client),
+        patch("agent.integrations.langsmith._install_create_extra_fields") as install,
+        patch(
+            "agent.integrations.langsmith._create_sandbox_with_retry",
+            new_callable=AsyncMock,
+            return_value=sandbox,
+        ) as create,
+    ):
+        await LangSmithProvider(api_key="key").get_or_create(snapshot_id="")
+
+    install.assert_called_once_with(client, {"snapshot_id": ""})
+    assert create.await_args is not None
+    assert create.await_args.kwargs["snapshot_id"] == ""
 
 
 @pytest.mark.asyncio

@@ -528,7 +528,7 @@ async def create_langsmith_sandbox(
         github_token: Optional GitHub token. Used to configure proxy auth on
                       new sandboxes. Ignored when connecting to an existing sandbox.
         snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
-            falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
+            uses DEFAULT_SANDBOX_SNAPSHOT_ID or the API's root snapshot.
         mem_bytes: Optional memory capacity override for a newly-created sandbox.
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
@@ -547,7 +547,7 @@ async def create_langsmith_sandbox(
         delete_after_stop_seconds,
     ) = _get_sandbox_snapshot_config()
 
-    effective_snapshot_id = snapshot_id or default_snapshot_id
+    effective_snapshot_id = snapshot_id or default_snapshot_id or ""
     if mem_bytes is None and vcpus is None:
         effective_mem_bytes = default_mem_bytes
         effective_vcpus = default_vcpus
@@ -714,13 +714,6 @@ class LangSmithProvider(SandboxProvider):
     @classmethod
     def validate_startup_config(cls) -> None:
         """Validate env-var configuration at server startup. Raises ValueError if invalid."""
-        if not os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID"):
-            # Not fatal: an admin can set the base snapshot at runtime from the
-            # dashboard, which is stored outside the environment.
-            logger.warning(
-                "DEFAULT_SANDBOX_SNAPSHOT_ID is not set; sandbox creation will fail until a "
-                "base snapshot is configured in admin settings"
-            )
         for name in (
             "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES",
             "DEFAULT_SANDBOX_VCPUS",
@@ -779,17 +772,10 @@ class LangSmithProvider(SandboxProvider):
                 sandbox = await _reuse_existing_sandbox(client, sandbox_id)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
-            if not snapshot_id:
-                msg = (
-                    "No base snapshot configured: set it in admin settings or via "
-                    "DEFAULT_SANDBOX_SNAPSHOT_ID"
-                )
-                raise ValueError(msg)
-
-            _install_create_extra_fields(
-                client,
-                _merge_sandbox_create_extra_fields(create_params),
-            )
+            extra_fields = _merge_sandbox_create_extra_fields(create_params)
+            if snapshot_id == "":
+                extra_fields["snapshot_id"] = ""
+            _install_create_extra_fields(client, extra_fields)
 
             try:
                 sandbox = await _create_sandbox_with_retry(

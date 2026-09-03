@@ -64,7 +64,7 @@ async def create_sandbox(
         sandbox_id: Optional existing sandbox ID to reconnect to.
         snapshot_id: Optional snapshot to boot a new sandbox from. Only the
             langsmith provider honors this; others ignore it. When omitted the
-            langsmith provider falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
+            langsmith provider uses DEFAULT_SANDBOX_SNAPSHOT_ID or its root snapshot.
         mem_bytes: Optional memory capacity override for a new LangSmith sandbox.
         vcpus: Optional virtual CPU count override for a new LangSmith sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a new LangSmith sandbox.
