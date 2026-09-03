@@ -786,10 +786,9 @@ async def notion_callback(
         raise HTTPException(400, "Notion OAuth callback missing code")
 
     if handoff is not None:
-        # The pending flow is stored under the login that started it, which
-        # this browser can't prove it is. Carry the authorization code back
-        # over the loopback port and exchange it under the app's session; the
-        # code is useless without the PKCE verifier that stayed in that flow.
+        # This browser can't prove it is the login the pending flow is stored
+        # under, so carry the code back over the loopback port and exchange it
+        # under the session the desktop app already holds.
         challenge, port = handoff
         handoff_code = issue_connect_handoff(
             provider="notion",
@@ -881,10 +880,8 @@ async def slack_callback(
     handoff = desktop_handoff_from_state(state_payload)
 
     if handoff is not None:
-        # Slack consent runs in the user's own browser, which holds neither the
-        # desktop app's session nor its state cookie. Hand the verified
-        # identity back over the loopback port instead, and let the app redeem
-        # it under the session it already has.
+        # Same as the Notion flow: hand the verified identity back over the
+        # loopback port, for the app to redeem under the session it holds.
         challenge, port = handoff
         slack_user_id, work_email = await _verified_slack_identity(code)
         handoff_code = issue_connect_handoff(
@@ -950,7 +947,7 @@ async def slack_desktop_exchange(
         source="slack_oauth",
         status="active",
     )
-    return {"connected": True, "slack_user_id": slack_user_id, "work_email": email}
+    return {"connected": True}
 
 
 @router.get("/team-settings")

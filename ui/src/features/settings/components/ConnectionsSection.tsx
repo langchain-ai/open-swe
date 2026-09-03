@@ -7,12 +7,7 @@ import type { ApiKeyCredentialStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  api,
-  desktopConnect,
-  notionConnectUrl,
-  slackConnectUrl,
-} from "@/lib/api"
+import { api, connectService } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type SetError = (message: string | null) => void
@@ -45,12 +40,7 @@ function SlackRow({ user }: { user: SessionUser }) {
     setConnecting(true)
     // Refresh the cached mapping when the user returns from the OAuth redirect.
     void qc.invalidateQueries({ queryKey: ["myMapping"] })
-    const pending = desktopConnect("slack")
-    if (!pending) {
-      window.location.assign(slackConnectUrl())
-      return
-    }
-    void pending.finally(() => {
+    void connectService("slack")?.finally(() => {
       setConnecting(false)
       void qc.invalidateQueries({ queryKey: ["myMapping"] })
     })
@@ -113,12 +103,7 @@ function NotionRow({ setError }: { setError: SetError }) {
   const connect = () => {
     setConnecting(true)
     void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    const pending = desktopConnect("notion")
-    if (!pending) {
-      window.location.assign(notionConnectUrl())
-      return
-    }
-    void pending.finally(() => {
+    void connectService("notion")?.finally(() => {
       setConnecting(false)
       void qc.invalidateQueries({ queryKey: ["myNotion"] })
     })

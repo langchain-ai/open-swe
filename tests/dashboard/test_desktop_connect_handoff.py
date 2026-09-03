@@ -134,16 +134,9 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
             }
         ]
 
-
-def test_desktop_connect_handoff_code_names_no_account(links: list[dict[str, Any]]) -> None:
-    """The code rides in a URL the browser records, so it must not name a login.
-
-    A login in there — signed but readable, since a JWT is not encrypted —
-    would let anyone who saw the URL attach their own Slack account to it.
-    """
-    with _client() as client:
-        client.cookies.set(COOKIE_NAME, issue_session(login="alice", email=None, avatar_url=None))
-        payload = jwt.decode(_start_desktop_slack_flow(client), "test-secret", algorithms=["HS256"])
-
+    # A JWT is signed but not encrypted, and this one rides in a URL the browser
+    # records — so a login in there would let anyone who saw it attach their own
+    # Slack account to that login instead.
+    payload = jwt.decode(handoff, "test-secret", algorithms=["HS256"])
     assert "alice" not in payload.values()
     assert set(payload) == {"slack_user_id", "email", "provider", "challenge", "iat", "exp"}

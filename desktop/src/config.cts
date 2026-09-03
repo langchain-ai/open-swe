@@ -90,15 +90,10 @@ function isConnectProvider(value) {
   return typeof value === "string" && CONNECT_PROVIDERS.has(value);
 }
 
-/**
- * Start URL for a desktop connect flow.
- *
- * The app requests this itself, with its own session cookie, and opens only
- * the provider URL it redirects to — the browser never sees an endpoint that
- * needs the session.
- */
+// The app requests this itself, with its own session cookie, and opens only
+// the provider URL it redirects to — the browser never sees an endpoint that
+// needs the session.
 function connectLoginUrl(backendUrl, provider, { challenge, port }) {
-  if (!isConnectProvider(provider)) throw new Error("Unknown connect provider");
   const target = new URL(`/dashboard/api/${provider}/login`, backendUrl);
   target.searchParams.set("desktop_handoff", challenge);
   target.searchParams.set("desktop_port", String(port));
@@ -106,7 +101,6 @@ function connectLoginUrl(backendUrl, provider, { challenge, port }) {
 }
 
 function connectExchangeUrl(backendUrl, provider) {
-  if (!isConnectProvider(provider)) throw new Error("Unknown connect provider");
   return new URL(
     `/dashboard/api/${provider}/desktop/exchange`,
     backendUrl,

@@ -297,30 +297,24 @@ def desktop_callback_url(port: int, code: str) -> str:
     return f"http://127.0.0.1:{port}/callback?code={quote(code, safe='')}"
 
 
-def issue_desktop_handoff(
-    *, login: str, email: str | None, avatar_url: str | None, challenge: str
-) -> str:
-    """Mint the code the browser hands back to the desktop app.
+def _mint_handoff(*, challenge: str, claims: dict[str, Any]) -> str:
+    """Sign a PKCE-bound code for the browser to hand back to the desktop app.
 
-    Carries the identity a session will be minted from, never a session
-    itself: a JWT is signed but not encrypted, so anything that sees the
-    loopback URL — browser history, an extension — can read the payload, and a
-    session in there would be a bearer token that makes the verifier pointless.
+    A JWT is signed but not encrypted, and this one rides in a URL the browser
+    records, so its claims have to be inert to whoever reads them: the identity
+    a session is minted from, never a session itself; what was connected, never
+    whose account to connect it to.
     """
     now = int(time.time())
-    payload = {
-        "sub": login,
-        "email": email,
-        "avatar_url": avatar_url,
-        "challenge": challenge,
-        "iat": now,
-        "exp": now + HANDOFF_TTL_SECONDS,
-    }
-    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+    return jwt.encode(
+        {**claims, "challenge": challenge, "iat": now, "exp": now + HANDOFF_TTL_SECONDS},
+        _secret(),
+        algorithm=JWT_ALG,
+    )
 
 
-def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
-    """Mint the session a desktop handoff code was issued for.
+def _decode_handoff(*, code: str, verifier: str) -> dict[str, Any]:
+    """Return a handoff code's claims, proving the caller holds the verifier.
 
     The code reaches a loopback port through the user's browser, so redeeming
     it also requires the verifier the challenge committed to — and that never
@@ -331,11 +325,29 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     except jwt.PyJWTError as e:
         raise HTTPException(400, f"invalid handoff code: {e}") from e
     challenge = payload.get("challenge")
-    login = payload.get("sub")
-    if not isinstance(challenge, str) or not isinstance(login, str) or not login:
+    if not isinstance(challenge, str):
         raise HTTPException(400, "malformed handoff code")
     if not hmac.compare_digest(_s256(verifier), challenge):
         raise HTTPException(400, "handoff verifier mismatch")
+    return payload
+
+
+def issue_desktop_handoff(
+    *, login: str, email: str | None, avatar_url: str | None, challenge: str
+) -> str:
+    """Mint the code the browser hands back after a desktop login."""
+    return _mint_handoff(
+        challenge=challenge,
+        claims={"sub": login, "email": email, "avatar_url": avatar_url},
+    )
+
+
+def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
+    """Mint the session a desktop handoff code was issued for."""
+    payload = _decode_handoff(code=code, verifier=verifier)
+    login = payload.get("sub")
+    if not isinstance(login, str) or not login:
+        raise HTTPException(400, "malformed handoff code")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
     return issue_session(
@@ -346,49 +358,20 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
 
 
 def issue_connect_handoff(*, provider: str, challenge: str, claims: dict[str, Any]) -> str:
-    """Mint the code the browser hands back after a desktop *connect* flow.
-
-    Carries what finishing the connection needs and nothing that says who to
-    connect it to: the account is read from the desktop app's own session
-    cookie when the code is redeemed. That is what keeps a leaked code inert —
-    it can't attach the leaker's Slack or Notion account to someone else's
-    login, which is exactly what an identity embedded in the state or in this
-    payload would allow.
-    """
-    now = int(time.time())
-    return jwt.encode(
-        {
-            **claims,
-            "provider": provider,
-            "challenge": challenge,
-            "iat": now,
-            "exp": now + HANDOFF_TTL_SECONDS,
-        },
-        _secret(),
-        algorithm=JWT_ALG,
-    )
+    """Mint the code the browser hands back after a desktop connect flow."""
+    return _mint_handoff(challenge=challenge, claims={**claims, "provider": provider})
 
 
 def redeem_connect_handoff(*, provider: str, code: str, verifier: str) -> dict[str, Any]:
-    """Validate a connect handoff code and return its claims.
+    """Return a connect code's claims, pinned to the provider that minted them.
 
-    Like the login handoff, the code reaches a loopback port through the user's
-    browser, so redeeming it also requires the verifier the challenge committed
-    to — and that never leaves the desktop app. ``provider`` is checked so a
-    code minted by one connect flow can't be redeemed by another's endpoint.
+    Without the pin, a code from one connect flow could be redeemed by another
+    provider's endpoint.
     """
-    try:
-        payload = jwt.decode(code, _secret(), algorithms=[JWT_ALG])
-    except jwt.PyJWTError as e:
-        raise HTTPException(400, f"invalid handoff code: {e}") from e
-    challenge = payload.get("challenge")
+    payload = _decode_handoff(code=code, verifier=verifier)
     code_provider = payload.get("provider")
-    if not isinstance(challenge, str) or not isinstance(code_provider, str):
-        raise HTTPException(400, "malformed handoff code")
-    if not hmac.compare_digest(code_provider, provider):
+    if not isinstance(code_provider, str) or not hmac.compare_digest(code_provider, provider):
         raise HTTPException(400, "handoff provider mismatch")
-    if not hmac.compare_digest(_s256(verifier), challenge):
-        raise HTTPException(400, "handoff verifier mismatch")
     return payload
 
 

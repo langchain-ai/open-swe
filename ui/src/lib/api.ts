@@ -908,22 +908,18 @@ export function loginUrl(redirectTo?: string): string {
   return `${API_BASE}/dashboard/api/auth/login${qs}`
 }
 
-export function slackConnectUrl(): string {
-  return `${API_BASE}/dashboard/api/slack/login`
-}
-
-export function notionConnectUrl(): string {
-  return `${API_BASE}/dashboard/api/notion/login`
-}
-
 /**
- * Hand an OAuth connect flow to the desktop app, or `undefined` on the web.
+ * Start an OAuth connect flow, returning a promise only the desktop app has.
  *
  * The web flow is a redirect that comes back to the page that started it. The
  * desktop app can't use that: its window and the browser that shows the
- * provider's consent page have separate cookie jars, so the app runs the flow
+ * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
-export function desktopConnect(provider: "slack" | "notion") {
-  return window.openSweDesktop?.connectService(provider)
+export function connectService(provider: "slack" | "notion") {
+  const pending = window.openSweDesktop?.connectService(provider)
+  if (!pending) {
+    window.location.assign(`${API_BASE}/dashboard/api/${provider}/login`)
+  }
+  return pending
 }

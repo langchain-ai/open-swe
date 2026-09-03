@@ -66,6 +66,10 @@ async function beginLogin({ connect = false } = {}) {
     resolveCode = resolve;
   });
 
+  const [okPage, failedPage] = connect
+    ? [CONNECTED_PAGE, CONNECT_FAILED_PAGE]
+    : [SIGNED_IN_PAGE, FAILED_PAGE];
+
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (url.pathname !== "/callback") {
@@ -74,15 +78,7 @@ async function beginLogin({ connect = false } = {}) {
     }
     const value = url.searchParams.get("code");
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(
-      value
-        ? connect
-          ? CONNECTED_PAGE
-          : SIGNED_IN_PAGE
-        : connect
-          ? CONNECT_FAILED_PAGE
-          : FAILED_PAGE,
-    );
+    response.end(value ? okPage : failedPage);
     finish(value || null);
   });
 
