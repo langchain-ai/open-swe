@@ -14,6 +14,7 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.api.oauth import build_settings_url
 from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
@@ -21,7 +22,6 @@ from agent.dashboard.agent_overrides import (
 )
 from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from agent.dashboard.enabled_repos import is_review_repo_enabled
-from agent.dashboard.oauth import build_settings_url
 from agent.dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
 from agent.dashboard.profiles import (  # noqa: F401
     get_profile,

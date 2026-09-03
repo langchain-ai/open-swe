@@ -8,9 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
+from agent.api.plans import plan_router
+from agent.api.workflow_approval import workflow_approval_router
 from agent.dashboard import router as dashboard_router
-from agent.dashboard.plan_api import plan_router
-from agent.dashboard.workflow_approval_api import workflow_approval_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
 from agent.slack.routes import router as slack_webhook_router

@@ -5,7 +5,7 @@ import logging
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import oauth
+from agent.api import oauth
 
 
 def _stub_membership(monkeypatch, members: dict[str, set[str]]) -> dict[str, list[tuple[str, str]]]:

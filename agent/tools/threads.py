@@ -12,13 +12,10 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from agent.dashboard import plan_api, workflow_approval_api
-from agent.dashboard.admin import is_admin
-from agent.dashboard.agent_overrides import resolve_login_from_email_async
-from agent.dashboard.oauth import enforce_org_login_gate
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from agent.dashboard.plan_store import get_plan_content, list_plan_comments
-from agent.dashboard.thread_api import (
+from agent.api import plans as plan_api
+from agent.api import workflow_approval as workflow_approval_api
+from agent.api.oauth import enforce_org_login_gate
+from agent.api.threads import (
     ThreadMessageBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -29,6 +26,10 @@ from agent.dashboard.thread_api import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
+from agent.dashboard.admin import is_admin
+from agent.dashboard.agent_overrides import resolve_login_from_email_async
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from agent.dashboard.plan_store import get_plan_content, list_plan_comments
 from agent.dashboard.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,

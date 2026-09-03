@@ -5,7 +5,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from agent.dashboard import oauth, routes, thread_api
+from agent.api import oauth, routes
+from agent.api import threads as thread_api
 
 
 def _request(

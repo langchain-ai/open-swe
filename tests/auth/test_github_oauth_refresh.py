@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.oauth import (
+from agent.api.oauth import (
     GithubOAuthError,
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,

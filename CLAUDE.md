@@ -100,7 +100,7 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 
 - **GitHub**: dual-mode. User OAuth tokens are encrypted at rest in the dashboard OAuth store and cached only in process during a run (`utils/auth.py:resolve_github_token`, `utils/github_token.py`). When no user token is available, falls back to a GitHub App installation token (`utils/github_app.py`). The installation token is also what configures the LangSmith sandbox's GitHub proxy.
 - **Webhooks**: GitHub signatures verified in `utils/github_comments.py:verify_github_signature`; Slack/Linear handled in their respective utils.
-- **Dashboard / UI**: GitHub OAuth login lives in `agent/dashboard/oauth.py` and `routes.py` (`/auth/login`, `/auth/callback`, `/auth/logout`, `/me`).
+- **Dashboard / UI**: GitHub OAuth login lives in `agent/api/oauth.py` and `routes.py` (`/auth/login`, `/auth/callback`, `/auth/logout`, `/me`).
 
 ### Thread-id derivation
 
@@ -112,7 +112,7 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 - New sandbox providers: add a module under `agent/sandboxes/providers/` and wire it into `SANDBOX_FACTORIES` in `agent/sandboxes/providers/registry.py`. See `docs/CUSTOMIZATION.md`.
 - New tools: add to `agent/tools/`, export from `agent/tools/__init__.py`, add to the `tools=[...]` list in `server.py:get_agent` (or `reviewer.py` for reviewer-only tools).
 - New middleware: add to `agent/middleware/`, export from `agent/middleware/__init__.py`, add to the `middleware=[...]` list in `server.py:get_agent` — order is significant (see the stack above).
-- New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
+- New dashboard endpoints: add to `agent/api/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
 - Do not add feature documentation to this file. Shipping a feature earns it **no** line here — not a section, not a pointer, not a resolution order or a list of which module wins. Anyone can read that from the code. Feature detail belongs in the code, its docstrings, and the PR description. Only edit this file when asked to, or when something it already claims has become wrong.

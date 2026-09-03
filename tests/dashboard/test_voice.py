@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from agent.dashboard import routes, voice
+from agent.api import routes, voice
 
 
 def _request(body: bytes, content_type: str = "audio/webm") -> Request:

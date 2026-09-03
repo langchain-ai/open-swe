@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from agent import server
-from agent.dashboard import thread_api
+from agent.api import threads as thread_api
 from agent.prompt import construct_system_prompt
 
 

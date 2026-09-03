@@ -1,4 +1,4 @@
-from agent.dashboard import workflow_approval_api
+from agent.api import workflow_approval as workflow_approval_api
 
 
 async def test_list_workflow_push_approvals_returns_records(monkeypatch) -> None:

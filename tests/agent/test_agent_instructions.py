@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent import server
-from agent.dashboard import routes
+from agent.api import routes
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
     AGENT_INSTRUCTIONS_NAMESPACE,

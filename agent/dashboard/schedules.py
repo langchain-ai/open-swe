@@ -9,12 +9,12 @@ from fastapi import HTTPException
 from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
+from agent.api.threads import _agent_version_metadata, _resolve_run_email
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import gate_fable_model, normalize_model_choice
 from agent.dashboard.profiles import get_profile, get_valid_access_token
 from agent.dashboard.repo_access import repo_config_for_user, require_repo_access_for_user
 from agent.dashboard.team_settings import get_team_fable_enabled
-from agent.dashboard.thread_api import _agent_version_metadata, _resolve_run_email
 from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
