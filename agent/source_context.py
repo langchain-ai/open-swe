@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 #: Slack's two session kinds: a thread inside a shared channel, and a code
 #: channel that is one session end to end.
-SlackSurface = Literal["slack_thread", "slack_channel"]
+SlackSurfaceKind = Literal["slack_thread", "slack_channel"]
 _SLACK_SURFACES: frozenset[str] = frozenset(("slack_thread", "slack_channel"))
 
 
@@ -47,7 +47,7 @@ class SlackThreadRef(BaseModel):
     channel_context: dict[str, Any] | None = None
     # None on locations written before this field existed, and on a kind this
     # deployment does not know; `agent.surfaces` falls back to `thread_ts` there.
-    surface: SlackSurface | None = None
+    surface: SlackSurfaceKind | None = None
     # A thread the user started inside a code channel, which the agent answers
     # in rather than at channel level.
     reply_thread_ts: str = ""

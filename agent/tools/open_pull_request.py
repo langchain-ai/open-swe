@@ -640,7 +640,7 @@ async def _record_pr_telemetry(
                 slack_thread if isinstance(slack_thread, dict) else None,
             )
             surface = slack_surface(SlackThreadRef.parse(active))
-            if surface.has_chrome:
+            if surface is not None and surface.has_chrome:
                 await surface.sync_context(
                     repo={"owner": owner, "name": repo},
                     thread_id=thread_id,

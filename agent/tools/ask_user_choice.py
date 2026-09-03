@@ -69,6 +69,8 @@ async def ask_user_choice(
             "error": "This session has no Slack location to ask in",
         }
     surface = slack_surface(location)
+    if surface is None:
+        return {"success": False, "error": "This session has no Slack location to ask in"}
     return await post_session_message(
         channel_id=location.channel_id,
         thread_ts=location.thread_ts,
@@ -76,7 +78,7 @@ async def ask_user_choice(
         message=question,
         blocks=option_blocks(question, choices),
         usage=summarize_run_usage(state),
-        agent_thread_id=surface.web_link_thread_id(str(thread_id or "")),
+        agent_thread_id=surface.viewer_link_thread_id(str(thread_id or "")),
         run_id=current_run_id(config),
         triggering_user=triggering_user_id(configurable),
     )

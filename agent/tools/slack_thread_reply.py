@@ -81,6 +81,8 @@ async def slack_thread_reply(
         return {"success": False, "error": "Message cannot be empty"}
 
     surface = slack_surface(SlackThreadRef.parse(active))
+    if surface is None:
+        return {"success": False, "error": "Current Slack location is unavailable"}
     result = await post_session_message(
         channel_id=str(channel_id),
         thread_ts=str(thread_ts),
@@ -88,7 +90,7 @@ async def slack_thread_reply(
         message=message,
         blocks=blocks or option_blocks(message, options),
         usage=summarize_run_usage(state),
-        agent_thread_id=surface.web_link_thread_id(str(thread_id or "")),
+        agent_thread_id=surface.viewer_link_thread_id(str(thread_id or "")),
         run_id=current_run_id(config),
         triggering_user=triggering_user_id(configurable),
     )

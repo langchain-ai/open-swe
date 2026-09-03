@@ -742,6 +742,8 @@ async def _process_slack_mention_impl(
     # Interactions carry no flag of their own, and a location at the session
     # timestamp is a code channel whether or not the caller said so.
     code_channel = bool(event_data.get("code_channel")) or thread_ts == CODE_CHANNEL_SESSION_TS
+    # A Slack event always has a channel, so this always resolves; the check is
+    # the type system's, not a real case.
     surface = slack_surface(
         SlackThreadRef(
             channel_id=channel_id,
@@ -750,6 +752,9 @@ async def _process_slack_mention_impl(
             reply_thread_ts=reply_thread_ts if code_channel else "",
         )
     )
+    if surface is None:
+        common.logger.warning("Slack event without a resolvable session: %s", channel_id)
+        return
     context_messages, context_mode = common.select_slack_context_messages(
         thread_messages,
         event_ts,

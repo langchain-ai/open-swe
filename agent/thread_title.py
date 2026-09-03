@@ -132,7 +132,10 @@ async def generate_and_store_thread_title(
     # Re-read after the update: the pre-update snapshot can be stale if the
     # thread moved to a surface with a title between the check and the update.
     latest = await client.threads.get(thread_id=thread_id)
-    await surface_from_metadata(_thread_metadata(latest)).set_title(title)
+    # A thread with no Slack session behind it has nothing to rename.
+    surface = surface_from_metadata(_thread_metadata(latest))
+    if surface is not None:
+        await surface.set_title(title)
 
 
 def schedule_thread_title_generation(

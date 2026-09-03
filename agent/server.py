@@ -701,8 +701,8 @@ def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) 
 
 def _projects_transcript(configurable: dict[str, Any]) -> bool:
     """Whether this run's surface carries the agent's words on its own."""
-    location = SlackThreadRef.parse(configurable.get("slack_thread"))
-    return location is not None and slack_surface(location).projects_transcript
+    surface = slack_surface(SlackThreadRef.parse(configurable.get("slack_thread")))
+    return surface is not None and surface.projects_transcript
 
 
 def _transcript_middleware(configurable: dict[str, Any], thread_id: str) -> list[Any]:
@@ -737,7 +737,9 @@ def _session_reply_tools(configurable: dict[str, Any]) -> list[Any]:
     how the agent speaks.
     """
     surface = slack_surface(SlackThreadRef.parse(configurable.get("slack_thread")))
-    return [slack_reply_to_message] if surface.projects_transcript else [slack_thread_reply]
+    if surface is not None and surface.projects_transcript:
+        return [slack_reply_to_message]
+    return [slack_thread_reply]
 
 
 def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:

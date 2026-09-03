@@ -46,7 +46,7 @@ async def slack_reply_to_message(
         return {"success": False, "error": "Current Slack location is unavailable"}
     location = SlackThreadRef.parse(active)
     surface = slack_surface(location)
-    if location is None or not surface.projects_transcript:
+    if location is None or surface is None or not surface.projects_transcript:
         return {
             "success": False,
             "error": "This session is not in a Slack channel; use slack_thread_reply instead",
@@ -65,7 +65,7 @@ async def slack_reply_to_message(
         post_thread_ts=message_ts.strip(),
         message=message,
         usage=summarize_run_usage(state),
-        agent_thread_id=surface.web_link_thread_id(str(thread_id or "")),
+        agent_thread_id=surface.viewer_link_thread_id(str(thread_id or "")),
         run_id=current_run_id(config),
         triggering_user=triggering_user_id(configurable),
     )

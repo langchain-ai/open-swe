@@ -5,8 +5,8 @@ import pytest
 
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.surfaces import (
-    WEB_SURFACE,
     SlackChannelSurface,
+    SlackSurface,
     SlackThreadSurface,
     resolve_surface,
     slack_surface,
@@ -50,32 +50,34 @@ def test_thread_surface_replies_in_its_thread() -> None:
     assert isinstance(surface, SlackThreadSurface)
     assert surface.reply_target() == "1717171717.123456"
     assert surface.prompt_section() == ""
-    assert surface.web_link_thread_id("thread-1") == "thread-1"
+    assert surface.viewer_link_thread_id("thread-1") == "thread-1"
 
 
 def test_channel_surface_replies_at_channel_level_by_default() -> None:
-    assert slack_surface(_channel_ref()).reply_target() == "0"
+    assert SlackChannelSurface("C1").reply_target() == "0"
 
 
 def test_channel_surface_replies_in_a_thread_the_user_started() -> None:
     surface = slack_surface(_channel_ref(reply_thread_ts="1717171717.123456"))
+    assert isinstance(surface, SlackChannelSurface)
     assert surface.reply_target() == "1717171717.123456"
 
 
-def test_channel_surface_omits_the_per_thread_web_link() -> None:
-    assert slack_surface(_channel_ref()).web_link_thread_id("thread-1") is None
+def test_channel_surface_omits_the_per_thread_viewer_link() -> None:
+    assert SlackChannelSurface("C1").viewer_link_thread_id("thread-1") is None
 
 
 def test_channel_surface_describes_itself_to_the_agent() -> None:
-    assert "one session" in slack_surface(_channel_ref()).prompt_section()
+    assert "one session" in SlackChannelSurface("C1").prompt_section()
 
 
-def test_locations_without_a_channel_are_not_slack_surfaces() -> None:
-    assert slack_surface(None) is WEB_SURFACE
-    assert slack_surface(SlackThreadRef()) is WEB_SURFACE
-    assert resolve_surface(None) is WEB_SURFACE
-    assert resolve_surface(SourceContext()) is WEB_SURFACE
-    assert surface_from_metadata({"source": "dashboard"}) is WEB_SURFACE
+def test_a_session_outside_slack_has_no_surface_at_all() -> None:
+    """The dashboard reads a thread; it is a view onto a surface, not one."""
+    assert slack_surface(None) is None
+    assert slack_surface(SlackThreadRef()) is None
+    assert resolve_surface(None) is None
+    assert resolve_surface(SourceContext()) is None
+    assert surface_from_metadata({"source": "dashboard"}) is None
 
 
 def test_unparseable_location_yields_no_ref() -> None:
@@ -90,18 +92,18 @@ def test_surface_comes_from_thread_metadata() -> None:
     assert isinstance(surface_from_metadata(metadata), SlackChannelSurface)
 
 
-def test_web_surface_has_nothing_to_report_or_publish() -> None:
-    assert WEB_SURFACE.reports_activity is False
-    assert WEB_SURFACE.has_chrome is False
-    assert WEB_SURFACE.reply_target() is None
-
-
-async def test_web_surface_chrome_calls_are_inert() -> None:
-    await WEB_SURFACE.begin_turn()
-    await WEB_SURFACE.end_turn()
-    await WEB_SURFACE.start_session(repo={"owner": "o", "name": "n"}, thread_id="thread-1")
-    await WEB_SURFACE.set_title("Title")
-    await WEB_SURFACE.publish_diff("diff", base_branch="main", head_branch="topic")
+async def test_a_surface_only_overrides_what_it_actually_does() -> None:
+    """The base answers "nothing to do" so a thread need not stub out chrome."""
+    plain = SlackSurface()
+    assert plain.reports_activity is False
+    assert plain.has_chrome is False
+    assert plain.projects_transcript is False
+    assert plain.reply_target() is None
+    await plain.begin_turn()
+    await plain.end_turn()
+    await plain.start_session(repo={"owner": "o", "name": "n"}, thread_id="thread-1")
+    await plain.set_title("Title")
+    await plain.publish_diff("diff", base_branch="main", head_branch="topic")
 
 
 async def test_thread_surface_has_no_session_chrome(monkeypatch: pytest.MonkeyPatch) -> None:

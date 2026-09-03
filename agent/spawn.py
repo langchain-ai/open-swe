@@ -22,7 +22,7 @@ from typing import Any
 from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import ContentBlocks, dispatch_agent_run
-from agent.source_context import SlackSurface, SlackThreadRef, SourceContext
+from agent.source_context import SlackSurfaceKind, SlackThreadRef, SourceContext
 from agent.surfaces.slack import SlackChannelSurface
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.slack import (
@@ -51,7 +51,7 @@ class SpawnDestination:
 
     channel_id: str
     thread_ts: str
-    surface: SlackSurface = "slack_thread"
+    surface: SlackSurfaceKind = "slack_thread"
 
 
 @dataclass(frozen=True)

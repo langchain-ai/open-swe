@@ -1,23 +1,29 @@
-"""Where a session's conversation lives.
+"""What kind of Slack session a conversation lives in.
 
-A surface answers the handful of questions that differ between a Slack thread, a
-Slack code channel and the web dashboard: where a reply goes, what the agent is
-told about the place it is speaking, and which chrome the surface keeps in sync
-with the work. Callers ask the surface instead of asking which kind it is.
+Slack has two: a thread inside a shared channel, and a code channel that is one
+session end to end. They answer the same handful of questions differently —
+where a reply goes, what the agent is told about the place it is speaking,
+which chrome the surface keeps in sync with the work — and callers ask the
+surface instead of asking which kind it is.
 
-Every question has a "nothing to do" answer, which is what the dashboard needs,
-so :class:`Surface` is both the base class and the web surface.
+This is a Slack abstraction, not a general one. The web dashboard is not a
+third kind: it reads a thread, whichever Slack session that thread belongs to,
+so it is a view onto a surface. A session with no Slack conversation behind it
+has no surface at all, which is why `slack_surface` can answer with nothing.
+
+Every question has a "nothing to do" answer, so a surface only overrides what
+it actually does.
 """
 
-from typing import Any, Literal
+from typing import Any
 
-SurfaceKind = Literal["slack_thread", "slack_channel", "web"]
+from agent.source_context import SlackSurfaceKind
 
 
-class Surface:
-    """A conversation surface with no chrome and no posting rules."""
+class SlackSurface:
+    """A Slack session with no chrome and no posting rules."""
 
-    kind: SurfaceKind = "web"
+    kind: SlackSurfaceKind = "slack_thread"
 
     #: Whether the surface shows the user that the agent is working, and so has
     #: to be told when a turn starts and ends.
@@ -27,9 +33,8 @@ class Surface:
     #: because something mirrors the run into it.
     projects_transcript: bool = False
 
-    #: Whether the surface renders session chrome — context, resources, views —
-    #: that the work has to be published into. Callers check this before doing
-    #: work whose only purpose is to fill it.
+    #: Whether the surface renders session chrome — a status, a title, a context
+    #: bar — that the work has to keep current.
     has_chrome: bool = False
 
     def prompt_section(self) -> str:
@@ -40,8 +45,8 @@ class Surface:
         """The Slack ``thread_ts`` a reply belongs in, if any."""
         return None
 
-    def web_link_thread_id(self, thread_id: str) -> str | None:
-        """The agent thread a posted message's web link should point at."""
+    def viewer_link_thread_id(self, thread_id: str) -> str | None:
+        """The agent thread a posted message's "Open in Web" footer points at."""
         return thread_id or None
 
     async def begin_turn(self) -> None:
@@ -78,6 +83,3 @@ class Surface:
     async def set_title(self, title: str) -> None:
         """Rename the session."""
         return None
-
-
-WEB_SURFACE = Surface()

@@ -395,7 +395,8 @@ def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
 
 def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or slack_surface(slack_thread).kind != "slack_channel":
+    surface = slack_surface(slack_thread)
+    if slack_thread is None or surface is None or surface.kind != "slack_channel":
         return None
     channel_id = slack_thread.channel_id.strip()
     team_id = SLACK_TEAM_ID.strip()

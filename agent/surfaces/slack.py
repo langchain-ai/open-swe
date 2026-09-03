@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from agent.surfaces.base import Surface
+from agent.surfaces.base import SlackSurface
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.slack_code_channels import (
     CODE_CHANNEL_SESSION_TS,
@@ -31,7 +31,7 @@ CODE_CHANNEL_PROMPT_SECTION = (
 )
 
 
-class SlackThreadSurface(Surface):
+class SlackThreadSurface(SlackSurface):
     """A session that lives in one Slack thread, alongside whatever else is in the channel."""
 
     kind = "slack_thread"
@@ -44,7 +44,7 @@ class SlackThreadSurface(Surface):
         return self.thread_ts
 
 
-class SlackChannelSurface(Surface):
+class SlackChannelSurface(SlackSurface):
     """A session that owns a whole Slack code channel, chrome included."""
 
     kind = "slack_channel"
@@ -62,7 +62,7 @@ class SlackChannelSurface(Surface):
     def reply_target(self) -> str:
         return self.reply_thread_ts or CODE_CHANNEL_SESSION_TS
 
-    def web_link_thread_id(self, thread_id: str) -> None:
+    def viewer_link_thread_id(self, thread_id: str) -> None:
         # The channel is the session, so a per-thread web link would point users
         # away from the surface they are already reading.
         return None

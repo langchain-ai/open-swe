@@ -228,7 +228,7 @@ async def _settle_surface_activity(
     completion that arrives out of order must not clear that run's loading UI.
     """
     surface = surface_from_metadata(metadata)
-    if not surface.reports_activity:
+    if surface is None or not surface.reports_activity:
         return
     if run_key and surface.projects_transcript:
         with suppress(Exception):
