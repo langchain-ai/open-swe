@@ -670,3 +670,26 @@ async def test_upsert_agent_thread_metadata_keeps_manual_resolution() -> None:
 
     assert "resolved" not in metadata
     assert "attention_reason" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_upsert_agent_thread_metadata_locks_pr_linked_threads_before_deciding() -> None:
+    before_lock = {
+        "source": "slack",
+        "created_at_ms": 1,
+        "pr_url": "https://github.com/lc/repo/pull/7",
+        "pr_state": "open",
+    }
+    under_lock = {**before_lock, "pr_state": "closed", "attention_reason": "prs_closed"}
+    fake_client = MagicMock()
+    fake_client.threads.get = AsyncMock(
+        side_effect=[
+            {"thread_id": "t1", "metadata": before_lock},
+            {"thread_id": "t1", "metadata": under_lock},
+        ]
+    )
+    fake_client.threads.update = AsyncMock()
+    metadata = await _slack_follow_up(fake_client)
+
+    assert fake_client.threads.get.await_count == 2
+    assert metadata["attention_reason"] is None

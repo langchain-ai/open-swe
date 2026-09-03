@@ -797,10 +797,11 @@ async def upsert_agent_thread_metadata(
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
-        elif _pr_state_reset_for_user_activity(existing_meta):
+        elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
             # A person is continuing the thread, so PR-driven resolution or the
-            # "PRs closed" mark no longer applies. Re-read under the PR-state lock
-            # so a concurrent PR webhook cannot interleave its own update.
+            # "PRs closed" mark no longer applies. Only the PR webhook sets those,
+            # and only on PR-linked threads, so take its lock for any such thread
+            # and derive the reset from a fresh read rather than the pre-lock one.
             async with agent_thread_pr_state_lock(langgraph_client, thread_id):
                 current = as_thread_dict(await langgraph_client.threads.get(thread_id))
                 current_meta = (
@@ -1082,6 +1083,10 @@ _GH_PR_AGENT_STATE_ACTIONS = frozenset(
 )
 _TERMINAL_PR_STATES = frozenset(["closed", "merged"])
 _PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+
+
+def _pr_linked(metadata: Mapping[str, Any]) -> bool:
+    return any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
 
 
 def _pr_state_reset_for_user_activity(metadata: Mapping[str, Any]) -> dict[str, Any]:
