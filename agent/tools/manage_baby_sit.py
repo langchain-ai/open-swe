@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from langgraph.config import get_config
+from pydantic import BaseModel
 
 from agent.baby_sit import record_retry, start_watch, stop_watch, watch_key
 from agent.github.app import get_github_app_installation_id_for_repo
@@ -40,21 +41,26 @@ def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
         "agent_model_id",
         "agent_effort",
     )
-    dumped = cfg.dump()
-    result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
+    result = {}
+    for key in allowed:
+        value = cfg.get(key)
+        if value is not None:
+            if isinstance(value, BaseModel):
+                value = value.model_dump(mode="json", exclude_unset=True)
+            result[key] = value
     result["thread_id"] = thread_id
     return result
 
 
 def _source_context(cfg: RunConfig) -> SourceContext:
-    dumped = cfg.dump()
-    return SourceContext.parse(
-        {
-            key: dumped[key]
-            for key in ("slack_thread", "linear_issue", "github_issue")
-            if isinstance(dumped.get(key), Mapping)
-        }
-    )
+    values = {}
+    for key in ("slack_thread", "linear_issue", "github_issue"):
+        value = cfg.get(key)
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json", exclude_unset=True)
+        if isinstance(value, Mapping):
+            values[key] = value
+    return SourceContext.parse(values)
 
 
 async def manage_baby_sit(

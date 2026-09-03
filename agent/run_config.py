@@ -21,6 +21,7 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 ``chat_pr_number``.
 """
 
+import json
 import logging
 from collections.abc import Mapping
 from typing import Annotated, Any, Self
@@ -190,6 +191,20 @@ class RunConfig(BaseModel):
         if not isinstance(raw, Mapping):
             return cls()
         data = dict(raw)
+        dropped_non_json = []
+        for key, value in list(data.items()):
+            if key in cls.model_fields:
+                continue
+            try:
+                json.dumps(value)
+            except OverflowError, TypeError, ValueError:
+                del data[key]
+                dropped_non_json.append(key)
+        if dropped_non_json:
+            logger.warning(
+                "Dropping non-JSON-serializable configurable keys",
+                extra={"configurable_keys": sorted(dropped_non_json)},
+            )
         for _ in range(len(cls.model_fields) + 1):
             try:
                 return cls.model_validate(data)

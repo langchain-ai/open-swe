@@ -10,6 +10,7 @@ from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
 from langgraph_sdk import get_client
+from pydantic import BaseModel
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from agent.input_messages import build_run_input
@@ -295,11 +296,12 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         "user_email",
         "schedule_id",
     )
-    dumped = cfg.dump()
     wakeup_configurable: dict[str, Any] = {"thread_id": thread_id}
     for key in passthrough_keys:
-        value = dumped.get(key)
+        value = cfg.get(key)
         if value is not None:
+            if isinstance(value, BaseModel):
+                value = value.model_dump(mode="json", exclude_unset=True)
             wakeup_configurable[key] = value
     active = await get_active_slack_thread(
         client,

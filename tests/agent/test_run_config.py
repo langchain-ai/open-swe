@@ -21,6 +21,17 @@ def test_dump_round_trips_only_the_keys_that_were_set():
     assert RunConfig.parse(raw).dump() == raw
 
 
+def test_parse_drops_non_json_serializable_extras():
+    cfg = RunConfig.parse(
+        {
+            "thread_id": "t1",
+            "custom": {"a": 1},
+            "platform_user": object(),
+        }
+    )
+    assert cfg.dump() == {"thread_id": "t1", "custom": {"a": 1}}
+
+
 def test_parse_drops_only_the_malformed_field():
     cfg = RunConfig.parse({"thread_id": "t1", "pr_number": {"not": "an int"}})
     assert cfg.thread_id == "t1"
