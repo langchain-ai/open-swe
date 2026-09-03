@@ -1315,7 +1315,6 @@ if (!hasSingleInstanceLock) {
       return;
     }
 
-    if (process.platform === "darwin") app.dock.setIcon(iconPath());
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),
     );
