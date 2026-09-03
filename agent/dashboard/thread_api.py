@@ -54,6 +54,7 @@ from ..utils.thread_participants import (
     merge_participants,
     participant_search_filters,
 )
+from ..utils.thread_pr_state import agent_thread_pr_state_lock
 from ..utils.timing import phase
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
@@ -1655,12 +1656,25 @@ async def _enrich_run_start_command(
         overrides["agent_effort"] = chosen_effort
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
-    if _is_thread_resolved(metadata):
-        metadata_update["resolved"] = False
-        metadata_update["resolved_at_ms"] = None
     metadata_update["updated_at_ms"] = _now_ms()
-    metadata = {**metadata, **metadata_update}
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
+    if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
+        async with agent_thread_pr_state_lock(client, thread_id):
+            current = await client.threads.get(thread_id)
+            metadata = thread_metadata(current)
+            if _is_thread_resolved(metadata):
+                metadata_update["resolved"] = False
+                metadata_update["resolved_at_ms"] = None
+            if metadata.get("auto_resolved_by_prs") is True:
+                metadata_update["auto_resolved_by_prs"] = False
+            metadata = {**metadata, **metadata_update}
+            await client.threads.update(thread_id=thread_id, metadata=metadata)
+    else:
+        if _is_thread_resolved(metadata):
+            metadata_update["resolved"] = False
+            metadata_update["resolved_at_ms"] = None
+        metadata = {**metadata, **metadata_update}
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
@@ -1751,9 +1765,7 @@ async def send_dashboard_message(
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
-    if _is_thread_resolved(metadata):
-        metadata_update["resolved"] = False
-        metadata_update["resolved_at_ms"] = None
+    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
 
     active = await get_thread_active_status(thread_id)
     if active is None:
@@ -1766,7 +1778,21 @@ async def send_dashboard_message(
 
     active_model = _metadata_model_id(metadata) if body.images else None
     content = _user_message_content(prompt, body.images, model_id=active_model)
-    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    if pr_linked or metadata.get("auto_resolved_by_prs") is True:
+        async with agent_thread_pr_state_lock(client, thread_id):
+            current = await client.threads.get(thread_id)
+            metadata = thread_metadata(current)
+            if _is_thread_resolved(metadata):
+                metadata_update["resolved"] = False
+                metadata_update["resolved_at_ms"] = None
+            if metadata.get("auto_resolved_by_prs") is True:
+                metadata_update["auto_resolved_by_prs"] = False
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    else:
+        if _is_thread_resolved(metadata):
+            metadata_update["resolved"] = False
+            metadata_update["resolved_at_ms"] = None
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
@@ -1915,14 +1941,19 @@ async def resolve_dashboard_thread(
 ) -> dict[str, Any]:
     """Mark a thread resolved/unresolved via thread metadata."""
     client = langgraph_client()
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    metadata_update: dict[str, Any] = {
-        "resolved": resolved,
-        "resolved_at_ms": _now_ms() if resolved else None,
-    }
+    await _authorized_thread(thread_id, login, email=email)
     try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        async with agent_thread_pr_state_lock(client, thread_id):
+            thread = await _authorized_thread(thread_id, login, email=email)
+            metadata = thread_metadata(thread)
+            metadata_update: dict[str, Any] = {
+                "resolved": resolved,
+                "resolved_at_ms": _now_ms() if resolved else None,
+                "auto_resolved_by_prs": False,
+            }
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc

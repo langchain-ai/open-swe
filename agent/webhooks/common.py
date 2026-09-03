@@ -152,6 +152,7 @@ from ..utils.thread_participants import (
     PARTICIPANT_LOGINS_KEY,
     merge_participants,
 )
+from ..utils.thread_pr_state import agent_thread_pr_state_lock
 
 __all__ = [
     "Any",
@@ -1064,6 +1065,7 @@ _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 _GH_PR_AGENT_STATE_ACTIONS = frozenset(
     ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
+_TERMINAL_PR_STATES = frozenset(["closed", "merged"])
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1409,22 +1411,56 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         metadata = thread.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
             continue
-        metadata_update: dict[str, Any] = {}
-        pull_requests = metadata.get("pull_requests")
-        if isinstance(pull_requests, list):
-            updated = [
-                {**record, "state": new_state} if record.get("url") == pr_url else record
-                for record in pull_requests
-                if isinstance(record, dict)
-            ]
-            if updated != pull_requests:
-                metadata_update["pull_requests"] = updated
-        if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
-            metadata_update["pr_state"] = new_state
-        if not metadata_update:
-            continue
         try:
-            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = await langgraph_client.threads.get(thread_id)
+                metadata = current.get("metadata") if isinstance(current, dict) else None
+                if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
+                    continue
+                metadata_update: dict[str, Any] = {}
+                pull_requests = metadata.get("pull_requests")
+                updated_pull_requests: list[dict[str, Any]] = []
+                previous_state: Any = None
+                if isinstance(pull_requests, list):
+                    previous_state = next(
+                        (
+                            record.get("state")
+                            for record in pull_requests
+                            if isinstance(record, dict) and record.get("url") == pr_url
+                        ),
+                        None,
+                    )
+                    updated_pull_requests = [
+                        {**record, "state": new_state} if record.get("url") == pr_url else record
+                        for record in pull_requests
+                        if isinstance(record, dict)
+                    ]
+                    if updated_pull_requests != pull_requests:
+                        metadata_update["pull_requests"] = updated_pull_requests
+                if not updated_pull_requests and metadata.get("pr_url") == pr_url:
+                    previous_state = metadata.get("pr_state")
+                state_changed = previous_state != new_state
+                if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
+                    metadata_update["pr_state"] = new_state
+
+                tracked_states = [record.get("state") for record in updated_pull_requests]
+                if not tracked_states and metadata.get("pr_url") == pr_url:
+                    tracked_states = [new_state]
+                all_terminal = bool(tracked_states) and all(
+                    state in _TERMINAL_PR_STATES for state in tracked_states
+                )
+                if all_terminal and state_changed and metadata.get("resolved") is not True:
+                    metadata_update["resolved"] = True
+                    metadata_update["resolved_at_ms"] = int(datetime.now(UTC).timestamp() * 1000)
+                    metadata_update["auto_resolved_by_prs"] = True
+                elif not all_terminal and metadata.get("auto_resolved_by_prs") is True:
+                    metadata_update["resolved"] = False
+                    metadata_update["resolved_at_ms"] = None
+                    metadata_update["auto_resolved_by_prs"] = False
+                if metadata_update:
+                    await langgraph_client.threads.update(
+                        thread_id=thread_id, metadata=metadata_update
+                    )
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 

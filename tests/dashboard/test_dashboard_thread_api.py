@@ -1,5 +1,6 @@
 import base64
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, patch
@@ -17,6 +18,11 @@ _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
 _FABLE = "anthropic:claude-fable-5"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
+
+
+@asynccontextmanager
+async def _unlocked(*args, **kwargs):
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -1614,7 +1620,11 @@ async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
         async def get(self, thread_id: str) -> dict[str, object]:
             return {
                 "thread_id": thread_id,
-                "metadata": {"source": "dashboard", "github_login": "octocat"},
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "auto_resolved_by_prs": True,
+                },
             }
 
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
@@ -1624,11 +1634,13 @@ async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
         threads = FakeThreads()
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
 
     summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=True)
 
     assert updates[-1]["resolved"] is True
     assert isinstance(updates[-1]["resolved_at_ms"], int)
+    assert updates[-1]["auto_resolved_by_prs"] is False
     assert summary["resolved"] is True
 
 
@@ -1644,6 +1656,7 @@ async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
                     "github_login": "octocat",
                     "resolved": True,
                     "resolved_at_ms": 1700,
+                    "auto_resolved_by_prs": True,
                 },
             }
 
@@ -1654,11 +1667,13 @@ async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
         threads = FakeThreads()
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
 
     summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=False)
 
     assert updates[-1]["resolved"] is False
     assert updates[-1]["resolved_at_ms"] is None
+    assert updates[-1]["auto_resolved_by_prs"] is False
     assert summary["resolved"] is False
 
 
@@ -1671,6 +1686,7 @@ async def test_resolve_dashboard_thread_rejects_unsurfaced_thread(monkeypatch) -
         threads = FakeThreads()
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.resolve_dashboard_thread("tid", "teammate", resolved=True)
@@ -1681,6 +1697,18 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
     updates: list[dict[str, object]] = []
 
     class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "resolved": True,
+                    "resolved_at_ms": 1700,
+                    "auto_resolved_by_prs": True,
+                },
+            }
+
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
             updates.append(dict(metadata))
 
@@ -1689,6 +1717,7 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
 
     _patch_new_thread_deps(monkeypatch, profile={})
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
 
     async def fake_build(thread_id, login, metadata, *, overrides):
         return {"github_login": login, "source": "dashboard"}
@@ -1712,12 +1741,14 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
             "github_login": "octocat",
             "resolved": True,
             "resolved_at_ms": 1700,
+            "auto_resolved_by_prs": True,
         },
     )
 
     assert updates, "expected metadata update to clear resolved state"
     assert updates[-1]["resolved"] is False
     assert updates[-1]["resolved_at_ms"] is None
+    assert updates[-1]["auto_resolved_by_prs"] is False
 
 
 def test_summary_matches_filters() -> None:
