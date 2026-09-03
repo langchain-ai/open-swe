@@ -2017,7 +2017,7 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
 
     with (
         patch(
-            "agent.tools.publish_review.get_config",
+            "agent.run_config.get_config",
             return_value={
                 "configurable": {
                     "thread_id": "tid",
@@ -2093,7 +2093,7 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
 
     with (
         patch(
-            "agent.tools.publish_review.get_config",
+            "agent.run_config.get_config",
             return_value={
                 "configurable": {
                     "thread_id": "tid",
@@ -2152,7 +2152,7 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
 
     with (
         patch(
-            "agent.tools.publish_review.get_config",
+            "agent.run_config.get_config",
             return_value={"configurable": {"thread_id": "tid"}},
         ),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
@@ -2223,7 +2223,7 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
 
     with (
         patch(
-            "agent.tools.publish_review.get_config",
+            "agent.run_config.get_config",
             return_value={"configurable": {"thread_id": "tid"}},
         ),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
