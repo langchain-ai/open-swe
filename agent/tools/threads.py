@@ -181,7 +181,7 @@ async def list_threads(
     admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List Open SWE threads the current user, one other participant, or everyone joined."""
+    """List surfaced threads by participant, admin mode, status, source, scope, or text."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -205,7 +205,7 @@ async def list_threads(
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users or admin_threads is True,
+            include_all=all_users or (admin_threads is True and requested is None),
             resolved=resolved,
             viewed=viewed,
             source=source,
@@ -570,7 +570,7 @@ async def search_threads(
     admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Search Open SWE threads by identifiers, with optional admin-thread filtering."""
+    """Search surfaced threads by text/URL/ID/PR, participant, scope, or admin mode."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -621,7 +621,7 @@ async def search_threads(
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users or admin_threads is True,
+            include_all=all_users or (admin_threads is True and requested is None),
             query=normalized_query,
             scope=scope,
             filter_participant_login=filter_participant_login,

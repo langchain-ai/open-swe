@@ -165,6 +165,23 @@ async def test_list_threads_admin_filter_searches_all_admin_threads(
     assert awaited.kwargs["surfaced_only"] is True
 
 
+async def test_list_threads_intersects_participant_and_admin_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.list_threads(participant="other-user", admin_threads=True)
+
+    assert result["success"] is True
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["include_all"] is False
+    assert awaited.kwargs["filter_participant_login"] == "other-user"
+    assert awaited.kwargs["admin_threads"] is True
+
+
 async def test_list_threads_admin_filter_requires_admin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -560,6 +577,23 @@ async def test_search_threads_filters_all_threads_by_participant(
     assert awaited.kwargs["filter_participant_login"] == "other-user"
     assert awaited.kwargs["include_all"] is False
     assert awaited.kwargs["surfaced_only"] is True
+
+
+async def test_search_threads_intersects_participant_and_admin_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.search_threads(participant="other-user", admin_threads=True)
+
+    assert result["success"] is True
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["include_all"] is False
+    assert awaited.kwargs["filter_participant_login"] == "other-user"
+    assert awaited.kwargs["admin_threads"] is True
 
 
 async def test_search_threads_participant_filter_requires_admin(
