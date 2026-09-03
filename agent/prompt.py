@@ -25,7 +25,7 @@ def _load_default_prompt() -> str:
     """
     try:
         if DEFAULT_PROMPT_PATH:
-            content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
+            content = Path(DEFAULT_PROMPT_PATH).read_text(encoding="utf-8").strip()
         else:
             content = (
                 resources.files("agent.resources")
