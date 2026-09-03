@@ -117,8 +117,14 @@ test.describe("Plan review", () => {
     await owner.goto(`/agents/${threadId}`);
     await owner.getByTestId("inline-plan-artifact").click();
     await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
-    await expect(owner.getByTestId("plan-artifact-frame")).toBeVisible();
+    await expect(
+      owner
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByText("Add greet() helper"),
+    ).toBeVisible({ timeout: 30_000 });
     await expect(owner.getByTestId("plan-review")).toHaveCount(0);
+    await expect(owner.locator('[data-sidebar="sidebar"]')).toBeHidden();
     await owner.getByText("Back to conversation").click();
     await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
     await ownerCtx.close();

@@ -110,7 +110,7 @@ export function PlanView({
 
   if (standalone && plan.html.trim()) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col bg-background">
         <nav className="flex h-9 shrink-0 items-center border-b border-border px-3">
           {backLink}
         </nav>
@@ -123,7 +123,13 @@ export function PlanView({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      className={
+        standalone
+          ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col bg-background"
+          : "flex min-h-0 min-w-0 flex-1 flex-col"
+      }
+    >
       {standalone && (
         <nav className="flex h-9 shrink-0 items-center border-b border-border px-3">
           {backLink}
