@@ -112,7 +112,7 @@ async def _fetch_pull_request(
         response = await github_request(client, "GET", url)
         response.raise_for_status()
         payload = response.json()
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -140,7 +140,7 @@ async def _fetch_check_runs(
             if len(raw_runs) < 100:
                 return runs
             page += 1
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         return None
 
 
@@ -167,7 +167,7 @@ async def _fetch_commit_statuses(
             if len(raw_statuses) < 100:
                 break
             page += 1
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         return None
     latest: list[dict[str, Any]] = []
     contexts: set[str] = set()
@@ -293,7 +293,7 @@ async def _fetch_unresolved_review_threads(
                 return None
             seen_cursors.add(next_cursor)
             cursor = next_cursor
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         return None
 
 

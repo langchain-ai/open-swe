@@ -52,6 +52,7 @@ from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
     BasePrepareRunMiddleware,
     ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
@@ -364,7 +365,11 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         # middleware never wraps their model calls.
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
-            [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+            [
+                SanitizeOpenAIResponsesMiddleware(),
+                ModelErrorMiddleware(),
+                ModelCallTimeoutMiddleware(),
+            ],
         ),
     }
 
@@ -1064,7 +1069,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                     diff_text=fetched_diff,
                 )
                 diff_text = materialized.diff_text
-            except (RuntimeError, ValueError):
+            except RuntimeError, ValueError:
                 logger.exception("Failed to materialize review diff")
                 if fetched_diff is None:
                     return "", None
@@ -1247,7 +1252,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             skill_update = (
                 await skill_middleware.abefore_agent(
                     cast(SkillsState, {}),
-                    cast(Runtime[None], runtime),
+                    runtime,
                     self._config,
                 )
                 or {}
@@ -1401,6 +1406,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,
             ],

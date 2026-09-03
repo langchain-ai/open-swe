@@ -53,7 +53,7 @@ class FakeTranscript:
         self.stopped: str | None = None
         FakeTranscript.instances.append(self)
 
-    instances: list["FakeTranscript"] = []
+    instances: list[FakeTranscript] = []
 
     async def start(self) -> bool:
         FakeTranscript.started += 1

@@ -89,6 +89,7 @@ from agent.middleware import (
     ExcludeToolsMiddleware,
     IntegrationGroup,
     ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -381,8 +382,23 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """
     return cast(
         list[AgentMiddleware[Any, Any, Any]],
-        [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        [
+            SanitizeOpenAIResponsesMiddleware(),
+            ModelErrorMiddleware(),
+            ModelCallTimeoutMiddleware(),
+        ],
     )
+
+
+def _subagent_middleware(
+    dynamic_tools: DynamicToolMiddleware | None,
+) -> list[AgentMiddleware[Any, Any, Any]]:
+    middleware: list[AgentMiddleware[Any, Any, Any]] = []
+    if dynamic_tools is not None:
+        middleware.append(dynamic_tools)
+    middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
+    middleware.extend(_subagent_model_middleware())
+    return middleware
 
 
 def _is_subagent_excluded_tool(tool: Any) -> bool:
@@ -420,11 +436,7 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": [
-            *([dynamic_tools] if dynamic_tools else []),
-            ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
-            *_subagent_model_middleware(),
-        ],
+        "middleware": _subagent_middleware(dynamic_tools),
     }
     if skills:
         subagent["skills"] = skills
@@ -1374,6 +1386,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelErrorMiddleware(),
                 # Innermost, so the deadline covers the provider call itself and a
                 # timeout escalates outward to the fallback model.
                 ModelCallTimeoutMiddleware(),

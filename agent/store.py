@@ -16,7 +16,7 @@ validated instead of as ``dict[str, Any]``.
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 import httpx
 from langgraph_sdk import get_client
@@ -125,7 +125,7 @@ async def search_all_values(
 RecordT = TypeVar("RecordT", bound=BaseModel)
 
 
-class TypedStore(Generic[RecordT]):
+class TypedStore[RecordT: BaseModel]:
     """A namespace whose values are validated against ``model`` on the way out.
 
     Records outlive the code that wrote them, so ``model`` should default every

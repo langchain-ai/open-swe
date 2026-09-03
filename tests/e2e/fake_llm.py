@@ -1087,7 +1087,7 @@ class FakeScriptedChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "fake-scripted"
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "FakeScriptedChatModel":  # noqa: ARG002
+    def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
         return self
 
     def _generate(

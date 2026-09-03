@@ -169,12 +169,7 @@ def _get_sandbox_proxy_config(
 
 
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
-    """Merge ``extra`` into the JSON body of the sandbox-create request.
-
-    The SDK's ``create_sandbox`` builds a fixed payload with no passthrough, so
-    wrap the HTTP client's ``post`` to inject the fields on the ``POST /boxes``
-    request only (other endpoints post to ``/boxes/{name}/...``).
-    """
+    """Merge extra fields until the SDK exposes create-payload passthrough."""
     if not extra:
         return
     original_post = client._http.post
@@ -185,7 +180,8 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
             kwargs["json"] = {**payload, **extra}
         return await original_post(url, *args, **kwargs)
 
-    client._http.post = post_with_extra
+    # RFC moving this into the SDK if it adds a public arbitrary create-fields API.
+    client._http.post = post_with_extra  # ty: ignore[invalid-assignment]
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:

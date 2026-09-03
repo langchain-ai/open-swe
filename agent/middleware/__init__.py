@@ -8,6 +8,7 @@ _MIDDLEWARE_MODULES = {
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
+    "ModelErrorMiddleware": ".model_errors",
     "ModelFallbackMiddleware": ".model_fallback",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
@@ -36,6 +37,7 @@ __all__ = [
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
     "ModelCallTimeoutMiddleware",
+    "ModelErrorMiddleware",
     "ModelFallbackMiddleware",
     "BasePrepareRunMiddleware",
     "PlanModeMiddleware",
@@ -65,6 +67,7 @@ if TYPE_CHECKING:
     from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from agent.middleware.exclude_tools import ExcludeToolsMiddleware
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
+    from agent.middleware.model_errors import ModelErrorMiddleware
     from agent.middleware.model_fallback import ModelFallbackMiddleware
     from agent.middleware.notify_step_limit import notify_step_limit_reached
     from agent.middleware.plan_mode import PlanModeMiddleware

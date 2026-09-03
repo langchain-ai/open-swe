@@ -66,7 +66,7 @@ class SpawnOrigin:
     @classmethod
     def from_config(
         cls, cfg: RunConfig, active_slack: Mapping[str, Any] | SlackThreadRef
-    ) -> "SpawnOrigin":
+    ) -> SpawnOrigin:
         return cls(
             thread_id=cfg.thread_id or "",
             slack_thread=SlackThreadRef.parse(active_slack) or SlackThreadRef(),

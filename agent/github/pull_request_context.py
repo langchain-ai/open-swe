@@ -111,7 +111,7 @@ async def _graphql(
         )
         response.raise_for_status()
         payload = response.json()
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         return None
     if not isinstance(payload, dict) or payload.get("errors"):
         return None

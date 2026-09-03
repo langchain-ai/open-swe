@@ -532,6 +532,7 @@ async def _record_pr_telemetry(
     head: str,
     base: str,
     pr: dict[str, Any],
+    resolves_thread: bool = False,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -608,6 +609,7 @@ async def _record_pr_telemetry(
                     else ""
                 ),
                 "diff_stats": diff_stats,
+                "resolves_thread": resolves_thread,
             }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
@@ -770,6 +772,7 @@ async def _open_pull_request(
     title: str,
     body: str,
     draft: bool,
+    resolves_thread: bool = False,
 ) -> dict[str, Any]:
     token, kind = await _resolve_pr_author_token()
     if not token:
@@ -824,6 +827,7 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=pr,
+                    resolves_thread=resolves_thread,
                 )
             return {
                 "success": True,
@@ -847,6 +851,7 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=existing,
+                    resolves_thread=resolves_thread,
                 )
                 return {
                     "success": True,
@@ -895,6 +900,7 @@ async def open_pull_request(
     title: str,
     body: str,
     draft: bool = True,
+    resolves_thread: bool = False,
 ) -> dict[str, Any]:
     """Open a draft GitHub pull request attributed to the triggering user.
 
@@ -916,6 +922,12 @@ async def open_pull_request(
         body: PR description (Markdown).
         draft: Requested draft status. The authenticated user's dashboard preference
           overrides this value for newly created PRs; existing PRs are returned unchanged.
+        resolves_thread: Set True when merging or closing this PR finishes the
+          thread's work, so the thread auto-resolves once every PR it opened is
+          merged or closed. Prefer True. Use False only when you know more PRs
+          are coming for this thread (a stacked PR, a follow-up you still plan
+          to open) and set True on the last one instead. Threads whose PRs never
+          set this stay open until someone resolves them by hand.
 
     Returns:
         On success: {"success": True, "created": bool, "url": str, "number": int,
@@ -932,4 +944,5 @@ async def open_pull_request(
         title=title,
         body=body,
         draft=draft,
+        resolves_thread=resolves_thread,
     )

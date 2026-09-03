@@ -71,7 +71,11 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Approve workflow push", "emoji": True},
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Approve & continue push",
+                        "emoji": True,
+                    },
                     "style": "primary",
                     "value": json.dumps(
                         {
@@ -84,7 +88,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Reject", "emoji": True},
+                    "text": {"type": "plain_text", "text": "Cancel push", "emoji": True},
                     "style": "danger",
                     "value": json.dumps(
                         {

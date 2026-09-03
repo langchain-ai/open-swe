@@ -61,7 +61,7 @@ class SlackThreadRef(BaseModel):
         return value if value in _SLACK_SURFACES else None
 
     @classmethod
-    def parse(cls, raw: Any) -> "SlackThreadRef | None":
+    def parse(cls, raw: Any) -> SlackThreadRef | None:
         """A ref from an untyped Slack location, or None if there is nothing usable."""
         if isinstance(raw, SlackThreadRef):
             return raw
@@ -112,7 +112,7 @@ class SourceContext(BaseModel):
     pr_number: int | None = None
 
     @classmethod
-    def parse(cls, raw: Any) -> "SourceContext":
+    def parse(cls, raw: Any) -> SourceContext:
         if isinstance(raw, SourceContext):
             return raw
         if not isinstance(raw, Mapping):
@@ -124,7 +124,7 @@ class SourceContext(BaseModel):
             return cls()
 
     @classmethod
-    def from_metadata(cls, metadata: Any) -> "SourceContext":
+    def from_metadata(cls, metadata: Any) -> SourceContext:
         if not isinstance(metadata, Mapping):
             return cls()
         return cls.parse(metadata.get("source_context"))
