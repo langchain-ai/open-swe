@@ -129,7 +129,7 @@ Sandboxes can have network access and powerful tools. Deployments should use lea
 
 ## Getting started
 
-Open SWE includes a LangGraph backend, a web dashboard, and an experimental desktop client.
+Open SWE includes a LangGraph backend, a web dashboard, and an experimental desktop client for macOS.
 
 - **[Installation Guide](docs/INSTALLATION.md)** — Set up local development, the GitHub App, LangSmith, integrations, and production deployment
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
