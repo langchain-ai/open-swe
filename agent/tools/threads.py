@@ -144,11 +144,25 @@ def _web_link(item: Mapping[str, Any]) -> str | None:
     return dashboard_thread_url(thread_id) if isinstance(thread_id, str) else None
 
 
-def _list_item(item: Mapping[str, Any]) -> dict[str, Any]:
+def _langsmith_identifiers(trace_url: Any, locator: str | None = None) -> dict[str, Any]:
+    trusted = parse_langsmith_locator(trace_url) if isinstance(trace_url, str) else None
+    supplied = parse_langsmith_locator(locator) if locator else None
+    supplied_run_id = locator.strip() if locator and _looks_uuid(locator) else None
+    return {
+        "trace_url": trace_url if trusted else None,
+        "thread_id": trusted.id if trusted and trusted.kind == "thread" else None,
+        "run_id": supplied.id if supplied and supplied.kind == "run" else supplied_run_id,
+    }
+
+
+def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[str, Any]:
     result = dict(item)
     result.pop("messages", None)
     result.pop("sandboxId", None)
     result["webUrl"] = _web_link(item)
+    langsmith = _langsmith_identifiers(item.get("traceUrl"), locator)
+    if any(value is not None for value in langsmith.values()):
+        result["langsmith"] = langsmith
     return result
 
 
@@ -580,7 +594,7 @@ async def search_threads(
             _, summary = resolved
             return {
                 "success": True,
-                "items": [_list_item(summary)],
+                "items": [_list_item(summary, locator=query)],
                 "limit": 1,
                 "offset": 0,
                 "has_more": False,
@@ -703,7 +717,7 @@ async def get_thread(
     returned_participants = logins[:100]
     return {
         "success": True,
-        "thread": _list_item(summary),
+        "thread": _list_item(summary, locator=locator),
         "participant_logins": returned_participants,
         "participant_count": len(logins),
         "participants_truncated": len(returned_participants) < len(logins),
@@ -717,6 +731,7 @@ async def get_thread(
         "plan": plan,
         "workflow_approvals": _compact_approvals(approvals),
         "links": links,
+        "langsmith": _langsmith_identifiers(summary.get("traceUrl"), locator),
         "available_actions": _available_actions(
             admin=actor.admin,
             admin_thread=summary.get("adminThread") is True,

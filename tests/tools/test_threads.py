@@ -232,6 +232,7 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _DetailClient()
+    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool,
@@ -298,6 +299,12 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     assert result["queued_message_count"] == 1
     assert result["links"]["web"].endswith("/agents/thread-1")
     assert result["links"]["trace"] == "https://smith.example/t/thread-1"
+    assert result["langsmith"] == {
+        "trace_url": "https://smith.example/t/thread-1",
+        "thread_id": "thread-1",
+        "run_id": None,
+    }
+    assert result["thread"]["langsmith"] == result["langsmith"]
     assert "approve_plan" in result["available_actions"]
     assert "approve_workflow_push" in result["available_actions"]
     assert result["transcript"] == {
@@ -379,7 +386,13 @@ async def test_get_thread_accepts_langsmith_run_url(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     resolver = AsyncMock(return_value="thread-1")
     monkeypatch.setattr(threads_tool, "get_open_swe_thread_id_from_langsmith", resolver)
-    get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "status": "finished"})
+    get_dashboard_thread = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "status": "finished",
+            "traceUrl": "https://smith.langchain.com/o/org/projects/p/project/t/thread-1",
+        }
+    )
     monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
     monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
@@ -395,6 +408,11 @@ async def test_get_thread_accepts_langsmith_run_url(monkeypatch: pytest.MonkeyPa
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )
     client.threads.get.assert_awaited_once_with("thread-1")
+    assert result["langsmith"] == {
+        "trace_url": "https://smith.langchain.com/o/org/projects/p/project/t/thread-1",
+        "thread_id": "thread-1",
+        "run_id": "run-1",
+    }
 
 
 async def test_search_threads_resolves_langsmith_thread_url(
@@ -402,7 +420,12 @@ async def test_search_threads_resolves_langsmith_thread_url(
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     get_dashboard_thread = AsyncMock(
-        return_value={"id": "thread-1", "title": "Fix race", "messages": []}
+        return_value={
+            "id": "thread-1",
+            "title": "Fix race",
+            "messages": [],
+            "traceUrl": "https://smith.langchain.com/o/org/projects/p/project/t/thread-1",
+        }
     )
     monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
 
@@ -410,6 +433,11 @@ async def test_search_threads_resolves_langsmith_thread_url(
     result = await threads_tool.search_threads(locator)
 
     assert result["items"][0]["id"] == "thread-1"
+    assert result["items"][0]["langsmith"] == {
+        "trace_url": "https://smith.langchain.com/o/org/projects/p/project/t/thread-1",
+        "thread_id": "thread-1",
+        "run_id": None,
+    }
     get_dashboard_thread.assert_awaited_once_with(
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )
