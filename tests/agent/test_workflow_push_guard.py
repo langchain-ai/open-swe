@@ -73,7 +73,7 @@ class _Request:
             "id": "call-1",
         }
 
-    def override(self, **kwargs: Any) -> "_Request":
+    def override(self, **kwargs: Any) -> _Request:
         next_request = _Request()
         next_request.tool_call = kwargs.get("tool_call", self.tool_call)
         return next_request

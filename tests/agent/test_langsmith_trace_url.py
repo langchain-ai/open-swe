@@ -61,7 +61,7 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
         id = "pid-123"
 
     class _FakeClient:
-        async def __aenter__(self) -> "_FakeClient":
+        async def __aenter__(self) -> _FakeClient:
             return self
 
         async def __aexit__(self, *exc: object) -> None:
@@ -87,7 +87,7 @@ async def test_resolve_project_id_retries_transient_failure(
     calls: list[str] = []
 
     class _FakeClient:
-        async def __aenter__(self) -> "_FakeClient":
+        async def __aenter__(self) -> _FakeClient:
             return self
 
         async def __aexit__(self, *exc: object) -> None:

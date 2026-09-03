@@ -57,7 +57,7 @@ class _FakeLangSmithClient:
             }
         )
 
-    async def __aenter__(self) -> "_FakeLangSmithClient":
+    async def __aenter__(self) -> _FakeLangSmithClient:
         return self
 
     async def __aexit__(self, *exc: object) -> None:

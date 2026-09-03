@@ -39,7 +39,7 @@ async def slack_attach_html(
         return {"success": False, "error": _prepare_error(prepare.output)}
     try:
         size = int(prepare.output.strip())
-    except (AttributeError, ValueError):
+    except AttributeError, ValueError:
         await _remove_staged_file(backend, staged_path)
         return {"success": False, "error": "failed to determine file size"}
     if size < 1:

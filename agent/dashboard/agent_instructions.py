@@ -37,7 +37,7 @@ class AgentInstructions(BaseModel):
     updated_at: str = ""
 
     @classmethod
-    def seed(cls, full_name: str, created_by: str) -> "AgentInstructions":
+    def seed(cls, full_name: str, created_by: str) -> AgentInstructions:
         owner, _, name = full_name.partition("/")
         now = now_iso()
         return cls(

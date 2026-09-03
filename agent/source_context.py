@@ -68,7 +68,7 @@ class SourceContext(BaseModel):
     pr_number: int | None = None
 
     @classmethod
-    def parse(cls, raw: Any) -> "SourceContext":
+    def parse(cls, raw: Any) -> SourceContext:
         if isinstance(raw, SourceContext):
             return raw
         if not isinstance(raw, Mapping):
@@ -80,7 +80,7 @@ class SourceContext(BaseModel):
             return cls()
 
     @classmethod
-    def from_metadata(cls, metadata: Any) -> "SourceContext":
+    def from_metadata(cls, metadata: Any) -> SourceContext:
         if not isinstance(metadata, Mapping):
             return cls()
         return cls.parse(metadata.get("source_context"))

@@ -145,7 +145,7 @@ class Finding(TypedDict):
     resolution_note: str | None
     diff_hunk: str | None
     fingerprint: str
-    interactions: "list[FindingInteraction]"
+    interactions: list[FindingInteraction]
 
 
 class AppendFindingResult(TypedDict):

@@ -7,7 +7,7 @@ from agent.server import get_agent
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
+    def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config
         return self
 

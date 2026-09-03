@@ -480,6 +480,6 @@ async def _trace_url(thread_id: str, project: str) -> str | None:
 def _looks_uuid(value: str) -> bool:
     try:
         uuid.UUID(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return True

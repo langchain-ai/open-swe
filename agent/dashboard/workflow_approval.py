@@ -92,7 +92,7 @@ async def ensure_workflow_push_pending(
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return max(0, int(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 

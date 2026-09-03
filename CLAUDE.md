@@ -10,7 +10,7 @@ A separate **reviewer** graph runs read-only code reviews on PRs, and a **review
 
 ## Commands
 
-Dependencies are managed with **uv**. Tests use pytest (`asyncio_mode = "auto"`). Lint/format is **ruff** (line-length 100, target py311). Type checking is **basedpyright** (`typeCheckingMode = "standard"`). `requires-python = ">=3.11"`; `langgraph.json` pins the runtime to 3.12.
+Dependencies are managed with **uv**. Tests use pytest (`asyncio_mode = "auto"`). Lint/format is **ruff** (line-length 100, target py314). Type checking is **basedpyright** (`typeCheckingMode = "standard"`). `requires-python = ">=3.14"`; `langgraph.json` pins the runtime to 3.14.
 
 ```bash
 make install            # uv sync --extra dev (pytest, ruff, …)

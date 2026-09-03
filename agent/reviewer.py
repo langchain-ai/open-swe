@@ -1087,7 +1087,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                     diff_text=fetched_diff,
                 )
                 diff_text = materialized.diff_text
-            except (RuntimeError, ValueError):
+            except RuntimeError, ValueError:
                 logger.exception("Failed to materialize review diff")
                 if fetched_diff is None:
                     return "", None

@@ -3,7 +3,7 @@ name = "open-swe-agent"
 version = "0.1.0"
 description = "Open SWE Agent - Python agent for automating software engineering tasks"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.11",
@@ -68,7 +68,7 @@ packages = ["agent"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -95,7 +95,7 @@ testpaths = ["tests"]
 [tool.basedpyright]
 venvPath = "."
 venv = ".venv"
-pythonVersion = "3.11"
+pythonVersion = "3.14"
 typeCheckingMode = "standard"
 include = ["agent", "tests"]
 exclude = ["**/node_modules", "**/__pycache__", ".venv", "ui", "**/.*"]

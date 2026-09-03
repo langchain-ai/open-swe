@@ -49,7 +49,7 @@ async def create_sandbox(
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
     create_params: dict[str, Any] | None = None,
-) -> "SandboxBackendProtocol":
+) -> SandboxBackendProtocol:
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
