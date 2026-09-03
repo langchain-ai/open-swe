@@ -1,5 +1,5 @@
 import json
-from typing import Any, cast
+from typing import Any, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlencode
 
@@ -293,7 +293,7 @@ def invite_call(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             return captured["response"]
 
     class _Client:
-        async def __aenter__(self) -> "_Client":
+        async def __aenter__(self) -> Self:
             return self
 
         async def __aexit__(self, *_args: Any) -> None:
