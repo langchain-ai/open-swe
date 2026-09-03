@@ -54,7 +54,7 @@ override-dependencies = ["deepagents==0.7.11", "wcmatch>=11.0"]
 # uv's default pre-release policy shies away from, so a plain resolve lands on the
 # end-of-life 0.10.3. Hold the local dev server at the version `langgraph.json`
 # declares for the deployment, so tests run against the runtime that serves prod.
-constraint-dependencies = ["langgraph-api>=0.12.6,<0.13"]
+constraint-dependencies = ["langgraph-api>=0.13.3,<0.14"]
 
 [build-system]
 requires = ["hatchling"]
