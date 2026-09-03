@@ -32,7 +32,7 @@ class _Backend:
 
     async def aexecute(self, command: str) -> Any:
         path = command.removeprefix("realpath -- ").strip("'")
-        if path == "/workspace/project/link-to-secret":
+        if path == "/artifacts/link-to-secret":
             path = "/etc/passwd"
         return SimpleNamespace(exit_code=0, output=f"{path}\n")
 
@@ -56,12 +56,12 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
     return client
 
 
-async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_download_url_for_artifact_path(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
     result = await download_tool.create_sandbox_file_download_url(
-        "artifacts/demo.mp4",
+        "/artifacts/demo.mp4",
         expires_in_seconds=3600,
         content_type="video/mp4",
         content_disposition="inline",
@@ -69,7 +69,7 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
 
     assert result == {
         "url": "https://downloads.example/file?token=secret",
-        "file_path": "/workspace/project/artifacts/demo.mp4",
+        "file_path": "/artifacts/demo.mp4",
         "expires_at": "2026-08-20T12:00:00Z",
     }
     assert "token" not in result
@@ -77,7 +77,7 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
     assert client.calls == [
         (
             "sandbox-1",
-            "/workspace/project/artifacts/demo.mp4",
+            "/artifacts/demo.mp4",
             {
                 "expires_in_seconds": 3600,
                 "content_type": "video/mp4",
@@ -93,12 +93,12 @@ async def test_create_download_url_defaults_to_a_non_expiring_link(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    await download_tool.create_sandbox_file_download_url("/workspace/project/result.zip")
+    await download_tool.create_sandbox_file_download_url("/artifacts/result.zip")
 
     assert client.calls == [
         (
             "sandbox-1",
-            "/workspace/project/result.zip",
+            "/artifacts/result.zip",
             {
                 "expires_in_seconds": None,
                 "content_type": None,
@@ -110,16 +110,23 @@ async def test_create_download_url_defaults_to_a_non_expiring_link(
 
 @pytest.mark.parametrize(
     "file_path",
-    ["../secret.txt", "artifacts/../../secret.txt", "/etc/passwd", "/workspace/project-other/x"],
+    [
+        "artifact.bin",
+        "../secret.txt",
+        "/artifacts/../secret.txt",
+        "/etc/passwd",
+        "/workspace/project/artifact.bin",
+        "/artifacts-other/x",
+    ],
 )
-async def test_create_download_url_rejects_paths_outside_work_dir(
+async def test_create_download_url_rejects_paths_outside_artifacts(
     monkeypatch: pytest.MonkeyPatch,
     file_path: str,
 ) -> None:
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
+    with pytest.raises(ValueError, match="must resolve within /artifacts"):
         await download_tool.create_sandbox_file_download_url(file_path)
 
     assert client.calls == []
@@ -131,8 +138,8 @@ async def test_create_download_url_rejects_symlink_outside_work_dir(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
-        await download_tool.create_sandbox_file_download_url("link-to-secret")
+    with pytest.raises(ValueError, match="must resolve within /artifacts"):
+        await download_tool.create_sandbox_file_download_url("/artifacts/link-to-secret")
 
     assert client.calls == []
 
@@ -147,5 +154,5 @@ async def test_create_download_url_rejects_invalid_expiry(
 
     with pytest.raises(ValueError, match="must be positive"):
         await download_tool.create_sandbox_file_download_url(
-            "result.bin", expires_in_seconds=expires_in_seconds
+            "/artifacts/result.bin", expires_in_seconds=expires_in_seconds
         )

@@ -115,9 +115,10 @@ Application-owned model input uses an XML-like convention:
 SANDBOX_FILE_DOWNLOAD_GUIDANCE = """### Large File Sharing
 
 Use `create_sandbox_file_download_url` to share large binary artifacts such as videos, images,
-archives, or PDFs instead of pasting their contents into a response. Never create download links
-for secrets or credentials. Take a screenshot for applicable UI-facing changes and share it with
-the user in the final delivery."""
+archives, or PDFs instead of pasting their contents into a response. First place the file under
+`/artifacts/`, outside the sandbox work directory; the tool rejects every other location. Never
+create download links for secrets or credentials. Take a screenshot for applicable UI-facing
+changes and share it with the user in the final delivery."""
 
 
 def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:

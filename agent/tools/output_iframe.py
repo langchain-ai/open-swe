@@ -19,7 +19,7 @@ async def _output_iframe(
     title: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Display a sandbox HTML file in an isolated iframe in the dashboard."""
-    backend, source_path, work_dir = await _resolve_sandbox_file(path)
+    backend, source_path, _ = await _resolve_sandbox_file(path)
     quoted_source = shlex.quote(source_path)
     stat = await backend.aexecute(f"test -f {quoted_source} && stat -c %s -- {quoted_source}")
     if stat.exit_code != 0:
@@ -32,12 +32,7 @@ async def _output_iframe(
         raise ValueError("HTML file exceeds the 1 MB limit")
 
     filename = posixpath.basename(source_path) or "output.html"
-    snapshot_dir = posixpath.join(
-        work_dir,
-        ".open-swe",
-        "iframe-artifacts",
-        uuid4().hex,
-    )
+    snapshot_dir = posixpath.join("/artifacts", "iframe-artifacts", uuid4().hex)
     snapshot_path = posixpath.join(snapshot_dir, filename)
     quoted_snapshot = shlex.quote(snapshot_path)
     cleanup_command = f"rm -f -- {quoted_snapshot}"
