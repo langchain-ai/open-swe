@@ -154,13 +154,16 @@ function UsageTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-xs">
+      <table className="w-full min-w-[1040px] text-xs">
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
             <th className="w-14 px-4 py-3 text-left font-normal">Rank</th>
             <th className="px-2 py-3 text-left font-normal">User</th>
             <th className="px-2 py-3 text-left font-normal">Favorite Model</th>
             <th className="px-2 py-3 text-right font-normal">Agent Runs</th>
+            <th className="px-2 py-3 text-right font-normal">Tokens</th>
+            <th className="px-2 py-3 text-right font-normal">Cost</th>
+            <th className="px-2 py-3 text-right font-normal">Avg Duration</th>
             <th className="px-2 py-3 text-right font-normal">PRs Opened</th>
             <th className="px-2 py-3 text-right font-normal">Merged PRs</th>
             <th className="px-4 py-3 text-right font-normal">Agent LOC</th>
@@ -180,6 +183,15 @@ function UsageTable({
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.agent_runs)}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {formatNumber(row.total_tokens)}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {formatCurrency(row.total_cost_usd)}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {formatDuration(row.avg_run_seconds)}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.prs_opened)}
@@ -341,6 +353,20 @@ function formatTime(value: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+function formatDuration(value: number): string {
+  if (value < 60) return `${Math.round(value)}s`
+  return `${Math.round(value / 60)}m`
 }
 
 function formatPercent(value: number): string {
