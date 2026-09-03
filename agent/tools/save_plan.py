@@ -8,14 +8,14 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..dashboard.plan_store import (
+from agent.dashboard.plan_store import (
     PLAN_FILE_DIRECTORY,
     PLAN_STATUS_READY,
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
-from ..utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
-from ..utils.sandbox_state import get_sandbox_backend
+from agent.sandboxes.state import get_sandbox_backend
+from agent.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 
 logger = logging.getLogger(__name__)
 

@@ -8,9 +8,9 @@ metadata says "admin" cannot act on behalf of someone who is not one.
 import logging
 from typing import Any
 
-from ..dashboard import environments as store
-from .admin_gate import configurable as _configurable
-from .admin_gate import require_admin
+from agent.dashboard import environments as store
+from agent.tools.admin_gate import configurable as _configurable
+from agent.tools.admin_gate import require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,7 @@ async def capture_environment_snapshot(name: str) -> dict[str, Any]:
         return {"ok": False, "error": "no thread_id in the current run config"}
 
     try:
-        from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
+        from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.

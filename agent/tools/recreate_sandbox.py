@@ -28,7 +28,8 @@ async def recreate_sandbox() -> dict[str, Any]:
         return {"success": False, "error": "No thread_id in current run config"}
 
     try:
-        from ..server import _environment_slug, recreate_sandbox_for_thread
+        from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
+        from agent.server import _environment_slug
 
         old_sandbox_id, new_sandbox_id = await recreate_sandbox_for_thread(
             thread_id,

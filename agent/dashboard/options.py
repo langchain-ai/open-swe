@@ -59,8 +59,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "google_genai:gemini-3.7-flash",
-        "label": "Gemini 3.7 Flash",
+        "id": "google_genai:gemini-3.8-flash",
+        "label": "Gemini 3.8 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
@@ -108,6 +108,7 @@ DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
         "openai:gpt-5.5",
         "google_genai:gemini-3.5-flash",
         "google_genai:gemini-3.6-flash",
+        "google_genai:gemini-3.7-flash",
         "fireworks:accounts/fireworks/models/kimi-k2p7-code",
         "fireworks:accounts/fireworks/models/kimi-k3-code",
         "fireworks:accounts/fireworks/models/glm-5p2",

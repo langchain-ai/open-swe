@@ -5,8 +5,9 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
-from ..review.findings import (
+from agent.github.thread_token import get_github_token
+from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from agent.review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Confidence,
@@ -22,7 +23,6 @@ from ..review.findings import (
     resolve_review_head_sha,
     thread_missing_tool_result,
 )
-from ..utils.github_token import get_github_token
 
 
 async def add_finding(
@@ -133,7 +133,7 @@ async def add_finding(
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
-        from ..review.diff import extract_diff_hunk
+        from agent.review.diff import extract_diff_hunk
 
         diff_hunk = extract_diff_hunk(diff_text, file, start_line, end_line)
 

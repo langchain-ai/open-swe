@@ -6,12 +6,11 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.dispatch import dispatch_agent_run
+from agent.sandboxes.providers.registry import create_sandbox
 from agent.source_context import SourceContext
-
-from .dispatch import dispatch_agent_run
-from .tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
-from .utils.sandbox import create_sandbox
-from .utils.thread_ops import langgraph_url
+from agent.tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
+from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 

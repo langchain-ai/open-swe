@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..review.findings import (
+from agent.review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Finding,
@@ -19,7 +19,7 @@ from ..review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
-from ..utils.reviewer_outcomes import emit_finding_status_outcome
+from agent.utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 def _normalize_note(note: str | None) -> str | None:
@@ -151,7 +151,7 @@ async def update_finding(
         and can_resolve_github_thread
         and _has_published_github_surface(finding)
     ):
-        from .resolve_finding_thread import resolve_finding_thread
+        from agent.tools.resolve_finding_thread import resolve_finding_thread
 
         resolve_result = await resolve_finding_thread(
             finding_id, status=status, note=normalized_note or ""

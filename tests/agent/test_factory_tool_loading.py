@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
+from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import get_agent
-from agent.utils.sandbox_state import SANDBOX_BACKENDS
 
 _START_TIMEOUT_SECONDS = 2.0
 
@@ -62,7 +62,7 @@ async def test_tool_loaders_run_concurrently() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),

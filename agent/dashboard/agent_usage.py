@@ -14,8 +14,7 @@ import httpx
 from langgraph_sdk import get_client
 
 from agent.review.findings import coerce_finding, is_surfaced
-
-from ..utils.json_types import as_json_object, thread_metadata
+from agent.utils.json_types import as_json_object, thread_metadata
 
 AGENT_RUN_NAMESPACE = ["usage", "v2", "agent_runs"]
 AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]
@@ -190,7 +189,7 @@ async def _backfill_legacy_agent_records() -> None:
 
 
 async def _backfill_legacy_reviews() -> None:
-    from ..review.findings import REVIEWER_THREAD_KIND
+    from agent.review.findings import REVIEWER_THREAD_KIND
 
     offset = 0
     while True:

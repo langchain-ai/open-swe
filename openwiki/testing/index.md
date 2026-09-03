@@ -1,3 +1,3 @@
 # Files
 
-- [Testing Guide](overview.md) - A production-owner test map for Open SWE's Python, dashboard, desktop, and Playwright layers. It highlights dashboard-thread and sandbox contracts plus the isolated Electron end-to-end scenario.
+- [Testing Guide](overview.md) - Test-layer routing and focused test inventory for Open SWE, including dashboard thread contracts, shared pytest isolation, workspace suites, and the Playwright cross-boundary harness.

@@ -12,13 +12,13 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..dashboard import plan_api, workflow_approval_api
-from ..dashboard.admin import is_admin
-from ..dashboard.agent_overrides import resolve_login_from_email_async
-from ..dashboard.oauth import enforce_org_login_gate
-from ..dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from ..dashboard.plan_store import get_plan_content, list_plan_comments
-from ..dashboard.thread_api import (
+from agent.dashboard import plan_api, workflow_approval_api
+from agent.dashboard.admin import is_admin
+from agent.dashboard.agent_overrides import resolve_login_from_email_async
+from agent.dashboard.oauth import enforce_org_login_gate
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from agent.dashboard.plan_store import get_plan_content, list_plan_comments
+from agent.dashboard.thread_api import (
     ThreadMessageBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -29,17 +29,17 @@ from ..dashboard.thread_api import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
-from ..dashboard.workflow_approval import (
+from agent.dashboard.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from ..input_messages import input_message_text, message_sender_id
-from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.json_types import as_json_object, thread_metadata
-from ..utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
-from ..utils.thread_ops import langgraph_client
-from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from agent.input_messages import input_message_text, message_sender_id
+from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.utils.json_types import as_json_object, thread_metadata
+from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
+from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 
 logger = logging.getLogger(__name__)
 

@@ -35,7 +35,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
-from .input_messages import (
+from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
     PersonIdentity,
