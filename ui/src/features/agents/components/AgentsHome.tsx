@@ -415,17 +415,15 @@ export function AgentsHome() {
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {session.data && !routePending && <OnboardingDialog />}
-        {optimisticDraftThread && (
-          <AgentThreadHeader
-            project={
-              runTarget === "local"
-                ? localProjectPath
-                : optimisticDraftThread.repoFullName
-            }
-            target={runTarget === "local" ? "This Mac" : "Cloud"}
-            panelCollapsed={panelCollapsed}
-          />
-        )}
+        <AgentThreadHeader
+          project={
+            runTarget === "local"
+              ? localProjectPath
+              : optimisticDraftThread?.repoFullName ?? repo
+          }
+          target={runTarget === "local" ? "This Mac" : "Cloud"}
+          panelCollapsed={panelCollapsed}
+        />
         {optimisticDraftThread ? (
           <Messages
             messages={optimisticDraftThread.messages}
