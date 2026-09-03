@@ -94,7 +94,8 @@ export function WorkflowApprovalCard({
                       Where these changes came from
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Merging {inherited} into {approval.branch || "the current branch"}
+                      Merging {inherited} into{" "}
+                      {approval.branch || "the current branch"}
                     </p>
                   </div>
                 </div>
@@ -107,12 +108,15 @@ export function WorkflowApprovalCard({
                     Why you need to confirm
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Workflow files control CI jobs and may access repository secrets. Open SWE pauses before pushing any workflow change.
+                    Workflow files control CI jobs and may access repository
+                    secrets. Open SWE pauses before pushing any workflow change.
                   </p>
                 </div>
               </div>
 
-              {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
+              {error && (
+                <p className="mt-3 text-xs text-destructive">{error}</p>
+              )}
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button
@@ -130,7 +134,8 @@ export function WorkflowApprovalCard({
                 </Button>
               </div>
               <p className="mt-2 text-[0.7rem] text-muted-foreground">
-                Approval resumes this exact push only. If the workflow files change, Open SWE will ask again.
+                Approval resumes this exact push only. If the workflow files
+                change, Open SWE will ask again.
               </p>
 
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -168,7 +173,11 @@ export function WorkflowApprovalCard({
                 <div className="border-t border-border p-3">
                   <ul className="space-y-1 text-xs text-muted-foreground">
                     {approval.files.map((file) => (
-                      <li key={file} className="truncate font-mono" title={file}>
+                      <li
+                        key={file}
+                        className="truncate font-mono"
+                        title={file}
+                      >
                         {file}
                       </li>
                     ))}
