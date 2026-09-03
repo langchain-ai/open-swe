@@ -185,7 +185,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
             kwargs["json"] = {**payload, **extra}
         return await original_post(url, *args, **kwargs)
 
-    client._http.post = post_with_extra  # ty: ignore[invalid-assignment]
+    client._http.__dict__["post"] = post_with_extra
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:

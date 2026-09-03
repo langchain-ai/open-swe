@@ -12,7 +12,7 @@ snapshot, which today means a per-run model override.
 
 import logging
 from collections.abc import Mapping
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 from agent.utils import ttl_cache
 
@@ -32,20 +32,22 @@ class ThreadSettings(TypedDict, total=False):
 
 def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettings, bool]:
     """Remove participant settings that are now resolved for each message."""
-    value = dict(settings)
-    removed = {
-        "create_prs",
-        "draft_prs",
-        "user_instructions",
-        "commit_name",
-        "commit_email",
-        "display_name",
-        "owner_login",
-    }
-    changed = not removed.isdisjoint(value)
-    for key in removed:
-        value.pop(key, None)
-    return cast(ThreadSettings, value), changed
+    value = ThreadSettings()
+    if isinstance(settings.get("model_id"), str):
+        value["model_id"] = settings["model_id"]
+    if "effort" in settings and (settings["effort"] is None or isinstance(settings["effort"], str)):
+        value["effort"] = settings["effort"]
+    if isinstance(settings.get("subagent_model_id"), str):
+        value["subagent_model_id"] = settings["subagent_model_id"]
+    if "subagent_effort" in settings and (
+        settings["subagent_effort"] is None or isinstance(settings["subagent_effort"], str)
+    ):
+        value["subagent_effort"] = settings["subagent_effort"]
+    if "repo_instructions" in settings and (
+        settings["repo_instructions"] is None or isinstance(settings["repo_instructions"], str)
+    ):
+        value["repo_instructions"] = settings["repo_instructions"]
+    return value, set(value) != set(settings)
 
 
 def _cache_key(thread_id: str) -> str:
@@ -59,7 +61,7 @@ async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
         thread = await client.threads.get(thread_id=thread_id)
         metadata = thread.get("metadata") or {}
         stored = metadata.get(THREAD_SETTINGS_KEY)
-        return cast(ThreadSettings, dict(stored)) if isinstance(stored, dict) else {}
+        return normalize_thread_settings(stored)[0] if isinstance(stored, dict) else {}
 
     try:
         return await ttl_cache.cached(_cache_key(thread_id), _CACHE_TTL_SECONDS, _load)

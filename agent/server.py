@@ -386,6 +386,17 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     )
 
 
+def _subagent_middleware(
+    dynamic_tools: DynamicToolMiddleware | None,
+) -> list[AgentMiddleware[Any, Any, Any]]:
+    middleware: list[AgentMiddleware[Any, Any, Any]] = []
+    if dynamic_tools is not None:
+        middleware.append(dynamic_tools)
+    middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
+    middleware.extend(_subagent_model_middleware())
+    return middleware
+
+
 def _is_subagent_excluded_tool(tool: Any) -> bool:
     """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
@@ -421,11 +432,7 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": [  # ty: ignore[invalid-argument-type]
-            *([dynamic_tools] if dynamic_tools else []),
-            ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
-            *_subagent_model_middleware(),
-        ],
+        "middleware": _subagent_middleware(dynamic_tools),
     }
     if skills:
         subagent["skills"] = skills
