@@ -8,7 +8,6 @@ import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadsPage } from "@/features/agents/lib/api"
-import { AgentsApiError } from "@/features/agents/lib/api"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
@@ -98,22 +97,29 @@ beforeEach(() => {
   stream.isLoading = false
   stream.submit.mockClear()
   queueMessage.mockReset()
-  queueMessage.mockResolvedValue(undefined)
+  queueMessage.mockResolvedValue({ queuedMessages: [] })
 })
 
 describe("useSubmitAgentMessage", () => {
   it("never flashes a queued bubble when the send starts a new run", async () => {
-    queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
+    queueMessage.mockResolvedValueOnce({ queuedMessages: [] })
     const { client, queuedCounts, result } = setup()
 
     await result.current.mutateAsync({ content: "hi", images: [] })
 
-    await waitFor(() => expect(stream.submit).toHaveBeenCalled())
     expect(sidebarStatus(client)).toBe("running")
     expect(queuedCounts.every((count) => count === 0)).toBe(true)
   })
 
   it("shows the queued bubble once a run this client never joined accepts it", async () => {
+    queueMessage.mockResolvedValueOnce({
+      id: THREAD_ID,
+      status: "running",
+      messages: [],
+      queuedMessages: [
+        { id: "queued-server", content: "hi", createdAt: Date.now() },
+      ],
+    })
     const { client, result } = setup()
 
     await result.current.mutateAsync({ content: "hi", images: [] })
@@ -137,5 +143,16 @@ describe("useSubmitAgentMessage", () => {
     await waitFor(() => expect(queuedMessages(client)).toHaveLength(1))
     acceptQueue()
     await pending
+  })
+
+  it("survives when stop overtakes an optimistic queue", async () => {
+    stream.isLoading = true
+    queueMessage.mockResolvedValueOnce({ queuedMessages: [] })
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({ content: "survive stop", images: [] })
+
+    expect(queuedMessages(client)).toHaveLength(1)
+    expect(stream.submit).not.toHaveBeenCalled()
   })
 })

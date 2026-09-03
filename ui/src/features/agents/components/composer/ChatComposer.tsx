@@ -99,6 +99,7 @@ export interface ChatComposerProps {
   busy?: boolean
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
+  draftKey?: string
   onStop?: () => void | Promise<void>
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   models?: Array<ModelOption>
@@ -226,6 +227,7 @@ export const ChatComposer = memo(function ChatComposer({
   disabled = false,
   busy = false,
   activeRun,
+  draftKey,
   onStop,
   onSubmit,
   models = [],
@@ -259,8 +261,16 @@ export const ChatComposer = memo(function ChatComposer({
   skills = [],
   contextUsage,
 }: ChatComposerProps) {
-  const [value, setValue] = useState("")
-  const [cursor, setCursor] = useState(0)
+  const storageKey = draftKey ? `open-swe:composer-draft:${draftKey}` : null
+  const [value, setValue] = useState(() => {
+    if (!storageKey || typeof window === "undefined") return ""
+    try {
+      return window.sessionStorage.getItem(storageKey) ?? ""
+    } catch {
+      return ""
+    }
+  })
+  const [cursor, setCursor] = useState(value.length)
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -321,15 +331,27 @@ export const ChatComposer = memo(function ChatComposer({
   const audioChunksRef = useRef<Array<Blob>>([])
   const mountedRef = useRef(true)
   const requestingMicrophoneRef = useRef(false)
+  const pendingSubmissionsRef = useRef(0)
+  const previousStorageKeyRef = useRef(storageKey)
 
   useEffect(() => {
     if (autoFocus) editorRef.current?.focus()
   }, [autoFocus])
 
-  // Synchronous double-submit guard: blocks a same-tick second send (Enter +
-  // click, or two rapid Enters) before React re-renders. Scoped to the send
-  // request only — never the run lifecycle.
-  const submittingRef = useRef(false)
+  useEffect(() => {
+    if (previousStorageKeyRef.current === storageKey) return
+    previousStorageKeyRef.current = storageKey
+    let draft = ""
+    if (storageKey) {
+      try {
+        draft = window.sessionStorage.getItem(storageKey) ?? ""
+      } catch {
+        draft = ""
+      }
+    }
+    setValue(draft)
+    setCursor(draft.length)
+  }, [storageKey])
 
   useEffect(
     () => () => {
@@ -371,16 +393,26 @@ export const ChatComposer = memo(function ChatComposer({
 
   const canSubmit =
     !disabled &&
-    !isSubmitting &&
     selectedModelSupportsImages &&
     (value.trim().length > 0 || pendingImages.length > 0)
 
-  const applyPrompt = useCallback((nextValue: string, nextCursor: number) => {
-    setValue(nextValue)
-    setCursor(nextCursor)
-    setDismissedTriggerKey(null)
-    setActiveItemId(null)
-  }, [])
+  const applyPrompt = useCallback(
+    (nextValue: string, nextCursor: number) => {
+      setValue(nextValue)
+      setCursor(nextCursor)
+      setDismissedTriggerKey(null)
+      setActiveItemId(null)
+      if (storageKey) {
+        try {
+          if (nextValue) window.sessionStorage.setItem(storageKey, nextValue)
+          else window.sessionStorage.removeItem(storageKey)
+        } catch {
+          // Storage can be unavailable in private or sandboxed browser contexts.
+        }
+      }
+    },
+    [storageKey]
+  )
 
   const handleDictation = useCallback(async () => {
     if (dictationState === "recording") {
@@ -454,28 +486,36 @@ export const ChatComposer = memo(function ChatComposer({
     }
   }, [applyPrompt, dictationState, value])
 
-  const handleSubmit = useCallback(async () => {
-    if (submittingRef.current || disabled) return
-    // The editor is the source of truth for what is on screen; a keystroke that
-    // has not yet round-tripped through state would otherwise be dropped.
+  const handleSubmit = useCallback(() => {
+    if (disabled) return
     const snapshot = editorRef.current?.readSnapshot()
     const trimmed = (snapshot?.value ?? value).trim()
     if (trimmed.length === 0 && pendingImages.length === 0) return
 
     const images = pendingImages
-    submittingRef.current = true
-    setIsSubmitting(true)
     applyPrompt("", 0)
     setPendingImages([])
     setDictationError(null)
-    try {
-      await onSubmit?.(trimmed, images)
-    } catch {
-      // Caller surfaces send errors (e.g. via react-query mutation state).
-    } finally {
-      submittingRef.current = false
-      setIsSubmitting(false)
-    }
+    pendingSubmissionsRef.current += 1
+    setIsSubmitting(true)
+
+    void (async () => {
+      try {
+        await onSubmit?.(trimmed, images)
+      } catch {
+        if (mountedRef.current) {
+          const current = editorRef.current?.readSnapshot().value ?? ""
+          const restored = current ? `${trimmed}\n${current}` : trimmed
+          applyPrompt(restored, restored.length)
+          setPendingImages((next) => [...images, ...next])
+        }
+      } finally {
+        pendingSubmissionsRef.current -= 1
+        if (mountedRef.current && pendingSubmissionsRef.current === 0) {
+          setIsSubmitting(false)
+        }
+      }
+    })()
   }, [applyPrompt, disabled, onSubmit, pendingImages, value])
 
   const selectCommandItem = useCallback(
@@ -827,10 +867,7 @@ export const ChatComposer = memo(function ChatComposer({
           cursor={cursor}
           disabled={disabled}
           editorRef={editorRef}
-          onChange={(nextValue, nextCursor) => {
-            setValue(nextValue)
-            setCursor(nextCursor)
-          }}
+          onChange={applyPrompt}
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={busy ? "Send a message to queue next..." : placeholder}

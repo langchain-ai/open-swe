@@ -34,6 +34,7 @@ export const agentThreadKeys = {
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
+  cancel: (threadId: string) => ["agent-threads", threadId, "cancel"] as const,
   pullRequestStatus: (threadId: string) =>
     ["agent-threads", threadId, "pull-request-status"] as const,
   branchDiff: (threadId: string) =>
@@ -582,7 +583,7 @@ export function useAgentThread(threadId: string) {
       const thread = await agentsApi.getThread(threadId)
       const queuedMessages =
         queryClient.getQueryData<AgentThread>(key)?.queuedMessages
-      return thread.status === "running" && queuedMessages?.length
+      return thread.queuedMessages === undefined && queuedMessages?.length
         ? { ...thread, queuedMessages }
         : thread
     },
@@ -591,7 +592,7 @@ export function useAgentThread(threadId: string) {
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
     refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 3000 : false,
+      query.state.data?.status === "running" ? 1000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and bounce the route back to /agents.
@@ -817,6 +818,7 @@ export function useCancelAgentThread(threadId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
+    mutationKey: agentThreadKeys.cancel(threadId),
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)

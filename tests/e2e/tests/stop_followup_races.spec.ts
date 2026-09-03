@@ -117,7 +117,7 @@ async function raceQueuedSendAgainstStop(
   await expect(
     page.getByTestId("queued-message").filter({ hasText: followUp }),
   ).toHaveCount(0);
-  expect(response.status()).toBe(409);
+  expect(response.status()).toBe(200);
 }
 
 test.describe("stop followed by new input", () => {
@@ -133,7 +133,9 @@ test.describe("stop followed by new input", () => {
       await page.reload();
 
       await expect(
-        page.getByTestId("user-message").filter({ hasText: followUp }),
+        page
+          .getByTestId(/^(user|queued)-message$/)
+          .filter({ hasText: followUp }),
       ).toBeVisible();
     });
   }
@@ -145,7 +147,9 @@ test.describe("stop followed by new input", () => {
     const followUp = "Keep the click-overlapping replacement instruction.";
     await raceQueuedSendAgainstStop(page, threadId, followUp, "click");
 
-    await expect(page.getByTestId("composer-editor")).toContainText(followUp);
+    await expect(
+      page.getByTestId(/^(user|queued)-message$/).filter({ hasText: followUp }),
+    ).toBeVisible();
   });
 
   test("does not drop a follow-up whose queue request overlaps Escape-to-stop", async ({
@@ -155,7 +159,9 @@ test.describe("stop followed by new input", () => {
     const followUp = "Keep the Escape-overlapping replacement instruction.";
     await raceQueuedSendAgainstStop(page, threadId, followUp, "escape");
 
-    await expect(page.getByTestId("composer-editor")).toContainText(followUp);
+    await expect(
+      page.getByTestId(/^(user|queued)-message$/).filter({ hasText: followUp }),
+    ).toBeVisible();
   });
 
   test("keeps a queued follow-up visible after reloading a busy thread", async ({
