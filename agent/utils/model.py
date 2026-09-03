@@ -110,11 +110,15 @@ _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "m
 
 
 def _openai_responses_api_enabled() -> bool:
-    return os.environ.get("OPENAI_USE_RESPONSES_API", "true").lower() not in {
-        "0",
-        "false",
-        "no",
-    }
+    raw = os.environ.get("OPENAI_USE_RESPONSES_API")
+    if raw is None:
+        return True
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes"}:
+        return True
+    if normalized in {"0", "false", "no"}:
+        return False
+    raise ValueError("OPENAI_USE_RESPONSES_API must be true or false")
 
 
 def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> None:

@@ -60,3 +60,10 @@ def test_openai_base_url_can_use_chat_completions(monkeypatch: pytest.MonkeyPatc
 
     assert captured["base_url"] == "https://gateway.example/v1"
     assert captured["use_responses_api"] is False
+
+
+def test_openai_responses_api_flag_rejects_invalid_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "sometimes")
+
+    with pytest.raises(ValueError, match="must be true or false"):
+        _make_model("openai:compatible-model")
