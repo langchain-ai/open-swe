@@ -29,7 +29,7 @@ from agent.auth.thread_token import (
     invalidate_cached_github_token,
 )
 from agent.source_context import SourceContext
-from agent.utils.langsmith import create_langsmith_feedback
+from agent.utils.langsmith import create_langsmith_thread_feedback
 
 from ..dashboard.agent_overrides import (
     get_profile_default_repo,
@@ -1366,50 +1366,21 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     )
 
 
-async def _record_pr_merge_feedback(
-    langgraph_client: LangGraphClient,
-    thread_id: str,
-    *,
-    pr_url: str,
-) -> None:
-    offset = 0
-    page_size = 100
-    seen_run_ids: set[str] = set()
-    while True:
-        try:
-            runs = await langgraph_client.runs.list(thread_id, limit=page_size, offset=offset)
-        except Exception:  # noqa: BLE001
-            logger.debug("Failed to list runs for merged PR thread %s", thread_id, exc_info=True)
-            return
-        page = runs or []
-        for run in page:
-            run_id = (
-                (run.get("run_id") or run.get("id"))
-                if isinstance(run, dict)
-                else (getattr(run, "run_id", None) or getattr(run, "id", None))
-            )
-            if not isinstance(run_id, str) or not run_id or run_id in seen_run_ids:
-                continue
-            seen_run_ids.add(run_id)
-            try:
-                await create_langsmith_feedback(
-                    run_id,
-                    f"github_pr_merged:{pr_url}",
-                    score=1.0,
-                    comment=f"Agent-authored pull request merged: {pr_url}",
-                    source_info={
-                        "source": "github_pr_merged",
-                        "thread_id": thread_id,
-                        "pr_url": pr_url,
-                    },
-                )
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "Failed to record merged PR feedback for run %s", run_id, exc_info=True
-                )
-        if len(page) < page_size:
-            return
-        offset += page_size
+async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
+    try:
+        await create_langsmith_thread_feedback(
+            thread_id,
+            f"github_pr_merged:{pr_url}",
+            score=1.0,
+            comment=f"Agent-authored pull request merged: {pr_url}",
+            source_info={
+                "source": "github_pr_merged",
+                "thread_id": thread_id,
+                "pr_url": pr_url,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to record merged PR feedback for thread %s", thread_id, exc_info=True)
 
 
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
@@ -1512,7 +1483,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
             continue
         if new_state == "merged":
-            await _record_pr_merge_feedback(langgraph_client, thread_id, pr_url=pr_url)
+            await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
 
 
 async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
