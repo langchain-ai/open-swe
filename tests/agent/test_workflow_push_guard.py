@@ -25,9 +25,11 @@ class _Backend:
         *,
         workflow_files: str = ".github/workflows/ci.yml",
         inherited_from_main: bool = False,
+        workflows_changed_by_merge: bool = True,
     ) -> None:
         self.workflow_files = workflow_files
         self.inherited_from_main = inherited_from_main
+        self.workflows_changed_by_merge = workflows_changed_by_merge
         self.commands: list[str] = []
         self.head = "a" * 40
 
@@ -45,7 +47,9 @@ class _Backend:
             return _Response(f"{self.head} {'b' * 40}\n")
         if "merge-base --is-ancestor" in command:
             return _Response("", 0 if self.inherited_from_main else 1)
-        if "diff --quiet" in command:
+        if f"diff --quiet {'b' * 40} {self.head}" in command:
+            return _Response("", 1 if self.workflows_changed_by_merge else 0)
+        if f"diff --quiet {'c' * 40} {self.head}" in command:
             return _Response("", 0 if self.inherited_from_main else 1)
         if f"merge-base {self.head} origin/main" in command:
             return _Response("base-sha\n")
@@ -141,7 +145,7 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     assert len(change.fingerprint) == 64
 
 
-async def test_workflow_change_marks_unchanged_merge_workflows_as_inherited() -> None:
+async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
     change = await guard._workflow_change_for_push(
         _Backend(inherited_from_main=True),
         guard.ParsedGitPush(
@@ -151,6 +155,18 @@ async def test_workflow_change_marks_unchanged_merge_workflows_as_inherited() ->
 
     assert change is not None
     assert change.inherited_from == "main"
+
+
+async def test_workflow_change_does_not_misattribute_preexisting_workflows() -> None:
+    change = await guard._workflow_change_for_push(
+        _Backend(inherited_from_main=True, workflows_changed_by_merge=False),
+        guard.ParsedGitPush(
+            repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
+        ),
+    )
+
+    assert change is not None
+    assert change.inherited_from is None
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:

@@ -309,12 +309,19 @@ async def _inherited_workflow_source(backend: Any, root: str, head: str) -> str 
     )
     if not source_contains_parent.ok:
         return None
-    workflow_diff = await _run_git(
+    feature_workflow_diff = await _run_git(
+        backend,
+        root,
+        f"diff --quiet {shlex.quote(first_parent)} {shlex.quote(head)} -- .github/workflows",
+    )
+    if feature_workflow_diff.ok:
+        return None
+    merged_workflow_diff = await _run_git(
         backend,
         root,
         f"diff --quiet {shlex.quote(merged_parent)} {shlex.quote(head)} -- .github/workflows",
     )
-    return source_ref.removeprefix("origin/") if workflow_diff.ok else None
+    return source_ref.removeprefix("origin/") if merged_workflow_diff.ok else None
 
 
 def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
