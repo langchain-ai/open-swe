@@ -169,7 +169,7 @@ def extract_diff_hunk(
     file_diffs = [fd for fd in parse_unified_diff(diff_text) if fd.file == file]
     if not file_diffs:
         return None
-    hunks = tuple(hunk for file_diff in file_diffs for hunk in file_diff.hunks)
+    hunks = file_diffs[0].hunks
     if not hunks:
         return None
     if start_line is None or end_line is None:
