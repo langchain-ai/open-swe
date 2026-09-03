@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
+    "ask_user_choice": "agent.slack.tools.ask_user_choice",
     "background_execute": ".background_execute",
     "background_task": ".background_execute",
     "capture_environment_snapshot": ".environments",
@@ -18,32 +19,31 @@ _TOOL_MODULES = {
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
-    "linear_comment": ".linear_comment",
-    "linear_create_issue": ".linear_create_issue",
-    "linear_delete_issue": ".linear_delete_issue",
-    "linear_get_issue": ".linear_get_issue",
-    "ask_user_choice": ".ask_user_choice",
-    "linear_get_issue_comments": ".linear_get_issue_comments",
-    "linear_list_teams": ".linear_list_teams",
-    "linear_search_issues": ".linear_search_issues",
-    "linear_update_issue": ".linear_update_issue",
+    "linear_comment": "agent.linear.tools.comment",
+    "linear_create_issue": "agent.linear.tools.create_issue",
+    "linear_delete_issue": "agent.linear.tools.delete_issue",
+    "linear_get_issue": "agent.linear.tools.get_issue",
+    "linear_get_issue_comments": "agent.linear.tools.get_issue_comments",
+    "linear_list_teams": "agent.linear.tools.list_teams",
+    "linear_search_issues": "agent.linear.tools.search_issues",
+    "linear_update_issue": "agent.linear.tools.update_issue",
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
-    "manage_code_channel": ".manage_code_channel",
+    "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_thread": ".threads",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
-    "read_repo_file": ".read_repo_file",
+    "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
-    "request_pr_review": ".request_pr_review",
+    "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -55,14 +55,14 @@ _TOOL_MODULES = {
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
-    "search_repo_code": ".search_repo_code",
-    "slack_add_reaction": ".slack_add_reaction",
-    "slack_attach_html": ".slack_attach_html",
-    "slack_move_thread": ".slack_move_thread",
-    "slack_reply_to_message": ".slack_reply_to_message",
-    "slack_read_thread_messages": ".slack_read_thread_messages",
-    "slack_start_new_thread": ".slack_start_new_thread",
-    "slack_thread_reply": ".slack_thread_reply",
+    "search_repo_code": "agent.github.tools.search_repo_code",
+    "slack_add_reaction": "agent.slack.tools.add_reaction",
+    "slack_attach_html": "agent.slack.tools.attach_html",
+    "slack_move_thread": "agent.slack.tools.move_thread",
+    "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
+    "slack_reply_to_message": "agent.slack.tools.reply_to_message",
+    "slack_start_new_thread": "agent.slack.tools.start_new_thread",
+    "slack_thread_reply": "agent.slack.tools.thread_reply",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
@@ -72,6 +72,7 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "approve_plan",
+    "ask_user_choice",
     "background_execute",
     "background_task",
     "capture_environment_snapshot",
@@ -89,7 +90,6 @@ __all__ = [
     "linear_create_issue",
     "linear_delete_issue",
     "linear_get_issue",
-    "ask_user_choice",
     "linear_get_issue_comments",
     "linear_list_teams",
     "linear_search_issues",
@@ -137,69 +137,69 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from .add_finding import add_finding
-    from .approve_plan import approve_plan
-    from .ask_user_choice import ask_user_choice
-    from .automations import (
+    from agent.github.tools.read_repo_file import read_repo_file
+    from agent.github.tools.search_repo_code import search_repo_code
+    from agent.linear.tools.comment import linear_comment
+    from agent.linear.tools.create_issue import linear_create_issue
+    from agent.linear.tools.delete_issue import linear_delete_issue
+    from agent.linear.tools.get_issue import linear_get_issue
+    from agent.linear.tools.get_issue_comments import linear_get_issue_comments
+    from agent.linear.tools.list_teams import linear_list_teams
+    from agent.linear.tools.search_issues import linear_search_issues
+    from agent.linear.tools.update_issue import linear_update_issue
+    from agent.slack.tools.add_reaction import slack_add_reaction
+    from agent.slack.tools.ask_user_choice import ask_user_choice
+    from agent.slack.tools.attach_html import slack_attach_html
+    from agent.slack.tools.manage_code_channel import manage_code_channel
+    from agent.slack.tools.move_thread import slack_move_thread
+    from agent.slack.tools.read_thread_messages import slack_read_thread_messages
+    from agent.slack.tools.reply_to_message import slack_reply_to_message
+    from agent.slack.tools.request_pr_review import request_pr_review
+    from agent.slack.tools.start_new_thread import slack_start_new_thread
+    from agent.slack.tools.thread_reply import slack_thread_reply
+    from agent.tools.add_finding import add_finding
+    from agent.tools.approve_plan import approve_plan
+    from agent.tools.automations import (
         create_automation,
         delete_automation,
         list_automations,
         trigger_automation,
         update_automation,
     )
-    from .background_execute import background_execute, background_task
-    from .create_sandbox_file_download_url import create_sandbox_file_download_url
-    from .create_sandbox_service_url import create_sandbox_service_url
-    from .enter_plan_mode import enter_plan_mode
-    from .environments import (
+    from agent.tools.background_execute import background_execute, background_task
+    from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
+    from agent.tools.create_sandbox_service_url import create_sandbox_service_url
+    from agent.tools.enter_plan_mode import enter_plan_mode
+    from agent.tools.environments import (
         capture_environment_snapshot,
         delete_environment,
         list_environments,
         save_environment,
     )
-    from .fetch_review_diff import fetch_review_diff
-    from .fetch_url import fetch_url
-    from .http_request import http_request
-    from .linear_comment import linear_comment
-    from .linear_create_issue import linear_create_issue
-    from .linear_delete_issue import linear_delete_issue
-    from .linear_get_issue import linear_get_issue
-    from .linear_get_issue_comments import linear_get_issue_comments
-    from .linear_list_teams import linear_list_teams
-    from .linear_search_issues import linear_search_issues
-    from .linear_update_issue import linear_update_issue
-    from .list_findings import list_findings
-    from .list_review_findings import list_review_findings
-    from .manage_baby_sit import manage_baby_sit
-    from .manage_code_channel import manage_code_channel
-    from .notify_automation_channel import notify_automation_channel
-    from .open_pull_request import open_pull_request
-    from .organization_skills import delete_organization_skill, save_organization_skill
-    from .output_iframe import output_iframe
-    from .publish_review import publish_review
-    from .read_repo_file import read_repo_file
-    from .read_user_settings import read_user_settings
-    from .recreate_sandbox import recreate_sandbox
-    from .reply_to_finding_thread import reply_to_finding_thread
-    from .report_platform_issue import report_platform_issue
-    from .request_pr_review import request_pr_review
-    from .resolve_finding_thread import resolve_finding_thread
-    from .sandbox_reset import sandbox_reset
-    from .save_plan import save_plan
-    from .save_user_instructions import save_user_instructions
-    from .schedule_thread_wakeup import schedule_thread_wakeup
-    from .search_repo_code import search_repo_code
-    from .slack_add_reaction import slack_add_reaction
-    from .slack_attach_html import slack_attach_html
-    from .slack_move_thread import slack_move_thread
-    from .slack_read_thread_messages import slack_read_thread_messages
-    from .slack_reply_to_message import slack_reply_to_message
-    from .slack_start_new_thread import slack_start_new_thread
-    from .slack_thread_reply import slack_thread_reply
-    from .threads import get_thread, list_threads, manage_thread
-    from .update_finding import update_finding
-    from .user_skills import delete_user_skill, save_user_skill
-    from .web_search import web_search
+    from agent.tools.fetch_review_diff import fetch_review_diff
+    from agent.tools.fetch_url import fetch_url
+    from agent.tools.http_request import http_request
+    from agent.tools.list_findings import list_findings
+    from agent.tools.list_review_findings import list_review_findings
+    from agent.tools.manage_baby_sit import manage_baby_sit
+    from agent.tools.notify_automation_channel import notify_automation_channel
+    from agent.tools.open_pull_request import open_pull_request
+    from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
+    from agent.tools.output_iframe import output_iframe
+    from agent.tools.publish_review import publish_review
+    from agent.tools.read_user_settings import read_user_settings
+    from agent.tools.recreate_sandbox import recreate_sandbox
+    from agent.tools.reply_to_finding_thread import reply_to_finding_thread
+    from agent.tools.report_platform_issue import report_platform_issue
+    from agent.tools.resolve_finding_thread import resolve_finding_thread
+    from agent.tools.sandbox_reset import sandbox_reset
+    from agent.tools.save_plan import save_plan
+    from agent.tools.save_user_instructions import save_user_instructions
+    from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from agent.tools.threads import get_thread, list_threads, manage_thread
+    from agent.tools.update_finding import update_finding
+    from agent.tools.user_skills import delete_user_skill, save_user_skill
+    from agent.tools.web_search import web_search
 
 
 def _load_export(name: str) -> Any:
@@ -208,7 +208,8 @@ def _load_export(name: str) -> Any:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from importlib import import_module
 
-    value = getattr(import_module(module_name, __name__), name)
+    package = None if module_name.startswith("agent.") else __name__
+    value = getattr(import_module(module_name, package), name)
     globals()[name] = value
     return value
 

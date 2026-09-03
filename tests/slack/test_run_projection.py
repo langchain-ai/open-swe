@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from agent import server
 from agent.middleware import slack_transcript as middleware_module
 from agent.middleware.slack_transcript import SlackTranscriptMiddleware
-from agent.surfaces import projector
+from agent.slack.surfaces import projector
 
 CHANNEL_LOCATION = {
     "channel_id": "C-code",

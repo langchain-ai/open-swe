@@ -8,15 +8,14 @@ import httpx
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.auth.github_app import get_github_app_installation_token
+from agent.dashboard.agent_usage import record_agent_pr_usage
+from agent.dashboard.plan_store import get_plan_content
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import derive_pr_state
+from agent.slack.client import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
+from agent.slack.surfaces import slack_surface
 from agent.source_context import SlackThreadRef
-from agent.surfaces import slack_surface
-
-from ..dashboard.agent_usage import record_agent_pr_usage
-from ..dashboard.plan_store import get_plan_content
-from ..utils.dashboard_links import dashboard_plan_url
-from ..utils.github_comments import derive_pr_state
-from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
+from agent.utils.dashboard_links import dashboard_plan_url
 
 logger = logging.getLogger(__name__)
 

@@ -16,20 +16,19 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
-from agent.sandboxes.state import SANDBOX_BACKENDS
-
-from ..dashboard.workflow_approval import (
+from agent.dashboard.workflow_approval import (
     ensure_workflow_push_pending,
     mark_workflow_push_notified,
     workflow_push_approved,
 )
-from ..utils.dashboard_links import dashboard_workflow_approval_url
-from ..utils.slack import (
+from agent.sandboxes.state import SANDBOX_BACKENDS
+from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
 )
-from ..utils.slack_session import build_workflow_approval_blocks
+from agent.slack.session import build_workflow_approval_blocks
+from agent.utils.dashboard_links import dashboard_workflow_approval_url
 
 logger = logging.getLogger(__name__)
 

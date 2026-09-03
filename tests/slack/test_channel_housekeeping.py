@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.webhooks import slack_routes
+from agent.slack import routes as slack_routes
 
 JOIN = {
     "type": "message",

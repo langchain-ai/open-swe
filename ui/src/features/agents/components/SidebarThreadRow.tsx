@@ -513,9 +513,11 @@ export function SidebarThreadRow({
         isDeleting={isDeleting}
         onConfirm={() => void onConfirmDelete()}
         detail={
-          item.location === "local"
-            ? "This removes its history but does not revert changes made to your project."
-            : undefined
+          item.location !== "local"
+            ? undefined
+            : item.thread.ownedWorktrees?.length
+              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+              : "This removes its history but does not revert changes made to your project."
         }
         error={deleteError}
       />

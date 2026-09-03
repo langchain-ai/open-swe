@@ -30,7 +30,7 @@ from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 
 from agent.middleware.message_content import content_to_text
-from agent.surfaces.projector import (
+from agent.slack.surfaces.projector import (
     SlackTranscript,
     shows_its_own_effect,
     transcript_namespace,

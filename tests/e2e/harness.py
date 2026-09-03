@@ -64,7 +64,7 @@ from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.utils.slack import lookup_slack_thread_id  # noqa: E402
+from agent.slack.client import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -252,7 +252,7 @@ async def control_forget_slack_events() -> JSONResponse:
     A redelivery normally lands on a different instance than the original, which
     only has the LangGraph store to dedupe on. Clearing the local cache lets the
     E2E exercise that path instead of the same-process fast path."""
-    from agent.utils.slack_events import reset_slack_event_claims
+    from agent.slack.events import reset_slack_event_claims
 
     reset_slack_event_claims()
     return JSONResponse({"ok": True})
@@ -1122,7 +1122,7 @@ async def slack_create_code_channel(request: Request) -> JSONResponse:
 @app.get("/mock/slack/thread-map")
 async def mock_thread_map(channel: str = "", ts: str = "0") -> JSONResponse:
     """Which Open SWE thread a Slack location is bound to, if any."""
-    from agent.utils.slack import lookup_slack_thread_id
+    from agent.slack.client import lookup_slack_thread_id
     from agent.utils.thread_ops import langgraph_client
 
     try:

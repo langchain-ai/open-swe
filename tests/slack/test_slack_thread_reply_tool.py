@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-slack_reply_tool = importlib.import_module("agent.tools.slack_thread_reply")
+slack_reply_tool = importlib.import_module("agent.slack.tools.thread_reply")
 
 
 def _config() -> dict[str, Any]:

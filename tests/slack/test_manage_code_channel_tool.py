@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-manage_tool = import_module("agent.tools.manage_code_channel")
-surfaces_slack = import_module("agent.surfaces.slack")
+manage_tool = import_module("agent.slack.tools.manage_code_channel")
+surfaces_slack = import_module("agent.slack.surfaces.channel")
 
 
 @pytest.mark.parametrize(

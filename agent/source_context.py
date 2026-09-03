@@ -46,7 +46,7 @@ class SlackThreadRef(BaseModel):
     permalink: str = ""
     channel_context: dict[str, Any] | None = None
     # None on locations written before this field existed, and on a kind this
-    # deployment does not know; `agent.surfaces` falls back to `thread_ts` there.
+    # deployment does not know; `agent.slack.surfaces` falls back to `thread_ts` there.
     surface: SlackSurfaceKind | None = None
     # A thread the user started inside a code channel, which the agent answers
     # in rather than at channel level.

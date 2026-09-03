@@ -3,8 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.source_context import SlackThreadRef, SourceContext
-from agent.surfaces import (
+from agent.slack.surfaces import (
     SlackChannelSurface,
     SlackSurface,
     SlackThreadSurface,
@@ -12,7 +11,8 @@ from agent.surfaces import (
     slack_surface,
     surface_from_metadata,
 )
-from agent.surfaces import slack as surfaces_slack
+from agent.slack.surfaces import channel as surfaces_channel
+from agent.source_context import SlackThreadRef, SourceContext
 
 
 def _channel_ref(**overrides: Any) -> SlackThreadRef:
@@ -108,8 +108,8 @@ async def test_a_surface_only_overrides_what_it_actually_does() -> None:
 
 async def test_thread_surface_has_no_session_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
     status = AsyncMock()
-    monkeypatch.setattr(surfaces_slack, "set_session_status", status)
-    monkeypatch.setattr(surfaces_slack, "rename_session", AsyncMock())
+    monkeypatch.setattr(surfaces_channel, "set_session_status", status)
+    monkeypatch.setattr(surfaces_channel, "rename_session", AsyncMock())
 
     surface = SlackThreadSurface("C1", "1717171717.123456")
     assert surface.reports_activity is False
@@ -121,7 +121,7 @@ async def test_thread_surface_has_no_session_chrome(monkeypatch: pytest.MonkeyPa
 
 async def test_channel_surface_reports_turn_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
     status = AsyncMock()
-    monkeypatch.setattr(surfaces_slack, "set_session_status", status)
+    monkeypatch.setattr(surfaces_channel, "set_session_status", status)
 
     surface = SlackChannelSurface("C1")
     await surface.begin_turn()
@@ -135,8 +135,8 @@ async def test_channel_surface_reports_turn_boundaries(monkeypatch: pytest.Monke
 async def test_channel_surface_seeds_context_and_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     context_bar = AsyncMock(return_value=(True, None))
     commands = AsyncMock(return_value=({}, None))
-    monkeypatch.setattr(surfaces_slack, "set_context_bar", context_bar)
-    monkeypatch.setattr(surfaces_slack, "set_commands", commands)
+    monkeypatch.setattr(surfaces_channel, "set_context_bar", context_bar)
+    monkeypatch.setattr(surfaces_channel, "set_commands", commands)
 
     await SlackChannelSurface("C1").start_session(
         repo={"owner": "acme", "name": "billing"}, thread_id="thread-1"
@@ -150,7 +150,7 @@ async def test_channel_surface_seeds_context_and_commands(monkeypatch: pytest.Mo
 async def test_channel_surface_skips_an_empty_context_bar(monkeypatch: pytest.MonkeyPatch) -> None:
     """An empty bar would clear the items already on the channel."""
     context_bar = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr(surfaces_slack, "set_context_bar", context_bar)
+    monkeypatch.setattr(surfaces_channel, "set_context_bar", context_bar)
 
     await SlackChannelSurface("C1").sync_context(repo=None, thread_id="")
     context_bar.assert_not_awaited()
@@ -158,7 +158,7 @@ async def test_channel_surface_skips_an_empty_context_bar(monkeypatch: pytest.Mo
 
 async def test_channel_surface_publishes_a_diff_view(monkeypatch: pytest.MonkeyPatch) -> None:
     view = AsyncMock(return_value=({}, None))
-    monkeypatch.setattr(surfaces_slack, "set_view", view)
+    monkeypatch.setattr(surfaces_channel, "set_view", view)
 
     await SlackChannelSurface("C1").publish_diff(
         "diff --git a/x b/x", base_branch="main", head_branch="topic"

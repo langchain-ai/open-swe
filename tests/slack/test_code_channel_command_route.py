@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, HTTPException, Request
 
-from agent.webhooks import slack_routes
+from agent.slack import routes as slack_routes
 
 FORM = {
     "channel_id": "C-origin",

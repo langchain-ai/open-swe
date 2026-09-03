@@ -3,15 +3,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import spawn
-from agent.source_context import SlackThreadRef
-from agent.spawn import (
+from agent.slack import spawn
+from agent.slack.spawn import (
     SpawnDestination,
     SpawnHandoff,
     SpawnOrigin,
     spawn_slack_session,
 )
-from agent.surfaces import slack as surfaces_slack
+from agent.slack.surfaces import channel as surfaces_channel
+from agent.source_context import SlackThreadRef
 
 
 class _Threads:
@@ -239,7 +239,7 @@ def opening(monkeypatch: pytest.MonkeyPatch, spawn_calls: dict[str, AsyncMock]) 
         "set_commands": AsyncMock(return_value=({"ok": True}, None)),
     }
     for name, mock in chrome.items():
-        monkeypatch.setattr(surfaces_slack, name, mock)
+        monkeypatch.setattr(surfaces_channel, name, mock)
     return {**calls, **chrome, **spawn_calls}
 
 
@@ -280,7 +280,7 @@ async def test_opening_a_channel_dresses_it_before_the_run_starts(
     assert (channel, items[0]["label"]) == ("C-code", "acme/billing")
     assert opening["set_commands"].await_args.args == (
         "C-code",
-        surfaces_slack.DEFAULT_CODE_CHANNEL_COMMANDS,
+        surfaces_channel.DEFAULT_CODE_CHANNEL_COMMANDS,
     )
     assert opened.warnings == []
 

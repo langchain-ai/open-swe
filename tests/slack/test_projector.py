@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.surfaces import projector
+from agent.slack.surfaces import projector
 
 
 def _stream(**overrides: object) -> projector.SlackTranscript:
@@ -66,13 +66,21 @@ def test_a_tool_card_updates_in_place() -> None:
     assert "output" not in stream.pending[0]
 
 
-def test_a_failed_tool_shows_as_failed() -> None:
-    stream = _stream()
+async def test_a_failed_tool_reads_as_an_error_only_if_the_run_fails() -> None:
+    """The agent usually recovers from a failed call, so the run's outcome decides."""
+    recovered = _stream()
+    recovered.tool_started("call-1", "execute", {"command": "pytest"})
+    recovered.tool_finished("call-1", failed=True)
+    assert recovered.pending[0]["status"] == "complete"
 
-    stream.tool_started("call-1", "execute", {"command": "pytest"})
-    stream.tool_finished("call-1", failed=True)
+    await recovered.stop("success")
+    assert [step.status for step in recovered.steps.values()] == ["complete"]
 
-    assert stream.pending[0]["status"] == "error"
+    doomed = _stream()
+    doomed.tool_started("call-1", "execute", {"command": "pytest"})
+    doomed.tool_finished("call-1", failed=True)
+    await doomed.stop("error")
+    assert [step.status for step in doomed.steps.values()] == ["error"]
 
 
 def test_a_step_is_titled_by_what_it_did() -> None:

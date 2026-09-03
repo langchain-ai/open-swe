@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import spawn
-from agent.webhooks import slack as slack_webhook
+from agent.slack import spawn
+from agent.slack import webhook as slack_webhook
 
 COMMAND = {
     "channel_id": "C-origin",

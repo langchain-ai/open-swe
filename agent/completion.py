@@ -19,20 +19,19 @@ from typing import Any
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.auth.github_app import get_github_app_installation_token
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import post_github_comment
+from agent.linear.client import comment_on_linear_issue
+from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.review.publish import settle_review_check_run
+from agent.session_cost import schedule_session_cost_refresh
+from agent.slack.client import post_slack_thread_reply
+from agent.slack.surfaces import surface_from_metadata
+from agent.slack.surfaces.projector import close_transcript
 from agent.source_context import SourceContext
-from agent.surfaces import surface_from_metadata
-from agent.surfaces.projector import close_transcript
-
-from .review.findings import REVIEWER_THREAD_KIND
-from .review.publish import settle_review_check_run
-from .session_cost import schedule_session_cost_refresh
-from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_comments import post_github_comment
-from .utils.linear import comment_on_linear_issue
-from .utils.slack import post_slack_thread_reply
-from .utils.thread_ops import langgraph_client
-from .utils.user_messages import warning
+from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.thread_ops import langgraph_client
+from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 

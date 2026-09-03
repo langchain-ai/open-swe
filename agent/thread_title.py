@@ -8,13 +8,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from .input_messages import (
+from agent.input_messages import (
     dynamic_context_hash,
     human_input,
     input_message_text,
     wrap_system_prompt,
 )
-from .surfaces import surface_from_metadata
+from agent.slack.surfaces import surface_from_metadata
 
 logger = logging.getLogger(__name__)
 

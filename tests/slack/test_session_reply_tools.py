@@ -5,8 +5,8 @@ import pytest
 
 from agent import server
 
-ask_tool = importlib.import_module("agent.tools.ask_user_choice")
-reply_tool = importlib.import_module("agent.tools.slack_reply_to_message")
+ask_tool = importlib.import_module("agent.slack.tools.ask_user_choice")
+reply_tool = importlib.import_module("agent.slack.tools.reply_to_message")
 
 CHANNEL = {
     "channel_id": "C-code",

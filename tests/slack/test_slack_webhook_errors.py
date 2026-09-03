@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.dashboard import plan_api
-from agent.webhooks import slack as slack_webhook
+from agent.slack import webhook as slack_webhook
 
 
 class _FakeThreads:

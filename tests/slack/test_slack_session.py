@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-session = importlib.import_module("agent.utils.slack_session")
+session = importlib.import_module("agent.slack.session")
 
 
 @pytest.fixture(autouse=True)
@@ -136,7 +136,7 @@ def test_no_real_options_means_no_blocks(options: list[str] | None) -> None:
 
 
 def test_slack_action_ids_are_unique_and_recognized() -> None:
-    slack_routes = importlib.import_module("agent.webhooks.slack_routes")
+    slack_routes = importlib.import_module("agent.slack.routes")
     actions = session.build_workflow_approval_blocks("Review", "abc")[1]["elements"]
 
     assert len({action["action_id"] for action in actions}) == len(actions)

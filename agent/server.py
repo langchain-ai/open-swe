@@ -36,53 +36,46 @@ from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
+from deepagents.graph import DeepAgentState
+from deepagents.middleware.filesystem import FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.auth.resolve import resolve_github_token
-from agent.sandboxes.lifecycle import (
-    ensure_sandbox_for_thread,
-    get_cached_sandbox_backend,
-)
-from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.read_only_backend import ReadOnlyBackend
-from agent.sandboxes.state import (
-    SandboxUnreachableError,
-    get_or_create_sandbox_backend_proxy,
-)
-
-from .dashboard.admin import is_admin, is_observability_authorized
-from .dashboard.agent_overrides import (
+from agent.dashboard.admin import is_admin, is_observability_authorized
+from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_draft_prs,
     resolve_github_login,
 )
-from .dashboard.agent_usage import record_agent_run_usage
-from .dashboard.environments import (
+from agent.dashboard.agent_usage import record_agent_run_usage
+from agent.dashboard.environments import (
     resolve_environment,
 )
-from .dashboard.options import (
+from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from .dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from .dashboard.team_settings import (
+from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
-from .dashboard.user_mappings import email_for_login
-from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
-from .input_messages import (
+from agent.dashboard.user_mappings import email_for_login
+from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
+from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.github.org_membership import is_user_active_org_member
+from agent.github.token import resolve_github_token
+from agent.input_messages import (
     SystemIdentity,
     build_input_messages,
     dynamic_context_hash,
@@ -90,17 +83,7 @@ from .input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from .integrations.corridor_mcp import (
-    CORRIDOR_TOOL_NAMES,
-    corridor_configured,
-    load_corridor_tools,
-)
-from .integrations.currents_tools import load_currents_tools
-from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith_tools import load_langsmith_tools
-from .integrations.notion_mcp import load_notion_tools
-from .integrations.stagehand_browser import load_browser_tools
-from .middleware import (
+from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
@@ -125,22 +108,46 @@ from .middleware import (
     task_on_failure,
     task_retry_on,
 )
-from .middleware.prepare_run import PrepareRunState
-from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from .prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
-from .runtime.constants import (
+from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.prompt import (
+    construct_sender_context,
+    construct_system_prompt,
+    render_open_swe_shared_base,
+)
+from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
 )
-from .runtime.constants import (
+from agent.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
-from .runtime.execution import graph_loaded_for_execution
-from .source_context import SlackThreadRef
-from .surfaces import slack_surface
-from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from .tools import (
+from agent.runtime.execution import graph_loaded_for_execution
+from agent.sandboxes.lifecycle import (
+    ensure_sandbox_for_thread,
+    get_cached_sandbox_backend,
+)
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.state import (
+    SandboxUnreachableError,
+    get_or_create_sandbox_backend_proxy,
+)
+from agent.slack.surfaces import slack_surface
+from agent.source_context import SlackThreadRef
+from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.tool_loaders.corridor_mcp import (
+    CORRIDOR_TOOL_NAMES,
+    corridor_configured,
+    load_corridor_tools,
+)
+from agent.tool_loaders.currents import load_currents_tools
+from agent.tool_loaders.datadog_mcp import load_datadog_tools
+from agent.tool_loaders.langsmith import load_langsmith_tools
+from agent.tool_loaders.notion_mcp import load_notion_tools
+from agent.tool_loaders.stagehand_browser import load_browser_tools
+from agent.tools import (
     approve_plan,
     ask_user_choice,
     background_execute,
@@ -196,33 +203,32 @@ from .tools import (
     update_automation,
     web_search,
 )
-from .utils import ttl_cache
-from .utils.authorship import (
+from agent.utils import ttl_cache
+from agent.utils.authorship import (
     CollaboratorIdentity,
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
-from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
-from .utils.deferred_model import make_deferred_error_model
-from .utils.gateway import gateway_env_default
-from .utils.github_org_membership import is_user_active_org_member
-from .utils.json_types import as_json_object, thread_metadata
-from .utils.model import (
+from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
+from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.gateway import gateway_env_default
+from agent.utils.json_types import as_json_object, thread_metadata
+from agent.utils.model import (
     DEFAULT_LLM_REASONING,
     ModelKwargs,
     fallback_model_id_for,
     make_model,
     provider_model_kwargs,
 )
-from .utils.startup_trace import aphase
-from .utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
-from .utils.thread_settings import (
+from agent.utils.startup_trace import aphase
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from agent.utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
     normalize_thread_settings,
     store_thread_settings,
 )
-from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+from agent.utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
 
@@ -295,7 +301,7 @@ async def _resolve_repo_custom_instructions(
     if not default_repo or not default_repo.get("owner") or not default_repo.get("name"):
         return None
     try:
-        from .dashboard.agent_instructions import get_repo_agent_instructions
+        from agent.dashboard.agent_instructions import get_repo_agent_instructions
 
         return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
     except Exception:
@@ -319,7 +325,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     if not login:
         return None
     try:
-        from .dashboard.user_instructions import get_user_custom_instructions
+        from agent.dashboard.user_instructions import get_user_custom_instructions
 
         return await get_user_custom_instructions(login)
     except Exception:
@@ -342,6 +348,10 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
+        "browser_act",
+        "browser_extract",
+        "browser_navigate",
+        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -423,49 +433,6 @@ def _general_purpose_subagent(
     if skills:
         subagent["skills"] = skills
     return subagent
-
-
-BROWSER_SUBAGENT_DESCRIPTION = (
-    "Drives sandbox-local Chromium with Stagehand to "
-    "accomplish tasks that require interacting with live web pages: logging "
-    "into dashboards, clicking through flows, filling forms, reading "
-    "JS-rendered content, reproducing UI bugs, and extracting structured data. "
-    "Prefer the `fetch_url` tool for static page reads; delegate here only when "
-    "the task needs interaction or JavaScript-rendered content."
-)
-
-BROWSER_SUBAGENT_SYSTEM_PROMPT = """You are a browser automation specialist. You control a real Chromium \
-browser via Stagehand tools.
-
-Workflow:
-1. Call `browser_navigate` to open the browser and go to the starting URL.
-2. Use `browser_observe` to find actionable elements before acting when the \
-page is unfamiliar.
-3. Use `browser_act` for clicks/typing/navigation with concise \
-natural-language instructions (one action per call).
-4. Use `browser_extract` to pull the specific data the caller asked for, \
-passing a JSON schema when you need a precise shape.
-5. Always call `browser_close` when finished to release the session.
-
-Guidance:
-- Take one concrete step at a time and verify the result before the next.
-- Keep instructions specific and grounded in what `browser_observe`/\
-`browser_extract` returned.
-- Do not exfiltrate credentials or secrets. Only act on the task you were \
-delegated.
-- Return a concise summary of what you did and the data you extracted; include \
-the session replay URL if one was returned."""
-
-
-def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
-    return {
-        "name": "browser",
-        "description": BROWSER_SUBAGENT_DESCRIPTION,
-        "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
-        "tools": tools,
-        "model": model,
-        "middleware": _subagent_model_middleware(),
-    }
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -873,6 +840,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         if is_desktop_run(configurable):
+            local_path = configurable.get("local_project_path")
+            if isinstance(local_path, str) and local_path:
+                schedule_worktree_branch_rename(
+                    worktree_path=local_path,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             async with aphase(self._thread_id, "prepare.work_dir"):
@@ -980,6 +954,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
 
+class DesktopAgentState(FilesystemState, DeepAgentState):
+    """Desktop agent state including snapshotted skill files."""
+
+
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
@@ -1021,7 +999,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     if local_run:
-        from .dashboard.options import default_model_pair
+        from agent.dashboard.options import default_model_pair
 
         team_defaults = (default_model_pair(), default_model_pair())
         title_defaults = team_defaults[0]
@@ -1200,11 +1178,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = configurable.get("stop_summary") is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
     observability_tools: list[Any] = []
-    browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
         observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1288,6 +1264,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
+    if not stop_summary_mode and not local_run:
+        browser_tools = load_browser_tools()
+        if browser_tools:
+            integration_tool_groups["Browser"] = browser_tools
     # Corridor's catalog is a static allowlist, so the MCP handshake that used to
     # run before every first model call now waits until the agent asks for it.
     if not stop_summary_mode and not local_run and corridor_configured():
@@ -1357,10 +1337,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
-            *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         skills=skill_sources,
         backend=agent_backend,
+        state_schema=DesktopAgentState if local_run else None,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [

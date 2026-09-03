@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-slack_breakout_tool = importlib.import_module("agent.tools.slack_start_new_thread")
-spawn = importlib.import_module("agent.spawn")
+slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
+spawn = importlib.import_module("agent.slack.spawn")
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:

@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.webhooks import slack_routes
+from agent.slack import routes as slack_routes
 
 
 def _request(payload: dict[str, Any]) -> Request:
