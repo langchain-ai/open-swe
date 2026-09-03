@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web desktop install-desktop install-checkout
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web desktop install-desktop install-checkout setup
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -30,6 +30,9 @@ install-checkout:
 
 install:
 	uv sync --extra dev
+
+setup:
+	uv run python scripts/setup_env.py
 
 ######################
 # TESTING
@@ -84,6 +87,7 @@ help:
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
+	@echo 'setup                        - guided .env setup for the GitHub + Slack install'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run basedpyright on agent/ and tests/'
