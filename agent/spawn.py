@@ -148,6 +148,18 @@ def _configurable(location: SlackThreadRef, origin: SpawnOrigin, handoff: SpawnH
     return configurable
 
 
+def _session_id(origin: SpawnOrigin, title: str, content: ContentBlocks) -> str:
+    """Slack's idempotency key for this request to open a channel.
+
+    Derived from the request rather than minted per attempt: Slack can create
+    the channel and lose the response, and a retry that asks for the same work
+    has to get that channel back instead of a second one. Two genuinely
+    different tasks differ in their instructions, so they differ here too.
+    """
+    request = "\0".join((origin.thread_id, origin.slack_thread.channel_id, title, str(content)))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:code-channel:{request}"))
+
+
 class CodeChannelError(Exception):
     """A code channel could not be opened, with a message for the caller."""
 
@@ -195,7 +207,7 @@ async def open_code_channel(
     origin_pair = origin_channel_id and origin_message_ts
     channel_id, error = await create_code_channel(
         name=title,
-        session_id=str(uuid.uuid4()),
+        session_id=_session_id(origin, title, content),
         origin_channel_id=origin_channel_id if origin_pair else "",
         origin_message_ts=origin_message_ts if origin_pair else "",
         team_id=team_id,

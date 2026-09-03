@@ -13,6 +13,7 @@ and renders their state back as a user-facing UI.
 import hashlib
 import hmac
 import json
+import logging
 import os
 import sys
 import threading
@@ -1052,9 +1053,9 @@ async def mock_slack_command(request: Request) -> JSONResponse:
     }
     body = urlencode(fields).encode()
     timestamp = str(int(time.time()))
-    response = await _post_signed(
-        str(form.get("path") or "/webhooks/slack/code-channel-open"), body, timestamp
-    )
+    # The endpoint is fixed: a caller-chosen path would let a test drive the app
+    # at an arbitrary URL through this signed poster.
+    response = await _post_signed("/webhooks/slack/code-channel-open", body, timestamp)
     return JSONResponse(
         {"status": response.status_code, "body": response.json() if response.content else None}
     )
@@ -1126,8 +1127,10 @@ async def mock_thread_map(channel: str = "", ts: str = "0") -> JSONResponse:
 
     try:
         thread_id = await lookup_slack_thread_id(langgraph_client(), channel, ts)
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"channel": channel, "ts": ts, "error": str(exc)})
+    except Exception:  # noqa: BLE001
+        # The reason is for the log, not the response body.
+        logging.getLogger(__name__).exception("Could not look up %s/%s", channel, ts)
+        return JSONResponse({"channel": channel, "ts": ts, "error": "lookup_failed"})
     return JSONResponse({"channel": channel, "ts": ts, "thread_id": thread_id})
 
 

@@ -21,9 +21,13 @@ type Stream = {
 
 const HANDOFF_LINE = "Picking up the flaky CI investigation in this channel";
 
-async function codeChannels(request: APIRequestContext): Promise<CodeChannel[]> {
+async function codeChannels(
+  request: APIRequestContext,
+): Promise<CodeChannel[]> {
   const response = await request.get("/mock/slack/code-channels");
-  return ((await response.json()) as { channels?: CodeChannel[] }).channels ?? [];
+  return (
+    ((await response.json()) as { channels?: CodeChannel[] }).channels ?? []
+  );
 }
 
 async function streams(
@@ -43,7 +47,9 @@ async function boundThread(
   const response = await request.get(
     `/mock/slack/thread-map?channel=${encodeURIComponent(channel)}&ts=0`,
   );
-  return ((await response.json()) as { thread_id?: string | null }).thread_id ?? null;
+  return (
+    ((await response.json()) as { thread_id?: string | null }).thread_id ?? null
+  );
 }
 
 async function openCodeChannel(page: {

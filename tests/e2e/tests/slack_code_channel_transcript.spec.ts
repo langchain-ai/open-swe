@@ -1,4 +1,9 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 
 type CodeChannel = { id: string; status: string; archived: boolean };
 
@@ -25,9 +30,13 @@ type Stream = {
 
 const HANDOFF_LINE = "Picking up the flaky CI investigation in this channel";
 
-async function codeChannels(request: APIRequestContext): Promise<CodeChannel[]> {
+async function codeChannels(
+  request: APIRequestContext,
+): Promise<CodeChannel[]> {
   const response = await request.get("/mock/slack/code-channels");
-  return ((await response.json()) as { channels?: CodeChannel[] }).channels ?? [];
+  return (
+    ((await response.json()) as { channels?: CodeChannel[] }).channels ?? []
+  );
 }
 
 async function streams(
@@ -92,7 +101,8 @@ test.describe("Slack code channel transcript", () => {
     // tool call arrive before that call's card.
     const spoken = stream.timeline.findIndex(
       (entry) =>
-        entry.kind === "text" && (entry.text ?? "").includes("Looking at what the checkout"),
+        entry.kind === "text" &&
+        (entry.text ?? "").includes("Looking at what the checkout"),
     );
     const carded = stream.timeline.findIndex(
       (entry) => entry.kind === "task" && entry.title === "Listed /workspace",
@@ -101,12 +111,16 @@ test.describe("Slack code channel transcript", () => {
     expect(carded).toBeGreaterThan(spoken);
 
     // The block is named once, from the words that opened the turn.
-    expect(stream.plan_title).toBe("Publishing the diff view for the handed-over task.");
+    expect(stream.plan_title).toBe(
+      "Publishing the diff view for the handed-over task.",
+    );
 
     // A Slack tool's whole effect is this channel, so it draws no card.
     expect(
       stream.timeline.filter(
-        (entry) => entry.kind === "task" && (entry.title ?? "").includes("manage code channel"),
+        (entry) =>
+          entry.kind === "task" &&
+          (entry.title ?? "").includes("manage code channel"),
       ),
     ).toEqual([]);
   });
@@ -141,7 +155,11 @@ test.describe("Slack code channel transcript", () => {
 
   test("a second turn gets its own streaming message", async ({ page }) => {
     const channel = await channelWithSession(page);
-    await sendInChannel(page, channel.id, "Anything else? E2E_CODE_CHANNEL_FOLLOWUP");
+    await sendInChannel(
+      page,
+      channel.id,
+      "Anything else? E2E_CODE_CHANNEL_FOLLOWUP",
+    );
 
     await expect
       .poll(async () => (await streams(page.request, channel.id)).length, {
@@ -168,7 +186,9 @@ test.describe("Slack code channel transcript", () => {
     await expect
       .poll(
         async () =>
-          (await streams(page.request, channel.id)).map((stream) => stream.thread_ts),
+          (await streams(page.request, channel.id)).map(
+            (stream) => stream.thread_ts,
+          ),
         { timeout: 60_000 },
       )
       .toContain(rootTs);
@@ -178,7 +198,11 @@ test.describe("Slack code channel transcript", () => {
     page,
   }) => {
     const channel = await channelWithSession(page);
-    await sendInChannel(page, channel.id, "Write it all out E2E_CODE_CHANNEL_LONG");
+    await sendInChannel(
+      page,
+      channel.id,
+      "Write it all out E2E_CODE_CHANNEL_LONG",
+    );
 
     // One turn, more than one streaming message: the transcript rolled over
     // rather than losing the append Slack would have rejected.
@@ -230,8 +254,9 @@ test.describe("Slack code channel transcript", () => {
         codeChannelUrl?: string | null;
       }[];
       return (
-        threads.find((thread) => (thread.codeChannelUrl ?? "").includes(channel.id))?.id ??
-        null
+        threads.find((thread) =>
+          (thread.codeChannelUrl ?? "").includes(channel.id),
+        )?.id ?? null
       );
     };
     await expect.poll(findThread, { timeout: 60_000 }).not.toBeNull();

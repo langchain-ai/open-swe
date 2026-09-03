@@ -124,7 +124,7 @@ class SlackTranscriptMiddleware(AgentMiddleware[Any, Any, Any]):
             streamed = record.get("streamed_chars")
             transcript.streamed_chars = streamed if isinstance(streamed, int) else 0
             pending = record.get("pending")
-            transcript.pending = (
+            transcript.restore_pending(
                 [chunk for chunk in pending if isinstance(chunk, dict)]
                 if isinstance(pending, list)
                 else []

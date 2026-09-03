@@ -2,9 +2,13 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 
 type CodeChannel = { id: string; name: string; status: string };
 
-async function codeChannels(request: APIRequestContext): Promise<CodeChannel[]> {
+async function codeChannels(
+  request: APIRequestContext,
+): Promise<CodeChannel[]> {
   const response = await request.get("/mock/slack/code-channels");
-  return ((await response.json()) as { channels?: CodeChannel[] }).channels ?? [];
+  return (
+    ((await response.json()) as { channels?: CodeChannel[] }).channels ?? []
+  );
 }
 
 async function commandResponses(request: APIRequestContext): Promise<string[]> {
@@ -17,8 +21,13 @@ async function invites(
   request: APIRequestContext,
 ): Promise<{ channel: string; users: string }[]> {
   const response = await request.get("/mock/slack/invites");
-  return ((await response.json()) as { invites?: { channel: string; users: string }[] })
-    .invites ?? [];
+  return (
+    (
+      (await response.json()) as {
+        invites?: { channel: string; users: string }[];
+      }
+    ).invites ?? []
+  );
 }
 
 async function channelMessages(
@@ -39,14 +48,18 @@ test.describe("Opening a code channel by command", () => {
     await expect(page.locator("#thread")).toContainText("No messages yet");
   });
 
-  test("a command starts a session in a channel of its own", async ({ page }) => {
+  test("a command starts a session in a channel of its own", async ({
+    page,
+  }) => {
     const ran = await page.request.post("/mock/slack/command", {
       data: { text: "E2E_CODE_CHANNEL investigate the flaky CI failures" },
     });
     expect(((await ran.json()) as { status: number }).status).toBe(200);
 
     await expect
-      .poll(async () => (await codeChannels(page.request)).length, { timeout: 30_000 })
+      .poll(async () => (await codeChannels(page.request)).length, {
+        timeout: 30_000,
+      })
       .toBe(1);
     const [channel] = await codeChannels(page.request);
 
@@ -70,7 +83,9 @@ test.describe("Opening a code channel by command", () => {
       data: { text: "E2E_CODE_CHANNEL investigate the flaky CI failures" },
     });
     await expect
-      .poll(async () => (await codeChannels(page.request)).length, { timeout: 30_000 })
+      .poll(async () => (await codeChannels(page.request)).length, {
+        timeout: 30_000,
+      })
       .toBe(1);
 
     // The origin channel is untouched: no thread, no announcement, nothing.
@@ -79,7 +94,9 @@ test.describe("Opening a code channel by command", () => {
   });
 
   test("a command with no prompt says what to type", async ({ page }) => {
-    const ran = await page.request.post("/mock/slack/command", { data: { text: "  " } });
+    const ran = await page.request.post("/mock/slack/command", {
+      data: { text: "  " },
+    });
 
     const body = (await ran.json()) as { body?: { text?: string } };
     expect(body.body?.text).toContain("Say what the channel should work on");

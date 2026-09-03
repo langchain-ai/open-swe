@@ -71,6 +71,9 @@ class FakeTranscript:
     def tool_finished(self, call_id: str, *, failed: bool = False) -> None:
         self.cards.append((call_id, "failed" if failed else "finished"))
 
+    def restore_pending(self, chunks: list[dict[str, Any]]) -> None:
+        self.pending = list(chunks)
+
     async def flush(self, *, force: bool = False) -> None:
         self.streamed_chars = sum(len(text) for text in self.said)
         self.pending = []

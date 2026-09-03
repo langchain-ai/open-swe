@@ -274,3 +274,32 @@ async def test_no_message_is_left_over_slacks_text_cap(monkeypatch) -> None:
     assert all(chars <= projector._STREAM_TEXT_LIMIT for _, chars in appended)
     assert sum(chars for _, chars in appended) == projector._STREAM_TEXT_LIMIT * 2 + 100
     assert not stream.pending
+
+
+def test_a_restored_queue_keeps_its_cards_identifiable() -> None:
+    """A tool that started before a resume must complete its own card, not a new one."""
+    first = _stream()
+    first.tool_started("call-1", "execute", {"command": "pytest tests/auth"})
+    carried = list(first.pending)
+
+    resumed = _stream()
+    resumed.restore_pending(carried)
+    resumed.tool_finished("call-1")
+
+    assert len(resumed.pending) == 1
+    assert resumed.pending[0]["title"] == "pytest tests/auth"
+    assert resumed.pending[0]["status"] == "complete"
+
+
+def test_a_restored_queue_keeps_text_where_it_was() -> None:
+    first = _stream()
+    first.say("Running the tests.")
+    first.tool_started("call-1", "execute", {"command": "pytest"})
+    carried = list(first.pending)
+
+    resumed = _stream()
+    resumed.restore_pending(carried)
+    resumed.tool_finished("call-1")
+
+    assert [chunk["type"] for chunk in resumed.pending] == ["markdown_text", "task_update"]
+    assert resumed.pending[0]["text"] == "Running the tests."

@@ -22,7 +22,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import PurePath
 from time import monotonic
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langgraph_sdk.client import LangGraphClient
 
@@ -177,7 +177,8 @@ class SlackTranscript:
         self.mapping_thread_ts = mapping_thread_ts
         self.original_message_ts = original_message_ts
         self.message_ts: str | None = None
-        self.steps: dict[tuple[tuple[str, ...], str], Step] = {}
+        # Keyed by task id, which is what a restored card carries.
+        self.steps: dict[str, Step] = {}
         # Chunks in the order they happened, so text and task cards interleave the
         # way the run did. A step that updates replaces its earlier pending chunk
         # in place: Slack identifies a task card by id, not by position.
@@ -197,6 +198,31 @@ class SlackTranscript:
             self.pending.append(step.chunk())
         else:
             self.pending[index] = step.chunk()
+
+    def restore_pending(self, chunks: list[dict[str, Any]]) -> None:
+        """Take back a queue that outlived the process that built it.
+
+        The cards in it have to be recognized as the same cards, or a tool that
+        started before the resume and finishes after it draws a second, generic
+        card instead of completing the one already on screen.
+        """
+        self.pending = list(chunks)
+        self.pending_steps = {
+            str(chunk["id"]): index
+            for index, chunk in enumerate(self.pending)
+            if chunk.get("type") == "task_update" and chunk.get("id")
+        }
+        self.steps = {
+            str(chunk["id"]): Step(
+                task_id=str(chunk["id"]),
+                title=str(chunk.get("title") or "Agent step"),
+                status=cast(StepStatus, chunk.get("status") or "in_progress"),
+                details=str(chunk.get("details") or ""),
+                output=str(chunk.get("output") or ""),
+            )
+            for chunk in self.pending
+            if chunk.get("type") == "task_update" and chunk.get("id")
+        }
 
     def _queue_text(self, text: str) -> None:
         """Queue words, split so no single chunk can exceed Slack's text cap.
@@ -267,15 +293,17 @@ class SlackTranscript:
 
     def tool_started(self, call_id: str, tool_name: str, tool_input: Any) -> None:
         title, details = _tool_step(tool_name, tool_input)
-        step = Step(_step_id(self.run_id, (), call_id), title, "in_progress", details)
-        self.steps[((), call_id)] = step
+        task_id = _step_id(self.run_id, (), call_id)
+        step = Step(task_id, title, "in_progress", details)
+        self.steps[task_id] = step
         self._queue_step(step)
 
     def tool_finished(self, call_id: str, *, failed: bool = False) -> None:
-        step = self.steps.get(((), call_id))
+        task_id = _step_id(self.run_id, (), call_id)
+        step = self.steps.get(task_id)
         if step is None:
-            step = Step(_step_id(self.run_id, (), call_id), "Agent step", "complete")
-            self.steps[((), call_id)] = step
+            step = Step(task_id, "Agent step", "complete")
+            self.steps[task_id] = step
         # The status renders on its own; a "Completed" line under every step
         # says it twice.
         step.status = "error" if failed else "complete"
