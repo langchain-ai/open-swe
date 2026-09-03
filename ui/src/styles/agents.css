@@ -8,10 +8,6 @@
  * already styles itself with `bg-card` / `text-muted-foreground` / …, so one
  * block of values recolours the whole surface.
  *
- * The dark neutrals follow Codex's `.electron-dark` layer: the chat canvas is
- * the black `background-surface-under`, the sidebar the `background-surface`
- * above it, with cards, menus and the composer lifted further.
- *
  * Colour stops are written as literals rather than `var(--color-zinc-200)`
  * because Tailwind tree-shakes unreferenced theme colours out of the build.
  *
@@ -25,21 +21,21 @@
 html[data-agents-theme] {
   color-scheme: light;
 
-  --background: oklch(97.4% 0.002 106); /* soft warm off-white */
+  --background: oklch(99.2% 0 0); /* zinc-25 */
   --app-chrome-background: var(--background);
   --foreground: oklch(27.4% 0.006 286.033); /* zinc-800 */
-  --card: oklch(99.3% 0.001 106);
+  --card: #fff;
   --card-foreground: var(--foreground);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --popover: oklch(99.3% 0.001 106);
+  --popover: #fff;
   --popover-foreground: var(--foreground);
   --primary: oklch(0.488 0.217 264);
   --primary-foreground: #fff;
-  --secondary: oklch(96.3% 0.002 106);
+  --secondary: oklch(98.5% 0 0); /* zinc-50 */
   --secondary-foreground: var(--foreground);
-  --muted: oklch(96.3% 0.002 106);
-  --muted-foreground: oklch(48% 0.016 285.938); /* zinc-600 */
-  --accent: oklch(94.2% 0.003 106);
+  --muted: oklch(98.5% 0 0); /* zinc-50 */
+  --muted-foreground: oklch(55.2% 0.016 285.938); /* zinc-500 */
+  --accent: oklch(96.7% 0.001 286.375); /* zinc-100 */
   --accent-foreground: oklch(21% 0.006 285.885); /* zinc-900 */
   --destructive: oklch(63.7% 0.237 25.331); /* red-500 */
   --destructive-foreground: oklch(50.5% 0.213 27.518); /* red-700 */
@@ -51,15 +47,15 @@ html[data-agents-theme] {
   --success-foreground: oklch(50.8% 0.118 165.612); /* emerald-700 */
   --warning: oklch(76.9% 0.188 70.08); /* amber-500 */
   --warning-foreground: oklch(55.5% 0.163 48.998); /* amber-700 */
-  --border: oklch(90.6% 0.003 106);
-  --input: oklch(86.5% 0.004 106);
+  --border: oklch(92% 0.004 286.32); /* zinc-200 */
+  --input: oklch(87.1% 0.006 286.286); /* zinc-300 */
   --ring: oklch(0.488 0.217 264);
 
-  --sidebar: oklch(96.3% 0.002 106);
+  --sidebar: oklch(98.5% 0 0); /* zinc-50 */
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: oklch(94.2% 0.003 106);
-  --sidebar-row-hover: oklch(93.8% 0.003 106);
+  --sidebar-control-surface: oklch(96.7% 0.001 286.375); /* zinc-100 */
+  --sidebar-row-hover: oklch(99.2% 0 0); /* zinc-25 */
   --sidebar-row-active: var(--card);
   --sidebar-row-selected: var(--card);
   --sidebar-border: var(--border);
@@ -75,21 +71,21 @@ html[data-agents-theme] {
 html.dark[data-agents-theme] {
   color-scheme: dark;
 
-  --background: #000; /* background-surface-under */
+  --background: oklch(14.5% 0 0); /* neutral-950 */
   --app-chrome-background: var(--background);
-  --foreground: #dfdfdf;
-  --card: #212121; /* background-elevated-secondary-opaque */
+  --foreground: oklch(97% 0 0); /* neutral-100 */
+  --card: color-mix(in srgb, var(--background) 97%, #fff);
   --card-foreground: var(--foreground);
-  --surface-raised: var(--secondary);
-  --popover: #282828; /* background-elevated-primary-opaque */
+  --surface-raised: var(--card);
+  --popover: var(--card);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.588 0.217 264);
+  --primary: oklch(0.571 0.21 264);
   --primary-foreground: #fff;
-  --secondary: color-mix(in srgb, #fff 5%, transparent);
+  --secondary: color-mix(in srgb, #fff 3%, transparent);
   --secondary-foreground: var(--foreground);
-  --muted: color-mix(in srgb, #fff 5%, transparent);
-  --muted-foreground: color-mix(in srgb, #fff 70%, transparent);
-  --accent: color-mix(in srgb, #fff 8%, transparent);
+  --muted: color-mix(in srgb, #fff 3%, transparent);
+  --muted-foreground: color-mix(in srgb, oklch(55.6% 0 0) 90%, #fff);
+  --accent: color-mix(in srgb, #fff 4%, transparent);
   --accent-foreground: var(--foreground);
   --destructive: color-mix(in srgb, oklch(63.7% 0.237 25.331) 90%, #fff);
   --destructive-foreground: oklch(70.4% 0.191 22.216); /* red-400 */
@@ -101,15 +97,15 @@ html.dark[data-agents-theme] {
   --success-foreground: oklch(76.5% 0.177 163.223); /* emerald-400 */
   --warning: oklch(76.9% 0.188 70.08);
   --warning-foreground: oklch(82.8% 0.189 84.429); /* amber-400 */
-  --border: color-mix(in srgb, #fff 8%, transparent);
-  --input: color-mix(in srgb, #fff 16%, transparent);
-  --ring: oklch(0.588 0.217 264);
+  --border: color-mix(in srgb, #fff 6%, transparent);
+  --input: color-mix(in srgb, #fff 8%, transparent);
+  --ring: oklch(0.571 0.21 264);
 
-  --sidebar: #181818; /* background-surface, one step above the canvas */
-  --sidebar-control-surface: color-mix(in srgb, #fff 5%, transparent);
-  --sidebar-row-hover: color-mix(in srgb, #fff 5%, transparent);
-  --sidebar-row-active: color-mix(in srgb, #fff 8%, transparent);
-  --sidebar-row-selected: color-mix(in srgb, #fff 10%, transparent);
+  --sidebar: var(--card);
+  --sidebar-control-surface: var(--muted);
+  --sidebar-row-hover: var(--accent);
+  --sidebar-row-active: var(--accent);
+  --sidebar-row-selected: var(--muted);
   --sidebar-border: var(--border);
 }
 
