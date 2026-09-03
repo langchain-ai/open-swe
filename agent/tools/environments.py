@@ -8,9 +8,9 @@ metadata says "admin" cannot act on behalf of someone who is not one.
 import logging
 from typing import Any
 
-from ..dashboard import environments as store
-from .admin_gate import configurable as _configurable
-from .admin_gate import require_admin
+from agent.dashboard import environments as store
+from agent.tools.admin_gate import configurable as _configurable
+from agent.tools.admin_gate import require_admin
 
 logger = logging.getLogger(__name__)
 

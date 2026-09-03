@@ -13,7 +13,7 @@ from langsmith.sandbox import SandboxClientError
 
 from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.sandboxes.providers import SandboxGoneError
+from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
 
 

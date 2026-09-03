@@ -37,7 +37,7 @@
     "lexical": "^0.49.0",
     "lucide-react": "^1.34.0",
     "monaco-editor": "^0.56.0",
-    "nitro": "latest",
+    "nitro": "3.0.260610-beta",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-icons": "^5.7.0",

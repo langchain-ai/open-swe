@@ -17,21 +17,20 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from agent.auth.github_app import get_github_app_installation_token
-from agent.thread_ids import reviewer_thread_id
-
-from ..review.diff import fetch_pr_diff
-from ..review.findings import REVIEWER_THREAD_KIND
-from ..utils.json_types import as_json_object
-from ..utils.thread_ops import langgraph_client, langgraph_url
-from .options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from .review_api import classify_finding, get_pr_head_sha, get_review
-from .thread_api import (
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from agent.dashboard.review_api import classify_finding, get_pr_head_sha, get_review
+from agent.dashboard.thread_api import (
     _DASHBOARD_STREAM_MODES,
     _langgraph_proxy_headers,
     _require_json_content_type,
     _stream_thread_events,
 )
+from agent.github.app import get_github_app_installation_token
+from agent.review.diff import fetch_pr_diff
+from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.thread_ids import reviewer_thread_id
+from agent.utils.json_types import as_json_object
+from agent.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
 

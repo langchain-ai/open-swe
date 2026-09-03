@@ -3,7 +3,7 @@ import logging
 import os
 from typing import Any
 
-from ._sandbox_output import chunk_output_as_jsonl, write_sandbox_output
+from agent.tools._sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 
 logger = logging.getLogger(__name__)
 

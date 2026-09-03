@@ -25,12 +25,11 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
-from agent.sandboxes.retry import is_transient_sandbox_error
-
-from .sandbox_circuit_breaker import (
+from agent.middleware.sandbox_circuit_breaker import (
     extract_sandbox_id,
     post_sandbox_unreachable_notification,
 )
+from agent.sandboxes.retry import is_transient_sandbox_error
 
 logger = logging.getLogger(__name__)
 

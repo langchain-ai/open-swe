@@ -5,9 +5,8 @@ from typing import Any, Literal
 from langgraph.config import get_config
 
 from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
-
-from ..integrations.langsmith import get_async_sandbox_client
 
 
 async def _resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:

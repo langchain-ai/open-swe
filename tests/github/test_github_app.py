@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from agent.auth import github_app as github_app
+from agent.github import app as github_app
 
 
 @pytest.fixture(autouse=True)

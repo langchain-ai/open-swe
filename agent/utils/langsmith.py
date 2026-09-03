@@ -13,7 +13,7 @@ from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 from langsmith.utils import LangSmithNotFoundError
 
-from .tracing import AGENT_TRACING_PROJECT
+from agent.utils.tracing import AGENT_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
 

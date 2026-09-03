@@ -6,7 +6,7 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.messages import BaseMessage, SystemMessage
 
-from ..input_messages import wrap_system_prompt
+from agent.input_messages import wrap_system_prompt
 
 _DEFAULT_TIMEOUT_SECONDS = 45 * 60
 _WRAPUP_INSTRUCTION = """

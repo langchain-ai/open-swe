@@ -17,7 +17,9 @@ overrides:
   crossws: 0.4.12
   'brace-expansion@>=5.0.0': 5.0.9
   dompurify: 3.4.14
-  fast-uri: 3.1.5
+  fast-uri: 3.1.6
+  '@xmldom/xmldom': 0.8.15
+  qs: 6.16.0
   hono: 4.13.3
   ip-address: 10.5.0
   js-yaml: 4.3.1

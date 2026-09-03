@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from .admin_gate import configurable, require_admin
+from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
 

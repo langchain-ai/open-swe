@@ -3,17 +3,16 @@
 import logging
 from typing import Any
 
-from agent.store import get_value
-
-from .options import (
+from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     model_supports_effort,
     provider_fallback_pair,
 )
-from .profiles import PROFILES_NAMESPACE
-from .team_settings import get_team_default_model
-from .user_mappings import cached_login_for_email, login_for_email
+from agent.dashboard.profiles import PROFILES_NAMESPACE
+from agent.dashboard.team_settings import get_team_default_model
+from agent.dashboard.user_mappings import cached_login_for_email, login_for_email
+from agent.store import get_value
 
 logger = logging.getLogger(__name__)
 

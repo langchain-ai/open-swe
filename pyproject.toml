@@ -30,7 +30,7 @@ dependencies = [
     "exa-py>=2.18.1",
     "langchain-google-genai>=4.3.5",
     "langchain-mcp-adapters>=0.3.2",
-    "stagehand>=3.23.0,<4",
+    "stagehand>=3.23.0,<4.0.0",
     "websockets>=16.1.1",
 ]
 
