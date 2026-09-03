@@ -33,7 +33,7 @@ By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.
 Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
-DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required unless an admin sets the base snapshot at runtime
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Optional; defaults to LangSmith's root snapshot
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, default 128 GiB
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB

@@ -241,7 +241,8 @@ class _FakeSandboxClient:
 
 
 @pytest.mark.asyncio
-async def test_provider_passes_empty_snapshot_id_to_api() -> None:
+@pytest.mark.parametrize("snapshot_id", [None, ""])
+async def test_provider_passes_empty_snapshot_id_to_api(snapshot_id: str | None) -> None:
     client = AsyncSandboxClient(api_key="key", api_endpoint="https://example.com/v2/sandboxes")
     response = MagicMock()
     response.raise_for_status.return_value = None
@@ -250,7 +251,7 @@ async def test_provider_passes_empty_snapshot_id_to_api() -> None:
     client._http.post = post
 
     with patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client):
-        await LangSmithProvider(api_key="key").get_or_create(snapshot_id="")
+        await LangSmithProvider(api_key="key").get_or_create(snapshot_id=snapshot_id)
 
     assert post.await_args is not None
     assert post.await_args.kwargs["json"]["snapshot_id"] == ""
