@@ -238,6 +238,52 @@ def _feedback_id(run_id: str, key: str) -> uuid.UUID:
     return uuid.uuid5(uuid.NAMESPACE_URL, f"langsmith-feedback:{run_id}:{key}")
 
 
+async def create_langsmith_thread_feedback(
+    thread_id: str,
+    key: str,
+    *,
+    score: float,
+    comment: str | None = None,
+    source_info: dict[str, Any] | None = None,
+    project_name: str = AGENT_TRACING_PROJECT,
+) -> bool:
+    client = _build_prod_langsmith_client()
+    if client is None:
+        logger.warning("No LangSmith API key configured, skipping thread feedback")
+        return False
+    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
+        "LANGSMITH_TRACING_PROJECT_ID_PROD"
+    )
+    if not project_id:
+        logger.warning("LangSmith tracing project is unavailable, skipping thread feedback")
+        return False
+    feedback_id = _feedback_id(thread_id, key)
+    payload = {
+        "id": str(feedback_id),
+        "key": key,
+        "score": score,
+        "comment": comment,
+        "session_id": project_id,
+        "feedback_thread_id": thread_id,
+        "feedback_source": {"type": "api", "metadata": source_info or {}},
+    }
+    try:
+        await client._arequest_with_retries("POST", "/feedback", json=payload)
+        return True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await client._arequest_with_retries(
+            "PATCH",
+            f"/feedback/{feedback_id}",
+            json={"score": score, "comment": comment},
+        )
+        return True
+    except Exception:
+        logger.exception("Failed to create or update LangSmith thread feedback for %s", thread_id)
+        return False
+
+
 async def _update_feedback(
     api_key: str,
     api_url: str,

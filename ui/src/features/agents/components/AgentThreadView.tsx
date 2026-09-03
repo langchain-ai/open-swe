@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowUpRight, CircleAlert as CircleAlertIcon } from "lucide-react"
+import {
+  ArrowUpRight,
+  CircleAlert as CircleAlertIcon,
+  GitMerge as GitMergeIcon,
+} from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 
 import type {
@@ -265,6 +269,20 @@ export function AgentThreadView({
                   </a>
                 </AlertAction>
               )}
+            </Alert>
+          </div>
+        )}
+        {thread.attentionReason === "prs_closed" && !thread.resolved && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+            <Alert variant="info">
+              <GitMergeIcon />
+              <AlertDescription>
+                <span>
+                  Every pull request from this thread is merged or closed.
+                  Resolve the thread if the work is done, or send a follow-up to
+                  keep going.
+                </span>
+              </AlertDescription>
             </Alert>
           </div>
         )}
