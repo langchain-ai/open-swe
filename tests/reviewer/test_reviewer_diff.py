@@ -85,6 +85,23 @@ def test_extract_diff_hunk_returns_overlapping_hunk_body() -> None:
     assert "line_b" in hunk
 
 
+def test_extract_diff_hunk_uses_old_side_line_numbers_for_left_anchors() -> None:
+    diff = """diff --git a/x.py b/x.py
+--- a/x.py
++++ b/x.py
+@@ -100,3 +100,1 @@ def f():
+-    old_a()
+-    old_b()
+-    old_c()
++    new()
+"""
+
+    hunk = extract_diff_hunk(diff, "x.py", 102, 102, side="LEFT")
+
+    assert hunk is not None
+    assert "old_c" in hunk
+
+
 def test_extract_diff_hunk_returns_none_for_unknown_file() -> None:
     assert extract_diff_hunk(_TWO_FILE_DIFF, "unknown.py", 1, 1) is None
 

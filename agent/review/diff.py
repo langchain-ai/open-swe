@@ -159,6 +159,7 @@ def extract_diff_hunk(
     file: str,
     start_line: int | None,
     end_line: int | None,
+    side: DiffSide = "RIGHT",
 ) -> str | None:
     """Extract the hunk body covering ``file:start_line..end_line``.
 
@@ -168,13 +169,16 @@ def extract_diff_hunk(
     file_diffs = [fd for fd in parse_unified_diff(diff_text) if fd.file == file]
     if not file_diffs:
         return None
-    hunks = file_diffs[0].hunks
+    hunks = tuple(hunk for file_diff in file_diffs for hunk in file_diff.hunks)
     if not hunks:
         return None
     if start_line is None or end_line is None:
         return hunks[0].body
     for hunk in hunks:
-        if hunk.new_start <= end_line and start_line <= hunk.new_end:
+        hunk_start, hunk_end = (
+            (hunk.old_start, hunk.old_end) if side == "LEFT" else (hunk.new_start, hunk.new_end)
+        )
+        if hunk_start <= end_line and start_line <= hunk_end:
             return hunk.body
     return None
 
