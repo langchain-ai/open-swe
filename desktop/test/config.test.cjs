@@ -8,6 +8,8 @@ const {
   backendRequestUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  connectExchangeUrl,
+  connectLoginUrl,
   isAppLoginUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
@@ -233,4 +235,27 @@ test("keeps static file resolution inside the bundled UI root", () => {
     path.join(root, "assets/app.js"),
   );
   assert.equal(staticFilePath(root, `${APP_URL}%2e%2e%2fsecret`), null);
+});
+
+test("builds connect flow URLs only for known providers", () => {
+  assert.equal(
+    connectLoginUrl("https://backend.example", "slack", {
+      challenge: "abc",
+      port: 51234,
+    }),
+    "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
+  );
+  assert.equal(
+    connectExchangeUrl("https://backend.example", "notion"),
+    "https://backend.example/dashboard/api/notion/desktop/exchange",
+  );
+  assert.throws(() =>
+    connectExchangeUrl("https://backend.example", "../auth/desktop"),
+  );
+  assert.throws(() =>
+    connectLoginUrl("https://backend.example", "github", {
+      challenge: "abc",
+      port: 51234,
+    }),
+  );
 });

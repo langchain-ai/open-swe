@@ -915,3 +915,15 @@ export function slackConnectUrl(): string {
 export function notionConnectUrl(): string {
   return `${API_BASE}/dashboard/api/notion/login`
 }
+
+/**
+ * Hand an OAuth connect flow to the desktop app, or `undefined` on the web.
+ *
+ * The web flow is a redirect that comes back to the page that started it. The
+ * desktop app can't use that: its window and the browser that shows the
+ * provider's consent page have separate cookie jars, so the app runs the flow
+ * itself and resolves once the connection is stored.
+ */
+export function desktopConnect(provider: "slack" | "notion") {
+  return window.openSweDesktop?.connectService(provider)
+}

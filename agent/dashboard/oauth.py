@@ -345,6 +345,62 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     )
 
 
+def issue_connect_handoff(*, provider: str, challenge: str, claims: dict[str, Any]) -> str:
+    """Mint the code the browser hands back after a desktop *connect* flow.
+
+    Carries what finishing the connection needs and nothing that says who to
+    connect it to: the account is read from the desktop app's own session
+    cookie when the code is redeemed. That is what keeps a leaked code inert —
+    it can't attach the leaker's Slack or Notion account to someone else's
+    login, which is exactly what an identity embedded in the state or in this
+    payload would allow.
+    """
+    now = int(time.time())
+    return jwt.encode(
+        {
+            **claims,
+            "provider": provider,
+            "challenge": challenge,
+            "iat": now,
+            "exp": now + HANDOFF_TTL_SECONDS,
+        },
+        _secret(),
+        algorithm=JWT_ALG,
+    )
+
+
+def redeem_connect_handoff(*, provider: str, code: str, verifier: str) -> dict[str, Any]:
+    """Validate a connect handoff code and return its claims.
+
+    Like the login handoff, the code reaches a loopback port through the user's
+    browser, so redeeming it also requires the verifier the challenge committed
+    to — and that never leaves the desktop app. ``provider`` is checked so a
+    code minted by one connect flow can't be redeemed by another's endpoint.
+    """
+    try:
+        payload = jwt.decode(code, _secret(), algorithms=[JWT_ALG])
+    except jwt.PyJWTError as e:
+        raise HTTPException(400, f"invalid handoff code: {e}") from e
+    challenge = payload.get("challenge")
+    code_provider = payload.get("provider")
+    if not isinstance(challenge, str) or not isinstance(code_provider, str):
+        raise HTTPException(400, "malformed handoff code")
+    if not hmac.compare_digest(code_provider, provider):
+        raise HTTPException(400, "handoff provider mismatch")
+    if not hmac.compare_digest(_s256(verifier), challenge):
+        raise HTTPException(400, "handoff verifier mismatch")
+    return payload
+
+
+def desktop_handoff_from_state(state_payload: dict[str, Any]) -> tuple[str, int] | None:
+    """Return the PKCE challenge and loopback port a desktop flow was started with."""
+    challenge = state_payload.get("handoff_challenge")
+    port = state_payload.get("handoff_port")
+    if isinstance(challenge, str) and isinstance(port, int):
+        return challenge, port
+    return None
+
+
 # Dashboard route where users manage their GitHub↔Slack link.
 PROFILE_SETTINGS_PATH = "/my-settings"
 

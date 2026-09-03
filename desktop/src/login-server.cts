@@ -38,16 +38,24 @@ const FAILED_PAGE = page(
   "Sign-in failed",
   "Open SWE did not receive a sign-in code. Try again from the app.",
 );
+const CONNECTED_PAGE = page(
+  "You're connected",
+  "You can close this tab and return to Open SWE.",
+);
+const CONNECT_FAILED_PAGE = page(
+  "Connection failed",
+  "Open SWE did not receive a code. Try again from the app.",
+);
 
 /**
- * Bind a loopback listener for one GitHub sign-in, so the login itself can run
- * in the user's own browser and hand the result back to the app.
+ * Bind a loopback listener for one browser handoff, so the OAuth leg itself can
+ * run in the user's own browser and hand the result back to the app.
  *
  * Resolves to the flow's PKCE material, the bound port, and a `code` promise
  * that yields the handoff code — or `null` if the flow timed out or was
  * superseded by `cancel()`.
  */
-async function beginLogin() {
+async function beginLogin({ connect = false } = {}) {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
 
@@ -64,7 +72,15 @@ async function beginLogin() {
     }
     const value = url.searchParams.get("code");
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(value ? SIGNED_IN_PAGE : FAILED_PAGE);
+    response.end(
+      value
+        ? connect
+          ? CONNECTED_PAGE
+          : SIGNED_IN_PAGE
+        : connect
+          ? CONNECT_FAILED_PAGE
+          : FAILED_PAGE,
+    );
     finish(value || null);
   });
 
