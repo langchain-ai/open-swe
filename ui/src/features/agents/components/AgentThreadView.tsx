@@ -356,6 +356,7 @@ export function AgentThreadView({
                 disabled={!canPost}
                 busy={isStreaming}
                 activeRun={activeRun}
+                draftKey={thread.id}
                 onSubmit={submitMessage}
                 models={models}
                 selection={activeSelection}

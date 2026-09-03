@@ -8,12 +8,21 @@ import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadsPage } from "@/features/agents/lib/api"
-import { AgentsApiError } from "@/features/agents/lib/api"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
 } from "@/features/agents/lib/queries"
 
+const mocks = vi.hoisted(() => ({
+  AgentsApiError: class extends Error {
+    constructor(
+      public readonly status: number,
+      message: string
+    ) {
+      super(message)
+    }
+  },
+}))
 const stream = {
   isLoading: false,
   submit: vi.fn(() => Promise.resolve(undefined)),
@@ -26,15 +35,10 @@ vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
 const queueMessage = vi.fn()
 
 vi.mock("@/features/agents/lib/api", () => ({
-  agentsApi: { queueMessage: () => queueMessage() },
-  AgentsApiError: class extends Error {
-    constructor(
-      public readonly status: number,
-      message: string
-    ) {
-      super(message)
-    }
+  agentsApi: {
+    queueMessage: (...args: Array<unknown>) => queueMessage(...args),
   },
+  AgentsApiError: mocks.AgentsApiError,
 }))
 
 const THREAD_ID = "thread-1"
@@ -98,28 +102,55 @@ beforeEach(() => {
   stream.isLoading = false
   stream.submit.mockClear()
   queueMessage.mockReset()
-  queueMessage.mockResolvedValue(undefined)
+  queueMessage.mockResolvedValue({ queuedMessages: [] })
 })
 
 describe("useSubmitAgentMessage", () => {
-  it("never flashes a queued bubble when the send starts a new run", async () => {
-    queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
+  it("falls back to the connected stream when the thread is idle", async () => {
+    queueMessage.mockRejectedValueOnce(
+      new mocks.AgentsApiError(409, "thread is idle")
+    )
     const { client, queuedCounts, result } = setup()
 
     await result.current.mutateAsync({ content: "hi", images: [] })
 
-    await waitFor(() => expect(stream.submit).toHaveBeenCalled())
+    expect(stream.submit).toHaveBeenCalledWith(
+      {
+        messages: [{ type: "human", content: [{ type: "text", text: "hi" }] }],
+      },
+      { config: undefined }
+    )
     expect(sidebarStatus(client)).toBe("running")
     expect(queuedCounts.every((count) => count === 0)).toBe(true)
   })
 
   it("shows the queued bubble once a run this client never joined accepts it", async () => {
+    queueMessage.mockResolvedValueOnce({
+      id: THREAD_ID,
+      status: "running",
+      messages: [],
+      queuedMessages: [
+        { id: "queued-server", content: "hi", createdAt: Date.now() },
+      ],
+    })
     const { client, result } = setup()
 
     await result.current.mutateAsync({ content: "hi", images: [] })
 
     expect(queuedMessages(client)).toHaveLength(1)
     expect(stream.submit).not.toHaveBeenCalled()
+  })
+
+  it("sends the active hint while queueing a known running thread", async () => {
+    stream.isLoading = true
+    const { result } = setup()
+
+    await result.current.mutateAsync({ content: "hi", images: [] })
+
+    expect(queueMessage).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.objectContaining({ expect_active: true })
+    )
   })
 
   it("shows the queued bubble immediately while this client streams", async () => {
@@ -137,5 +168,16 @@ describe("useSubmitAgentMessage", () => {
     await waitFor(() => expect(queuedMessages(client)).toHaveLength(1))
     acceptQueue()
     await pending
+  })
+
+  it("survives when stop overtakes an optimistic queue", async () => {
+    stream.isLoading = true
+    queueMessage.mockResolvedValueOnce({ queuedMessages: [] })
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({ content: "survive stop", images: [] })
+
+    expect(queuedMessages(client)).toHaveLength(1)
+    expect(stream.submit).not.toHaveBeenCalled()
   })
 })

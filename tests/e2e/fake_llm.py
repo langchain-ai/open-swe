@@ -169,6 +169,10 @@ curl --fail --silent --show-error \
 LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
+_PHASE_HOLD_RE = re.compile(
+    r"E2E_PHASE_HOLD:(before-model|before-tool|after-tool|final)"
+    r"(?::(\d+))?(?::(\d+(?:\.\d+)?))?"
+)
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 _THREAD_TOOLS_RE = re.compile(
@@ -1030,6 +1034,24 @@ def build_script() -> list[StepSpec]:
     return list(SCRIPT_LIBRARY["implement"])
 
 
+def _phase_hold(text: str, step_index: int, step: StepSpec, *, after_tool: bool) -> float | None:
+    match = _PHASE_HOLD_RE.search(text)
+    if match is None:
+        return None
+    phase, selected_step, seconds = match.groups()
+    if selected_step is not None and step_index != int(selected_step):
+        return None
+    should_hold = (
+        (phase == "before-model" and step_index == 0)
+        or (phase == "before-tool" and bool(step.tool_calls))
+        or (phase == "after-tool" and after_tool)
+        or (phase == "final" and not step.tool_calls)
+    )
+    if not should_hold:
+        return None
+    return float(seconds or os.environ.get("E2E_PHASE_HOLD_SECONDS", "30"))
+
+
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
@@ -1071,15 +1093,18 @@ class FakeScriptedChatModel(BaseChatModel):
         )
         step_index = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
 
-        # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
-        # the interrupt-debounce path). Only the triggering message carries the
-        # marker. The block lands on the second model call so the Slack
-        # acknowledgement — and the web link a spec may need to click — is already
-        # out by the time the run stalls. `E2E_BUSY_HOLD:<n>` overrides the window
-        # so a spec needing a short hold does not leave a run in flight for the
-        # specs that follow it.
-        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
-        if hold:
-            time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
+        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
+        delay = (
+            float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10"))
+            if hold
+            else _phase_hold(
+                context.last_text,
+                step_index,
+                step,
+                after_tool=last_human + 1 < len(messages) and isinstance(messages[-1], ToolMessage),
+            )
+        )
+        if delay is not None:
+            time.sleep(delay)
         return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])

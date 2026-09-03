@@ -37,6 +37,9 @@ class _FakeStore:
     async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
         return self.items.get((namespace, key))
 
+    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
+        self.items[(namespace, key)] = {"value": value}
+
 
 class _FakeClient:
     def __init__(
@@ -111,6 +114,7 @@ async def test_dashboard_followup_sends_image_content_blocks(
         "github_login": "octocat",
         "repo_owner": "octo",
         "repo_name": "repo",
+        "model": "vision-model",
     }
     client = _FakeClient(metadata)
 
@@ -119,6 +123,12 @@ async def test_dashboard_followup_sends_image_content_blocks(
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
     monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+    monkeypatch.setattr(thread_api, "model_supports_images", lambda model_id: True)
+    monkeypatch.setattr(
+        thread_api,
+        "normalize_model_choice",
+        lambda model_id, effort: (model_id, effort),
+    )
     monkeypatch.setattr(
         thread_api,
         "create_image_block",
@@ -131,6 +141,8 @@ async def test_dashboard_followup_sends_image_content_blocks(
             "octocat",
             thread_api.ThreadMessageBody(
                 content="describe this",
+                model_id="vision-model",
+                effort="medium",
                 images=[
                     thread_api.DashboardImageBody(
                         base64="aW1hZ2U=",
@@ -142,6 +154,46 @@ async def test_dashboard_followup_sends_image_content_blocks(
         )
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_expected_active_dispatches_when_stop_won(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {"source": "dashboard", "github_login": "octocat"}
+    client = _FakeClient(metadata)
+    queued_messages: list[object] = []
+    dispatched: list[dict[str, Any]] = []
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append(message_content)
+        return True
+
+    async def fake_dispatch(
+        thread_id: str,
+        content: Any,
+        configurable: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        dispatched.append({"content": content, "input": kwargs.get("input")})
+        return {"run_id": "replacement-run"}
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(thread_api, "dispatch_agent_run", fake_dispatch)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
+    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(content="survive stop", expect_active=True),
+    )
+
+    assert len(queued_messages) == 1
+    assert dispatched == [{"content": None, "input": {"messages": []}}]
 
 
 @pytest.mark.asyncio
@@ -172,19 +224,68 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     )
 
     assert client.threads.updates[0]["source"] == "dashboard"
-    assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-                "email": "octocat@example.com",
-            },
-        }
-    ]
+    payload = queued_messages[0]
+    assert isinstance(payload, dict)
+    assert payload["id"].startswith("queued-")
+    assert isinstance(payload["created_at_ms"], int)
+    assert {key: value for key, value in payload.items() if key not in {"id", "created_at_ms"}} == {
+        "text": "continue in web",
+        "source": "dashboard",
+        "surface": "web",
+        "sender": {
+            "id": "github:octocat",
+            "platform": "github",
+            "github_login": "octocat",
+            "email": "octocat@example.com",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_dispatches_queued_message_when_stop_wins_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {"source": "dashboard", "github_login": "octocat"}
+    client = _FakeClient(metadata)
+    statuses = iter((True, False))
+    queued_messages: list[object] = []
+    dispatched: list[dict[str, Any]] = []
+
+    async def status(thread_id: str) -> bool:
+        return next(statuses)
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append(message_content)
+        return True
+
+    async def fake_dispatch(
+        thread_id: str,
+        content: Any,
+        configurable: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        dispatched.append({"content": content, "input": kwargs.get("input")})
+        return {"run_id": "replacement-run"}
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "get_thread_active_status", status)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(thread_api, "dispatch_agent_run", fake_dispatch)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
+    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(content="survive stop"),
+    )
+
+    assert len(queued_messages) == 1
+    assert dispatched == [{"content": None, "input": {"messages": []}}]
+    assert any(
+        update.get("latest_run_id") == "replacement-run" for update in client.threads.updates
+    )
 
 
 @pytest.mark.asyncio
@@ -231,19 +332,21 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         email="octocat@example.com",
     )
 
-    assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-                "email": "octocat@example.com",
-            },
-        }
-    ]
+    payload = queued_messages[0]
+    assert isinstance(payload, dict)
+    assert payload["id"].startswith("queued-")
+    assert isinstance(payload["created_at_ms"], int)
+    assert {key: value for key, value in payload.items() if key not in {"id", "created_at_ms"}} == {
+        "text": "continue in web",
+        "source": "dashboard",
+        "surface": "web",
+        "sender": {
+            "id": "github:octocat",
+            "platform": "github",
+            "github_login": "octocat",
+            "email": "octocat@example.com",
+        },
+    }
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
     ]
@@ -331,19 +434,21 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         ),
     )
 
-    assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-            },
-            "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
-        }
-    ]
+    payload = queued_messages[0]
+    assert isinstance(payload, dict)
+    assert payload["id"].startswith("queued-")
+    assert isinstance(payload["created_at_ms"], int)
+    assert {key: value for key, value in payload.items() if key not in {"id", "created_at_ms"}} == {
+        "text": "continue in web",
+        "source": "dashboard",
+        "surface": "web",
+        "sender": {
+            "id": "github:octocat",
+            "platform": "github",
+            "github_login": "octocat",
+        },
+        "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
+    }
 
 
 @pytest.mark.asyncio

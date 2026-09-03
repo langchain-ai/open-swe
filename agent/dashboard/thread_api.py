@@ -10,7 +10,7 @@ import posixpath
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -35,7 +35,7 @@ from agent.dashboard.team_settings import get_team_default_model, get_team_fable
 from agent.dashboard.thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from agent.dashboard.user_mappings import email_for_login
-from agent.dispatch import dispatch_agent_run
+from agent.dispatch import ContentBlocks, dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
@@ -175,10 +175,66 @@ class ThreadMessageBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     plan_mode: bool = False
+    expect_active: bool = False
 
 
 class ThreadResolveBody(BaseModel):
     resolved: bool = True
+
+
+def _queued_message_summary(message: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(message, dict) or not isinstance(message.get("content"), dict):
+        return None
+    content = message["content"]
+    text = content.get("text")
+    if not isinstance(text, str):
+        return None
+    created_at = content.get("created_at_ms")
+    if not isinstance(created_at, (int, float)):
+        created_at = 0
+    queued_id = content.get("id")
+    if not isinstance(queued_id, str) or not queued_id:
+        queued_id = f"queued-store-{index}-{int(created_at)}"
+    summary: dict[str, Any] = {
+        "id": queued_id,
+        "content": text,
+        "createdAt": int(created_at),
+    }
+    images = content.get("images")
+    if isinstance(images, list):
+        summary["images"] = [
+            {
+                "kind": "image",
+                "base64": image["base64"],
+                "mimeType": image.get("mime_type") or image.get("mimeType"),
+                **(
+                    {"fileName": image.get("file_name") or image.get("fileName")}
+                    if image.get("file_name") or image.get("fileName")
+                    else {}
+                ),
+            }
+            for image in images
+            if isinstance(image, dict)
+            and isinstance(image.get("base64"), str)
+            and isinstance(image.get("mime_type") or image.get("mimeType"), str)
+        ]
+    return summary
+
+
+async def _queued_message_summaries(client: Any, thread_id: str) -> list[dict[str, Any]]:
+    try:
+        item = await client.store.get_item(("queue", thread_id), "pending_messages")
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not fetch queued messages for thread %s", thread_id, exc_info=True)
+        return []
+    messages = item.get("value", {}).get("messages", []) if item else []
+    if not isinstance(messages, list):
+        return []
+    return [
+        summary
+        for index, message in enumerate(messages)
+        if (summary := _queued_message_summary(message, index)) is not None
+    ]
 
 
 async def _resolve_agent_model_choice(
@@ -262,16 +318,19 @@ def _image_blocks(
 
 def _user_message_content(
     prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
-) -> str | list[ImageContentBlock | dict[str, str]]:
+) -> ContentBlocks:
     text = prompt.strip()
     if not text and not images:
         raise HTTPException(422, "prompt or image required")
     if not images:
         return text
-    return [
-        *_image_blocks(images, model_id=model_id),
-        *([{"type": "text", "text": text}] if text else []),
-    ]
+    return cast(
+        list[dict[str, Any]],
+        [
+            *_image_blocks(images, model_id=model_id),
+            *([{"type": "text", "text": text}] if text else []),
+        ],
+    )
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
@@ -1214,11 +1273,13 @@ async def get_dashboard_thread(
         )
         thread = {**as_thread_dict(thread), "metadata": metadata}
 
-    return await _thread_summary(
+    summary = await _thread_summary(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
     )
+    summary["queuedMessages"] = await _queued_message_summaries(client, thread_id)
+    return summary
 
 
 async def _resolve_requested_environment(requested: Any) -> str | None:
@@ -1774,7 +1835,7 @@ async def send_dashboard_message(
     active = await get_thread_active_status(thread_id)
     if active is None:
         raise HTTPException(502, "could not determine whether thread is active")
-    if not active:
+    if not active and not body.expect_active:
         raise HTTPException(
             409,
             "thread is idle; start a run via the stream commands endpoint",
@@ -1801,7 +1862,10 @@ async def send_dashboard_message(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+
     queue_payload: dict[str, Any] = {
+        "id": f"queued-{uuid.uuid4()}",
+        "created_at_ms": now_ms,
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
         "surface": "web",
@@ -1819,12 +1883,50 @@ async def send_dashboard_message(
     queued = await queue_message_for_thread(thread_id, queue_payload)
     if not queued:
         raise HTTPException(502, "failed to queue follow-up message")
+
+    active_after_queue = await get_thread_active_status(thread_id)
+    if active_after_queue is None:
+        raise HTTPException(502, "could not determine whether thread is active")
+    if not active_after_queue:
+        configurable = await _build_dashboard_configurable(
+            thread_id,
+            login,
+            {**metadata, **metadata_update},
+            overrides={
+                "agent_model_id": chosen_model,
+                "agent_effort": chosen_effort,
+                "plan_mode": body.plan_mode or None,
+            },
+        )
+        try:
+            run = await dispatch_agent_run(
+                thread_id,
+                None,
+                configurable,
+                source=_DASHBOARD_SOURCE,
+                input={"messages": []},
+                client=client,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to start dashboard follow-up for thread %s", thread_id)
+            raise HTTPException(502, "failed to start follow-up run") from exc
+        run_id = run.get("run_id") if isinstance(run, dict) else None
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                "latest_run_status": "pending",
+                "latest_run_id": run_id,
+                "updated_at_ms": _now_ms(),
+            },
+        )
     try:
         await _notify_slack_web_handoff(thread_id, handoff_metadata, client)
     except Exception:
         logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
     thread = await client.threads.get(thread_id)
-    return await _thread_summary(thread)
+    summary = await _thread_summary(thread)
+    summary["queuedMessages"] = await _queued_message_summaries(client, thread_id)
+    return summary
 
 
 async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
