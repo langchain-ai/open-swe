@@ -21,6 +21,16 @@ async def github_webhook(
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
     event_type = request.headers.get("X-GitHub-Event", "")
+    delivery_id = request.headers.get("X-GitHub-Delivery", "")
+    common.logger.info(
+        "GitHub webhook received",
+        extra={
+            "github_event": event_type,
+            "github_delivery": delivery_id,
+            "github_payload": body.decode("utf-8", errors="replace"),
+        },
+    )
+
     if event_type not in common._SUPPORTED_GH_EVENTS:
         common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
         return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
@@ -96,7 +106,6 @@ async def github_webhook(
         return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     if event_type in common._GITHUB_CI_EVENTS:
-        delivery_id = request.headers.get("X-GitHub-Delivery")
         background_tasks.add_task(
             service.process_github_ci_event,
             payload,

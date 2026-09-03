@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 from agent.review.findings import Finding
+from agent.run_config import RunConfig
 from agent.utils import reviewer_outcomes
 from agent.utils.reviewer_outcomes import (
     FALSE_POSITIVE,
@@ -184,7 +185,7 @@ async def test_emit_finding_status_outcome_maps_and_calls(monkeypatch) -> None: 
         "head_sha": "bbb",
     }
     assert await emit_finding_status_outcome(
-        _finding(), "resolved", configurable=configurable, thread_id="t1"
+        _finding(), "resolved", cfg=RunConfig.parse(configurable), thread_id="t1"
     )
     assert captured["repo"] == "o/r"
     assert captured["label"] == TRUE_POSITIVE
@@ -194,7 +195,7 @@ async def test_emit_finding_status_outcome_maps_and_calls(monkeypatch) -> None: 
 
 async def test_emit_finding_status_outcome_no_repo_is_noop(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(reviewer_outcomes, "upsert_finding_outcome", lambda *a, **k: pytest_fail())
-    assert await emit_finding_status_outcome(_finding(), "dismissed", configurable={}) is False
+    assert await emit_finding_status_outcome(_finding(), "dismissed", cfg=RunConfig()) is False
 
 
 def pytest_fail() -> bool:

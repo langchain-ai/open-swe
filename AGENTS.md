@@ -24,14 +24,15 @@ make format             # ruff format + ruff check --fix
 make typecheck          # basedpyright agent tests
 ```
 
-`langgraph.json` declares three graph entrypoints and the FastAPI app, all served together by `langgraph dev`:
+`langgraph.json` declares five graph entrypoints and the FastAPI app, all served together by `langgraph dev`. Each entrypoint is a thin re-export shim in `agent/graphs/`; the implementation lives in the module it names:
 
-| Graph | Entrypoint | Purpose |
-|---|---|---|
-| `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
-| `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
-| `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
-| `scheduler` | `agent.scheduler:get_scheduler` | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
+| Graph | Entrypoint | Implemented in | Purpose |
+|---|---|---|---|
+| `agent` | `agent.graphs.agent:traced_agent` | `agent/server.py` | Main coding agent (Slack/Linear/GitHub-triggered). |
+| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | `agent/reviewer.py` | Read-only PR reviewer. Findings model + `publish_review`. |
+| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | `agent/analyzer.py` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
+| `chat` | `agent.graphs.chat:traced_chat_agent` | `agent/chat.py` | Read-only "chat with this PR" agent for the review UI. No sandbox — answers from the diff, published findings, and read-only GitHub API access. |
+| `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent/scheduler.py` | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
 
 The FastAPI app is `agent.webapp:app`.
 
@@ -132,6 +133,8 @@ Slack **code channels** (`utils/slack_code_channels.py`) are a channel-per-task 
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
 - Do not use parent-relative Python imports that start with `..`; use absolute imports instead. Same-package imports with a single dot, such as `.foo`, are allowed.
+- Do not add feature documentation to this file. Shipping a feature earns it **no** line here — not a section, not a pointer, not a resolution order or a list of which module wins. Anyone can read that from the code. Feature detail belongs in the code, its docstrings, and the PR description. Only edit this file when asked to, or when something it already claims has become wrong.
+- Structured logging only. The log message is a static string; every variable goes in `extra={...}` as a named field. Do not interpolate values into the message with `%s`, `.format()`, or f-strings — that makes logs unqueryable and unaggregatable. Write `logger.info("Rejecting GitHub webhook", extra={"owner": owner, "repo": name})`, not `logger.info("Rejecting GitHub webhook: repo '%s/%s'", owner, name)`. Field names must not collide with stdlib `LogRecord` attributes (`message`, `args`, `module`, `name`, `filename`, `exc_info`, …); prefix them with their domain when in doubt (`github_event`, not `event`).
 
 <!-- OPENWIKI:START -->
 

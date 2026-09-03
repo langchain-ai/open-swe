@@ -32,9 +32,15 @@ class SlackThreadRef(BaseModel):
 
     channel_id: str = ""
     thread_ts: str = ""
+    reply_thread_ts: str = ""
+    trace_message_ts: str = ""
     triggering_user_id: str = ""
+    triggering_user_name: str = ""
+    triggering_user_email: str = ""
+    triggering_user_timezone: str = ""
     triggering_event_ts: str = ""
     permalink: str = ""
+    channel_context: dict[str, Any] | None = None
 
     @property
     def location(self) -> tuple[str, str] | None:
@@ -46,17 +52,24 @@ class SlackThreadRef(BaseModel):
     def is_at(self, channel_id: str, thread_ts: str) -> bool:
         return self.channel_id == channel_id and self.thread_ts == thread_ts
 
+    def dump(self) -> dict[str, Any]:
+        """The JSON value to store, preserving exactly the keys that were set."""
+        return self.model_dump(mode="json", exclude_unset=True)
+
 
 class LinearIssueRef(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str = ""
+    identifier: str = ""
+    url: str = ""
 
 
 class GitHubIssueRef(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     number: int | None = None
+    url: str = ""
 
 
 class SourceContext(BaseModel):

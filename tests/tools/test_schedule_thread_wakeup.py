@@ -131,7 +131,7 @@ def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]
 
 
 async def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     result = await wakeup_tool.schedule_thread_wakeup(0)
     assert result["success"] is False
     assert "positive" in result["error"].lower()
@@ -140,7 +140,7 @@ async def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.Mon
 async def test_schedule_thread_wakeup_rejects_negative_delay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     result = await wakeup_tool.schedule_thread_wakeup(-5)
     assert result["success"] is False
 
@@ -148,7 +148,7 @@ async def test_schedule_thread_wakeup_rejects_negative_delay(
 async def test_schedule_thread_wakeup_rejects_delay_over_24h(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     result = await wakeup_tool.schedule_thread_wakeup(1441)
     assert result["success"] is False
     assert "1440" in result["error"]
@@ -158,9 +158,7 @@ async def test_schedule_thread_wakeup_rejects_missing_thread_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        wakeup_tool,
-        "get_config",
-        lambda: {"configurable": {"source": "slack"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"source": "slack"}}
     )
     result = await wakeup_tool.schedule_thread_wakeup(5)
     assert result["success"] is False
@@ -193,7 +191,7 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
             "thread_id": thread_id,
         }
 
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
     result = await wakeup_tool.schedule_thread_wakeup(10, prompt="Check CI status")
@@ -261,7 +259,7 @@ async def test_schedule_thread_wakeup_returns_error_on_exception(
         raise RuntimeError("connection refused")
 
     client = _FakeClient([])
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
@@ -291,7 +289,7 @@ async def test_schedule_thread_wakeup_defaults_prompt_and_omits_none_configurabl
         captured["prompt"] = prompt
         return {"success": True, "cron_id": "cron-1", "scheduled_for": "", "thread_id": thread_id}
 
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
     result = await wakeup_tool.schedule_thread_wakeup(5, prompt=prompt)
@@ -310,7 +308,7 @@ async def test_schedule_allows_ten_wakeups_then_rejects_the_eleventh(
         [],
         messages=[_input_message("user-1", kind="human", sender="slack:U1")],
     )
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     for _ in range(10):
@@ -341,7 +339,7 @@ async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyP
             _input_message("user-2", kind="human", sender="slack:U1"),
         ]
     )
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -366,7 +364,7 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.Mon
             wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
         },
     )
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -387,7 +385,7 @@ async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
         raise RuntimeError("metadata unavailable")
 
     monkeypatch.setattr(client.threads, "update", fail_update)
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -408,7 +406,7 @@ async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.Mo
             wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 9,
         },
     )
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     results = await asyncio.gather(
@@ -520,7 +518,7 @@ async def test_schedule_purges_before_creating(monkeypatch: pytest.MonkeyPatch) 
             "thread_id": kwargs["thread_id"],
         }
 
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", spy_purge)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 

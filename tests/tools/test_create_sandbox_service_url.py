@@ -34,9 +34,7 @@ class _Backend:
 
 def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, _AsyncClient]:
     monkeypatch.setattr(
-        service_tool,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-1"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     backend = _Backend()
 
