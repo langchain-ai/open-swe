@@ -15,10 +15,10 @@ from agent.sandboxes.providers.langsmith import (
     DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES,
     LangSmithProvider,
     _create_sandbox_with_retry,
-    _CreatePayloadClient,
     _get_sandbox_api_endpoint,
     _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
+    _install_create_extra_fields,
     _merge_sandbox_create_extra_fields,
     _reuse_existing_sandbox,
     create_langsmith_sandbox,
@@ -243,18 +243,14 @@ class _FakeSandboxClient:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("snapshot_id", [None, ""])
 async def test_provider_passes_empty_snapshot_id_to_api(snapshot_id: str | None) -> None:
-    client = _CreatePayloadClient(
-        api_key="key",
-        api_endpoint="https://example.com/v2/sandboxes",
-        extra={"snapshot_id": ""},
-    )
+    client = AsyncSandboxClient(api_key="key", api_endpoint="https://example.com/v2/sandboxes")
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.json.return_value = {"name": "sandbox-new", "status": "ready"}
     post = AsyncMock(return_value=response)
     client._http.post = post
 
-    with patch("agent.sandboxes.providers.langsmith._CreatePayloadClient", return_value=client):
+    with patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client):
         await LangSmithProvider(api_key="key").get_or_create(snapshot_id=snapshot_id)
 
     assert post.await_args is not None
@@ -294,7 +290,8 @@ async def test_create_from_params_forwards_public_and_hidden_options() -> None:
     client.wait_for_sandbox = AsyncMock(return_value=sandbox)
 
     with (
-        patch("agent.sandboxes.providers.langsmith._CreatePayloadClient", return_value=client),
+        patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client),
+        patch("agent.sandboxes.providers.langsmith._install_create_extra_fields") as install,
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_create_extra_fields",
             return_value={},
@@ -316,6 +313,10 @@ async def test_create_from_params_forwards_public_and_hidden_options() -> None:
         timeout=240,
     )
     client.wait_for_sandbox.assert_awaited_once_with("sandbox-new", timeout=240)
+    install.assert_called_once_with(
+        client,
+        {"cpu_millicores": 500, "_internal_runtime": "v2"},
+    )
 
 
 def test_extra_fields_unset_is_empty() -> None:
@@ -362,38 +363,43 @@ def test_extra_fields_rejects_non_object() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_payload_client_merges_extra_fields() -> None:
-    client = _CreatePayloadClient(extra={"_internal_runtime": "v2"})
-    original_post = client._http.post
-    response = MagicMock()
-    response.json.return_value = {"name": "sandbox", "status": "running"}
-    response.raise_for_status.return_value = None
+async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
+    calls: list[tuple[str, dict]] = []
 
-    with patch.object(client._http, "post", AsyncMock(return_value=response)) as post:
-        await client.create_sandbox(snapshot_id="snapshot")
+    class _FakeHttp:
+        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+            payload = kwargs.get("json")
+            assert isinstance(payload, dict)
+            calls.append((url, payload))
+            return "ok"
 
-    assert post.await_args.kwargs["json"] == {
-        "wait_for_ready": True,
-        "snapshot_id": "snapshot",
-        "timeout": 30,
-        "_internal_runtime": "v2",
-    }
-    assert client._http.post.__func__ is original_post.__func__
-    await client.aclose()
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+
+    client = _FakeClient()
+    _install_create_extra_fields(cast(AsyncSandboxClient, client), {"_internal_runtime": "v2"})
+
+    await client._http.post("https://api/v2/sandboxes/boxes", json={"snapshot_id": "s"})
+    await client._http.post("https://api/v2/sandboxes/boxes/abc/start", json={"foo": "bar"})
+
+    assert calls[0][1] == {"snapshot_id": "s", "_internal_runtime": "v2"}
+    assert calls[1][1] == {"foo": "bar"}
 
 
 @pytest.mark.asyncio
-async def test_create_payload_client_noop_when_empty() -> None:
-    client = _CreatePayloadClient(extra={})
-    response = MagicMock()
-    response.json.return_value = {"name": "sandbox", "status": "running"}
-    response.raise_for_status.return_value = None
+async def test_install_create_extra_fields_noop_when_empty() -> None:
+    class _FakeHttp:
+        def __init__(self) -> None:
+            self.post = "sentinel"
 
-    with patch.object(client._http, "post", AsyncMock(return_value=response)) as post:
-        await client.create_sandbox(snapshot_id="snapshot")
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
 
-    assert "_internal_runtime" not in post.await_args.kwargs["json"]
-    await client.aclose()
+    client = _FakeClient()
+    _install_create_extra_fields(cast(AsyncSandboxClient, client), {})
+    assert client._http.post == "sentinel"
 
 
 class _MissingSandboxClient:
