@@ -4,10 +4,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from .oauth import require_same_origin_for_mutations, require_session
-from .plan_api import _dispatch_followup, _thread_metadata
-from .thread_api import _thread_is_readable
-from .workflow_approval import (
+from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
+from agent.dashboard.plan_api import _dispatch_followup, _thread_metadata
+from agent.dashboard.thread_api import _thread_is_readable
+from agent.dashboard.workflow_approval import (
     decide_workflow_push_approval,
     get_workflow_push_approvals,
     workflow_push_approval_responses,

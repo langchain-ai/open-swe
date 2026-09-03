@@ -5,19 +5,17 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ..dashboard import schedules
-from .admin_gate import configurable, require_admin
+from agent.dashboard import schedules
+from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
 
 
 def _identity() -> tuple[str, str | None] | None:
-    values = configurable()
-    login = values.get("github_login")
-    email = values.get("user_email")
-    if not isinstance(login, str) or not login:
+    cfg = configurable()
+    if not cfg.github_login:
         return None
-    return login, email if isinstance(email, str) and email else None
+    return cfg.github_login, cfg.user_email or None
 
 
 def _error(exc: Exception) -> dict[str, Any]:

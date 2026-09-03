@@ -112,7 +112,7 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
     github_login = _normalize_text(configurable.get("github_login"))
     if github_login:
         github_user_id = configurable.get("github_user_id")
-        from ..dashboard.user_mappings import cached_email_for_login
+        from agent.dashboard.user_mappings import cached_email_for_login
 
         commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
             cached_email_for_login(github_login)
@@ -153,7 +153,7 @@ def resolve_triggering_user_identity(
 
 async def resolve_participant_identities(logins: Iterable[str]) -> list[CollaboratorIdentity]:
     """Git identities for thread participants the agent may author commits as."""
-    from ..dashboard.user_mappings import email_for_login
+    from agent.dashboard.user_mappings import email_for_login
 
     unique = sorted({login.strip() for login in logins if isinstance(login, str) and login.strip()})
     emails = await asyncio.gather(*(email_for_login(login) for login in unique))

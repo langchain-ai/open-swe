@@ -4,10 +4,9 @@ from xml.etree import ElementTree
 
 import pytest
 
-from agent.source_context import SourceContext
-from agent.utils import slack as slack_utils
-from agent.utils.run_usage import RunUsageSummary
-from agent.utils.slack import (
+from agent.slack import client as slack_utils
+from agent.slack import webhook as slack_webhooks
+from agent.slack.client import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
     get_slack_permalink,
@@ -17,8 +16,9 @@ from agent.utils.slack import (
     select_slack_context_messages,
     strip_bot_mention,
 )
+from agent.source_context import SourceContext
+from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack as slack_webhooks
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:

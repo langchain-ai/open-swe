@@ -1,7 +1,7 @@
 {
   "$schema": "https://langgra.ph/schema.json",
   "python_version": "3.12",
-  "api_version": "0.12.6",
+  "api_version": "0.12.7",
   "graphs": {
     "agent": "agent.graphs.agent:traced_agent"
   },

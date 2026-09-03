@@ -5,11 +5,11 @@ from uuid import uuid4
 
 from langchain_core.tools import tool
 
-from ..utils.html_artifact import artifact_skeleton, sandbox_wrap_command
-from .create_sandbox_file_download_url import (
+from agent.tools.create_sandbox_file_download_url import (
     _resolve_sandbox_file,
     create_sandbox_file_download_url,
 )
+from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
 _MAX_HTML_BYTES = 1_000_000
 

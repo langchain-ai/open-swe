@@ -24,22 +24,19 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..utils.thread_ops import langgraph_url
-from ..utils.timing import server_timing_header
-from .admin import is_admin
-from .agent_instructions import (
+from agent.dashboard.admin import is_admin
+from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
     AgentInstructions,
     AgentInstructionsCreate,
     AgentInstructionsUpdate,
 )
-from .agent_usage import list_agent_usage_leaderboard
-from .analyzer_cron import remove_continual_cron
-from .enabled_repos import (
+from agent.dashboard.agent_usage import list_agent_usage_leaderboard
+from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
-from .environments import (
+from agent.dashboard.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
     ENVIRONMENTS,
     Environment,
@@ -48,18 +45,14 @@ from .environments import (
     list_environment_options,
     slugify,
 )
-from .eval_jobs import (
-    get_reviewer_eval_status,
-)
-from .github_token_auth import admin_session_for_github_token, bearer_github_token
-from .notion_oauth import (
+from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
     exchange_notion_code,
     pop_notion_oauth_flow,
     store_notion_oauth_flow,
 )
-from .oauth import (
+from agent.dashboard.oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
@@ -82,14 +75,14 @@ from .oauth import (
     sanitize_redirect_to,
     valid_handoff_challenge,
 )
-from .oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
-from .options import (
+from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
+from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
     gate_fable_model,
     models_with_profile_context_windows,
 )
-from .profiles import (
+from agent.dashboard.profiles import (
     ProfileUpdate,
     get_profile,
     get_valid_access_token,
@@ -97,15 +90,14 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
-from .pull_request_checks import PullRequestState
-from .repo_access import require_repo_access_for_user
-from .repo_cache import (
+from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.dashboard.repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
     schedule_repo_cache_refresh,
     write_cached_repos,
 )
-from .review_api import (
+from agent.dashboard.review_api import (
     create_review_comment,
     dry_run_trace_resolution,
     get_review,
@@ -116,7 +108,7 @@ from .review_api import (
     trigger_re_review,
     update_review_comment,
 )
-from .review_chat_api import (
+from agent.dashboard.review_chat_api import (
     delete_review_chat_thread,
     get_review_chat,
     list_review_chat_threads,
@@ -125,24 +117,12 @@ from .review_chat_api import (
     proxy_review_chat_state,
     proxy_review_chat_stream_events,
 )
-from .review_style_jobs import (
-    cancel_review_style_analysis,
-    start_bootstrap_analysis,
-    sync_review_style_run_status,
-)
-from .review_styles import (
-    REVIEW_STYLES,
-    ReviewStyle,
-    ReviewStyleCreate,
-    ReviewStylePromptUpdate,
-    normalize_repo_full_name,
-)
-from .sandbox_settings import (
+from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
     get_sandbox_settings,
     upsert_sandbox_settings,
 )
-from .schedules import (
+from agent.dashboard.schedules import (
     ScheduleCreateBody,
     ScheduleUpdateBody,
     create_agent_schedule,
@@ -151,7 +131,7 @@ from .schedules import (
     trigger_agent_schedule,
     update_agent_schedule,
 )
-from .skills import (
+from agent.dashboard.skills import (
     DEFAULT_SKILLS_PAGE_SIZE,
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
@@ -165,15 +145,7 @@ from .skills import (
     update_organization_skill,
     update_skill,
 )
-from .slack_oauth import (
-    SLACK_STATE_COOKIE_NAME,
-    build_authorize_url,
-    exchange_slack_code,
-    fetch_slack_identity,
-    slack_oauth_configured,
-    verify_team,
-)
-from .team_credentials import (
+from agent.dashboard.team_credentials import (
     DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
     connect_datadog,
@@ -182,7 +154,7 @@ from .team_credentials import (
     disconnect_langsmith,
     get_team_credentials_status,
 )
-from .team_settings import (
+from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
     get_team_default_model,
@@ -192,7 +164,7 @@ from .team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from .thread_api import (
+from agent.dashboard.thread_api import (
     ThreadMessageBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
@@ -221,7 +193,7 @@ from .thread_api import (
     stream_dashboard_thread,
     unpin_dashboard_thread,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,
     UserLangSmithCredentialsUpdate,
     connect_currents,
@@ -231,28 +203,56 @@ from .user_credentials import (
     get_currents_status,
     get_notion_status,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     connect_langsmith as connect_user_langsmith,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     disconnect_langsmith as disconnect_user_langsmith,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     get_langsmith_status as get_user_langsmith_status,
 )
-from .user_instructions import (
+from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
     delete_user_instructions,
     get_user_instructions,
     set_user_instructions,
 )
-from .user_mappings import (
+from agent.dashboard.user_mappings import (
     delete_mapping,
     get_mapping,
     list_mappings,
     upsert_mapping,
 )
-from .voice import transcribe_audio
+from agent.dashboard.voice import transcribe_audio
+from agent.github.pull_request_checks import PullRequestState
+from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.eval_jobs import (
+    get_reviewer_eval_status,
+)
+from agent.review.style_jobs import (
+    cancel_review_style_analysis,
+    start_bootstrap_analysis,
+    sync_review_style_run_status,
+)
+from agent.review.styles import (
+    REVIEW_STYLES,
+    ReviewStyle,
+    ReviewStyleCreate,
+    ReviewStylePromptUpdate,
+    normalize_repo_full_name,
+)
+from agent.slack.oauth import (
+    SLACK_STATE_COOKIE_NAME,
+    build_authorize_url,
+    exchange_slack_code,
+    fetch_slack_identity,
+    slack_oauth_configured,
+    verify_team,
+)
+from agent.utils.thread_ops import langgraph_url
+from agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
@@ -2056,7 +2056,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1013, reason="Cloud terminal capacity reached")
         return
     try:
-        from ..integrations.langsmith import connect_async_langsmith_sandbox
+        from agent.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
 
         client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
         cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"

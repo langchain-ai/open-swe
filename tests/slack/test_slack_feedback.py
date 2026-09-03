@@ -6,13 +6,13 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack_feedback
-from agent.utils.slack_feedback import (
+from agent.slack import feedback as slack_feedback
+from agent.slack import routes as slack_routes
+from agent.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack_routes
 
 
 class _FakeStore:

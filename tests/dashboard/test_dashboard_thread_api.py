@@ -2481,21 +2481,16 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     read_diff.assert_awaited_once_with(sandbox, "/work", "HEAD", None, repo_path="/work/repo")
 
 
-async def test_working_tree_diff_returns_missing_when_the_sandbox_is_unreachable(
-    monkeypatch,
-) -> None:
+async def test_working_tree_diff_raises_when_the_sandbox_is_unreachable(monkeypatch) -> None:
     metadata = {"sandbox_id": "sandbox-1"}
     monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
     monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(side_effect=RuntimeError))
 
-    result = await thread_api.get_dashboard_thread_working_tree_diff("thread-1", "owner")
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_thread_working_tree_diff("thread-1", "owner")
 
-    assert result == {
-        "status": "missing",
-        "files": [],
-        "truncated": False,
-        "summary": {"files": 0, "additions": 0, "deletions": 0},
-    }
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Could not connect to the workspace."
 
 
 async def test_branch_diff_uses_repository_from_pr_url(monkeypatch) -> None:
