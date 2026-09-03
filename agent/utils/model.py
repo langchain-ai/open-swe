@@ -109,6 +109,14 @@ class ModelKwargs(TypedDict, total=False):
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
 
 
+def _openai_responses_api_enabled() -> bool:
+    return os.environ.get("OPENAI_USE_RESPONSES_API", "true").lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+
+
 def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> None:
     if model_kwargs.get("use_responses_api") is not False:
         return
@@ -150,7 +158,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             or os.environ.get("OPENAI_API_BASE")
             or OPENAI_RESPONSES_WS_BASE_URL
         )
-        model_kwargs["use_responses_api"] = True
+        model_kwargs["use_responses_api"] = _openai_responses_api_enabled()
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
     gateway_applied = False

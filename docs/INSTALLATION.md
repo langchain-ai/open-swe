@@ -422,6 +422,7 @@ ANTHROPIC_API_KEY=""                   # Anthropic API key
 BASETEN_API_KEY=""                     # Baseten models when not using LangSmith Gateway
 OPENAI_API_KEY=""                      # OpenAI models and dashboard voice dictation
 # OPENAI_BASE_URL="https://api.openai.com/v1"  # Optional OpenAI-compatible API base URL
+# OPENAI_USE_RESPONSES_API="false"  # Use Chat Completions for compatible gateways
 GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
 FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks: models)
 # Voice dictation uses this OpenAI configuration.

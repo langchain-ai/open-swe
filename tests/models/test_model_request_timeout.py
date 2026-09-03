@@ -1,6 +1,8 @@
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from agent.utils import model
 
 
@@ -48,3 +50,13 @@ def test_explicit_timeout_wins() -> None:
 
 def test_unknown_provider_gets_no_timeout() -> None:
     assert "timeout" not in _make_model("ollama:llama4")
+
+
+def test_openai_base_url_can_use_chat_completions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "false")
+
+    captured = _make_model("openai:compatible-model")
+
+    assert captured["base_url"] == "https://gateway.example/v1"
+    assert captured["use_responses_api"] is False
