@@ -194,6 +194,30 @@ test.describe("stop followed by new input", () => {
     await expect(page.getByTestId("composer-editor")).toContainText(draft);
   });
 
+  test("keeps rapid follow-ups as separate queued messages", async ({
+    page,
+  }) => {
+    const threadId = await openHeldRun(page, PHASE_HELD_RUN);
+    const queue = await holdQueueMessage(page, threadId);
+    const messages = [
+      "First rapid instruction.",
+      "Second rapid instruction.",
+      "Third rapid instruction.",
+    ];
+
+    await typeDraft(page, messages[0]);
+    await page.getByTestId("composer-editor").press("Enter");
+    await queue.started;
+    for (const message of messages.slice(1)) {
+      await typeDraft(page, message);
+      await page.getByTestId("composer-editor").press("Enter");
+    }
+
+    await expect(page.getByTestId("queued-message")).toContainText(messages);
+    await expect(page.getByTestId("composer-editor")).toBeEmpty();
+    queue.release();
+  });
+
   test("shows a queued follow-up in another client viewing the busy thread", async ({
     page,
     browser,
