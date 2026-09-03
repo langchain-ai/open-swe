@@ -52,6 +52,7 @@ describe("app commands", () => {
       id: "local-1",
       title: "Fix local search",
       cwd: "/tmp/repo",
+      worktreePath: null,
       viewed: true,
       createdAt: 1,
       updatedAt: 2,

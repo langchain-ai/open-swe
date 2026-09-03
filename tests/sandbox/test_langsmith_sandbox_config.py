@@ -121,6 +121,23 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_langsmith_sandbox_uses_root_snapshot_when_unset() -> None:
+    provider = MagicMock()
+    provider.get_or_create = AsyncMock(return_value=MagicMock())
+    with (
+        patch(
+            "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
+            return_value=(None, 100, 2, 200, 300, 400),
+        ),
+        patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
+    ):
+        await create_langsmith_sandbox()
+
+    assert provider.get_or_create.await_args is not None
+    assert provider.get_or_create.await_args.kwargs["snapshot_id"] == ""
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("overrides", "expected_vcpus", "expected_mem_bytes"),
     [
@@ -221,6 +238,23 @@ class _FakeSandboxClient:
         if self.calls <= self.failures:
             raise _RetryableCreateError("try again")
         return {"sandbox": kwargs["snapshot_id"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_id", [None, ""])
+async def test_provider_passes_empty_snapshot_id_to_api(snapshot_id: str | None) -> None:
+    client = AsyncSandboxClient(api_key="key", api_endpoint="https://example.com/v2/sandboxes")
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"name": "sandbox-new", "status": "ready"}
+    post = AsyncMock(return_value=response)
+    client._http.post = post
+
+    with patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client):
+        await LangSmithProvider(api_key="key").get_or_create(snapshot_id=snapshot_id)
+
+    assert post.await_args is not None
+    assert post.await_args.kwargs["json"]["snapshot_id"] == ""
 
 
 @pytest.mark.asyncio

@@ -51,5 +51,15 @@ def test_browser_tools_require_secure_supported_configuration(
     monkeypatch.setenv("STAGEHAND_MODEL", "anthropic/claude-sonnet-4-5")
     assert stagehand_browser.browser_tools_enabled() is True
 
+    tools = stagehand_browser.load_browser_tools()
+    assert [tool.name for tool in tools] == [
+        "browser_navigate",
+        "browser_act",
+        "browser_observe",
+        "browser_extract",
+        "browser_close",
+    ]
+
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     assert stagehand_browser.browser_tools_enabled() is False
+    assert stagehand_browser.load_browser_tools() == []

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:13287a5c5faa439fdf5f1d911256199b11d75a5bfd1eaf253f841e4da9f861cc",
+  "pageVersion": "sha256:0997e2ff2bd0da5e35246b592b2a466f937a6b5a711912368ad235bfdb3e1905",
   "claims": [
     {
       "id": "claim_9a77e9c5301a46b8bbd02832b9de5a90",
@@ -224,11 +224,15 @@
     },
     {
       "id": "claim_fa632c46ba2543ca8e300663c1c9d942",
-      "statement": "Dashboard thread API tests cover model/image validation and precedence, dashboard run metadata enrichment, summary visibility rules, Slack-to-web handoff, terminal and recovery-patch sandbox failure handling, and command validation.",
+      "statement": "Dashboard thread API tests distinguish image and model validation, trusted run-start enrichment and Slack-to-web handoff, surfaced-thread read visibility, admin and automation posting authority, readable-thread pinning, existing-sandbox terminal and recovery-patch access, and lazy creation only for `run.start`.",
       "evidence": [
         {
           "resource": "repo://tests/dashboard/test_dashboard_thread_api.py",
-          "version": "repo-file-v1:sha256:9fdd9477ef165103dd23e3d3e8289b8b85b25c8912dd13433bc4857a29e4b185"
+          "version": "repo-file-v1:sha256:b172ea76d64a83ad7375e250a1492e9c2b98795ae0c7ba89ced9c44772beb0e4"
+        },
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_thread_api_activity.py",
+          "version": "repo-file-v1:sha256:48bde52e0928dbf29438ac55348e113a6a1293eaa5f0e3cf4d46bb2d1aebcb9a"
         }
       ]
     },
@@ -355,10 +359,52 @@
           "version": "repo-lines-v1:sha256:3824dcbf662b301fd810c6f8e41db8e43d7403af463d087e5141e702a01d2843:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5OWQyZDM3YWFjMThjMTFiMmNjNjBhMzA0NTdkYWM1MTVjNDAwZDQxOTFmODcxOWRiZDJlODgwZjdmYTk3MWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjViNmRjOTU0NTkyZGExYTBiZWRhMTI1YTExYjg4MjQ1NzRmOGE2NWIwZTVlMWM1YTQ2ZDhiMGIyMmI3ZDNmZDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
+    },
+    {
+      "id": "claim_8c8b7d077a904cf499ca74ba70b54e9e",
+      "statement": "Dashboard CSRF tests require configured cookie-authenticated mutations to use an allowed Origin or Referer, reject malformed, null, missing, and prefix-bypass origins, permit the desktop origin, and reject non-JSON command payloads while reads skip the mutation origin check.",
+      "evidence": [
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_csrf.py#L43-L220",
+          "version": "repo-lines-v1:sha256:131fcd91596e144fbd1db90b2a24dd0f952a2b0ad0ef98c6b48af698f3fd4170:eyJzZWxlY3RlZExpbmVDb3VudCI6MTc4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyNWNmYTI0ZmYwYjA5OGMzOTA4NzI3NTI4NTcwYWJlNzA3ZDFlOThlMzBmNGRmZDI3ZGU0NjZkZjlhMWYzMjhjIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MDcwNzlmYTFmYjg0YzgzNWQ4NjMzOTU2YWZlYzljYTI2Mzc0YjNiNzMyN2FkZWM5ODU2ZTBhZWFlNzkxYTg2In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_5dd32176cf5a4ecd974b47511cded35a",
+      "statement": "Agent assembly tests require the main agent to receive an initialized sandbox-backed composite backend, preserving deepagents context eviction and summarization support, and verify source-sensitive skills/tools plus middleware and parent-tool boundaries.",
+      "evidence": [
+        {
+          "resource": "repo://tests/agent/test_agent_assembly_context.py#L1-L8",
+          "version": "repo-lines-v1:sha256:c55b4ad6f06ec9e7fad45b0d69c0d3ed0dae9109933d79ae5d54f184ab4f99ab:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWRhNjY2OTFkNWM3OTQ5YjM3NDAzOTJjYzJmODRlY2MxZWFmMGJhNzExNjI3NTk3Yjc1NGRhZmNlMjU5NTRmNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWEzNGI1ZjEyNzFmNDdiMGIxNzAxNDZkMTM3MjM1MjM0NGI4MzU5MDRiMWNlNGRiZmY0M2ZhNjhkZDg3NjMyMCJ9"
+        },
+        {
+          "resource": "repo://tests/agent/test_agent_assembly_context.py#L120-L246",
+          "version": "repo-lines-v1:sha256:6300a6fc948f2fd62ccf0c5ed0685f8ef10169d063db914bd38847795255005d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTI3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI1Njc5ZjU3MDdjNDdiMWZjYjZlZWQzYzZkZGYxNzA4MjU5YzRhYTQ5NGMwMGY1ODYxOTc2NDAzMDFkZTljN2YzIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJjNDU0ZjYyMzU3ODBlYzcwZDBhMTM3Njc1YTY5N2JmNTMyMGZjNjIxZmM0MWU2MjAzYjJjMmYxOTBkMDQzMWE0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5In0"
+        },
+        {
+          "resource": "repo://tests/agent/test_agent_assembly_context.py#L260-L285",
+          "version": "repo-lines-v1:sha256:aa45ab421122c5cc533a92a9a47240ca60350e378ba119f2724d4b9d99569319:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzOGQxZmQ3N2M5MzY1MDMwMmNhNjA0MWYyNGQxNTVmYWJjMGE1ZDY1NWRjNmUyZjY5ZjZmZDQ0M2MxNTVhMzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhNjBlMmNkZGY4OTkyODI5ZDczMjA2NzBkNzczOTY2ZWEwMzk3NDE2ZmFmNGExNjJlNWU3NzUyOWI4OTJlOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+        },
+        {
+          "resource": "repo://tests/agent/test_agent_assembly_context.py#L367-L421",
+          "version": "repo-lines-v1:sha256:432d3619b505ce8b6369c84e27d72fbd90beae1f4eb9cd628a9348c3f16b05b6:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwYmY0Yzk5MjAzYmM3NjAxMDM2MTIzZjFjMjYwZDg2YWIzMTRlYjNjMTBmYzcwNGYzNGVhNjU5Njg4MzgwYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cca68070fb25416fbdeb424b523419c8",
+      "statement": "Dashboard activity tests refresh completed run status in listings and mark a finished thread viewed on read, but do not mark a running thread viewed; a surfaced Slack thread can be marked viewed by any authenticated user.",
+      "evidence": [
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_thread_api_activity.py#L47-L139",
+          "version": "repo-lines-v1:sha256:4887333b6b8077d0588c6b42ce569ad6a8a722587ed609786902674649678616:eyJzZWxlY3RlZExpbmVDb3VudCI6OTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyNzY3ZmNkMmZkYzNhYjU1NTEzYWIzNGVhZDAxOTBjMDhjYjFkMDJmYzA1ODMxZWQ3NTFhZDM4YWM3ZGRjZTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2YzM5NzA4MmQ4YjFhMDUwNGFmZjY5MjcwZjc3N2E5NDA0ZTk2YTE0MzNlYWZmMzBiYmY2ZDg4ZGZjYjA4YTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg2NzVjYzNmOWE2ZmJhNmNkMTRkMWZiODU1NWViM2ZiNmUzY2UyZGJhYWQxODJkMTJhNmZkMjAzMjdmNjU1NTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-01T08:16:00.848Z"
+    "at": "2026-09-02T08:15:43.727Z"
   }
 }

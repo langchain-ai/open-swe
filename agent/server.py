@@ -36,6 +36,8 @@ from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
+from deepagents.graph import DeepAgentState
+from deepagents.middleware.filesystem import FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
@@ -70,6 +72,7 @@ from agent.dashboard.team_settings import (
 )
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
+from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.org_membership import is_user_active_org_member
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
@@ -340,6 +343,10 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
+        "browser_act",
+        "browser_extract",
+        "browser_navigate",
+        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -421,49 +428,6 @@ def _general_purpose_subagent(
     if skills:
         subagent["skills"] = skills
     return subagent
-
-
-BROWSER_SUBAGENT_DESCRIPTION = (
-    "Drives sandbox-local Chromium with Stagehand to "
-    "accomplish tasks that require interacting with live web pages: logging "
-    "into dashboards, clicking through flows, filling forms, reading "
-    "JS-rendered content, reproducing UI bugs, and extracting structured data. "
-    "Prefer the `fetch_url` tool for static page reads; delegate here only when "
-    "the task needs interaction or JavaScript-rendered content."
-)
-
-BROWSER_SUBAGENT_SYSTEM_PROMPT = """You are a browser automation specialist. You control a real Chromium \
-browser via Stagehand tools.
-
-Workflow:
-1. Call `browser_navigate` to open the browser and go to the starting URL.
-2. Use `browser_observe` to find actionable elements before acting when the \
-page is unfamiliar.
-3. Use `browser_act` for clicks/typing/navigation with concise \
-natural-language instructions (one action per call).
-4. Use `browser_extract` to pull the specific data the caller asked for, \
-passing a JSON schema when you need a precise shape.
-5. Always call `browser_close` when finished to release the session.
-
-Guidance:
-- Take one concrete step at a time and verify the result before the next.
-- Keep instructions specific and grounded in what `browser_observe`/\
-`browser_extract` returned.
-- Do not exfiltrate credentials or secrets. Only act on the task you were \
-delegated.
-- Return a concise summary of what you did and the data you extracted; include \
-the session replay URL if one was returned."""
-
-
-def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
-    return {
-        "name": "browser",
-        "description": BROWSER_SUBAGENT_DESCRIPTION,
-        "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
-        "tools": tools,
-        "model": model,
-        "middleware": _subagent_model_middleware(),
-    }
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -828,6 +792,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         if is_desktop_run(configurable):
+            local_path = configurable.get("local_project_path")
+            if isinstance(local_path, str) and local_path:
+                schedule_worktree_branch_rename(
+                    worktree_path=local_path,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             async with aphase(self._thread_id, "prepare.work_dir"):
@@ -932,6 +903,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
             ),
         }
+
+
+class DesktopAgentState(FilesystemState, DeepAgentState):
+    """Desktop agent state including snapshotted skill files."""
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
@@ -1154,11 +1129,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = configurable.get("stop_summary") is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
     observability_tools: list[Any] = []
-    browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
         observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1239,6 +1212,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
+    if not stop_summary_mode and not local_run:
+        browser_tools = load_browser_tools()
+        if browser_tools:
+            integration_tool_groups["Browser"] = browser_tools
     # Corridor's catalog is a static allowlist, so the MCP handshake that used to
     # run before every first model call now waits until the agent asks for it.
     if not stop_summary_mode and not local_run and corridor_configured():
@@ -1308,10 +1285,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
-            *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         skills=skill_sources,
         backend=agent_backend,
+        state_schema=DesktopAgentState if local_run else None,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
