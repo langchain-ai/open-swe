@@ -152,7 +152,7 @@ test.describe("Environments", () => {
 
     await page.goto("/environments");
     const section = page
-      .getByRole("heading", { name: "Environments" })
+      .getByRole("heading", { name: "Environments", level: 2 })
       .locator("xpath=ancestor::section");
     await expect(section).toBeVisible();
     await expect(section.getByText(DRAFT_NAME)).toBeVisible();
@@ -177,7 +177,7 @@ test.describe("Environments", () => {
     await page.goto("/agents/environments");
     await expect(page).toHaveURL(/\/environments$/);
     await expect(
-      page.getByRole("heading", { name: "Environments" }),
+      page.getByRole("heading", { name: "Environments", level: 2 }),
     ).toBeVisible();
     await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
 

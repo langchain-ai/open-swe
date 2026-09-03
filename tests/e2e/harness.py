@@ -531,6 +531,11 @@ async def ui_settings(request: Request) -> Response:
     return await _render_app_route(request)
 
 
+@app.get("/environments", response_class=HTMLResponse)
+async def ui_environments(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
 @app.get("/agents", response_class=HTMLResponse)
 async def ui_agents_home(request: Request) -> Response:
     return await _render_app_route(request)
