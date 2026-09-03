@@ -50,7 +50,14 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       ],
       scopes: {
         bot: codeChannelsEnabled
-          ? [...LEGACY_BOT_SCOPES, "code_channels:manage", "files:read"]
+          ? [
+              ...LEGACY_BOT_SCOPES,
+              "code_channels:manage",
+              "files:read",
+              // conversations.invite, for public and private channels.
+              "channels:manage",
+              "groups:write",
+            ]
           : LEGACY_BOT_SCOPES,
       },
     },

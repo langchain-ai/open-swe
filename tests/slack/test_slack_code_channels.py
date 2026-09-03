@@ -260,3 +260,19 @@ async def test_code_channel_replies_are_posted_top_level(monkeypatch: pytest.Mon
     )
 
     assert "thread_ts" not in client.post.await_args.kwargs["json"]
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (["U06KD8BFY95"], ["U06KD8BFY95"]),
+        (["<@U1>", "<@U2|ramon>"], ["U1", "U2"]),
+        (["u1", "U1", " U1 "], ["U1"]),
+        (["W123"], ["W123"]),
+        (["", "not-an-id", "@ramon", "C123"], []),
+    ],
+)
+def test_slack_user_ids_reads_ids_however_they_were_written(
+    values: list[str], expected: list[str]
+) -> None:
+    assert slack_utils.slack_user_ids(values) == expected

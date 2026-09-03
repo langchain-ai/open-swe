@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest"
 
 import { slackAppManifest } from "./slack-manifest"
 
-const CODE_CHANNEL_SCOPES = ["code_channels:manage", "files:read"]
+const CODE_CHANNEL_SCOPES = [
+  "code_channels:manage",
+  "files:read",
+  // conversations.invite needs these, or a named invitee silently stays out.
+  "channels:manage",
+  "groups:write",
+]
 const CODE_CHANNEL_EVENTS = [
   "agent_session_stopped",
   "code_channel_action",
