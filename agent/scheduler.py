@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
 from pydantic import BaseModel, ConfigDict
 
+from agent.agent_cost import run_agent_cost_refresh
 from agent.baby_sit import evaluate_watch
 from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from agent.background_tasks import monitor_background_tasks
@@ -51,6 +52,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         return {"result": await monitor_background_tasks(thread_id)}
     if task == "session_cost":
         return {"result": await run_session_cost_refresh(state.model_dump())}
+    if task == "agent_cost":
+        return {"result": await run_agent_cost_refresh(state.model_dump())}
     schedule_id = state.schedule_id or cfg.schedule_id
     if not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")

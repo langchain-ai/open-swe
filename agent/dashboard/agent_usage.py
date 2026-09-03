@@ -15,6 +15,7 @@ from langgraph_sdk import get_client
 
 from agent.review.findings import coerce_finding, is_surfaced
 from agent.utils.json_types import as_json_object, thread_metadata
+from agent.utils.run_usage import RunUsageSummary
 
 AGENT_RUN_NAMESPACE = ["usage", "v2", "agent_runs"]
 AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]
@@ -328,7 +329,43 @@ async def record_agent_run_usage(
             "effort": effort or "",
             "source": source if source in _AGENT_SOURCES else "dashboard",
             "created_at_ms": now_ms,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cost_usd": None,
+            "finished_at_ms": 0,
         }
+
+    await _mutate(AGENT_RUN_NAMESPACE, key, update)
+
+
+async def record_agent_run_completion(*, run_id: str, usage: RunUsageSummary | None) -> bool:
+    """Complete an existing run record idempotently."""
+    if not run_id:
+        return False
+    key = _store_key("run", run_id)
+    async with _write_lock(AGENT_RUN_NAMESPACE, key):
+        existing = await _get(AGENT_RUN_NAMESPACE, key)
+        if not existing or existing.get("finished_at_ms"):
+            return False
+        value = {**existing, "finished_at_ms": _now_ms()}
+        if usage is not None:
+            for field in ("input_tokens", "output_tokens", "total_tokens"):
+                amount = getattr(usage, field)
+                if amount is not None:
+                    value[field] = amount
+        await _client().store.put_item(AGENT_RUN_NAMESPACE, key, value)
+    return True
+
+
+async def record_agent_run_cost(*, run_id: str, cost_usd: float) -> None:
+    """Store the cumulative LangSmith thread cost for an existing run."""
+    if not run_id or cost_usd < 0:
+        return
+    key = _store_key("run", run_id)
+
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        return {**existing, "cost_usd": cost_usd} if existing else {}
 
     await _mutate(AGENT_RUN_NAMESPACE, key, update)
 
@@ -572,6 +609,11 @@ def _new_user(key: str, record: dict[str, Any], aliases: dict[str, str]) -> dict
         "agent_loc": 0,
         "additions": 0,
         "deletions": 0,
+        "total_tokens": 0,
+        "total_cost_usd": 0.0,
+        "thread_costs": {},
+        "run_duration_ms": 0,
+        "finished_runs": 0,
         "models": Counter(),
     }
 
@@ -624,6 +666,19 @@ async def list_agent_usage_leaderboard(
             continue
         user = users.setdefault(key, _new_user(key, record, aliases))
         user["agent_runs"] += 1
+        user["total_tokens"] += _int(record.get("total_tokens"))
+        cost_usd = record.get("cost_usd")
+        if isinstance(cost_usd, int | float) and not isinstance(cost_usd, bool):
+            thread_id = record.get("thread_id")
+            if isinstance(thread_id, str) and thread_id:
+                user["thread_costs"][thread_id] = max(
+                    user["thread_costs"].get(thread_id, 0.0), float(cost_usd)
+                )
+        created_at_ms = _timestamp_ms(record.get("created_at_ms"))
+        finished_at_ms = _timestamp_ms(record.get("finished_at_ms"))
+        if created_at_ms and finished_at_ms >= created_at_ms:
+            user["run_duration_ms"] += finished_at_ms - created_at_ms
+            user["finished_runs"] += 1
         model = record.get("model_id")
         if isinstance(model, str) and model:
             user["models"][model] += 1
@@ -642,6 +697,9 @@ async def list_agent_usage_leaderboard(
         user["additions"] += additions
         user["deletions"] += deletions
         user["agent_loc"] += additions + deletions
+
+    for user in users.values():
+        user["total_cost_usd"] = sum(user["thread_costs"].values())
 
     ordered = sorted(
         users.values(),
@@ -670,6 +728,11 @@ async def list_agent_usage_leaderboard(
                 "email": (user["email"] or None) if is_current else None,
             },
             "favorite_model": models.most_common(1)[0][0] if models else "default",
+            "avg_run_seconds": (
+                user["run_duration_ms"] / user["finished_runs"] / 1000
+                if user["finished_runs"]
+                else 0.0
+            ),
             **{
                 key: user[key]
                 for key in (
@@ -679,6 +742,8 @@ async def list_agent_usage_leaderboard(
                     "agent_loc",
                     "additions",
                     "deletions",
+                    "total_tokens",
+                    "total_cost_usd",
                 )
             },
         }
