@@ -547,6 +547,62 @@ async def test_list_threads_resolves_langsmith_thread_url(
     )
 
 
+@pytest.mark.parametrize(
+    ("filters", "name"),
+    [
+        ({"participant": "alice"}, "participant"),
+        ({"all_users": True}, "all_users"),
+        ({"resolved": False}, "resolved"),
+        ({"viewed": True}, "viewed"),
+        ({"source": "slack"}, "source"),
+        ({"status": "running"}, "status"),
+        ({"scope": "automation"}, "scope"),
+        ({"automation_id": "daily"}, "automation_id"),
+        ({"admin_threads": False}, "admin_threads"),
+    ],
+)
+async def test_list_threads_rejects_filters_with_exact_locator(
+    monkeypatch: pytest.MonkeyPatch,
+    filters: dict[str, object],
+    name: str,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    get_dashboard_thread = AsyncMock()
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+
+    result = await threads_tool.list_threads(
+        query="https://dev.open-swe.langchain.dev/agents/thread-1", **filters
+    )
+
+    assert result == {
+        "success": False,
+        "error": f"Exact thread locators cannot be combined with filters: {name}",
+    }
+    get_dashboard_thread.assert_not_awaited()
+
+
+async def test_list_threads_reports_all_incompatible_exact_locator_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+
+    result = await threads_tool.list_threads(
+        query="https://dev.open-swe.langchain.dev/agents/thread-1",
+        participant="alice",
+        resolved=True,
+        scope="interactive",
+    )
+
+    assert result == {
+        "success": False,
+        "error": (
+            "Exact thread locators cannot be combined with filters: participant, resolved, scope"
+        ),
+    }
+
+
 async def test_list_threads_resolves_exact_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))

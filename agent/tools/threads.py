@@ -176,6 +176,40 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     return result
 
 
+def _exact_locator_filters(
+    *,
+    participant: str | None,
+    all_users: bool,
+    resolved: bool | None,
+    viewed: bool | None,
+    source: str | None,
+    status: str | None,
+    scope: ThreadScope,
+    automation_id: str | None,
+    admin_threads: bool | None,
+) -> list[str]:
+    filters = []
+    if participant:
+        filters.append("participant")
+    if all_users:
+        filters.append("all_users")
+    if resolved is not None:
+        filters.append("resolved")
+    if viewed is not None:
+        filters.append("viewed")
+    if source:
+        filters.append("source")
+    if status:
+        filters.append("status")
+    if scope != "all":
+        filters.append("scope")
+    if automation_id:
+        filters.append("automation_id")
+    if admin_threads is not None:
+        filters.append("admin_threads")
+    return filters
+
+
 async def list_threads(
     participant: str | None = None,
     all_users: bool = False,
@@ -210,6 +244,21 @@ async def list_threads(
         or (dashboard_thread_id(normalized_query) is not None and "/" in normalized_query)
     )
     if exact_locator or _looks_uuid(normalized_query):
+        incompatible = _exact_locator_filters(
+            participant=requested,
+            all_users=all_users,
+            resolved=resolved,
+            viewed=viewed,
+            source=source,
+            status=status,
+            scope=scope,
+            automation_id=automation_id,
+            admin_threads=admin_threads,
+        )
+        if incompatible:
+            return _failure(
+                "Exact thread locators cannot be combined with filters: " + ", ".join(incompatible)
+            )
         try:
             resolved_locator = await _authorized_locator(normalized_query, actor)
         except HTTPException as exc:
