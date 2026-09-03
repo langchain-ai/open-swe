@@ -32,6 +32,7 @@ DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
 DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
 SUPPORTED_GLM = "fireworks:accounts/fireworks/models/glm-5p3"
+FABLE = "anthropic:claude-fable-5-1"
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
@@ -198,6 +199,18 @@ def test_team_settings_response_defers_deprecated_models() -> None:
     assert settings["default_agent_reasoning_effort"] is None
 
 
+def test_fable_cannot_be_saved_as_default() -> None:
+    profile = ProfileUpdate(default_model=FABLE, reasoning_effort="high")
+    with pytest.raises(ValueError, match="cannot be a default model"):
+        profile.validate_pairing()
+    with pytest.raises(ValueError, match="cannot be a default model"):
+        TeamSettingsUpdate(
+            fable_enabled=True,
+            default_agent_model=FABLE,
+            default_agent_reasoning_effort="high",
+        )
+
+
 def test_profile_update_rejects_unknown_provider() -> None:
     update = ProfileUpdate(default_model="mystery:model", reasoning_effort="high")
     with pytest.raises(ValueError, match="not supported"):
@@ -219,14 +232,14 @@ def test_global_default_is_gpt_5_6_sol() -> None:
 
 
 def test_gate_fable_passthrough_when_enabled() -> None:
-    assert gate_fable_model("anthropic:claude-fable-5", "high", fable_enabled=True) == (
-        "anthropic:claude-fable-5",
+    assert gate_fable_model("anthropic:claude-fable-5-1", "high", fable_enabled=True) == (
+        "anthropic:claude-fable-5-1",
         "high",
     )
 
 
 def test_gate_fable_swaps_to_opus_when_disabled() -> None:
-    assert gate_fable_model("anthropic:claude-fable-5", "high", fable_enabled=False) == (
+    assert gate_fable_model("anthropic:claude-fable-5-1", "high", fable_enabled=False) == (
         SUPPORTED_ANTHROPIC,
         "high",
     )
