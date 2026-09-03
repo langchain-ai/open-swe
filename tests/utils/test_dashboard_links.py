@@ -12,6 +12,10 @@ from agent.utils.dashboard_links import dashboard_thread_id
             "https://dev.open-swe.langchain.dev/agents/b8d7d0b0-c1e3-5ded-bcc3-ef8254a34f2b",
             "b8d7d0b0-c1e3-5ded-bcc3-ef8254a34f2b",
         ),
+        (
+            "<https://dev.open-swe.langchain.dev/agents/thread-1|Open in Web>",
+            "thread-1",
+        ),
         ("https://openswe.example/agents/thread%20one/plan?comment=1#section", "thread one"),
     ],
 )

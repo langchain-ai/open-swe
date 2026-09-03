@@ -346,6 +346,83 @@ async def test_get_thread_accepts_dashboard_url(monkeypatch: pytest.MonkeyPatch)
     client.threads.get_state.assert_awaited_once_with("thread-1")
 
 
+async def test_get_thread_resolves_github_pr_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _DetailClient()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    page = AsyncMock(
+        return_value={
+            "items": [
+                {
+                    "id": "thread-1",
+                    "title": "Fix race",
+                    "pr": {"url": "https://github.com/Acme/Repo/pull/42"},
+                }
+            ],
+            "hasMore": False,
+        }
+    )
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "status": "finished"}),
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+
+    result = await threads_tool.get_thread("https://github.com/acme/repo/pull/42/files?diff=split")
+
+    assert result["success"] is True
+    assert result["thread"]["id"] == "thread-1"
+    page.assert_awaited_once_with(
+        "octocat",
+        email="octocat@example.com",
+        limit=100,
+        offset=0,
+        include_all=False,
+        query="https://github.com/acme/repo/pull/42",
+        surfaced_only=True,
+    )
+
+
+async def test_get_thread_reports_ambiguous_github_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(
+        threads_tool,
+        "list_dashboard_threads_page",
+        AsyncMock(
+            return_value={
+                "items": [
+                    {
+                        "id": "thread-1",
+                        "messages": [],
+                        "pr": {"url": "https://github.com/acme/repo/pull/42"},
+                    },
+                    {
+                        "id": "thread-2",
+                        "messages": [],
+                        "pullRequests": [{"url": "https://github.com/acme/repo/pull/42"}],
+                    },
+                ],
+                "hasMore": False,
+            }
+        ),
+    )
+
+    result = await threads_tool.get_thread("https://github.com/acme/repo/pull/42")
+
+    assert result["success"] is False
+    assert result["error"] == (
+        "Multiple Open SWE threads found for https://github.com/acme/repo/pull/42"
+    )
+    assert [candidate["id"] for candidate in result["candidates"]] == [
+        "thread-1",
+        "thread-2",
+    ]
+
+
 async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -358,7 +435,7 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
 
     assert result == {
         "success": False,
-        "error": "thread_id must be a thread ID or Open SWE dashboard thread URL",
+        "error": "locator must be a thread ID, Open SWE thread URL, or GitHub PR URL",
     }
     get_dashboard_thread.assert_not_awaited()
 

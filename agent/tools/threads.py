@@ -35,6 +35,7 @@ from agent.dashboard.workflow_approval import (
     workflow_push_approval_responses,
 )
 from agent.input_messages import input_message_text, message_sender_id
+from agent.slack.client import parse_github_pr_url
 from agent.utils.dashboard_links import (
     dashboard_plan_url,
     dashboard_thread_id,
@@ -469,6 +470,70 @@ def _compact_approvals(approvals: Mapping[str, Mapping[str, Any]]) -> list[dict[
     ]
 
 
+def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
+    expected = parse_github_pr_url(locator)
+    if expected is None:
+        return False
+    pr = summary.get("pr")
+    pull_requests = summary.get("pullRequests")
+    records = [pr] if isinstance(pr, Mapping) else []
+    if isinstance(pull_requests, list):
+        records.extend(record for record in pull_requests if isinstance(record, Mapping))
+    for record in records:
+        url = record.get("url")
+        actual = parse_github_pr_url(url) if isinstance(url, str) else None
+        if (
+            actual is not None
+            and actual.owner.lower() == expected.owner.lower()
+            and actual.repo.lower() == expected.repo.lower()
+            and actual.number == expected.number
+        ):
+            return True
+    return False
+
+
+async def _resolve_thread_id(locator: str, actor: _Actor) -> str | dict[str, Any]:
+    if thread_id := dashboard_thread_id(locator):
+        return thread_id
+    pr_ref = parse_github_pr_url(locator)
+    if pr_ref is None:
+        return _failure("locator must be a thread ID, Open SWE thread URL, or GitHub PR URL")
+    try:
+        page = await list_dashboard_threads_page(
+            actor.login,
+            email=actor.email,
+            limit=100,
+            offset=0,
+            include_all=actor.admin,
+            query=pr_ref.url,
+            surfaced_only=True,
+        )
+    except HTTPException as exc:
+        return _http_failure(exc)
+    except Exception:
+        logger.exception("Could not resolve thread from pull request %s", pr_ref.url)
+        return _failure("Could not resolve thread from GitHub PR URL")
+    matches = [
+        item
+        for item in page.get("items", [])
+        if isinstance(item, Mapping) and _summary_matches_pr(item, pr_ref.url)
+    ]
+    if not matches:
+        return _failure(f"No Open SWE thread found for {pr_ref.url}")
+    if len(matches) > 1 or page.get("hasMore") is True:
+        return {
+            **_failure(f"Multiple Open SWE threads found for {pr_ref.url}"),
+            "candidates": [_list_item(item) for item in matches[:10]],
+            "candidates_truncated": len(matches) > 10 or page.get("hasMore") is True,
+        }
+    thread_id = matches[0].get("id")
+    return (
+        thread_id
+        if isinstance(thread_id, str) and thread_id
+        else _failure("Matching Open SWE thread has no thread ID")
+    )
+
+
 def _available_actions(
     *,
     admin: bool,
@@ -503,14 +568,15 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Inspect an Open SWE thread from its thread ID or dashboard web URL."""
+    """Inspect an Open SWE thread identified by ID, dashboard URL, or GitHub PR URL."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
     locator = thread_id.strip()
-    thread_id = dashboard_thread_id(locator) or ""
-    if not thread_id:
-        return _failure("thread_id must be a thread ID or Open SWE dashboard thread URL")
+    resolved = await _resolve_thread_id(locator, actor)
+    if isinstance(resolved, dict):
+        return resolved
+    thread_id = resolved
     try:
         summary = await get_dashboard_thread(
             thread_id,
