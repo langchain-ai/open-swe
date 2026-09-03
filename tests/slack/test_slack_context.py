@@ -32,11 +32,14 @@ def test_verify_slack_signature_uses_raw_request_body(monkeypatch: pytest.Monkey
     timestamp = "1700000000"
     secret = "secret"
     body = b"payload=\xff"
-    signature = "v0=" + hmac.new(
-        secret.encode("utf-8"),
-        b"v0:" + timestamp.encode("utf-8") + b":" + body,
-        hashlib.sha256,
-    ).hexdigest()
+    signature = (
+        "v0="
+        + hmac.new(
+            secret.encode("utf-8"),
+            b"v0:" + timestamp.encode("utf-8") + b":" + body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     monkeypatch.setattr(slack_utils.time, "time", lambda: int(timestamp))
 
     assert verify_slack_signature(body, timestamp, signature, secret)
