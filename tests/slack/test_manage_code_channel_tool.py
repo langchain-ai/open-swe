@@ -91,7 +91,7 @@ async def test_promotion_initializes_status_context_and_runtime_commands(
     monkeypatch.setattr(manage_tool, "set_session_status_result", status)
     monkeypatch.setattr(manage_tool, "set_context_bar", context)
     monkeypatch.setattr(manage_tool, "set_commands", commands)
-    monkeypatch.setattr(manage_tool, "invite_to_slack_channel", AsyncMock(return_value=(0, "")))
+    monkeypatch.setattr(manage_tool, "invite_to_slack_channel", AsyncMock(return_value=([], "")))
 
     result = await manage_tool._create(
         client,
@@ -122,7 +122,7 @@ def promotion(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def locked(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
         yield source
 
-    invite = AsyncMock(return_value=(2, ""))
+    invite = AsyncMock(return_value=(["U1", "U2"], ""))
     stubs: dict[str, Any] = {
         "create_code_channel": AsyncMock(return_value=("C-code", None)),
         "bind_slack_thread_id": AsyncMock(),
@@ -172,20 +172,23 @@ async def test_nobody_named_means_no_invite_call(promotion: dict[str, Any]) -> N
 
 @pytest.mark.parametrize("invite", [["not-a-user"], ["   "], ["U1", "u1", "<@U1>"]])
 async def test_only_real_user_ids_survive(promotion: dict[str, Any], invite: list[str]) -> None:
+    promotion["invite_to_slack_channel"].return_value = (["U1"], "")
+
     result = await _promote(invite)
 
-    assert result["invited"] in ([], ["U1"])
-    if result["invited"]:
+    if invite == ["U1", "u1", "<@U1>"]:
         promotion["invite_to_slack_channel"].assert_awaited_once_with("C-code", ["U1"])
+        assert result["invited"] == ["U1"]
     else:
         promotion["invite_to_slack_channel"].assert_not_awaited()
+        assert result["invited"] == []
 
 
 async def test_a_failed_invite_warns_without_losing_the_channel(
     promotion: dict[str, Any],
 ) -> None:
     """A public channel is still reachable by link, so this is not fatal."""
-    promotion["invite_to_slack_channel"].return_value = (0, "not_in_channel")
+    promotion["invite_to_slack_channel"].return_value = ([], "U1: not_in_channel")
 
     result = await _promote(["U1"])
 
@@ -193,3 +196,14 @@ async def test_a_failed_invite_warns_without_losing_the_channel(
     assert result["channel_id"] == "C-code"
     assert result["invited"] == []
     assert result["warnings"] == ["Could not invite U1: not_in_channel"]
+
+
+async def test_one_stale_id_does_not_cost_the_others_their_invite(
+    promotion: dict[str, Any],
+) -> None:
+    promotion["invite_to_slack_channel"].return_value = (["U1"], "U2 (user_not_found)")
+
+    result = await _promote(["U1", "U2"])
+
+    assert result["invited"] == ["U1"]
+    assert result["warnings"] == ["Could not invite U2 (user_not_found)"]

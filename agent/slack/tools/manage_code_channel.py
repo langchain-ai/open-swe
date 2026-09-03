@@ -368,10 +368,9 @@ async def _create(
     invited: list[str] = []
     invitees = slack_user_ids(invite)
     if invitees:
-        invited_count, invite_error = await invite_to_slack_channel(channel_id, invitees)
-        invited = invitees if invited_count else []
+        invited, invite_error = await invite_to_slack_channel(channel_id, invitees)
         if invite_error:
-            warnings.append(f"Could not invite {', '.join(invitees)}: {invite_error}")
+            warnings.append(f"Could not invite {invite_error}")
     _, status_error = await set_session_status_result(channel_id, "processing")
     if status_error:
         warnings.append(f"Could not set processing status: {status_error}")
