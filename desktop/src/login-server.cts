@@ -38,9 +38,11 @@ const FAILED_PAGE = page(
   "Sign-in failed",
   "Open SWE did not receive a sign-in code. Try again from the app.",
 );
+// The app still has to redeem this code, and that can fail — so this says
+// what actually happened here rather than claiming the account is connected.
 const CONNECTED_PAGE = page(
-  "You're connected",
-  "You can close this tab and return to Open SWE.",
+  "Approval received",
+  "You can close this tab. Open SWE is finishing the connection.",
 );
 const CONNECT_FAILED_PAGE = page(
   "Connection failed",
