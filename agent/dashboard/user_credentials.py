@@ -415,12 +415,20 @@ async def disconnect_langsmith(login: str) -> dict[str, Any]:
     return await get_langsmith_status(login)
 
 
-async def get_langsmith_credentials(login: str) -> LangSmithCredentials | None:
-    """Return decrypted LangSmith credentials, or ``None`` when not connected."""
-    langsmith = await _provider_for_tool_loading(login, LANGSMITH_KEY)
-    if not isinstance(langsmith, dict):
+def _langsmith_credentials(record: object) -> LangSmithCredentials | None:
+    if not isinstance(record, dict):
         return None
-    api_key = decrypt_token(langsmith.get("encrypted_api_key", ""))
+    api_key = decrypt_token(record.get("encrypted_api_key", ""))
     if not api_key:
         return None
     return LangSmithCredentials(api_key=api_key, endpoint=DEFAULT_LANGSMITH_ENDPOINT)
+
+
+async def get_langsmith_credentials(login: str) -> LangSmithCredentials | None:
+    """Return decrypted LangSmith credentials, failing soft for optional tools."""
+    return _langsmith_credentials(await _provider_for_tool_loading(login, LANGSMITH_KEY))
+
+
+async def get_sandbox_langsmith_credentials(login: str) -> LangSmithCredentials | None:
+    """Return sandbox credentials while surfacing lookup failures."""
+    return _langsmith_credentials(await _get_provider(login, LANGSMITH_KEY))
