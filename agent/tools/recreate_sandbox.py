@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+from agent.dashboard.user_credentials import get_langsmith_credentials
 from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,14 @@ async def recreate_sandbox() -> dict[str, Any]:
         from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
         from agent.server import _environment_slug
 
+        credentials = (
+            await get_langsmith_credentials(cfg.github_login) if cfg.github_login else None
+        )
+        kwargs = {"langsmith_credentials": credentials} if credentials is not None else {}
         old_sandbox_id, new_sandbox_id = await recreate_sandbox_for_thread(
             thread_id,
             environment_slug=_environment_slug(cfg),
+            **kwargs,
         )
     except Exception as exc:
         logger.exception("Failed to recreate sandbox for thread %s", thread_id)

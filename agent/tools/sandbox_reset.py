@@ -6,6 +6,7 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.dashboard.user_credentials import get_langsmith_credentials
 from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,8 @@ async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
     if error := require_admin("reset sandboxes"):
         return {"success": False, "error": error}
 
-    thread_id = configurable().thread_id
+    cfg = configurable()
+    thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
 
@@ -64,7 +66,15 @@ async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
     try:
         from agent.sandboxes.lifecycle import reset_sandbox_for_thread
 
-        old_sandbox_id, new_sandbox_id = await reset_sandbox_for_thread(thread_id, create_params)
+        credentials = (
+            await get_langsmith_credentials(cfg.github_login) if cfg.github_login else None
+        )
+        kwargs = {"langsmith_credentials": credentials} if credentials is not None else {}
+        old_sandbox_id, new_sandbox_id = await reset_sandbox_for_thread(
+            thread_id,
+            create_params,
+            **kwargs,
+        )
     except Exception as exc:
         logger.exception("Failed to reset sandbox for thread %s", thread_id)
         return {"success": False, "error": str(exc)}
