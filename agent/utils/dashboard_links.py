@@ -1,7 +1,7 @@
 """Shared builders for dashboard ("Open in Web") URLs."""
 
 import os
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 _DEFAULT_DASHBOARD_BASE_URL = "https://openswe.vercel.app"
 
@@ -17,6 +17,57 @@ def dashboard_thread_url(thread_id: str) -> str | None:
     if not base_url or not thread_id:
         return None
     return f"{base_url}/agents/{quote(thread_id, safe='')}"
+
+
+def _origin(url: str) -> str | None:
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    default_port = 443 if parsed.scheme == "https" else 80
+    suffix = f":{port}" if port is not None and port != default_port else ""
+    return f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{suffix}"
+
+
+def _dashboard_origins() -> set[str]:
+    configured = [dashboard_base_url(), *os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",")]
+    return {origin for value in configured if (origin := _origin(value.strip())) is not None}
+
+
+def dashboard_thread_id(locator: str) -> str | None:
+    """Extract a thread id from a raw id or Open SWE dashboard URL."""
+    value = locator.strip()
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        has_credentials = parsed.username is not None or parsed.password is not None
+    except ValueError:
+        return None
+    if not parsed.scheme and not parsed.netloc:
+        return value if "/" not in value and "?" not in value and "#" not in value else None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or has_credentials
+        or _origin(value) not in _dashboard_origins()
+    ):
+        return None
+    segments = parsed.path.split("/")
+    if len(segments) not in {3, 4} or segments[:2] != ["", "agents"]:
+        return None
+    if len(segments) == 4 and segments[3] != "plan":
+        return None
+    try:
+        thread_id = unquote(segments[2], errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if not thread_id or quote(thread_id, safe="") != segments[2] or "/" in thread_id:
+        return None
+    return thread_id
 
 
 def dashboard_plan_url(thread_id: str) -> str | None:

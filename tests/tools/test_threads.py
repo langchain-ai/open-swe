@@ -300,6 +300,98 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     assert result["links"]["trace"] == "https://smith.example/t/thread-1"
     assert "approve_plan" in result["available_actions"]
     assert "approve_workflow_push" in result["available_actions"]
+    assert result["transcript"] == {
+        "messages": [
+            {
+                "id": None,
+                "role": "user",
+                "text": "Fix the race",
+                "truncated": False,
+                "sender_id": "github:octocat",
+                "timestamp": "2026-08-20T12:00:00Z",
+            }
+        ],
+        "message_count": 1,
+        "returned_count": 1,
+        "omitted_count": 0,
+        "truncated": False,
+    }
+    assert result["recent_runs"]["runs"] == [result["latest_run"]]
+    assert result["plan"]["content"] == "<html></html>"
+    assert result["plan"]["comments"] == []
+    assert result["state"]["message_count"] == 1
+    client.runs.list.assert_awaited_once_with("thread-1", limit=threads_tool._MAX_RUNS + 1)
+
+
+async def test_get_thread_accepts_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _DetailClient()
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "status": "finished"})
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+
+    result = await threads_tool.get_thread(
+        "https://dev.open-swe.langchain.dev/agents/thread-1?workflowApproval=fp"
+    )
+
+    assert result["success"] is True
+    get_dashboard_thread.assert_awaited_once_with(
+        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+    client.threads.get_state.assert_awaited_once_with("thread-1")
+
+
+async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get_dashboard_thread = AsyncMock()
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+
+    result = await threads_tool.get_thread("https://evil.example/agents/thread-1")
+
+    assert result == {
+        "success": False,
+        "error": "thread_id must be a thread ID or Open SWE dashboard thread URL",
+    }
+    get_dashboard_thread.assert_not_awaited()
+
+
+def test_transcript_filters_private_and_tool_content() -> None:
+    state = {
+        "values": {
+            "messages": [
+                {"type": "system", "content": "secret system prompt"},
+                {"type": "human", "content": "<dynamic-context>private</dynamic-context>"},
+                {"type": "human", "content": "Visible request", "id": "user-1"},
+                {
+                    "type": "ai",
+                    "content": [
+                        {"type": "reasoning", "text": "hidden reasoning"},
+                        {"type": "text", "text": "Visible answer"},
+                    ],
+                    "id": "assistant-1",
+                },
+                {"type": "tool", "content": "sensitive tool result"},
+            ]
+        }
+    }
+
+    transcript = threads_tool._transcript(state)
+
+    assert [message["text"] for message in transcript["messages"]] == [
+        "Visible request",
+        "Visible answer",
+    ]
+    assert transcript["message_count"] == 5
+    assert transcript["omitted_count"] == 3
+    assert transcript["truncated"] is True
 
 
 def test_admin_thread_actions_require_admin() -> None:

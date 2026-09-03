@@ -35,7 +35,11 @@ from agent.dashboard.workflow_approval import (
     workflow_push_approval_responses,
 )
 from agent.input_messages import input_message_text, message_sender_id
-from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.utils.dashboard_links import (
+    dashboard_plan_url,
+    dashboard_thread_id,
+    dashboard_thread_url,
+)
 from agent.utils.json_types import as_json_object, thread_metadata
 from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from agent.utils.thread_ops import langgraph_client
@@ -63,6 +67,11 @@ PlanFormat = Literal["html", "markdown"]
 _MAX_MESSAGE_CHARS = 20_000
 _MAX_COMMENT_CHARS = 20_000
 _MAX_DETAIL_MESSAGE_CHARS = 4_000
+_MAX_TRANSCRIPT_MESSAGES = 100
+_MAX_TRANSCRIPT_CHARS = 50_000
+_MAX_RUNS = 25
+_MAX_INSPECTION_CONTENT_CHARS = 50_000
+_MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
 
 
@@ -229,7 +238,13 @@ def _plain_message_text(content: Any) -> str | None:
     values = content if isinstance(content, list) else [content]
     texts: list[str] = []
     for value in values:
-        text = value.get("text") if isinstance(value, Mapping) else value
+        if isinstance(value, Mapping):
+            block_type = value.get("type")
+            if block_type not in {None, "text"}:
+                continue
+            text = value.get("text")
+        else:
+            text = value
         if not isinstance(text, str):
             continue
         stripped = text.strip()
@@ -242,12 +257,14 @@ def _plain_message_text(content: Any) -> str | None:
     return combined or None
 
 
-def _last_user_message(state: Any) -> dict[str, Any] | None:
+def _state_messages(state: Any) -> list[Any]:
     values = _value(state, "values")
     messages = values.get("messages") if isinstance(values, Mapping) else None
-    if not isinstance(messages, list):
-        return None
-    for message in reversed(messages):
+    return messages if isinstance(messages, list) else []
+
+
+def _last_user_message(state: Any) -> dict[str, Any] | None:
+    for message in reversed(_state_messages(state)):
         kind = _message_kind(message)
         if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"human", "user"}:
             continue
@@ -263,6 +280,65 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
             "timestamp": _message_timestamp(message),
         }
     return None
+
+
+def _message_id(message: Any) -> str | None:
+    value = _value(message, "id")
+    return str(value) if value else None
+
+
+def _transcript(state: Any) -> dict[str, Any]:
+    messages = _state_messages(state)
+    visible: list[dict[str, Any]] = []
+    omitted = 0
+    used_chars = 0
+    for message in messages:
+        kind = _message_kind(message)
+        if kind not in {"human", "user", "ai", "assistant"}:
+            omitted += 1
+            continue
+        content = _message_content(message)
+        text = _plain_message_text(content)
+        if not text:
+            omitted += 1
+            continue
+        if len(visible) >= _MAX_TRANSCRIPT_MESSAGES or used_chars >= _MAX_TRANSCRIPT_CHARS:
+            omitted += 1
+            continue
+        remaining = _MAX_TRANSCRIPT_CHARS - used_chars
+        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
+        visible.append(
+            {
+                "id": _message_id(message),
+                "role": "user" if kind in {"human", "user"} else "assistant",
+                "text": returned_text,
+                "truncated": len(returned_text) < len(text),
+                "sender_id": message_sender_id(content),
+                "timestamp": _message_timestamp(message),
+            }
+        )
+        used_chars += len(returned_text)
+    return {
+        "messages": visible,
+        "message_count": len(messages),
+        "returned_count": len(visible),
+        "omitted_count": omitted,
+        "truncated": omitted > 0 or any(item["truncated"] for item in visible),
+    }
+
+
+def _state_summary(state: Any) -> dict[str, Any]:
+    tasks = _value(state, "tasks")
+    next_nodes = _value(state, "next")
+    return {
+        "checkpoint_id": str(checkpoint_id)
+        if (checkpoint_id := _value(state, "checkpoint_id"))
+        else None,
+        "created_at": str(created_at) if (created_at := _value(state, "created_at")) else None,
+        "next": [str(node) for node in next_nodes] if isinstance(next_nodes, (list, tuple)) else [],
+        "task_count": len(tasks) if isinstance(tasks, (list, tuple)) else 0,
+        "message_count": len(_state_messages(state)),
+    }
 
 
 def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
@@ -290,6 +366,16 @@ def _run_detail(run: Any) -> dict[str, Any] | None:
         "status": status.lower() if isinstance(status, str) else None,
         "created_at": str(created) if (created := _value(run, "created_at")) else None,
         "updated_at": str(updated) if (updated := _value(run, "updated_at")) else None,
+    }
+
+
+def _run_history(runs: list[Any]) -> dict[str, Any]:
+    returned = [detail for run in runs[:_MAX_RUNS] if (detail := _run_detail(run)) is not None]
+    return {
+        "runs": returned,
+        "returned_count": len(returned),
+        "limit": _MAX_RUNS,
+        "truncated": len(runs) > _MAX_RUNS,
     }
 
 
@@ -334,6 +420,19 @@ async def _queued_message_count(client: Any, thread_id: str) -> int:
 
 def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) -> dict[str, Any]:
     approved_by = content.get("approved_by")
+    raw_content = content.get("html") or content.get("markdown")
+    plan_content = raw_content if isinstance(raw_content, str) else None
+    returned_comments = [
+        {
+            "id": comment.get("id"),
+            "author": comment.get("author"),
+            "author_login": comment.get("author_login"),
+            "body": str(comment.get("body") or "")[:_MAX_DETAIL_MESSAGE_CHARS],
+            "anchor": comment.get("anchor") if isinstance(comment.get("anchor"), Mapping) else None,
+            "created_at": comment.get("created_at"),
+        }
+        for comment in comments[:_MAX_PLAN_COMMENTS]
+    ]
     return {
         "status": content.get("status"),
         "format": "html"
@@ -341,7 +440,13 @@ def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) ->
         else "markdown"
         if content.get("markdown")
         else None,
+        "content": plan_content[:_MAX_INSPECTION_CONTENT_CHARS] if plan_content else None,
+        "content_truncated": bool(
+            plan_content and len(plan_content) > _MAX_INSPECTION_CONTENT_CHARS
+        ),
+        "comments": returned_comments,
         "comment_count": len(comments),
+        "comments_truncated": len(returned_comments) < len(comments),
         "approved_by": dict(approved_by) if isinstance(approved_by, Mapping) else None,
         "approved_at": content.get("approved_at"),
     }
@@ -398,13 +503,14 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Get bounded operational details for one Open SWE thread."""
+    """Inspect an Open SWE thread from its thread ID or dashboard web URL."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
-    thread_id = thread_id.strip()
+    locator = thread_id.strip()
+    thread_id = dashboard_thread_id(locator) or ""
     if not thread_id:
-        return _failure("thread_id is required")
+        return _failure("thread_id must be a thread ID or Open SWE dashboard thread URL")
     try:
         summary = await get_dashboard_thread(
             thread_id,
@@ -416,7 +522,7 @@ async def get_thread(
         async with asyncio.TaskGroup() as tasks:
             thread_task = tasks.create_task(client.threads.get(thread_id))
             state_task = tasks.create_task(client.threads.get_state(thread_id))
-            runs_task = tasks.create_task(client.runs.list(thread_id, limit=1))
+            runs_task = tasks.create_task(client.runs.list(thread_id, limit=_MAX_RUNS + 1))
             plan_content_task = tasks.create_task(get_plan_content(thread_id))
             plan_comments_task = tasks.create_task(list_plan_comments(thread_id))
             approvals_task = tasks.create_task(get_workflow_push_approvals(thread_id))
@@ -460,7 +566,10 @@ async def get_thread(
         "participant_count": len(logins),
         "participants_truncated": len(returned_participants) < len(logins),
         "latest_run": _run_detail(latest_run),
+        "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
+        "transcript": _transcript(thread_state),
+        "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
         "cost": cost,
         "plan": plan,
