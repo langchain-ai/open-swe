@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -796,6 +797,17 @@ async def upsert_agent_thread_metadata(
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
+        elif _pr_state_reset_for_user_activity(existing_meta):
+            # A person is continuing the thread, so PR-driven resolution or the
+            # "PRs closed" mark no longer applies. Re-read under the PR-state lock
+            # so a concurrent PR webhook cannot interleave its own update.
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                current_meta = (
+                    current["metadata"] if isinstance(current.get("metadata"), dict) else {}
+                )
+                metadata.update(_pr_state_reset_for_user_activity(current_meta))
+                await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:  # noqa: BLE001
@@ -1070,6 +1082,20 @@ _GH_PR_AGENT_STATE_ACTIONS = frozenset(
 )
 _TERMINAL_PR_STATES = frozenset(["closed", "merged"])
 _PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+
+
+def _pr_state_reset_for_user_activity(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Metadata that a new user message invalidates: PR-driven resolution and attention."""
+    reset: dict[str, Any] = {}
+    if metadata.get("attention_reason"):
+        reset["attention_reason"] = None
+    if metadata.get("auto_resolved_by_prs") is True:
+        reset["resolved"] = False
+        reset["resolved_at_ms"] = None
+        reset["auto_resolved_by_prs"] = False
+    return reset
+
+
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),

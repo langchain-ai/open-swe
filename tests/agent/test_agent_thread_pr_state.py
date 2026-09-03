@@ -605,3 +605,68 @@ async def test_update_agent_thread_pr_state_preserves_concurrent_pr_update() -> 
             "auto_resolved_by_prs": True,
         },
     )
+
+
+def _follow_up_client(metadata: dict[str, Any]) -> MagicMock:
+    fake_client = MagicMock()
+    fake_client.threads.get = AsyncMock(return_value={"thread_id": "t1", "metadata": metadata})
+    fake_client.threads.update = AsyncMock()
+    return fake_client
+
+
+async def _slack_follow_up(fake_client: MagicMock) -> dict[str, Any]:
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+    ):
+        await webhook_common.upsert_agent_thread_metadata("t1", source="slack", github_login="octo")
+    fake_client.threads.update.assert_awaited_once()
+    assert fake_client.threads.update.await_args is not None
+    return fake_client.threads.update.await_args.kwargs["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_upsert_agent_thread_metadata_clears_pr_attention_on_follow_up() -> None:
+    metadata = await _slack_follow_up(
+        _follow_up_client({"source": "slack", "created_at_ms": 1, "attention_reason": "prs_closed"})
+    )
+
+    assert metadata["attention_reason"] is None
+    assert "resolved" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_upsert_agent_thread_metadata_unresolves_auto_resolved_thread() -> None:
+    metadata = await _slack_follow_up(
+        _follow_up_client(
+            {
+                "source": "slack",
+                "created_at_ms": 1,
+                "resolved": True,
+                "resolved_at_ms": 5,
+                "auto_resolved_by_prs": True,
+            }
+        )
+    )
+
+    assert metadata["resolved"] is False
+    assert metadata["resolved_at_ms"] is None
+    assert metadata["auto_resolved_by_prs"] is False
+
+
+@pytest.mark.asyncio
+async def test_upsert_agent_thread_metadata_keeps_manual_resolution() -> None:
+    metadata = await _slack_follow_up(
+        _follow_up_client(
+            {
+                "source": "slack",
+                "created_at_ms": 1,
+                "resolved": True,
+                "resolved_at_ms": 5,
+                "auto_resolved_by_prs": False,
+            }
+        )
+    )
+
+    assert "resolved" not in metadata
+    assert "attention_reason" not in metadata
