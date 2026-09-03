@@ -2350,11 +2350,9 @@ async def get_dashboard_thread_working_tree_diff(
         return _missing_diff()
     try:
         sandbox = await create_sandbox(sandbox_id)
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not connect to sandbox %s for working tree diff", sandbox_id, exc_info=True
-        )
-        return _missing_diff()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
+        raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)
     repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
