@@ -36,7 +36,25 @@ async def test_default_environment_snapshot_wins_over_base() -> None:
 
 
 @pytest.mark.asyncio
-async def test_environment_without_ready_snapshot_falls_back_to_base() -> None:
+async def test_environment_without_a_captured_snapshot_falls_back_to_base() -> None:
+    never_captured = _READY.model_copy(update={"snapshot_status": "failed", "snapshot_id": None})
+    with (
+        patch.object(
+            lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=never_captured
+        ),
+        patch.object(
+            lifecycle,
+            "get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="admin-snap",
+        ),
+    ):
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"
+
+
+@pytest.mark.asyncio
+async def test_a_nightly_capture_does_not_send_runs_to_the_base_image() -> None:
+    """The new id lands only on success, so a refresh in flight changes nothing."""
     capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
     with (
         patch.object(
@@ -49,7 +67,7 @@ async def test_environment_without_ready_snapshot_falls_back_to_base() -> None:
             return_value="admin-snap",
         ),
     ):
-        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
 @pytest.mark.asyncio

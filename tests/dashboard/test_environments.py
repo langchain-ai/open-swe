@@ -193,15 +193,43 @@ def test_create_params_enforce_serialized_size_limit() -> None:
         )
 
 
-def test_snapshot_id_only_resolves_when_ready() -> None:
-    assert (
-        Environment(slug="e", snapshot_status="capturing", snapshot_id="s-1").ready_snapshot_id
-        is None
-    )
+def test_snapshot_id_only_resolves_when_there_is_one() -> None:
     assert (
         Environment(slug="e", snapshot_status="ready", snapshot_id="s-1").ready_snapshot_id == "s-1"
     )
     assert Environment(slug="e", snapshot_status="ready").ready_snapshot_id is None
+    assert (
+        Environment(slug="e", snapshot_status="failed", snapshot_id="s-1").ready_snapshot_id is None
+    )
+
+
+def test_a_capture_in_flight_keeps_serving_the_previous_snapshot() -> None:
+    """The new id lands only on success, so the old one is still what runs want."""
+    capturing = Environment(slug="e", snapshot_status="capturing", snapshot_id="s-1")
+    assert capturing.ready_snapshot_id == "s-1"
+    # Nothing captured yet: a first capture in flight has nothing to fall back to.
+    assert Environment(slug="e", snapshot_status="capturing").ready_snapshot_id is None
+
+
+@pytest.mark.asyncio
+async def test_capture_records_the_init_script_that_shipped(fake_store: FakeStore) -> None:
+    """The snapshot and the init script validated against it move together."""
+    await ENVIRONMENTS.create(
+        EnvironmentCreate(name="base", setup_script="make setup", init_script="git pull"), "ramon"
+    )
+    record = await ENVIRONMENTS.get("base")
+    assert record is not None
+    assert record.validated_init_script == ""
+
+    captured = await ENVIRONMENTS.mark_captured(
+        "base",
+        snapshot_id="snap-1",
+        snapshot_name="openswe-environment-base",
+        source_sandbox_id="sb-1",
+    )
+
+    assert captured is not None
+    assert captured.validated_init_script == "git pull"
 
 
 def test_environment_prompt_blank_is_none() -> None:

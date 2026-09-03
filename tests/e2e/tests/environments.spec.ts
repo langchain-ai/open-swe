@@ -26,8 +26,10 @@ interface Environment {
   repos: Array<string>;
   snapshot_id: string | null;
   snapshot_name: string | null;
+  init_script?: string;
   snapshot_status: string;
   snapshot_tag?: string | null;
+  validated_init_script?: string;
   refresh_status?: string;
   refresh_error?: string | null;
   refresh_log?: string | null;
@@ -83,9 +85,7 @@ async function saveDefaultModel(page: Page) {
   expect(res.ok()).toBeTruthy();
 }
 
-async function capturedSnapshots(
-  page: Page,
-): Promise<
+async function capturedSnapshots(page: Page): Promise<
   Array<{
     snapshot_id: string;
     name: string;
@@ -312,6 +312,8 @@ test.describe("Environments", () => {
     expect(record?.refresh_log).toContain("--- setup script ---");
     expect(record?.refresh_log).toContain(".provisioned");
     expect(record?.refresh_log).toContain("--- init script ---");
+    // Only a script that passed here is allowed to run on later sandboxes.
+    expect(record?.validated_init_script).toBe(record?.init_script);
 
     // Published as name:latest, and captured from the refresh's own builder
     // sandbox rather than this thread's.

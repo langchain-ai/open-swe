@@ -531,7 +531,7 @@ ENVIRONMENT_PROMPT = (
     "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
 )
 ENVIRONMENT_SETUP_SCRIPT = (
-    "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls repos"
+    "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls -a repos"
 )
 ENVIRONMENT_INIT_SCRIPT = "echo refreshed >> repos/.provisioned"
 

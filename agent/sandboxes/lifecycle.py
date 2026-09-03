@@ -96,11 +96,14 @@ class SandboxCreateConfig:
         degrades freshness rather than the run. It sits on the critical path
         before the first model call, hence the bounded timeout.
         """
-        if self.environment is None or not self.environment.init_script:
+        # The validated script, not the desired one: a save whose refresh failed
+        # leaves a broken init_script on the record, and running it here would
+        # stall every new run behind its timeout.
+        if self.environment is None or not self.environment.validated_init_script:
             return
         async with aphase(thread_id, "sandbox.init_script"):
             result = await sandbox_backend.aexecute(
-                script_command(self.environment.init_script, INIT_SCRIPT_PATH),
+                script_command(self.environment.validated_init_script, INIT_SCRIPT_PATH),
                 timeout=init_script_timeout(),
             )
         if result.exit_code != 0:

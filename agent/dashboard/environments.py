@@ -393,6 +393,9 @@ class Environment(BaseModel):
     snapshot_status: SnapshotStatus = "none"
     status_message: str | None = None
     snapshot_tag: str | None = None
+    # The init script as it stood when the live snapshot was captured. `init_script`
+    # is the desired one and may be unvalidated; this is the one that shipped.
+    validated_init_script: str = ""
     source_sandbox_id: str | None = None
     last_captured_at: str | None = None
     refresh_status: RefreshStatus = "never"
@@ -440,8 +443,14 @@ class Environment(BaseModel):
 
     @property
     def ready_snapshot_id(self) -> str | None:
-        """The snapshot new sandboxes boot from, or ``None`` when not captured yet."""
-        if self.snapshot_status != "ready":
+        """The snapshot new sandboxes boot from, or ``None`` when not captured yet.
+
+        A capture in flight still serves the previous snapshot: the new id is
+        written only once the capture succeeds, so the old one stays valid
+        throughout. Dropping it here would send every run started during a
+        nightly refresh to the bare base image.
+        """
+        if self.snapshot_status not in ("ready", "capturing"):
             return None
         return self.snapshot_id or None
 
@@ -589,6 +598,7 @@ class EnvironmentStore(TypedStore[Environment]):
         record.snapshot_id = snapshot_id
         record.snapshot_name = snapshot_name
         record.snapshot_tag = snapshot_tag
+        record.validated_init_script = record.init_script
         record.source_sandbox_id = source_sandbox_id
         record.last_captured_at = now_iso()
         return await self.save(record)
@@ -768,7 +778,14 @@ async def capture_environment_snapshot(
         snapshot_tag=SNAPSHOT_TAG,
         source_sandbox_id=sandbox_id,
     )
-    if previous_snapshot_id != snapshot.id:
+    # Re-read before deleting: a concurrent refresh may have captured and pointed
+    # the record at its own snapshot, and deleting ours would strand it.
+    current = await ENVIRONMENTS.get(slug)
+    if (
+        previous_snapshot_id != snapshot.id
+        and current is not None
+        and current.snapshot_id == snapshot.id
+    ):
         await _delete_snapshot(previous_snapshot_id)
     logger.info(
         "Captured snapshot %s as %s:%s for environment %s",

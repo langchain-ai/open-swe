@@ -73,9 +73,7 @@ describe("EnvironmentsSection", () => {
     renderSection(true)
 
     expect(await screen.findByText("Never refreshed")).toBeTruthy()
-    expect(
-      screen.getByText("Default environment · No snapshot")
-    ).toBeTruthy()
+    expect(screen.getByText("Default environment · No snapshot")).toBeTruthy()
   })
 
   it("directs non-admins to a workspace admin", async () => {
