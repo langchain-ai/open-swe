@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from agent.auth import resolve as auth
+from agent.github import token as auth
 
 
 def test_leave_failure_comment_posts_generic_token_free_slack_notice(
@@ -24,8 +24,7 @@ def test_leave_failure_comment_posts_generic_token_free_slack_notice(
 
     monkeypatch.setattr(auth, "post_slack_thread_reply", fake_post_slack_thread_reply)
     monkeypatch.setattr(
-        auth,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "slack_thread": {
@@ -50,8 +49,7 @@ def test_resolve_token_from_email_logs_legacy_only_user_in_background(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setattr(
-        auth,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",

@@ -8,8 +8,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from .desktop import is_desktop_worktree
-from .input_messages import dynamic_context_hash, input_message_text, wrap_system_prompt
+from agent.desktop import is_desktop_worktree
+from agent.input_messages import dynamic_context_hash, input_message_text, wrap_system_prompt
 
 logger = logging.getLogger(__name__)
 

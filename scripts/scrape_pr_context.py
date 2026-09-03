@@ -10,7 +10,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent.dashboard.pull_request_context import (  # noqa: E402
+from agent.github.pull_request_context import (  # noqa: E402
     _CHECKS_QUERY,
     _REVIEWS_QUERY,
     _actionable_check,

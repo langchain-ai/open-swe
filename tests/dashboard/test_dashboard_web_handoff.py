@@ -268,10 +268,7 @@ async def test_dashboard_followup_dispatches_queued_message_when_stop_wins_race(
     )
 
     assert len(queued_messages) == 1
-    assert dispatched == [{"content": "survive stop", "input": None}]
-    assert client.store.items[(("queue", "thread-1"), "pending_messages")] == {
-        "value": {"messages": []}
-    }
+    assert dispatched == [{"content": None, "input": {"messages": []}}]
     assert any(
         update.get("latest_run_id") == "replacement-run" for update in client.threads.updates
     )

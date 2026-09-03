@@ -15,10 +15,10 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.auth import thread_token as github_token
-from agent.utils import github_comments
+from agent.github import comments as github_comments
+from agent.github import thread_token as github_token
+from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
-from agent.webhooks import github as github_webhooks
 
 
 @pytest.fixture(autouse=True)

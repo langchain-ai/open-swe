@@ -5,7 +5,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import pull_request_status, thread_api
+from agent.dashboard import thread_api
+from agent.github import pull_request_status
 
 
 def _response(status: int, payload: object) -> httpx.Response:

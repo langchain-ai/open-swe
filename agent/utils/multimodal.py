@@ -15,7 +15,7 @@ from langchain_core.messages.content import (
     create_text_block,
 )
 
-from .url_safety import request_with_safe_redirects
+from agent.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 
