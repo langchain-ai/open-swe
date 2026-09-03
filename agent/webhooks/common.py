@@ -1390,6 +1390,10 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
     The agent thread is located by the PR's html_url persisted in metadata when
     the PR was opened (``open_pull_request``). Reviewer threads are skipped.
+
+    A thread auto-resolves only when every tracked PR is merged or closed and the
+    agent opened at least one of them with ``resolves_thread=True``; legacy
+    threads and PRs attached without that flag never resolve on their own.
     """
     pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
     if not isinstance(pull_request, dict):
@@ -1469,7 +1473,15 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 all_terminal = bool(tracked_states) and all(
                     state in _TERMINAL_PR_STATES for state in tracked_states
                 )
-                if all_terminal and state_changed and metadata.get("resolved") is not True:
+                resolves_thread = any(
+                    record.get("resolves_thread") is True for record in updated_pull_requests
+                )
+                if (
+                    all_terminal
+                    and resolves_thread
+                    and state_changed
+                    and metadata.get("resolved") is not True
+                ):
                     metadata_update["resolved"] = True
                     metadata_update["resolved_at_ms"] = int(datetime.now(UTC).timestamp() * 1000)
                     metadata_update["auto_resolved_by_prs"] = True

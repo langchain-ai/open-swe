@@ -76,12 +76,7 @@ async def test_update_agent_thread_pr_state_updates_matching_thread() -> None:
     call_args = fake_client.threads.update.await_args
     assert call_args is not None
     assert call_args.kwargs["thread_id"] == "t1"
-    assert call_args.kwargs["metadata"] == {
-        "pr_state": "closed",
-        "resolved": True,
-        "resolved_at_ms": ANY,
-        "auto_resolved_by_prs": True,
-    }
+    assert call_args.kwargs["metadata"] == {"pr_state": "closed"}
 
 
 @pytest.mark.asyncio
@@ -155,6 +150,7 @@ async def test_update_agent_thread_pr_state_resolves_after_all_prs_close() -> No
         "number": 9,
         "url": "https://github.com/lc/other/pull/9",
         "state": "merged",
+        "resolves_thread": True,
     }
     thread = {
         "thread_id": "t1",
@@ -184,6 +180,93 @@ async def test_update_agent_thread_pr_state_resolves_after_all_prs_close() -> No
             "resolved": True,
             "resolved_at_ms": ANY,
             "auto_resolved_by_prs": True,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_agent_thread_pr_state_skips_resolution_without_resolves_thread() -> None:
+    closing_pr = {
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "url": "https://github.com/lc/repo/pull/7",
+        "state": "open",
+    }
+    merged_pr = {
+        "repo_full_name": "lc/other",
+        "number": 9,
+        "url": "https://github.com/lc/other/pull/9",
+        "state": "merged",
+    }
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": merged_pr["url"],
+            "pr_state": "merged",
+            "pr_urls": [closing_pr["url"], merged_pr["url"]],
+            "pull_requests": [closing_pr, merged_pr],
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
+
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="t1",
+        metadata={"pull_requests": [{**closing_pr, "state": "closed"}, merged_pr]},
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_agent_thread_pr_state_waits_for_open_prs_when_flagged() -> None:
+    merging_pr = {
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "url": "https://github.com/lc/repo/pull/7",
+        "state": "open",
+        "resolves_thread": True,
+    }
+    open_pr = {
+        "repo_full_name": "lc/other",
+        "number": 9,
+        "url": "https://github.com/lc/other/pull/9",
+        "state": "open",
+    }
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": merging_pr["url"],
+            "pr_state": "open",
+            "pr_urls": [merging_pr["url"], open_pr["url"]],
+            "pull_requests": [merging_pr, open_pr],
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("agent.webhooks.common.create_langsmith_thread_feedback", AsyncMock()),
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
+
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="t1",
+        metadata={
+            "pull_requests": [{**merging_pr, "state": "merged"}, open_pr],
+            "pr_state": "merged",
         },
     )
 
@@ -266,12 +349,7 @@ async def test_update_agent_thread_pr_state_paginates_all_matching_threads() -> 
     ]
     fake_client.threads.update.assert_awaited_once_with(
         thread_id="t51",
-        metadata={
-            "pr_state": "closed",
-            "resolved": True,
-            "resolved_at_ms": ANY,
-            "auto_resolved_by_prs": True,
-        },
+        metadata={"pr_state": "closed"},
     )
 
 
@@ -404,6 +482,7 @@ async def test_update_agent_thread_pr_state_preserves_concurrent_pr_update() -> 
         "number": 9,
         "url": "https://github.com/lc/other/pull/9",
         "state": "open",
+        "resolves_thread": True,
     }
     stale_thread = {
         "thread_id": "t1",
