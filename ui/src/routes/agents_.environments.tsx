@@ -5,5 +5,5 @@ export const Route = createFileRoute("/agents_/environments")({
 })
 
 function EnvironmentsPage() {
-  return <Navigate to="/my-settings" />
+  return <Navigate to="/environments" />
 }

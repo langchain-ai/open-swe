@@ -150,7 +150,7 @@ test.describe("Environments", () => {
     await deleteEnvironment(page, DRAFT_SLUG);
     await createEnvironment(page, DRAFT_NAME, "");
 
-    await page.goto("/my-settings");
+    await page.goto("/environments");
     const section = page
       .getByRole("heading", { name: "Environments" })
       .locator("xpath=ancestor::section");
@@ -175,7 +175,7 @@ test.describe("Environments", () => {
     expect(res.status()).toBe(403);
 
     await page.goto("/agents/environments");
-    await expect(page).toHaveURL(/\/my-settings/);
+    await expect(page).toHaveURL(/\/environments$/);
     await expect(
       page.getByRole("heading", { name: "Environments" }),
     ).toBeVisible();
@@ -339,7 +339,7 @@ test.describe("Environments", () => {
     // Admin threads also carry the environment-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
-    await page.goto("/my-settings");
+    await page.goto("/environments");
     await expect(page.getByText("Default environment")).toBeVisible();
     await expect(
       page.getByText("Default environment · Snapshot ready"),
