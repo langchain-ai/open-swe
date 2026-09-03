@@ -12,9 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator
 
+from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
-
-from ..encryption import decrypt_token, encrypt_token
 
 logger = logging.getLogger(__name__)
 

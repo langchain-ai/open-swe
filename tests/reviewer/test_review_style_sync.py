@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.review_styles import REVIEW_STYLES, ReviewStyle, reconcile_running_status
+from agent.review.styles import REVIEW_STYLES, ReviewStyle, reconcile_running_status
 
 
 @pytest.mark.asyncio
@@ -63,7 +63,7 @@ async def test_reconcile_running_marks_completed_when_run_missing_but_prompt_exi
 
 @pytest.mark.asyncio
 async def test_sync_preserves_running_when_langgraph_errors() -> None:
-    from agent.dashboard.review_style_jobs import sync_review_style_run_status
+    from agent.review.style_jobs import sync_review_style_run_status
 
     record = ReviewStyle(
         full_name="acme/repo",
@@ -80,9 +80,9 @@ async def test_sync_preserves_running_when_langgraph_errors() -> None:
             new_callable=AsyncMock,
             return_value=record,
         ),
-        patch("agent.dashboard.review_style_jobs._client", return_value=mock_client),
+        patch("agent.review.style_jobs._client", return_value=mock_client),
         patch(
-            "agent.dashboard.review_style_jobs.reconcile_running_status",
+            "agent.review.style_jobs.reconcile_running_status",
             new_callable=AsyncMock,
         ) as mock_reconcile,
     ):

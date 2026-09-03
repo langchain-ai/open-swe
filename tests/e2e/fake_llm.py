@@ -551,7 +551,7 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
         isinstance(msg, HumanMessage) and "Please queue this follow-up" in _text(msg.content)
         for msg in messages
     ):
-        time.sleep(2)
+        time.sleep(0.5)
     attribution = _latest_attribution(messages)
     suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
@@ -873,13 +873,13 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Both subagents finished their investigation."),
     ),
-    # Subagent turn: a slow shell step first so a spec that opens the thread
-    # right after the run starts can watch the nested activity live.
+    # Subagent turn: a briefly slow shell step first so a spec that opens the
+    # thread right after the run starts can watch the nested activity live.
     "subagent_task": (
         _tool_step(
             "Looking around the workspace.",
             "execute",
-            {"command": "sleep 12 && ls"},
+            {"command": "sleep 3 && ls"},
             "call-subagent-ls",
         ),
         _tool_step(

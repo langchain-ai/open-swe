@@ -167,7 +167,7 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
       challenge: "abc",
       port: 51234,
     }),
-    "https://backend.example/dashboard/api/auth/login?desktop_handoff=abc&desktop_port=51234",
+    "https://backend.example/dashboard/api/auth/login?desktop=true&desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
     desktopExchangeUrl("https://backend.example/base/"),

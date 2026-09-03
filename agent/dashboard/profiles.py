@@ -17,15 +17,19 @@ from typing import Any
 
 from pydantic import BaseModel, model_validator
 
-from agent.store import delete_value, get_value, now_iso, put_value, search_values
-
-from ..encryption import decrypt_token, encrypt_token
-from .oauth import (
+from agent.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
 )
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
+from agent.dashboard.options import (
+    DEPRECATED_MODEL_IDS,
+    SUPPORTED_MODEL_IDS,
+    model_supports_effort,
+    provider_fallback_pair,
+)
+from agent.encryption import decrypt_token, encrypt_token
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +100,19 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.pop("create_prs", None)
-    model = value.get("default_model")
-    effort = value.get("reasoning_effort")
-    if isinstance(model, str):
-        value["default_model"], value["reasoning_effort"] = _normalize_stale_model_pair(
-            model,
-            effort if isinstance(effort, str) else None,
-        )
-    subagent_model = value.get("default_subagent_model")
-    subagent_effort = value.get("subagent_reasoning_effort")
-    if isinstance(subagent_model, str):
-        value["default_subagent_model"], value["subagent_reasoning_effort"] = (
-            _normalize_stale_model_pair(
-                subagent_model,
-                subagent_effort if isinstance(subagent_effort, str) else None,
+    for model_field, effort_field in (
+        ("default_model", "reasoning_effort"),
+        ("default_subagent_model", "subagent_reasoning_effort"),
+    ):
+        model = value.get(model_field)
+        effort = value.get(effort_field)
+        if model in DEPRECATED_MODEL_IDS:
+            value.pop(model_field, None)
+            value.pop(effort_field, None)
+        elif isinstance(model, str):
+            value[model_field], value[effort_field] = _normalize_stale_model_pair(
+                model, effort if isinstance(effort, str) else None
             )
-        )
     return value
 
 

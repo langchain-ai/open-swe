@@ -203,25 +203,52 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         {
           id: "toggle-work-panel",
           label: "Toggle work panel",
-          aliases: ["show panel", "hide panel", "changes panel"],
+          aliases: ["show panel", "hide panel", "right panel"],
           shortcuts: ["mod+alt+b"],
           group: "Workspace",
           run: () => onCollapsedChange(!collapsed),
         },
+        ...(diffAvailable
+          ? [
+              {
+                id: "toggle-changes",
+                label: "Toggle changes",
+                aliases: ["diff", "review changes"],
+                shortcuts: ["mod+d"],
+                group: "Workspace",
+                run: () => {
+                  if (!collapsed && activeSurface?.kind === "diff") {
+                    onCollapsedChange(true)
+                  } else {
+                    onCollapsedChange(false)
+                    handleAddDiff()
+                  }
+                },
+              },
+            ]
+          : []),
         ...(terminalAvailable
           ? [
               {
                 id: "toggle-terminal",
                 label: "Toggle terminal",
                 aliases: ["open terminal", "hide terminal"],
-                shortcuts: ["ctrl+`"],
+                shortcuts: ["mod+j", "ctrl+`"],
                 group: "Workspace",
                 run: toggleTerminal,
               },
             ]
           : []),
       ],
-      [collapsed, onCollapsedChange, terminalAvailable, toggleTerminal]
+      [
+        activeSurface?.kind,
+        collapsed,
+        diffAvailable,
+        handleAddDiff,
+        onCollapsedChange,
+        terminalAvailable,
+        toggleTerminal,
+      ]
     )
   )
 

@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
-import { CircleAlert, FolderOpen, X } from "lucide-react"
+import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type {
+  ImageChunk,
+  Message,
+  QueuedThreadMessage,
+} from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
+import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
@@ -33,6 +37,7 @@ import {
   ensureDesktopModelCredential,
   localThreadKeys,
   useDesktopLocalThread,
+  useLocalProjectRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
@@ -42,20 +47,49 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { cn } from "@/lib/utils"
 import { useSession } from "@/lib/session"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
 
-function promptContent(text: string, images: Array<ImageChunk>) {
-  const trimmed = text.trim()
-  const imageBlocks = images.map((image) => ({
+function imageBlocks(images: Array<ImageChunk>) {
+  return images.map((image) => ({
     type: "image",
     base64: image.base64,
     mime_type: image.mimeType,
     ...(image.fileName ? { file_name: image.fileName } : {}),
   }))
-  return [...imageBlocks, ...(trimmed ? [{ type: "text", text: trimmed }] : [])]
+}
+
+const QUEUE_KEY = "pending_messages"
+
+type QueuedPayload = {
+  text?: string
+  images?: Array<{ base64?: string; mime_type?: string; file_name?: string }>
+}
+
+function payloadImages(payload: QueuedPayload): Array<ImageChunk> {
+  return (payload.images ?? []).flatMap((block) =>
+    block.base64 && block.mime_type
+      ? [
+          {
+            kind: "image" as const,
+            base64: block.base64,
+            mimeType: block.mime_type,
+            ...(block.file_name ? { fileName: block.file_name } : {}),
+          },
+        ]
+      : []
+  )
+}
+
+function promptContent(text: string, images: Array<ImageChunk>) {
+  const trimmed = text.trim()
+  return [
+    ...imageBlocks(images),
+    ...(trimmed ? [{ type: "text", text: trimmed }] : []),
+  ]
 }
 
 function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
@@ -76,7 +110,8 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
-  const stream = useAgentThreadStream()
+  const login = session.data?.login
+  const stream = useAgentThreadRuntime()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
@@ -107,10 +142,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [models, threadEffort, threadModelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
+  const streamRef = useRef(stream)
+  useEffect(() => {
+    streamRef.current = stream
+  }, [stream])
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [queuedState, setQueuedState] = useState<{
+    sessionId: string
+    items: Array<QueuedThreadMessage>
+  }>({ sessionId, items: [] })
+  const queued = queuedState.sessionId === sessionId ? queuedState.items : []
+  const queueNamespace = useMemo(() => ["queue", sessionId], [sessionId])
+  const stoppedRef = useRef(false)
+  const handoffRef = useRef(false)
   const isMobile = useIsMobile()
-  const sidebarCollapsed = useSidebarCollapsed()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
@@ -125,7 +171,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const terminals = useTerminalGroups(
     { kind: "local", sessionId },
-    thread?.cwd ?? ""
+    thread?.worktreePath ?? thread?.cwd ?? ""
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
@@ -143,6 +189,35 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange, openSurface, threadRef]
+  )
+
+  const worktreePath = thread?.worktreePath ?? null
+  const refsQuery = useLocalProjectRefs(thread?.cwd)
+  const projectRefs = refsQuery.data
+  const refetchProjectRefs = refsQuery.refetch
+  // The thread's branch is wherever its working tree is: the ref checked out in
+  // its worktree, or the project's own checkout when it has none.
+  const threadBranch =
+    projectRefs.find((candidate) =>
+      worktreePath ? candidate.worktreePath === worktreePath : candidate.current
+    )?.name ?? null
+
+  const selectBranch = useCallback(
+    async (branch: string) => {
+      setError(null)
+      try {
+        const updated = await window.openSweDesktop?.setLocalBranch({
+          threadId: sessionId,
+          branch,
+        })
+        if (updated)
+          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+        await refetchProjectRefs()
+      } catch (cause) {
+        setError(errorMessage(cause))
+      }
+    },
+    [queryClient, refetchProjectRefs, sessionId]
   )
 
   const activity = useLocalThreadActivity()[sessionId]
@@ -243,6 +318,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     ) => {
       if (!thread) return false
       setError(null)
+      stoppedRef.current = false
       const credentialError = await ensureDesktopModelCredential(
         activeSelection?.modelId
       )
@@ -263,7 +339,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             config: {
               configurable: {
                 source: "desktop",
-                local_project_path: thread.cwd,
+                local_project_path: thread.worktreePath ?? thread.cwd,
                 ...(activeSelection && {
                   agent_model_id: activeSelection.modelId,
                   agent_effort: activeSelection.effort,
@@ -281,6 +357,81 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [activeSelection, rememberSelection, stream, thread]
   )
 
+  // Mid-run follow-ups go to the thread's store queue, which
+  // `check_message_queue_before_model` drains into the running agent, rather
+  // than starting a second run on a busy thread.
+  const enqueue = useCallback(
+    async (prompt: string, images: Array<ImageChunk>) => {
+      const text = prompt.trim()
+      const existing = await stream.client.store.getItem(
+        queueNamespace,
+        QUEUE_KEY
+      )
+      const pending = existing?.value?.messages
+      await stream.client.store.putItem(queueNamespace, QUEUE_KEY, {
+        messages: [
+          ...(Array.isArray(pending) ? pending : []),
+          {
+            content: {
+              text,
+              images: imageBlocks(images),
+              ...(login && {
+                sender: {
+                  id: `github:${login}`,
+                  platform: "github",
+                  github_login: login,
+                },
+              }),
+            },
+          },
+        ],
+      })
+      const createdAt = Date.now()
+      setQueuedState((current) => ({
+        sessionId,
+        items: [
+          ...(current.sessionId === sessionId ? current.items : []),
+          { id: `queued-${createdAt}`, content: text, images, createdAt },
+        ],
+      }))
+    },
+    [login, queueNamespace, sessionId, stream.client]
+  )
+
+  // A live run does not guarantee another queue check: a follow-up written
+  // after its last model call is never read. Once the run ends, take back
+  // whatever the agent left behind and send it as a fresh run — unless the
+  // user stopped the run, in which case the pending work is discarded.
+  const flushUndrainedQueue = useCallback(async () => {
+    const item = await stream.client.store.getItem(queueNamespace, QUEUE_KEY)
+    if (!item) return
+    await stream.client.store.deleteItem(queueNamespace, QUEUE_KEY)
+    const pending = item.value?.messages
+    if (stoppedRef.current || !Array.isArray(pending)) return
+    const payloads = pending.map(
+      (entry) =>
+        ((entry as { content?: QueuedPayload }).content ?? {}) as QueuedPayload
+    )
+    const text = payloads
+      .map((payload) => payload.text?.trim())
+      .filter(Boolean)
+      .join("\n\n")
+    const images = payloads.flatMap(payloadImages)
+    if (text || images.length > 0) await submit(text, images)
+  }, [queueNamespace, stream.client, submit])
+
+  useEffect(() => {
+    if (isRunning || queued.length === 0 || handoffRef.current) return
+    handoffRef.current = true
+    // oxlint-disable-next-line react/set-state-in-effect
+    setQueuedState({ sessionId, items: [] })
+    void flushUndrainedQueue()
+      .catch((cause) => setError(errorMessage(cause)))
+      .finally(() => {
+        handoffRef.current = false
+      })
+  }, [flushUndrainedQueue, isRunning, queued.length, sessionId])
+
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
       return
@@ -289,14 +440,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
-        if (await submit(pending.prompt, pending.images, pending.skills)) {
-          const updated =
-            await window.openSweDesktop?.clearLocalPrompt(sessionId)
-          if (updated)
-            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        } else {
+        // The pending prompt is only cleared once its run finishes, so a
+        // remount mid-run would otherwise submit it a second time. A thread
+        // that already has a run is past its initial prompt.
+        const started =
+          streamRef.current.isLoading || streamRef.current.messages.length > 0
+        if (
+          !started &&
+          !(await submit(pending.prompt, pending.images, pending.skills))
+        ) {
           initialPromptRef.current = null
+          return
         }
+        const updated = await window.openSweDesktop?.clearLocalPrompt(sessionId)
+        if (updated)
+          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
       })
       .catch((cause) => {
         initialPromptRef.current = null
@@ -342,28 +500,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <header
-          data-desktop-drag-region=""
-          className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
-        >
-          <div
-            className={cn(
-              "flex h-full w-full items-center gap-3 px-4",
-              sidebarCollapsed && "pl-32",
-              panelCollapsed && "pr-14"
-            )}
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-              <FolderOpen className="size-3.5 shrink-0" />
-              <span className="truncate" title={thread.cwd}>
-                {thread.cwd}
-              </span>
-            </span>
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              This Mac
-            </span>
-          </div>
-        </header>
+        <AgentThreadHeader
+          project={thread.cwd}
+          target="This Mac"
+          panelCollapsed={panelCollapsed}
+        />
         {(error || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
@@ -381,74 +522,88 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             isThinking={isRunning}
             messages={messages}
             onOpenFile={handleOpenFile}
+            queuedMessages={
+              isRunning ? visibleQueuedMessages(queued, messages) : []
+            }
             streamIsLoading={stream.isLoading}
           />
-          <div className="shrink-0 px-4 pb-4">
-            <div className="mx-auto w-full max-w-3xl min-w-0">
-              {terminalContexts.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {terminalContexts.map((text, index) => (
-                    <span
-                      key={`${text.slice(0, 24)}:${index}`}
-                      className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
-                      title={text}
-                    >
-                      <span className="max-w-64 truncate">
-                        Terminal selection
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Remove terminal selection"
-                        onClick={() =>
-                          setTerminalContexts((current) =>
-                            current.filter(
-                              (_, itemIndex) => itemIndex !== index
-                            )
-                          )
-                        }
-                      >
-                        <X className="size-3" />
-                      </button>
+          <AgentComposerDock>
+            {terminalContexts.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {terminalContexts.map((text, index) => (
+                  <span
+                    key={`${text.slice(0, 24)}:${index}`}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
+                    title={text}
+                  >
+                    <span className="max-w-64 truncate">
+                      Terminal selection
                     </span>
-                  ))}
-                </div>
-              )}
-              <AgentPromptBar
-                activeRun={{ threadId: thread.id, running: isRunning }}
-                busy={isRunning}
-                compact
-                models={models}
-                selection={activeSelection}
-                onSelectionChange={setSelection}
-                onStop={async () => {
-                  try {
-                    await stream.stop()
-                  } catch (cause) {
-                    setError(errorMessage(cause))
-                  }
-                }}
-                onSubmit={async (prompt, images) => {
-                  const terminalContext = terminalContexts.join("\n\n")
-                  setTerminalContexts([])
-                  await submit(
-                    terminalContext
-                      ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
-                      : prompt,
-                    images
-                  )
-                }}
-                placeholder="Add a follow up"
-                skills={skills.data}
-              />
-            </div>
-          </div>
+                    <button
+                      type="button"
+                      aria-label="Remove terminal selection"
+                      onClick={() =>
+                        setTerminalContexts((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index)
+                        )
+                      }
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <AgentPromptBar
+              activeRun={{ threadId: thread.id, running: isRunning }}
+              busy={isRunning}
+              compact
+              models={models}
+              selection={activeSelection}
+              onSelectionChange={setSelection}
+              onStop={async () => {
+                try {
+                  stoppedRef.current = true
+                  await stream.stop()
+                } catch (cause) {
+                  setError(errorMessage(cause))
+                }
+              }}
+              onSubmit={async (prompt, images) => {
+                const terminalContext = terminalContexts.join("\n\n")
+                setTerminalContexts([])
+                const text = terminalContext
+                  ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
+                  : prompt
+                if (!isRunning) {
+                  await submit(text, images)
+                  return
+                }
+                try {
+                  await enqueue(text, images)
+                } catch (cause) {
+                  setError(errorMessage(cause))
+                }
+              }}
+              placeholder="Add a follow up"
+              skills={skills.data}
+              runTarget="local"
+              selectedLocalProjectPath={thread.cwd}
+              localProjectBranches={projectRefs}
+              selectedLocalProjectBranch={threadBranch}
+              onRefreshLocalProjectBranch={() => void refetchProjectRefs()}
+              onSelectLocalProjectBranch={(branch) => void selectBranch(branch)}
+              localWorkspaceMode={thread.worktreePath ? "worktree" : "local"}
+              localWorktreeLabel="Worktree"
+            />
+          </AgentComposerDock>
         </div>
       </div>
       <AgentRightPanel
         threadRef={threadRef}
         terminals={terminals}
         terminalTarget={{ kind: "local", sessionId: thread.id }}
-        cwd={thread.cwd}
+        cwd={thread.worktreePath ?? thread.cwd}
         terminalAvailable
         diffAvailable
         collapsed={panelCollapsed}

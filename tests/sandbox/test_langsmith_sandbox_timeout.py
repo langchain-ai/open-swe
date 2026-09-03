@@ -4,11 +4,16 @@ import asyncio
 import time
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
-from langsmith.sandbox import CommandTimeoutError, SandboxConnectionError
+from langsmith.sandbox import (
+    CommandTimeoutError,
+    SandboxConnectionError,
+    SandboxRetryableConnectionError,
+)
 
-from agent.integrations.langsmith import TimeoutLangSmithSandbox
+from agent.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 
 
 class _FakeHandle:
@@ -95,7 +100,9 @@ def _patch_base_execute(monkeypatch: pytest.MonkeyPatch, sink: dict[str, Any]) -
         sink["timeout"] = timeout
         return SimpleNamespace(output="via-http", exit_code=0, truncated=False)
 
-    monkeypatch.setattr("agent.integrations.langsmith.LangSmithSandbox.aexecute", fake_base_execute)
+    monkeypatch.setattr(
+        "agent.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", fake_base_execute
+    )
 
 
 async def test_aexecute_ws_connect_failure_falls_back_to_base(
@@ -136,3 +143,35 @@ async def test_aexecute_midstream_ws_drop_falls_back_to_base(
 def test_execute_is_async_only() -> None:
     with pytest.raises(NotImplementedError):
         _backend(_FakeHandle()).execute("echo hi", timeout=5)
+
+
+async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 503 on the WebSocket upgrade is a blip, not a dead sandbox.
+
+    The command never started, so re-issuing it cannot double-run anything.
+    """
+    handle = _FakeHandle(result=SimpleNamespace(stdout="out", stderr="", exit_code=0))
+    sb = _backend(handle)
+    sandbox = cast(_FakeSandbox, sb._async_sandbox)
+    attempts = 0
+
+    async def flaky_run(command: str, *, timeout: int, wait: bool) -> _FakeHandle:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise SandboxRetryableConnectionError("WebSocket upgrade temporarily rejected (503)")
+        return handle
+
+    async def failing_base_execute(self: Any, command: str, *, timeout: int | None = None) -> Any:
+        raise SandboxRetryableConnectionError("WebSocket upgrade temporarily rejected (503)")
+
+    monkeypatch.setattr(
+        "agent.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", failing_base_execute
+    )
+    monkeypatch.setattr(sandbox, "run", flaky_run)
+    monkeypatch.setattr("agent.sandboxes.retry.asyncio.sleep", AsyncMock(), raising=True)
+
+    resp = await sb.aexecute("git status", timeout=5)
+
+    assert resp.exit_code == 0
+    assert attempts == 2

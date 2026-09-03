@@ -8,19 +8,24 @@ import httpx
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from ..dashboard.agent_usage import record_agent_pr_usage
-from ..dashboard.plan_store import get_plan_content
-from ..review.inline_review import REVIEWS
-from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_comments import derive_pr_state
-from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
-from ..utils.slack_code_channels import (
+from agent.dashboard.agent_usage import record_agent_pr_usage
+from agent.dashboard.plan_store import get_plan_content
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import derive_pr_state
+from agent.review.inline_review import REVIEWS
+from agent.slack.client import (
+    get_active_slack_thread,
+    get_slack_permalink,
+    parse_github_pr_url,
+)
+from agent.slack.code_channels import (
     is_code_channel_session,
     repo_context_bar_items,
+    set_agent_resource,
     set_context_bar,
     set_view,
 )
+from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +67,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     github_login = configurable.get("github_login")
 
     if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
-        from ..dashboard.profiles import get_valid_access_token
+        from agent.dashboard.profiles import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
         if user_token:
@@ -587,7 +592,7 @@ async def _record_pr_telemetry(
         github_login = configurable.get("github_login")
         user_email = configurable.get("user_email")
         if not isinstance(github_login, str) or not github_login.strip():
-            from ..dashboard.user_mappings import login_for_email
+            from agent.dashboard.user_mappings import login_for_email
 
             github_login = (
                 await login_for_email(user_email if isinstance(user_email, str) else None) or ""
@@ -693,6 +698,20 @@ async def _record_pr_telemetry(
                         dashboard_url=dashboard_thread_url(thread_id) or "",
                     ),
                 )
+                if isinstance(pr_url, str):
+                    await set_agent_resource(
+                        channel_id,
+                        {
+                            "url": pr_url,
+                            "resource_type": "pull_request",
+                            "title": (
+                                pr_title[:255]
+                                if isinstance(pr_title, str) and pr_title
+                                else "Pull request"
+                            ),
+                            "provider": "GitHub",
+                        },
+                    )
                 response = await client.get(
                     f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
                     headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},

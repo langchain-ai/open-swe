@@ -7,14 +7,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
-from agent.source_context import SourceContext
-
-from ..dispatch import dispatch_agent_run
-from ..utils.slack import post_slack_thread_reply
-from .oauth import require_same_origin_for_mutations, require_session
-from .plan_store import (
+from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
+from agent.dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
     PLAN_STATUS_READY,
@@ -22,6 +18,7 @@ from .plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
     delete_plan_comment,
+    format_plan_comments,
     get_plan_content,
     list_plan_comments,
     make_plan_approver,
@@ -30,11 +27,14 @@ from .plan_store import (
     set_plan_status,
     write_plan_to_sandbox,
 )
-from .thread_api import (
+from agent.dashboard.thread_api import (
     _repo_config_from_metadata,
     _thread_is_readable,
     _thread_source,
 )
+from agent.dispatch import dispatch_agent_run
+from agent.slack.client import post_slack_thread_reply
+from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 _plan_approval_locks: dict[str, asyncio.Lock] = {}
@@ -47,8 +47,25 @@ plan_router = APIRouter(
 _SESSION_DEP = Depends(require_session)
 
 
+class TextAnchor(BaseModel):
+    exact: str = Field(min_length=1, max_length=1000)
+    prefix: str = Field(max_length=64)
+    suffix: str = Field(max_length=64)
+    context_before: str = Field(default="", max_length=1000)
+    context_after: str = Field(default="", max_length=1000)
+    start: int = Field(ge=0, le=2_000_000)
+    end: int = Field(gt=0, le=2_000_000)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "TextAnchor":
+        if self.end <= self.start or self.end - self.start != len(self.exact):
+            raise ValueError("anchor range must match the selected text")
+        return self
+
+
 class CommentBody(BaseModel):
-    body: str
+    body: str = Field(min_length=1, max_length=10_000)
+    anchor: TextAnchor | None = None
 
 
 class PlanUpdate(BaseModel):
@@ -172,7 +189,11 @@ async def post_plan_comment(
         raise HTTPException(422, "comment body cannot be empty")
     login = session["sub"]
     return await add_plan_comment(
-        thread_id, author=session.get("name") or login, author_login=login, body=text
+        thread_id,
+        author=session.get("name") or login,
+        author_login=login,
+        body=text,
+        anchor=body.anchor.model_dump() if body.anchor else None,
     )
 
 
@@ -234,7 +255,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         plan_html = str(content.get("html", "")).strip()
         plan_markdown = str(content.get("markdown", "")).strip()
         comments = await list_plan_comments(thread_id, raise_on_error=True)
-        feedback = _format_comments(comments)
+        feedback = format_plan_comments(comments)
         await set_plan_status(
             thread_id,
             PLAN_STATUS_APPROVED,
@@ -293,7 +314,7 @@ async def reject_plan(
         await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     if rejection is not None and not rejection.dispatch:
         return {"status": PLAN_STATUS_REVISING}
-    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
+    feedback = format_plan_comments(await list_plan_comments(thread_id, raise_on_error=True))
     text = (
         "The plan needs changes before implementation. Address this reviewer feedback in the "
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "
@@ -355,19 +376,6 @@ async def _maybe_post_plan_approved_to_slack(
         return
     if not ok:
         logger.warning("Could not post plan approval Slack reply to %s/%s", channel_id, thread_ts)
-
-
-def _format_comments(comments: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    index = 1
-    for comment in comments:
-        body = str(comment.get("body", "")).strip()
-        if not body:
-            continue
-        author = str(comment.get("author") or "reviewer").strip()
-        lines.append(f"{index}. {author}: {body}")
-        index += 1
-    return "\n".join(lines)
 
 
 async def _dispatch_followup(

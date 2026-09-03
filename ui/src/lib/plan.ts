@@ -45,6 +45,25 @@ export interface PlanData {
   user: PlanUser
 }
 
+export interface PlanTextAnchor {
+  exact: string
+  prefix: string
+  suffix: string
+  context_before?: string
+  context_after?: string
+  start: number
+  end: number
+}
+
+export interface PlanComment {
+  id: string
+  author: string
+  author_login: string
+  body: string
+  created_at: string
+  anchor: PlanTextAnchor | null
+}
+
 export class PlanApiError extends Error {
   constructor(
     public readonly status: number,
@@ -85,6 +104,36 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function getPlan(threadId: string): Promise<PlanData> {
   return req<PlanData>(`/plan/${encodeURIComponent(threadId)}`)
+}
+
+export async function getPlanComments(
+  threadId: string
+): Promise<Array<PlanComment>> {
+  const { comments } = await req<{ comments: Array<PlanComment> }>(
+    `/plan/${encodeURIComponent(threadId)}/comments`
+  )
+  return comments
+}
+
+export function addPlanComment(
+  threadId: string,
+  body: string,
+  anchor: PlanTextAnchor
+): Promise<PlanComment> {
+  return req(`/plan/${encodeURIComponent(threadId)}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body, anchor }),
+  })
+}
+
+export function deletePlanComment(
+  threadId: string,
+  commentId: string
+): Promise<{ ok: boolean }> {
+  return req(
+    `/plan/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}`,
+    { method: "DELETE" }
+  )
 }
 
 export function updatePlan(

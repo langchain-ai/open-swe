@@ -8,6 +8,9 @@ const http = require("node:http");
 const path = require("node:path");
 
 const HOST = "127.0.0.1";
+// `langgraph dev` runs one job per worker unless told otherwise; every thread
+// has its own worktree, so runs no longer have to wait for each other.
+const JOBS_PER_WORKER = "10";
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 5_000;
 const THREAD_STATUS = { busy: "running", error: "error" };
@@ -23,12 +26,14 @@ const GATEWAY_KEYS = [
   "LANGSMITH_API_KEY",
 ];
 
-function devBackendTarget({ repoRoot, port, env = process.env }) {
+function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
+  const config = env.OPEN_SWE_LOCAL_BACKEND_CONFIG || "langgraph.desktop.json";
   return {
     command:
       env.OPEN_SWE_LOCAL_BACKEND_COMMAND || env.OPEN_SWE_UV_COMMAND || "uv",
     args: [
       "run",
+      ...(stateDir ? ["--project", repoRoot] : []),
       "langgraph",
       "dev",
       "--no-browser",
@@ -37,11 +42,12 @@ function devBackendTarget({ repoRoot, port, env = process.env }) {
       HOST,
       "--port",
       String(port),
+      "--n-jobs-per-worker",
+      JOBS_PER_WORKER,
       "--config",
-      env.OPEN_SWE_LOCAL_BACKEND_CONFIG ||
-        path.join(repoRoot, "langgraph.desktop.json"),
+      path.resolve(repoRoot, config),
     ],
-    cwd: repoRoot,
+    cwd: stateDir || repoRoot,
   };
 }
 
@@ -69,6 +75,8 @@ function packagedBackendTarget({
       HOST,
       "--port",
       String(port),
+      "--n-jobs-per-worker",
+      JOBS_PER_WORKER,
       "--config",
       path.join(root, "langgraph.json"),
     ],
@@ -190,6 +198,9 @@ class BackendSupervisor {
     const target = localBackendTarget({ ...this.options, port: this.port });
     if (!this.options.projectsFile)
       throw new Error("Local project allowlist is not configured");
+    if (!this.options.worktreesDir)
+      throw new Error("Local worktree directory is not configured");
+    fs.mkdirSync(this.options.worktreesDir, { recursive: true });
     if (this.options.stateDir)
       fs.mkdirSync(this.options.stateDir, { recursive: true });
     if (this.options.isPackaged && !fs.existsSync(target.command)) {
@@ -204,6 +215,7 @@ class BackendSupervisor {
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
+        OPEN_SWE_LOCAL_WORKTREES_DIR: this.options.worktreesDir,
         ...(this.options.stateDir
           ? {
               OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(

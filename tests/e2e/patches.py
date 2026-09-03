@@ -29,8 +29,10 @@ def apply() -> None:
     import importlib
 
     from agent import server
-    from agent.utils import auth, authorship, slack_code_channels
-    from agent.utils import slack as slack_utils
+    from agent.github import token as auth
+    from agent.slack import client as slack_utils
+    from agent.slack import code_channels as slack_code_channels
+    from agent.utils import authorship
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
     # *function* (the tools package __init__ shadows the submodule), so patch the
@@ -93,7 +95,8 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import profiles, pull_request_context, pull_request_status, thread_api
+    from agent.dashboard import profiles, thread_api
+    from agent.github import pull_request_context, pull_request_status
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
@@ -109,7 +112,7 @@ def apply() -> None:
     # fake store instead. The environment tools, store writes, name/tag scheme
     # and status transitions all still run for real.
     from agent.dashboard import environments as environments_store
-    from agent.integrations import langsmith as langsmith_integration
+    from agent.sandboxes.providers import langsmith as langsmith_integration
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that

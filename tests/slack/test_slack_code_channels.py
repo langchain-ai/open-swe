@@ -7,11 +7,12 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack as slack_utils
-from agent.utils import slack_code_channels, slack_events
+from agent.slack import client as slack_utils
+from agent.slack import code_channels as slack_code_channels
+from agent.slack import events as slack_events
+from agent.slack import routes as slack_routes
+from agent.slack import webhook as slack_service
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack as slack_service
-from agent.webhooks import slack_routes
 
 
 class _FakeRequest:
@@ -110,6 +111,25 @@ async def test_context_bar_action_routes_to_code_channel_session(
     assert response["status"] == "accepted"
     assert code_channel_route.await_args is not None
     assert "create-pr" in code_channel_route.await_args.args[0]["text"]
+
+
+@pytest.mark.parametrize("is_private", [False, True])
+async def test_create_code_channel_sets_visibility(
+    monkeypatch: pytest.MonkeyPatch, is_private: bool
+) -> None:
+    call = AsyncMock(return_value=({"channel": {"id": "C-code"}}, None))
+    monkeypatch.setattr(slack_code_channels, "_call", call)
+
+    channel_id, error = await slack_code_channels.create_code_channel(
+        name="Fix flaky tests",
+        session_id="thread-1",
+        origin_channel_id="C-origin",
+        origin_message_ts="1.000",
+        is_private=is_private,
+    )
+
+    assert (channel_id, error) == ("C-code", None)
+    assert call.await_args_list[0].args[1]["is_private"] is is_private
 
 
 async def test_set_view_rejects_content_over_one_megabyte(

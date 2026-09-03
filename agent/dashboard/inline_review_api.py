@@ -6,9 +6,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 
-from ..review.inline_review import REVIEWS, InlineReview
-from .oauth import require_same_origin_for_mutations, require_session
-from .thread_api import _thread_is_readable
+from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
+from agent.dashboard.thread_api import _thread_is_readable
+from agent.review.inline_review import REVIEWS, InlineReview
 
 logger = logging.getLogger(__name__)
 

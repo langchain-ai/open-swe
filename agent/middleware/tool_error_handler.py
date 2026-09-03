@@ -1,7 +1,9 @@
 """Tool error handling middleware.
 
-Wraps all tool calls in try/except so that unhandled exceptions are
-returned as error ToolMessages instead of crashing the agent run.
+Wraps all tool calls in try/except so that unhandled exceptions are returned as
+error ToolMessages instead of crashing the agent run. A sandbox that stopped
+answering is the exception: nothing the model does next can succeed, so the user
+is notified and the error propagates.
 """
 
 import json
@@ -17,17 +19,21 @@ from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from langsmith.sandbox import SandboxClientError
+from langsmith.sandbox import (
+    ResourceNotFoundError,
+    SandboxConnectionError,
+    SandboxServerReloadError,
+)
 
-from ..utils.sandbox_state import clear_sandbox_backend
-from .sandbox_circuit_breaker import (
+from agent.middleware.sandbox_circuit_breaker import (
     extract_sandbox_id,
     post_sandbox_unreachable_notification,
 )
+from agent.sandboxes.retry import is_transient_sandbox_error
 
 logger = logging.getLogger(__name__)
 
-SANDBOX_UNREACHABLE = "sandbox_unreachable"
+SANDBOX_TRANSIENT = "sandbox_transient"
 
 
 def _get_name(candidate: object) -> str | None:
@@ -64,32 +70,40 @@ def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> d
     return data
 
 
-def _to_sandbox_unreachable_payload(
-    e: SandboxClientError,
+def _to_transient_sandbox_payload(
+    e: Exception,
     request: ToolCallRequest | None = None,
 ) -> dict[str, str]:
-    sandbox_id = extract_sandbox_id(str(e))
-    which = f" ({sandbox_id})" if sandbox_id else ""
     data: dict[str, str] = {
         "status": "error",
         "error_type": e.__class__.__name__,
         "previous_error": str(e),
-        "recovery": SANDBOX_UNREACHABLE,
+        "recovery": SANDBOX_TRANSIENT,
         "error": (
-            f"The sandbox for this thread{which} stopped responding. It will not be "
-            "replaced automatically: a fresh sandbox is empty, so swapping one in "
-            "would discard any uncommitted work while looking like a recovery. Stop "
-            "calling sandbox tools and tell the user their sandbox stopped "
-            "responding, naming it, and that retriggering the thread retries the "
-            "same sandbox while a new thread gets a fresh one."
+            "The sandbox connection was rejected before this command started, so "
+            "nothing ran and nothing changed."
         ),
     }
+    sandbox_id = extract_sandbox_id(str(e))
     if sandbox_id:
         data["sandbox_id"] = sandbox_id
     tool_name = _extract_tool_name(request)
     if tool_name:
         data["name"] = tool_name
     return data
+
+
+def _is_sandbox_unreachable(e: Exception) -> bool:
+    """Whether the failure means the sandbox itself did not answer.
+
+    A connection error does, once the two that carry their own meaning are
+    excluded: a retryable rejection never started the command, and a server
+    reload left it running. ``ResourceNotFoundError`` qualifies only for the
+    sandbox itself — a missing file is a tool-local failure.
+    """
+    if isinstance(e, SandboxConnectionError):
+        return not isinstance(e, SandboxServerReloadError)
+    return isinstance(e, ResourceNotFoundError) and e.resource_type == "sandbox"
 
 
 def _get_tool_call_id(request: ToolCallRequest) -> str | None:
@@ -121,11 +135,11 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
     return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
-def _sandbox_unreachable_tool_message(
-    e: SandboxClientError,
+def _transient_sandbox_tool_message(
+    e: Exception,
     request: ToolCallRequest,
 ) -> ToolMessage:
-    data = _to_sandbox_unreachable_payload(e, request)
+    data = _to_transient_sandbox_payload(e, request)
     return ToolMessage(
         content=json.dumps(data),
         tool_call_id=_get_tool_call_id(request),
@@ -148,6 +162,10 @@ class ToolErrorMiddleware(AgentMiddleware):
     Catches any exception thrown during a tool call and converts it into
     a ToolMessage with status="error" so the LLM can see the failure and
     self-correct, rather than crashing the entire agent run.
+
+    An unreachable sandbox is the one error that is not survivable, so it is
+    re-raised instead: every later sandbox call would fail the same way and
+    notify the user again.
     """
 
     state_schema = AgentState
@@ -159,11 +177,20 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return await handler(request)
-        except SandboxClientError as e:
+        except Exception as e:
+            # The command never started, so nothing is known to be wrong with the
+            # sandbox: ending the run here would turn a gateway blip into an
+            # abandoned one.
+            if is_transient_sandbox_error(e):
+                logger.warning(
+                    "Transient sandbox error during tool call; request=%r", request, exc_info=True
+                )
+                return _transient_sandbox_tool_message(e, request)
+            if not _is_sandbox_unreachable(e):
+                logger.exception("Error during tool call handling; request=%r", request)
+                return _generic_error_tool_message(e, request)
             logger.exception("Sandbox error during tool call handling; request=%r", request)
             thread_id = _get_thread_id(request)
-            if thread_id:
-                clear_sandbox_backend(thread_id)
             config = _get_run_config(request)
             if config is not None:
                 try:
@@ -172,7 +199,6 @@ class ToolErrorMiddleware(AgentMiddleware):
                     )
                 except Exception:
                     logger.exception("Failed to notify user of dead sandbox for %s", thread_id)
-            return _sandbox_unreachable_tool_message(e, request)
-        except Exception as e:
-            logger.exception("Error during tool call handling; request=%r", request)
-            return _generic_error_tool_message(e, request)
+            # Every later sandbox call would hit the same dead backend and notify
+            # again, so end the run here now that the user has been told once.
+            raise

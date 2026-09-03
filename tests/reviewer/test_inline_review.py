@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.github import webhook as github_webhooks
 from agent.review.inline_review import (
     CLAIM_GRACE,
     INLINE_REVIEW_NAMESPACE,
@@ -17,7 +18,6 @@ from agent.review.inline_review import (
 )
 from agent.tools import inline_review as inline_review_tools
 from agent.webhooks import common as webhook_common
-from agent.webhooks import github as github_webhooks
 from tests.conftest import FakeStore
 
 THREAD_ID = "11111111-1111-1111-1111-111111111111"

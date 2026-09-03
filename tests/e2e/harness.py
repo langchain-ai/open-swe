@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 from html import escape
@@ -64,7 +65,7 @@ from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.utils.slack import lookup_slack_thread_id  # noqa: E402
+from agent.slack.client import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -79,6 +80,17 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
 
 fakes.seed_bare_remotes()
+
+if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
+    # Playwright closes the webServer stdin pipe when its runner exits.
+    def _exit_when_orphaned() -> None:
+        try:
+            sys.stdin.buffer.read()
+        except Exception:
+            return
+        os._exit(0)
+
+    threading.Thread(target=_exit_when_orphaned, daemon=True).start()
 
 
 # --- control + Slack compose (the test driver) -----------------------------
@@ -218,7 +230,7 @@ async def control_forget_slack_events() -> JSONResponse:
     A redelivery normally lands on a different instance than the original, which
     only has the LangGraph store to dedupe on. Clearing the local cache lets the
     E2E exercise that path instead of the same-process fast path."""
-    from agent.utils.slack_events import reset_slack_event_claims
+    from agent.slack.events import reset_slack_event_claims
 
     reset_slack_event_claims()
     return JSONResponse({"ok": True})

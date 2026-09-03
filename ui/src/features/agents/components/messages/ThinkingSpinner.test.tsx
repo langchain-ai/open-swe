@@ -33,7 +33,9 @@ describe("ThinkingSpinner", () => {
       />
     )
 
-    expect(screen.getByText("Setting up sandbox…")).toBeTruthy()
+    expect(
+      screen.getByText("Agent is setting up the environment…")
+    ).toBeTruthy()
     expect(screen.queryByText("Exploring · AgentTurn.tsx")).toBeNull()
   })
 })

@@ -14,7 +14,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, TypedDict, cast
 
-from . import ttl_cache
+from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 

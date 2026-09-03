@@ -12,9 +12,9 @@ from typing import Any, cast
 
 from langgraph.config import get_config
 
-from ..review.diff import changed_files, materialize_review_diff
-from ..review.findings import clip_suggestion, normalize_finding_title
-from ..review.inline_review import (
+from agent.review.diff import changed_files, materialize_review_diff
+from agent.review.findings import clip_suggestion, normalize_finding_title
+from agent.review.inline_review import (
     MAX_INLINE_FINDINGS,
     REVIEWS,
     Confidence,
@@ -24,8 +24,8 @@ from ..review.inline_review import (
     Severity,
     format_findings_markdown,
 )
-from ..runtime import get_cached_sandbox_backend
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
+from agent.sandboxes.lifecycle import get_cached_sandbox_backend
+from agent.sandboxes.paths import resolve_sandbox_work_dir
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ async def fetch_self_review_diff() -> dict[str, Any]:
 
     sandbox_backend = get_cached_sandbox_backend(_thread_id())
     try:
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         repo_dir = await _resolve_repo_dir(sandbox_backend, work_dir, review.repo)
         if repo_dir is None:
             return {"success": False, "error": "no git checkout found in the sandbox"}
