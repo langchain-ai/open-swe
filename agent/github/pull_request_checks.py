@@ -15,10 +15,9 @@ private PR is never served to an account that lacks access.
 import re
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 import httpx
-from typing_extensions import TypedDict
 
 from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
 
@@ -26,8 +25,6 @@ CheckState = Literal["failing", "passing", "pending", "unknown"]
 PrState = Literal["open", "draft", "merged", "closed"]
 
 
-# typing_extensions, not typing: pydantic rejects a stdlib TypedDict in a
-# response model below Python 3.12, and this project supports 3.11.
 class PullRequestState(TypedDict):
     """Live GitHub truth for one PR: check verdict plus open/merged/closed."""
 
@@ -166,7 +163,7 @@ async def get_pull_request_check_states(
             )
             response.raise_for_status()
             payload = response.json()
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         payload = None
 
     data = payload.get("data") if isinstance(payload, Mapping) else None

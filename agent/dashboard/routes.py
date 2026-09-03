@@ -330,7 +330,7 @@ class _RepoScopedRecord(Protocol):
 RepoRecordT = TypeVar("RepoRecordT", bound=_RepoScopedRecord)
 
 
-async def _filter_repo_models_for_user(
+async def _filter_repo_models_for_user[RepoRecordT: _RepoScopedRecord](
     login: str,
     records: list[RepoRecordT],
 ) -> list[RepoRecordT]:
