@@ -3,7 +3,7 @@
 - **Authors:** Mukil Loganathan (`@langchain-infra`), Ramon Nogueira (`@ramon-langchain`)
 - **Status:** Draft
 - **Created:** 2026-09-03
-- **Discussion:** https://github.com/langchain-ai/open-swe/discussions/TBD
+- **Discussion:** https://github.com/langchain-ai/open-swe/pull/2425
 - **Supersedes:** None
 
 ## Summary
