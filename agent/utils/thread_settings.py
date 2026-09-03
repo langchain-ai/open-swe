@@ -14,6 +14,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any, TypedDict
 
+from pydantic import TypeAdapter, ValidationError
+
 from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
@@ -30,24 +32,16 @@ class ThreadSettings(TypedDict, total=False):
     repo_instructions: str | None
 
 
+_THREAD_SETTINGS_ADAPTER = TypeAdapter(ThreadSettings)
+
+
 def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettings, bool]:
-    """Remove participant settings that are now resolved for each message."""
-    value = ThreadSettings()
-    if isinstance(settings.get("model_id"), str):
-        value["model_id"] = settings["model_id"]
-    if "effort" in settings and (settings["effort"] is None or isinstance(settings["effort"], str)):
-        value["effort"] = settings["effort"]
-    if isinstance(settings.get("subagent_model_id"), str):
-        value["subagent_model_id"] = settings["subagent_model_id"]
-    if "subagent_effort" in settings and (
-        settings["subagent_effort"] is None or isinstance(settings["subagent_effort"], str)
-    ):
-        value["subagent_effort"] = settings["subagent_effort"]
-    if "repo_instructions" in settings and (
-        settings["repo_instructions"] is None or isinstance(settings["repo_instructions"], str)
-    ):
-        value["repo_instructions"] = settings["repo_instructions"]
-    return value, set(value) != set(settings)
+    """Remove obsolete or invalid settings from stored thread metadata."""
+    try:
+        value = _THREAD_SETTINGS_ADAPTER.validate_python(settings, strict=True)
+    except ValidationError:
+        return {}, bool(settings)
+    return value, value != settings
 
 
 def _cache_key(thread_id: str) -> str:

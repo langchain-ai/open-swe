@@ -168,24 +168,28 @@ def _get_sandbox_proxy_config(
     return dict(proxy_config) if isinstance(proxy_config, dict) else None
 
 
-def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
-    """Merge ``extra`` into the JSON body of the sandbox-create request.
+class _CreatePayloadClient(AsyncSandboxClient):
+    def __init__(self, *, extra: dict[str, Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._extra = extra
 
-    The SDK's ``create_sandbox`` builds a fixed payload with no passthrough, so
-    wrap the HTTP client's ``post`` to inject the fields on the ``POST /boxes``
-    request only (other endpoints post to ``/boxes/{name}/...``).
-    """
-    if not extra:
-        return
-    original_post = client._http.post
+    async def create_sandbox(self, *args: Any, **kwargs: Any) -> Any:
+        if not self._extra:
+            return await super().create_sandbox(*args, **kwargs)
+        original_post = self._http.post
 
-    async def post_with_extra(url: Any, *args: Any, **kwargs: Any) -> Any:
-        payload = kwargs.get("json")
-        if str(url).endswith("/boxes") and isinstance(payload, dict):
-            kwargs["json"] = {**payload, **extra}
-        return await original_post(url, *args, **kwargs)
+        async def post_with_extra(url: Any, **post_kwargs: Any) -> Any:
+            payload = post_kwargs.get("json")
+            if isinstance(payload, dict):
+                post_kwargs["json"] = {**payload, **self._extra}
+            return await original_post(url, **post_kwargs)
 
-    client._http.__dict__["post"] = post_with_extra
+        dynamic_http: Any = self._http
+        dynamic_http.post = post_with_extra
+        try:
+            return await super().create_sandbox(*args, **kwargs)
+        finally:
+            dynamic_http.post = original_post
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
@@ -454,11 +458,15 @@ async def _configure_github_proxy(
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 
-def get_async_sandbox_client() -> AsyncSandboxClient:
+def get_async_sandbox_client(
+    extra: dict[str, Any] | None = None,
+) -> AsyncSandboxClient:
     """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
-    return AsyncSandboxClient(
-        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
-    )
+    api_key = _get_sandbox_api_key()
+    api_endpoint = _get_sandbox_api_endpoint()
+    if extra is not None:
+        return _CreatePayloadClient(extra=extra, api_key=api_key, api_endpoint=api_endpoint)
+    return AsyncSandboxClient(api_key=api_key, api_endpoint=api_endpoint)
 
 
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
@@ -496,10 +504,7 @@ async def create_langsmith_sandbox_from_params(
     if not isinstance(timeout, int):
         raise ValueError("timeout must be an integer")
 
-    async with AsyncSandboxClient(
-        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
-    ) as client:
-        _install_create_extra_fields(client, extra_params)
+    async with get_async_sandbox_client(extra_params) as client:
         sandbox = await client.create_sandbox(**sdk_params)
         if wait_for_ready is False:
             sandbox = await client.wait_for_sandbox(sandbox.name, timeout=timeout)
@@ -765,18 +770,19 @@ class LangSmithProvider(SandboxProvider):
         if kwargs:
             msg = f"Received unsupported arguments: {list(kwargs.keys())}"
             raise TypeError(msg)
-        async with AsyncSandboxClient(
-            api_key=self._api_key, api_endpoint=self._api_endpoint
+        extra_fields = _merge_sandbox_create_extra_fields(create_params)
+        if not sandbox_id and not (snapshot_id or ""):
+            extra_fields["snapshot_id"] = ""
+        async with _CreatePayloadClient(
+            api_key=self._api_key,
+            api_endpoint=self._api_endpoint,
+            extra=extra_fields,
         ) as client:
             if sandbox_id:
                 sandbox = await _reuse_existing_sandbox(client, sandbox_id)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
             effective_snapshot_id = snapshot_id or ""
-            extra_fields = _merge_sandbox_create_extra_fields(create_params)
-            if not effective_snapshot_id:
-                extra_fields["snapshot_id"] = ""
-            _install_create_extra_fields(client, extra_fields)
 
             try:
                 sandbox = await _create_sandbox_with_retry(
