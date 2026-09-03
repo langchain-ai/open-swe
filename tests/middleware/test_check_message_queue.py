@@ -12,7 +12,8 @@ from agent.middleware.check_message_queue import (
 
 
 class _QueuedItem:
-    def __init__(self, value: dict[str, Any]) -> None:
+    def __init__(self, key: str, value: dict[str, Any]) -> None:
+        self.key = key
         self.value = value
 
 
@@ -23,10 +24,18 @@ class _FakeStore:
 
     async def aget(self, namespace: tuple[str, ...], key: str) -> _QueuedItem | None:
         value = self.items.get((namespace, key))
-        return _QueuedItem(value) if value is not None else None
+        return _QueuedItem(key, value) if value is not None else None
+
+    async def asearch(self, namespace: tuple[str, ...], *, limit: int) -> list[_QueuedItem]:
+        return [
+            _QueuedItem(key, value)
+            for (item_namespace, key), value in self.items.items()
+            if item_namespace == namespace
+        ][:limit]
 
     async def adelete(self, namespace: tuple[str, ...], key: str) -> None:
         self.deleted.append((namespace, key))
+        self.items.pop((namespace, key), None)
 
 
 def _envelope(message: dict) -> str:
@@ -89,6 +98,40 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     # prompt would say the same thing while invalidating the whole cached prefix.
     assert "rendered_system_prompt" not in result
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
+
+
+@pytest.mark.asyncio
+async def test_check_message_queue_consumes_append_only_messages_in_order() -> None:
+    store = _FakeStore(
+        {
+            (("queue", "thread-1"), "message:00000000000000000002-b"): {
+                "content": "second",
+                "created_at_ns": 2,
+            },
+            (("queue", "thread-1"), "message:00000000000000000001-a"): {
+                "content": "first",
+                "created_at_ns": 1,
+            },
+        }
+    )
+
+    with (
+        patch(
+            "agent.middleware.check_message_queue.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+    ):
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}), MagicMock()
+        )
+
+    assert result is not None
+    assert "first\n\nsecond" in _envelope(result["messages"][-1])
+    assert store.deleted == [
+        (("queue", "thread-1"), "message:00000000000000000001-a"),
+        (("queue", "thread-1"), "message:00000000000000000002-b"),
+    ]
 
 
 @pytest.mark.asyncio
