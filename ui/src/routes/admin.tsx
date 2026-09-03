@@ -30,7 +30,11 @@ import {
 } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { slackAppManifestJson } from "@/lib/slack-manifest"
+import {
+  slackAppManifestJson,
+  slackManifestPlaceholdersRemain,
+} from "@/lib/slack-manifest"
+import { dashboardApiBase } from "@/lib/api-base"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -61,7 +65,10 @@ function AdminPage() {
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
-      <SlackIntegrationSection />
+      <SlackIntegrationSection
+        backendUrl={session.data.api_base_url}
+        providerId={session.data.github_oauth_provider_id}
+      />
 
       <LLMGatewaySection />
 
@@ -103,7 +110,13 @@ function AdminPage() {
 const SLACK_CODE_CHANNELS_STORAGE_KEY =
   "open-swe.admin.slack-code-channels-enabled"
 
-export function SlackIntegrationSection() {
+export function SlackIntegrationSection({
+  backendUrl,
+  providerId,
+}: {
+  backendUrl?: string
+  providerId?: string
+}) {
   const [enabled, setEnabled] = useState(false)
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle"
@@ -122,9 +135,20 @@ export function SlackIntegrationSection() {
     window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
   }
 
+  const manifestConfig = {
+    backendUrl:
+      backendUrl ||
+      dashboardApiBase() ||
+      (typeof window === "undefined" ? "" : window.location.origin),
+    providerId,
+  }
+  const placeholdersRemain = slackManifestPlaceholdersRemain(manifestConfig)
+
   const copyManifest = async () => {
     try {
-      await navigator.clipboard.writeText(slackAppManifestJson(enabled))
+      await navigator.clipboard.writeText(
+        slackAppManifestJson(enabled, manifestConfig)
+      )
       setCopyState("copied")
     } catch {
       setCopyState("failed")
@@ -158,8 +182,9 @@ export function SlackIntegrationSection() {
             App manifest
           </span>
           <span className="text-xs/relaxed text-muted-foreground">
-            Copy the selected manifest, replace its URL/provider placeholders,
-            then paste it into your Slack app settings and reinstall the app.
+            {placeholdersRemain
+              ? "Copy the selected manifest, replace its remaining <…> placeholders, then paste it into your Slack app settings and reinstall the app."
+              : "Copy the selected manifest — its URLs and provider ID are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
           </span>
         </div>
         <Button size="sm" variant="outline" onClick={() => void copyManifest()}>

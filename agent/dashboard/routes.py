@@ -353,6 +353,10 @@ def _api_base_url() -> str:
     return v
 
 
+def _github_oauth_provider_id() -> str:
+    return os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "").strip()
+
+
 def _frontend_base_url() -> str:
     v = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     if not v:
@@ -573,6 +577,8 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "avatar_url": session.get("avatar_url"),
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
+        "github_oauth_provider_id": _github_oauth_provider_id(),
+        "api_base_url": os.environ.get("DASHBOARD_API_BASE_URL", "").strip().rstrip("/"),
     }
 
 

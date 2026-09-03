@@ -32,7 +32,12 @@ describe("SlackIntegrationSection", () => {
   })
 
   it("defaults to legacy Slack and copies Code Channels only when enabled", async () => {
-    render(<SlackIntegrationSection />)
+    render(
+      <SlackIntegrationSection
+        backendUrl="https://openswe.example.com"
+        providerId="acme-github-oauth"
+      />
+    )
 
     const toggle = screen.getByRole("switch", {
       name: /^Slack Code Channels/,
@@ -41,8 +46,13 @@ describe("SlackIntegrationSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy manifest" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
-    expect(JSON.parse(writeText.mock.calls[0]![0]).features).not.toHaveProperty(
-      "code_channels"
+    const legacy = JSON.parse(writeText.mock.calls[0]![0])
+    expect(legacy.features).not.toHaveProperty("code_channels")
+    expect(legacy.settings.event_subscriptions.request_url).toBe(
+      "https://openswe.example.com/webhooks/slack"
+    )
+    expect(legacy.oauth_config.redirect_urls).toContain(
+      "https://smith.langchain.com/host-oauth-callback/acme-github-oauth"
     )
 
     fireEvent.click(toggle)

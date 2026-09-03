@@ -19,7 +19,28 @@ const LEGACY_BOT_SCOPES = [
 
 const LEGACY_BOT_EVENTS = ["app_mention", "message.im", "message.mpim"]
 
-export function slackAppManifest(codeChannelsEnabled = false) {
+const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
+const PROVIDER_ID_PLACEHOLDER = "<your-provider-id>"
+
+export interface SlackManifestConfig {
+  backendUrl?: string | null
+  providerId?: string | null
+}
+
+export function slackManifestPlaceholdersRemain(
+  config: SlackManifestConfig = {}
+): boolean {
+  return !config.backendUrl?.trim() || !config.providerId?.trim()
+}
+
+export function slackAppManifest(
+  codeChannelsEnabled = false,
+  config: SlackManifestConfig = {}
+) {
+  const backendUrl =
+    config.backendUrl?.trim().replace(/\/+$/, "") || BACKEND_URL_PLACEHOLDER
+  const providerId = config.providerId?.trim() || PROVIDER_ID_PLACEHOLDER
+
   const features: Record<string, unknown> = {
     app_home: {
       home_tab_enabled: false,
@@ -31,8 +52,7 @@ export function slackAppManifest(codeChannelsEnabled = false) {
   if (codeChannelsEnabled) {
     features.code_channels = {
       enabled: true,
-      slash_command_url:
-        "https://<your-backend-url>/webhooks/slack/code-channel-commands",
+      slash_command_url: `${backendUrl}/webhooks/slack/code-channel-commands`,
     }
   }
 
@@ -45,8 +65,8 @@ export function slackAppManifest(codeChannelsEnabled = false) {
     features,
     oauth_config: {
       redirect_urls: [
-        "https://smith.langchain.com/host-oauth-callback/<your-provider-id>",
-        "http://localhost:2024/dashboard/api/slack/callback",
+        `https://smith.langchain.com/host-oauth-callback/${providerId}`,
+        `${backendUrl}/dashboard/api/slack/callback`,
       ],
       scopes: {
         bot: codeChannelsEnabled
@@ -56,7 +76,7 @@ export function slackAppManifest(codeChannelsEnabled = false) {
     },
     settings: {
       event_subscriptions: {
-        request_url: "https://<your-ngrok-url>/webhooks/slack",
+        request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
           ? [
               "app_mention",
@@ -71,7 +91,7 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       },
       interactivity: {
         is_enabled: true,
-        request_url: "https://<your-ngrok-url>/webhooks/slack/interactivity",
+        request_url: `${backendUrl}/webhooks/slack/interactivity`,
       },
       org_deploy_enabled: false,
       socket_mode_enabled: false,
@@ -80,6 +100,9 @@ export function slackAppManifest(codeChannelsEnabled = false) {
   }
 }
 
-export function slackAppManifestJson(codeChannelsEnabled = false): string {
-  return JSON.stringify(slackAppManifest(codeChannelsEnabled), null, 2)
+export function slackAppManifestJson(
+  codeChannelsEnabled = false,
+  config: SlackManifestConfig = {}
+): string {
+  return JSON.stringify(slackAppManifest(codeChannelsEnabled, config), null, 2)
 }
