@@ -19,6 +19,10 @@ const BACKEND_PREFIXES = [
   "/fake-slack",
   "/static",
   "/ok",
+  // LangGraph's own API, which the harness serves alongside the fake SaaS. The
+  // app router has no route under either, so fronting them shadows nothing.
+  "/threads",
+  "/store",
 ]
 
 // The harness-owned subset: everything but the two a deployment fronts and
