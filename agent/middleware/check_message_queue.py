@@ -25,7 +25,11 @@ from agent.input_messages import (
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
-from agent.utils.thread_ops import MAX_QUEUED_MESSAGES, PENDING_MESSAGES_KEY, QUEUE_MESSAGE_KEY_PREFIX
+from agent.utils.thread_ops import (
+    MAX_QUEUED_MESSAGES,
+    PENDING_MESSAGES_KEY,
+    QUEUE_MESSAGE_KEY_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
