@@ -3,7 +3,7 @@ import os
 import httpx
 from fastapi import HTTPException, Request
 
-from .team_settings import get_team_transcription_model
+from agent.dashboard.team_settings import get_team_transcription_model
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 SUPPORTED_AUDIO_TYPES = {

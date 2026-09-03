@@ -8,14 +8,14 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from .input_messages import (
+from agent.input_messages import (
     dynamic_context_hash,
     human_input,
     input_message_text,
     wrap_system_prompt,
 )
-from .source_context import SourceContext
-from .utils.slack_code_channels import CODE_CHANNEL_SESSION_TS, rename_session
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, rename_session
+from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 

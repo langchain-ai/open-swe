@@ -5,13 +5,13 @@ from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
-from .utils.authorship import (
+from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
     build_pr_attribution_footer,
 )
-from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
 

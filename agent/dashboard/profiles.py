@@ -17,20 +17,19 @@ from typing import Any
 
 from pydantic import BaseModel, model_validator
 
-from agent.store import delete_value, get_value, now_iso, put_value, search_values
-
-from ..encryption import decrypt_token, encrypt_token
-from .oauth import (
+from agent.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
 )
-from .options import (
+from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     model_supports_effort,
     provider_fallback_pair,
 )
+from agent.encryption import decrypt_token, encrypt_token
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 logger = logging.getLogger(__name__)
 

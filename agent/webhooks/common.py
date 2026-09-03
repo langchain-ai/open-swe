@@ -14,65 +14,43 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from agent.auth.github_app import (
-    get_github_app_installation_token,  # noqa: F401
-    get_github_app_installation_token_with_expiry,
-)
-from agent.auth.resolve import (
-    is_bot_token_only_mode,
-    resolve_github_token_from_email,
-)
-from agent.auth.thread_token import (
-    cache_github_token_for_thread,
-    get_github_token_from_thread,
-    github_token_principal,
-    invalidate_cached_github_token,
-)
-from agent.source_context import SourceContext
-
-from ..dashboard.agent_overrides import (
+from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
-from ..dashboard.agent_usage import update_agent_pr_usage_from_webhook
-from ..dashboard.enabled_repos import is_review_repo_enabled
-from ..dashboard.oauth import build_settings_url
-from ..dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
-from ..dashboard.profiles import (  # noqa: F401
+from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
+from agent.dashboard.enabled_repos import is_review_repo_enabled
+from agent.dashboard.oauth import build_settings_url
+from agent.dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
+from agent.dashboard.profiles import (  # noqa: F401
     get_profile,
     get_valid_access_token,
     has_access_token_record,
 )
-from ..dashboard.team_settings import (
+from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
 )
-from ..dashboard.user_mappings import (
+from agent.dashboard.user_mappings import (
     email_for_login,  # noqa: F401
     login_for_email,  # noqa: F401
     login_for_slack_id,  # noqa: F401
 )
-from ..dashboard.user_mappings import (
+from agent.dashboard.user_mappings import (
     refresh_cache as refresh_user_mapping_cache,  # noqa: F401
 )
-from ..dashboard.workflow_approval import decide_workflow_push_approval
-from ..dispatch import dispatch_agent_run
-from ..review.findings import (
-    REVIEWER_THREAD_KIND,
-    Finding,
-    append_finding_interaction,  # noqa: F401
-    set_reviewer_thread_metadata,
+from agent.dashboard.workflow_approval import decide_workflow_push_approval
+from agent.dispatch import dispatch_agent_run
+from agent.github.app import (
+    get_github_app_installation_token,  # noqa: F401
+    get_github_app_installation_token_with_expiry,
 )
-from ..review.findings import (
-    list_findings as list_reviewer_findings,  # noqa: F401
+from agent.github.checks import (  # noqa: F401
+    complete_review_check_run,
+    create_review_check_run,
 )
-from ..review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
-from ..review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
-from ..utils.comments import get_recent_comments  # noqa: F401
-from ..utils.dashboard_links import dashboard_thread_url  # noqa: F401
-from ..utils.github_checks import complete_review_check_run, create_review_check_run  # noqa: F401
-from ..utils.github_comments import (
+from agent.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
     derive_pr_state,
@@ -86,19 +64,32 @@ from ..utils.github_comments import (
     sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
 )
-from ..utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.json_types import ThreadLike, as_thread_dict
-from ..utils.linear import post_linear_trace_comment  # noqa: F401
-from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
-from ..utils.multimodal import (
-    dedupe_urls,  # noqa: F401
-    extract_image_urls,  # noqa: F401
-    fetch_image_block,  # noqa: F401
-    vision_not_supported_warning,  # noqa: F401
+from agent.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
+from agent.github.thread_token import (
+    cache_github_token_for_thread,
+    get_github_token_from_thread,
+    github_token_principal,
+    invalidate_cached_github_token,
 )
-from ..utils.repo import extract_repo_from_text
-from ..utils.slack import (
+from agent.github.token import (
+    is_bot_token_only_mode,
+    resolve_github_token_from_email,
+)
+from agent.linear.client import post_linear_trace_comment  # noqa: F401
+from agent.linear.comments import get_recent_comments  # noqa: F401
+from agent.linear.team_repo_map import LINEAR_TEAM_TO_REPO
+from agent.review.findings import (
+    REVIEWER_THREAD_KIND,
+    Finding,
+    append_finding_interaction,  # noqa: F401
+    set_reviewer_thread_metadata,
+)
+from agent.review.findings import (
+    list_findings as list_reviewer_findings,  # noqa: F401
+)
+from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
+from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
     _parse_ts,  # noqa: F401
@@ -126,7 +117,7 @@ from ..utils.slack import (
     update_slack_message,
     verify_slack_signature,
 )
-from ..utils.slack_code_channels import (  # noqa: F401
+from agent.slack.code_channels import (  # noqa: F401
     CODE_CHANNEL_SESSION_TS,
     DEFAULT_CODE_CHANNEL_COMMANDS,
     get_block_suggestions,
@@ -136,18 +127,29 @@ from ..utils.slack_code_channels import (  # noqa: F401
     set_context_bar,
     set_session_status,
 )
-from ..utils.slack_events import (
+from agent.slack.events import (
     claim_slack_event,
     slack_event_already_seen,
 )
-from ..utils.slack_feedback import (
+from agent.slack.feedback import (
     FEEDBACK_REACTIONS,
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
-from ..utils.slack_stop import process_agent_session_stopped, process_slack_stop_reaction
-from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
-from ..utils.thread_participants import (
+from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
+from agent.source_context import SourceContext
+from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.utils.json_types import ThreadLike, as_thread_dict
+from agent.utils.multimodal import (
+    dedupe_urls,  # noqa: F401
+    extract_image_urls,  # noqa: F401
+    fetch_image_block,  # noqa: F401
+    vision_not_supported_warning,  # noqa: F401
+)
+from agent.utils.repo import extract_repo_from_text
+from agent.utils.thread_ops import queue_message_for_thread  # noqa: F401
+from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
     PARTICIPANT_LOGINS_KEY,
     merge_participants,

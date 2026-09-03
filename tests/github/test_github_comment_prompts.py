@@ -7,8 +7,9 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from agent.dashboard.agent_overrides import profile_draft_prs
+from agent.github import comments as github_comments
+from agent.github import webhook as github_webhooks
 from agent.prompt import construct_sender_context, construct_system_prompt
-from agent.utils import github_comments
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -16,7 +17,6 @@ from agent.utils.authorship import (
     add_pr_collaboration_note,
     resolve_triggering_user_identity,
 )
-from agent.webhooks import github as github_webhooks
 
 _BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
 
@@ -90,7 +90,7 @@ def test_construct_system_prompt_includes_operational_safeguards() -> None:
 
 
 def test_slack_information_only_response_uses_single_output_path() -> None:
-    from agent.tools.slack_thread_reply import slack_thread_reply
+    from agent.slack.tools.thread_reply import slack_thread_reply
 
     prompt = construct_system_prompt(working_dir="/workspace", source="slack", slack_context=True)
     tool_guidance = " ".join((slack_thread_reply.__doc__ or "").split())

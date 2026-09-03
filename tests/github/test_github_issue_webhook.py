@@ -11,15 +11,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent.api.app import app
+from agent.github import webhook as github_webhooks
+from agent.slack import client as slack_utils
+from agent.slack import webhook as slack_webhooks
+from agent.slack.client import GitHubPrRef
+from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
-from agent.tools import request_pr_review as request_pr_review_tool
-from agent.utils import slack as slack_utils
-from agent.utils.slack import GitHubPrRef
 from agent.webhooks import common as webhook_common
-from agent.webhooks import github as github_webhooks
-from agent.webhooks import slack as slack_webhooks
 
-request_pr_review_module = importlib.import_module("agent.tools.request_pr_review")
+request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"

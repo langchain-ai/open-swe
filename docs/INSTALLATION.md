@@ -299,7 +299,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 **Configure team-to-repo mapping:**
 
-Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/utils/linear_team_repo_map.py`:
+Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/linear/team_repo_map.py`:
 
 ```python
 LINEAR_TEAM_TO_REPO = {

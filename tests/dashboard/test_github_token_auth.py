@@ -8,7 +8,8 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from agent.dashboard import github_token_auth, oauth, routes
+from agent.dashboard import oauth, routes
+from agent.github import token_auth as github_token_auth
 
 
 def _request(

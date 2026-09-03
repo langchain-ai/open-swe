@@ -2,7 +2,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.integrations.langsmith import get_async_sandbox_client
+from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
