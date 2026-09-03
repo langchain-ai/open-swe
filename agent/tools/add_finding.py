@@ -134,7 +134,7 @@ async def add_finding(
     if isinstance(diff_text, str) and diff_text:
         from agent.review.diff import extract_diff_hunk
 
-        diff_hunk = extract_diff_hunk(diff_text, file, start_line, end_line)
+        diff_hunk = extract_diff_hunk(diff_text, file, start_line, end_line, side=_cast_side(side))
 
     clipped_suggestion, suggestion_dropped = clip_suggestion(suggestion)
 
