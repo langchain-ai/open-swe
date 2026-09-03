@@ -175,6 +175,7 @@ class ThreadMessageBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     plan_mode: bool = False
+    expect_active: bool = False
 
 
 class ThreadResolveBody(BaseModel):
@@ -1834,16 +1835,13 @@ async def send_dashboard_message(
     active = await get_thread_active_status(thread_id)
     if active is None:
         raise HTTPException(502, "could not determine whether thread is active")
-
-    active_model = (
-        (
-            _metadata_model_id(metadata)
-            if active
-            else chosen_model or _metadata_model_id({**metadata, **metadata_update})
+    if not active and not body.expect_active:
+        raise HTTPException(
+            409,
+            "thread is idle; start a run via the stream commands endpoint",
         )
-        if body.images
-        else None
-    )
+
+    active_model = _metadata_model_id(metadata) if body.images else None
     content = _user_message_content(prompt, body.images, model_id=active_model)
     if pr_linked or metadata.get("auto_resolved_by_prs") is True:
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -1864,41 +1862,6 @@ async def send_dashboard_message(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    if not active:
-        configurable = await _build_dashboard_configurable(
-            thread_id,
-            login,
-            {**metadata, **metadata_update},
-            overrides={
-                "agent_model_id": chosen_model,
-                "agent_effort": chosen_effort,
-                "plan_mode": body.plan_mode or None,
-            },
-        )
-        try:
-            run = await dispatch_agent_run(
-                thread_id,
-                content,
-                configurable,
-                source=_DASHBOARD_SOURCE,
-                client=client,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to start dashboard follow-up for thread %s", thread_id)
-            raise HTTPException(502, "failed to start follow-up run") from exc
-        run_id = run.get("run_id") if isinstance(run, dict) else None
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={
-                "latest_run_status": "pending",
-                "latest_run_id": run_id,
-                "updated_at_ms": _now_ms(),
-            },
-        )
-        thread = await client.threads.get(thread_id)
-        summary = await _thread_summary(thread)
-        summary["queuedMessages"] = []
-        return summary
 
     queue_payload: dict[str, Any] = {
         "id": f"queued-{uuid.uuid4()}",

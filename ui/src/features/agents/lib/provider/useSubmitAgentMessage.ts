@@ -2,12 +2,24 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
-import { agentsApi } from "@/features/agents/lib/api"
+import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
 import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+
+function messageContent(vars: SendAgentMessageVariables) {
+  const text = vars.content.trim()
+  const imageBlocks =
+    vars.images?.map((image) => ({
+      type: "image",
+      base64: image.base64,
+      mime_type: image.mimeType,
+      ...(image.fileName ? { file_name: image.fileName } : {}),
+    })) ?? []
+  return [...imageBlocks, ...(text ? [{ type: "text", text }] : [])]
+}
 
 function appendQueuedMessage(
   thread: AgentThread,
@@ -42,8 +54,9 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
  * User-initiated sends from the prompt bar. Prefer this over calling `stream.submit`
  * directly so cache updates and the busy-thread queue path stay consistent.
  *
- * When the thread is busy, the endpoint queues the follow-up. When stop wins a
- * race and leaves it idle, the same endpoint starts a durable replacement run.
+ * When the thread is idle, submits a new run via the stream commands endpoint.
+ * When it is busy, persists the follow-up to the dashboard queue. If stop wins
+ * after that persistence, the endpoint starts a replacement run for the queue.
  *
  * @param threadId - The ID of the thread to submit the message to.
  * @returns The mutation object.
@@ -80,10 +93,6 @@ export function useSubmitAgentMessage(threadId: string) {
         })
       }
       await waitForCancellation()
-      // `optimistic` is only safe when a run is known to be in flight. Idle
-      // sends still probe `/messages` first (a run may have started elsewhere),
-      // and that probe answers 409 — showing the bubble up front would flash a
-      // "Queued next" card for the length of the round trip.
       const queue = async (optimistic: boolean) => {
         const queuedAt = Date.now()
         const queuedId = `queued-${queuedAt}-${Math.random().toString(36).slice(2)}`
@@ -94,15 +103,21 @@ export function useSubmitAgentMessage(threadId: string) {
               prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
           )
         if (optimistic) showQueued()
-        let queuedThread: AgentThread
         try {
-          queuedThread = await agentsApi.queueMessage(threadId, {
+          const queuedThread = await agentsApi.queueMessage(threadId, {
             content: vars.content,
             images: vars.images,
             model_id: vars.model_id,
             effort: vars.effort,
             plan_mode: vars.plan_mode,
+            expect_active: optimistic,
           })
+          if (queuedThread?.queuedMessages?.length) {
+            queryClient.setQueryData(
+              agentThreadKeys.detail(threadId),
+              queuedThread
+            )
+          }
         } catch (error) {
           if (optimistic) {
             queryClient.setQueryData<AgentThread>(
@@ -112,19 +127,38 @@ export function useSubmitAgentMessage(threadId: string) {
           }
           throw error
         }
-        if (queuedThread?.queuedMessages?.length) {
-          queryClient.setQueryData(
-            agentThreadKeys.detail(threadId),
-            queuedThread
-          )
-        }
       }
 
       const thread = queryClient.getQueryData<AgentThread>(
         agentThreadKeys.detail(threadId)
       )
       const optimistic = stream.isLoading || thread?.status === "running"
-      await queue(optimistic)
+      try {
+        await queue(optimistic)
+        return
+      } catch (error) {
+        if (!(error instanceof AgentsApiError) || error.status !== 409) {
+          throw error
+        }
+      }
+
+      const configurable: Record<string, unknown> = {}
+      if (vars.model_id && vars.effort) {
+        configurable.agent_model_id = vars.model_id
+        configurable.agent_effort = vars.effort
+      }
+      if (vars.plan_mode) configurable.plan_mode = true
+      const config =
+        Object.keys(configurable).length > 0 ? { configurable } : undefined
+
+      void stream
+        .submit(
+          { messages: [{ type: "human", content: messageContent(vars) }] },
+          { config }
+        )
+        .catch(() => {
+          setAgentThreadStatus(queryClient, threadId, "error")
+        })
     },
     onSuccess: () => {
       setAgentThreadStatus(queryClient, threadId, "running")

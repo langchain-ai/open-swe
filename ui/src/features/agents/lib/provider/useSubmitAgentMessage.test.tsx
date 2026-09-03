@@ -13,6 +13,16 @@ import {
   agentThreadKeys,
 } from "@/features/agents/lib/queries"
 
+const mocks = vi.hoisted(() => ({
+  AgentsApiError: class extends Error {
+    constructor(
+      public readonly status: number,
+      message: string
+    ) {
+      super(message)
+    }
+  },
+}))
 const stream = {
   isLoading: false,
   submit: vi.fn(() => Promise.resolve(undefined)),
@@ -25,15 +35,10 @@ vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
 const queueMessage = vi.fn()
 
 vi.mock("@/features/agents/lib/api", () => ({
-  agentsApi: { queueMessage: () => queueMessage() },
-  AgentsApiError: class extends Error {
-    constructor(
-      public readonly status: number,
-      message: string
-    ) {
-      super(message)
-    }
+  agentsApi: {
+    queueMessage: (...args: Array<unknown>) => queueMessage(...args),
   },
+  AgentsApiError: mocks.AgentsApiError,
 }))
 
 const THREAD_ID = "thread-1"
@@ -101,12 +106,20 @@ beforeEach(() => {
 })
 
 describe("useSubmitAgentMessage", () => {
-  it("never flashes a queued bubble when the send starts a new run", async () => {
-    queueMessage.mockResolvedValueOnce({ queuedMessages: [] })
+  it("falls back to the connected stream when the thread is idle", async () => {
+    queueMessage.mockRejectedValueOnce(
+      new mocks.AgentsApiError(409, "thread is idle")
+    )
     const { client, queuedCounts, result } = setup()
 
     await result.current.mutateAsync({ content: "hi", images: [] })
 
+    expect(stream.submit).toHaveBeenCalledWith(
+      {
+        messages: [{ type: "human", content: [{ type: "text", text: "hi" }] }],
+      },
+      { config: undefined }
+    )
     expect(sidebarStatus(client)).toBe("running")
     expect(queuedCounts.every((count) => count === 0)).toBe(true)
   })
@@ -126,6 +139,18 @@ describe("useSubmitAgentMessage", () => {
 
     expect(queuedMessages(client)).toHaveLength(1)
     expect(stream.submit).not.toHaveBeenCalled()
+  })
+
+  it("sends the active hint while queueing a known running thread", async () => {
+    stream.isLoading = true
+    const { result } = setup()
+
+    await result.current.mutateAsync({ content: "hi", images: [] })
+
+    expect(queueMessage).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.objectContaining({ expect_active: true })
+    )
   })
 
   it("shows the queued bubble immediately while this client streams", async () => {

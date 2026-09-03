@@ -32,6 +32,7 @@ export interface ThreadMessageRequest {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  expect_active?: boolean
 }
 
 export interface ScheduleCreateRequest {

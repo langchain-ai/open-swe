@@ -94,28 +94,15 @@ async def test_dashboard_followup_on_slack_thread_uses_dashboard_source(
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
     monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
 
-    dispatched: dict[str, Any] = {}
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "thread-1",
+            "octocat",
+            thread_api.ThreadMessageBody(content="continue in web"),
+            email="octocat@example.com",
+        )
 
-    async def fake_dispatch(
-        thread_id: str,
-        content: Any,
-        configurable: dict[str, Any],
-        **kwargs: Any,
-    ) -> dict[str, str]:
-        dispatched.update(thread_id=thread_id, content=content, configurable=configurable)
-        return {"run_id": "replacement-run"}
-
-    monkeypatch.setattr(thread_api, "dispatch_agent_run", fake_dispatch)
-
-    result = await thread_api.send_dashboard_message(
-        "thread-1",
-        "octocat",
-        thread_api.ThreadMessageBody(content="continue in web"),
-        email="octocat@example.com",
-    )
-
-    assert dispatched["content"] == "continue in web"
-    assert result["queuedMessages"] == []
+    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -148,38 +135,65 @@ async def test_dashboard_followup_sends_image_content_blocks(
         lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
     )
 
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "thread-1",
+            "octocat",
+            thread_api.ThreadMessageBody(
+                content="describe this",
+                model_id="vision-model",
+                effort="medium",
+                images=[
+                    thread_api.DashboardImageBody(
+                        base64="aW1hZ2U=",
+                        mimeType="image/png",
+                        fileName="screenshot.png",
+                    )
+                ],
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_expected_active_dispatches_when_stop_won(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {"source": "dashboard", "github_login": "octocat"}
+    client = _FakeClient(metadata)
+    queued_messages: list[object] = []
+    dispatched: list[dict[str, Any]] = []
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append(message_content)
+        return True
+
     async def fake_dispatch(
         thread_id: str,
         content: Any,
         configurable: dict[str, Any],
         **kwargs: Any,
     ) -> dict[str, str]:
-        assert content == [
-            {"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"},
-            {"type": "text", "text": "describe this"},
-        ]
+        dispatched.append({"content": content, "input": kwargs.get("input")})
         return {"run_id": "replacement-run"}
 
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
     monkeypatch.setattr(thread_api, "dispatch_agent_run", fake_dispatch)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
+    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
 
-    result = await thread_api.send_dashboard_message(
+    await thread_api.send_dashboard_message(
         "thread-1",
         "octocat",
-        thread_api.ThreadMessageBody(
-            content="describe this",
-            model_id="vision-model",
-            effort="medium",
-            images=[
-                thread_api.DashboardImageBody(
-                    base64="aW1hZ2U=",
-                    mimeType="image/png",
-                    fileName="screenshot.png",
-                )
-            ],
-        ),
+        thread_api.ThreadMessageBody(content="survive stop", expect_active=True),
     )
 
-    assert result["queuedMessages"] == []
+    assert len(queued_messages) == 1
+    assert dispatched == [{"content": None, "input": {"messages": []}}]
 
 
 @pytest.mark.asyncio
@@ -520,27 +534,14 @@ async def test_dashboard_followup_preserves_explicit_repo_less_thread(
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
     monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
 
-    dispatched: list[dict[str, Any]] = []
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "thread-1",
+            "octocat",
+            thread_api.ThreadMessageBody(content="continue in web"),
+        )
 
-    async def fake_dispatch(
-        thread_id: str,
-        content: Any,
-        configurable: dict[str, Any],
-        **kwargs: Any,
-    ) -> dict[str, str]:
-        dispatched.append(configurable)
-        return {"run_id": "replacement-run"}
-
-    monkeypatch.setattr(thread_api, "dispatch_agent_run", fake_dispatch)
-
-    await thread_api.send_dashboard_message(
-        "thread-1",
-        "octocat",
-        thread_api.ThreadMessageBody(content="continue in web"),
-    )
-
-    assert dispatched
-    assert dispatched[0]["repo_explicitly_none"] is True
+    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -559,23 +560,11 @@ async def test_dashboard_followup_without_repo_metadata_allows_team_default(
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
     monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
 
-    dispatched: list[dict[str, Any]] = []
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "thread-1",
+            "octocat",
+            thread_api.ThreadMessageBody(content="continue in web"),
+        )
 
-    async def fake_dispatch(
-        thread_id: str,
-        content: Any,
-        configurable: dict[str, Any],
-        **kwargs: Any,
-    ) -> dict[str, str]:
-        dispatched.append(configurable)
-        return {"run_id": "replacement-run"}
-
-    monkeypatch.setattr(thread_api, "dispatch_agent_run", fake_dispatch)
-
-    await thread_api.send_dashboard_message(
-        "thread-1",
-        "octocat",
-        thread_api.ThreadMessageBody(content="continue in web"),
-    )
-
-    assert dispatched
+    assert exc_info.value.status_code == 409

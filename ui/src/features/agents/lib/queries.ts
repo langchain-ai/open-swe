@@ -821,7 +821,13 @@ export function useCancelAgentThread(threadId: string) {
     mutationKey: agentThreadKeys.cancel(threadId),
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
-      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId),
+        (current) =>
+          thread.queuedMessages === undefined && current?.queuedMessages?.length
+            ? { ...thread, queuedMessages: current.queuedMessages }
+            : thread
+      )
       invalidateAgentThreadLists(queryClient)
     },
   })
