@@ -613,7 +613,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <NotePencilIcon className="size-4" />
           New Thread
@@ -653,10 +653,9 @@ export function AgentsSidebar({
                       key={item.to}
                       to={item.to}
                       onClick={layout.closeOnMobile}
-                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
                       activeProps={{
-                        className:
-                          "bg-sidebar-row-hover !text-foreground font-medium",
+                        className: "bg-sidebar-row-hover font-medium",
                       }}
                     >
                       <Icon className="size-4" />
@@ -924,7 +923,7 @@ function ProjectGroup({
 
   return (
     <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground">
+      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover">
         <button
           type="button"
           onClick={onToggleCollapsed}
