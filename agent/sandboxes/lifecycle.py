@@ -15,7 +15,14 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
-from agent.dashboard.environments import SandboxResources, resolve_environment
+from agent.dashboard.environments import (
+    INIT_SCRIPT_PATH,
+    Environment,
+    SandboxResources,
+    init_script_timeout,
+    resolve_environment,
+    script_command,
+)
 from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
@@ -62,6 +69,7 @@ class SandboxCreateConfig:
     snapshot_id: str | None
     resources: SandboxResources = field(default_factory=SandboxResources)
     create_params: dict[str, Any] = field(default_factory=dict)
+    environment: Environment | None = None
 
     @classmethod
     async def resolve(cls, environment_slug: str | None = None) -> "SandboxCreateConfig":
@@ -72,11 +80,36 @@ class SandboxCreateConfig:
             snapshot_id=environment.ready_snapshot_id or await get_admin_base_snapshot_id(),
             resources=environment.sandbox_resources(),
             create_params=environment.sandbox_create_params(),
+            environment=environment,
         )
 
     @property
     def proxy_config(self) -> dict[str, Any] | None:
         return _get_sandbox_proxy_config(self.create_params)
+
+    async def run_init_script(
+        self, sandbox_backend: SandboxBackendProtocol, thread_id: str | None
+    ) -> None:
+        """Run the environment's per-sandbox init script on a freshly created box.
+
+        Never fatal: the snapshot is already usable, so a failing init script
+        degrades freshness rather than the run. It sits on the critical path
+        before the first model call, hence the bounded timeout.
+        """
+        if self.environment is None or not self.environment.init_script:
+            return
+        async with aphase(thread_id, "sandbox.init_script"):
+            result = await sandbox_backend.aexecute(
+                script_command(self.environment.init_script, INIT_SCRIPT_PATH),
+                timeout=init_script_timeout(),
+            )
+        if result.exit_code != 0:
+            logger.warning(
+                "Environment %s init script exited %s: %s",
+                self.environment.slug,
+                result.exit_code,
+                (result.output or "")[-2000:],
+            )
 
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
@@ -120,6 +153,7 @@ async def _create_sandbox_with_proxy(
                 base_proxy_config=proxy_config,
             )
 
+    await config.run_init_script(sandbox_backend, thread_id)
     return sandbox_backend
 
 

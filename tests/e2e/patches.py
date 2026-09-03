@@ -97,9 +97,28 @@ def apply() -> None:
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that
     # provider's snapshot API faked above, the E2E's local sandbox is capturable.
-    environments_store._require_capture_support = lambda: None
+    environments_store.require_capture_support = lambda: None
+
+    # A refresh boots its own builder to run the scripts in. There is no platform
+    # to boot one from here, so the local provider stands in and nothing is
+    # reclaimed afterwards; the scripts, the capture and the record all run for real.
+    from agent.dashboard import environment_refresh
+
+    environment_refresh.require_capture_support = lambda: None
+    environment_refresh._create_builder_sandbox = _fake_builder_sandbox
+    environment_refresh._release_builder_sandbox = _release_nothing
 
     _applied = True
+
+
+async def _fake_builder_sandbox(_record: object) -> object:
+    from agent.sandboxes.providers.registry import create_sandbox
+
+    return await create_sandbox()
+
+
+async def _release_nothing(_sandbox_id: str) -> None:
+    return None
 
 
 class _FakeSnapshot:
@@ -109,8 +128,23 @@ class _FakeSnapshot:
         self.status = "ready"
 
 
+class _FakeSandboxHttp:
+    """The SDK's HTTP client, which the capture path wraps to add the tag."""
+
+    def __init__(self) -> None:
+        self.body: dict[str, object] = {}
+
+    async def post(self, url: str, **kwargs: object) -> object:  # noqa: ARG002
+        payload = kwargs.get("json")
+        self.body = dict(payload) if isinstance(payload, dict) else {}
+        return None
+
+
 class _FakeSandboxClient:
     """Stands in for ``AsyncSandboxClient`` for snapshot calls only."""
+
+    def __init__(self) -> None:
+        self._http = _FakeSandboxHttp()
 
     async def __aenter__(self) -> "_FakeSandboxClient":
         return self
@@ -128,7 +162,14 @@ class _FakeSandboxClient:
     ) -> _FakeSnapshot:
         import fakes
 
-        return _FakeSnapshot(fakes.record_snapshot_capture(sandbox_name, name), name)
+        await self._http.post(f"/v2/sandboxes/boxes/{sandbox_name}/snapshot", json={"name": name})
+        tag = self._http.body.get("tag")
+        return _FakeSnapshot(
+            fakes.record_snapshot_capture(
+                sandbox_name, name, tag if isinstance(tag, str) else None
+            ),
+            name,
+        )
 
     async def delete_snapshot(self, snapshot_id: str) -> None:
         import fakes

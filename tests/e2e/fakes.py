@@ -393,10 +393,12 @@ DELETED_SNAPSHOTS: list[str] = []
 _snapshot_seq = [0]
 
 
-def record_snapshot_capture(sandbox_id: str, name: str) -> str:
+def record_snapshot_capture(sandbox_id: str, name: str, tag: str | None = None) -> str:
     _snapshot_seq[0] += 1
     snapshot_id = f"snap-{_snapshot_seq[0]}"
-    SNAPSHOTS.append({"snapshot_id": snapshot_id, "name": name, "sandbox_id": sandbox_id})
+    SNAPSHOTS.append(
+        {"snapshot_id": snapshot_id, "name": name, "tag": tag, "sandbox_id": sandbox_id}
+    )
     return snapshot_id
 
 

@@ -245,7 +245,7 @@ async def test_save_environment_rejects_clear_sizing_with_values(
 
 
 @pytest.mark.asyncio
-async def test_capture_tool_requires_a_saved_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refresh_tool_requires_a_saved_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with (
         patch(
@@ -256,10 +256,155 @@ async def test_capture_tool_requires_a_saved_environment(monkeypatch: pytest.Mon
             env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
         ),
     ):
-        result = await env_tools.capture_environment_snapshot("base")
+        result = await env_tools.refresh_environment("base")
 
     assert result["ok"] is False
     assert "save_environment" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_refuses_an_environment_with_no_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    run_refresh = AsyncMock()
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS,
+            "get",
+            new_callable=AsyncMock,
+            return_value=Environment(slug="base"),
+        ),
+        patch.object(env_tools.refresh, "refresh_environment", run_refresh),
+    ):
+        result = await env_tools.refresh_environment("base")
+
+    assert result["ok"] is False
+    assert "setup_script" in result["error"]
+    run_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_waits_and_hands_back_the_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The admin thread iterates on the script, so it needs the error, not a job id."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    outcome = {
+        "status": "failed",
+        "script": "init",
+        "error": "init script exited 1",
+        "log": "fatal: not a git repository",
+    }
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS,
+            "get",
+            new_callable=AsyncMock,
+            return_value=Environment(slug="base", setup_script="make setup"),
+        ),
+        patch.object(
+            env_tools.refresh,
+            "refresh_environment",
+            new_callable=AsyncMock,
+            return_value=outcome,
+        ),
+    ):
+        result = await env_tools.refresh_environment("base")
+
+    assert result["ok"] is False
+    assert result["failed_script"] == "init"
+    assert result["error"] == "init script exited 1"
+    assert result["log"] == "fatal: not a git repository"
+
+
+@pytest.mark.asyncio
+async def test_saving_a_setup_script_runs_it_and_registers_the_cron(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    record = Environment(slug="base", name="base", setup_script="make setup")
+    ensure_cron = AsyncMock(return_value="cron-1")
+    run_refresh = AsyncMock(return_value={"status": "success", "seconds": 12, "log": "done"})
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS,
+            "get",
+            new_callable=AsyncMock,
+            side_effect=[None, record],
+        ),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "create", new_callable=AsyncMock, return_value=record
+        ),
+        patch.object(env_tools.refresh, "ensure_refresh_cron", ensure_cron),
+        patch.object(env_tools.refresh, "refresh_environment", run_refresh),
+    ):
+        result = await env_tools.save_environment("base", "prompt", setup_script="make setup")
+
+    assert result["ok"] is True
+    assert result["environment"]["setup_script"] == "make setup"
+    assert result["refresh"] == {"ok": True, "refreshed": True, "seconds": 12, "log": "done"}
+    run_refresh.assert_awaited_once_with("base")
+    ensure_cron.assert_awaited_once_with("base")
+
+
+@pytest.mark.asyncio
+async def test_a_prompt_only_save_does_not_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rebuild costs minutes; only a changed script has earned one."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    existing = Environment(slug="base", name="base", setup_script="make setup")
+    run_refresh = AsyncMock()
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=existing
+        ),
+        patch.object(
+            env_tools.store.ENVIRONMENTS,
+            "apply_update",
+            new_callable=AsyncMock,
+            return_value=existing.model_copy(update={"prompt": "new"}),
+        ),
+        patch.object(env_tools.refresh, "ensure_refresh_cron", AsyncMock()),
+        patch.object(env_tools.refresh, "refresh_environment", run_refresh),
+    ):
+        result = await env_tools.save_environment("base", "new")
+
+    assert result["ok"] is True
+    assert "refresh" not in result
+    run_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rebuild_makes_the_save_report_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    record = Environment(slug="base", name="base", setup_script="make setup")
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
+        ),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "create", new_callable=AsyncMock, return_value=record
+        ),
+        patch.object(env_tools.refresh, "ensure_refresh_cron", AsyncMock()),
+        patch.object(
+            env_tools.refresh,
+            "refresh_environment",
+            new_callable=AsyncMock,
+            return_value={"status": "failed", "script": "setup", "error": "boom", "log": "gcc: no"},
+        ),
+    ):
+        result = await env_tools.save_environment("base", "prompt", setup_script="make setup")
+
+    assert result["ok"] is False
+    assert result["refresh"]["failed_script"] == "setup"
+    assert result["refresh"]["log"] == "gcc: no"
 
 
 # --- prompt wiring ---
@@ -285,6 +430,7 @@ def test_admin_section_only_for_admin_threads() -> None:
     prompt = construct_system_prompt(working_dir="/workspace", admin_environments=True)
     assert "### Admin Thread: Workspace Setup" in prompt
     assert "optional VM sizing" in prompt
+    assert "`setup_script`" in prompt
     assert "Every environment must include `rg` and `gh`" in prompt
     assert "direct them to an admin thread" not in prompt
 
