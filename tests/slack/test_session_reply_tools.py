@@ -37,11 +37,9 @@ def _patch(
     monkeypatch.setattr(module, "post_session_message", post)
     monkeypatch.setattr(module, "get_active_slack_thread", active)
     monkeypatch.setattr(module, "get_langgraph_client", lambda: object())
-    monkeypatch.setattr(
-        module,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-1", "slack_thread": location}},
-    )
+    config = {"configurable": {"thread_id": "thread-1", "slack_thread": location}}
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr("agent.slack.session.get_config", lambda: config)
     return captured
 
 

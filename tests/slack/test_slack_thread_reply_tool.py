@@ -19,6 +19,12 @@ def _config() -> dict[str, Any]:
     }
 
 
+def _patch_config(monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]) -> None:
+    """Both readers of the run's config: the typed one, and the raw run id."""
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr("agent.slack.session.get_config", lambda: config)
+
+
 @pytest.fixture
 def posted(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {}
@@ -28,7 +34,7 @@ def posted(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return {"success": True, "message_ts": "2.0"}
 
     monkeypatch.setattr(slack_reply_tool, "post_session_message", post)
-    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    _patch_config(monkeypatch, _config())
     return captured
 
 
@@ -49,10 +55,9 @@ async def test_code_channel_reply_stays_in_user_started_thread(
         assert thread_id == "thread-code"
         return {"channel_id": "C-code", "thread_ts": "0"}
 
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "get_config",
-        lambda: {
+    _patch_config(
+        monkeypatch,
+        {
             "configurable": {
                 "thread_id": "thread-code",
                 "slack_thread": {
@@ -85,7 +90,7 @@ async def test_slack_thread_reply_surfaces_a_failed_post(
     async def post(**_kwargs: Any) -> dict[str, Any]:
         return failure
 
-    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    _patch_config(monkeypatch, _config())
     monkeypatch.setattr(slack_reply_tool, "post_session_message", post)
 
     assert await slack_reply_tool.slack_thread_reply("hello") == failure
@@ -116,7 +121,7 @@ async def test_slack_thread_reply_passes_the_executing_run_and_user(
     config = _config()
     config["run_id"] = UUID("12345678-1234-5678-1234-567812345678")
     config["configurable"]["slack_thread"]["triggering_user_id"] = "active-user"
-    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    _patch_config(monkeypatch, config)
 
     assert await slack_reply_tool.slack_thread_reply("hello") == {"success": True}
     assert posted["run_id"] == "12345678-1234-5678-1234-567812345678"

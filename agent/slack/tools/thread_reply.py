@@ -1,6 +1,5 @@
 from typing import Annotated, Any
 
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.run_config import RunConfig
@@ -50,8 +49,7 @@ async def slack_thread_reply(
     To mention/tag a user, use Slack's mention format: <@USER_ID>.
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
     Example: <@U06KD8BFY95> will tag that user in the message."""
-    config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
     client = get_langgraph_client()
@@ -91,7 +89,7 @@ async def slack_thread_reply(
         blocks=blocks or option_blocks(message, options),
         usage=summarize_run_usage(state),
         agent_thread_id=surface.viewer_link_thread_id(str(thread_id or "")),
-        run_id=current_run_id(config),
+        run_id=current_run_id(),
         triggering_user=triggering_user_id(cfg),
     )
     return {"success": True} if result.get("success") else result

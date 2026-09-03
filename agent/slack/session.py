@@ -6,8 +6,9 @@ recognizes have one implementation.
 """
 
 import json
-from collections.abc import Mapping
 from typing import Any
+
+from langgraph.config import get_config
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -20,7 +21,9 @@ from agent.utils.run_usage import RunUsageSummary
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 
-def current_run_id(config: Mapping[str, Any]) -> str | None:
+def current_run_id() -> str | None:
+    """This run's id, which rides at the top of the config as well as inside it."""
+    config = get_config()
     candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
     return next((str(candidate) for candidate in candidates if candidate), None)
 

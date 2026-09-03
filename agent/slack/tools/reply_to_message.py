@@ -1,6 +1,5 @@
 from typing import Annotated, Any
 
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.run_config import RunConfig
@@ -32,8 +31,7 @@ async def slack_reply_to_message(
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
     bullet lists with "• ", ```code blocks```, > blockquotes.
     To mention a user, use <@USER_ID>."""
-    config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     client = get_langgraph_client()
     active = await get_active_slack_thread(
@@ -65,6 +63,6 @@ async def slack_reply_to_message(
         message=message,
         usage=summarize_run_usage(state),
         agent_thread_id=surface.viewer_link_thread_id(str(thread_id or "")),
-        run_id=current_run_id(config),
+        run_id=current_run_id(),
         triggering_user=triggering_user_id(cfg),
     )

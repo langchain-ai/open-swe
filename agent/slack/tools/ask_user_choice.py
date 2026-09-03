@@ -1,6 +1,5 @@
 from typing import Annotated, Any
 
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.run_config import RunConfig
@@ -41,8 +40,7 @@ async def ask_user_choice(
     Format `question` using Slack's mrkdwn format, NOT standard Markdown:
     *bold*, _italic_, <url|link text>, bullet lists with "• ".
     """
-    config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not question.strip():
         return {"success": False, "error": "question is required"}
@@ -78,6 +76,6 @@ async def ask_user_choice(
         blocks=option_blocks(question, choices),
         usage=summarize_run_usage(state),
         agent_thread_id=surface.viewer_link_thread_id(str(thread_id or "")),
-        run_id=current_run_id(config),
+        run_id=current_run_id(),
         triggering_user=triggering_user_id(cfg),
     )

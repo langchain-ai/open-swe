@@ -74,10 +74,6 @@ ORIGIN = {
 }
 
 
-def _exec(output: str = "", exit_code: int = 0) -> SimpleNamespace:
-    return SimpleNamespace(output=output, exit_code=exit_code)
-
-
 def _opened(channel_id: str = "C-code") -> SimpleNamespace:
     """What `open_code_channel` hands back once the session is running."""
     return SimpleNamespace(
@@ -95,16 +91,10 @@ def _opened(channel_id: str = "C-code") -> SimpleNamespace:
 
 @pytest.fixture
 def creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """A clean origin checkout and a code channel Slack agrees to create."""
-    backend = AsyncMock()
-    backend.aexecute.side_effect = lambda command, **_: (
-        _exec("agent/fix-flaky") if "rev-parse" in command else _exec()
-    )
+    """A code channel Slack agrees to create."""
     calls: dict[str, Any] = {
         "open_code_channel": AsyncMock(),
-        "get_sandbox_backend": AsyncMock(return_value=backend),
         "get_slack_permalink": AsyncMock(return_value="https://slack.example/p1"),
-        "resolve_repo_dir": AsyncMock(return_value="/workspace/open-swe"),
     }
     calls["open_code_channel"].side_effect = lambda _client, **_kwargs: _opened()
     for name, mock in calls.items():
@@ -117,14 +107,19 @@ def creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     }
     for name, mock in chrome.items():
         monkeypatch.setattr(surfaces_slack, name, mock)
-    return {**calls, **chrome, "backend": backend}
+    return {**calls, **chrome}
 
 
 def _client() -> SimpleNamespace:
     return SimpleNamespace(
         threads=SimpleNamespace(
             get=AsyncMock(
-                return_value={"metadata": {"pr_urls": ["https://github.com/a/b/pull/7"]}}
+                return_value={
+                    "metadata": {
+                        "branch_name": "agent/fix-flaky",
+                        "pr_urls": ["https://github.com/a/b/pull/7"],
+                    }
+                }
             ),
             update=AsyncMock(),
         )
@@ -234,47 +229,6 @@ async def test_create_needs_instructions_for_a_session_with_no_history(
     assert result["success"] is False
     assert "instructions is required" in result["error"]
     creation["open_code_channel"].assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    ("dirty", "unpushed", "expected"),
-    [
-        ("M agent/server.py", "", "uncommitted changes"),
-        ("", "abc1234", "commits that were never pushed"),
-        ("M agent/server.py", "abc1234", "uncommitted changes and commits that were never pushed"),
-    ],
-)
-async def test_create_refuses_to_abandon_work_the_new_sandbox_cannot_see(
-    creation: dict[str, Any], dirty: str, unpushed: str, expected: str
-) -> None:
-    def fake_exec(command: str, **_: Any) -> SimpleNamespace:
-        if "rev-parse" in command:
-            return _exec("agent/fix-flaky")
-        if "status --porcelain" in command:
-            return _exec(dirty)
-        return _exec(unpushed)
-
-    creation["backend"].aexecute.side_effect = fake_exec
-
-    result = await _create()
-
-    assert result["success"] is False
-    assert expected in result["error"]
-    assert "Push it first" in result["error"]
-    creation["open_code_channel"].assert_not_awaited()
-
-
-async def test_create_allows_a_checkout_it_cannot_inspect(creation: dict[str, Any]) -> None:
-    """An unreachable sandbox is not evidence of unpushed work."""
-    creation["get_sandbox_backend"].side_effect = RuntimeError("sandbox is gone")
-
-    result = await _create()
-
-    assert result["success"] is True
-    assert (
-        "No branch was started yet."
-        in (creation["open_code_channel"].await_args_list[0].kwargs["content"])
-    )
 
 
 @pytest.mark.parametrize("retryable", [True, False])

@@ -1,13 +1,9 @@
 import logging
-import shlex
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
 from typing import Any, Literal
 
 from agent.run_config import RunConfig
-from agent.sandboxes.paths import resolve_repo_dir
-from agent.sandboxes.state import get_sandbox_backend
 from agent.slack.client import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -92,11 +88,11 @@ async def manage_code_channel(
     takes the task over from here. That session begins with no history and its own
     fresh sandbox, so `instructions` must describe the task on its own: what to do,
     what has been decided, and anything learned so far that it would otherwise have
-    to rediscover. Push any local work before calling it — commit and push to a
-    branch, creating one if the work is still on the default branch — because the
-    new sandbox is a clean checkout and cannot see this one's working tree; `create`
-    refuses while this checkout holds unpushed work. After it succeeds, tell the
-    user which channel is handling the task and stop working on it here.
+    to rediscover. Commit and push any local work first — create a branch for it if
+    it is still on the default branch — because the new sandbox is a clean checkout
+    and cannot see this one's working tree, so anything unpushed is lost to it.
+    After it succeeds, tell the user which channel is handling the task and stop
+    working on it here.
 
     `invite` is who starts out in that channel, as Slack user ids, and it needs at
     least one person — a channel nobody is in is a channel nobody reads. Include
@@ -297,50 +293,15 @@ async def _resolve_content(content: str, file_path: str) -> tuple[str, str | Non
         return "", "file_path must contain valid UTF-8 text"
 
 
-@dataclass(frozen=True)
-class _OriginRepoState:
-    """What the origin sandbox holds that a fresh sandbox would not."""
-
-    branch: str = ""
-    unshared: str = ""
-
-
-async def _origin_repo_state(thread_id: str, repo: dict[str, Any] | None) -> _OriginRepoState:
-    """The origin checkout's branch, and anything in it that GitHub has not seen.
-
-    Best effort: a sandbox that cannot answer is not a reason to refuse the
-    channel, so an unreachable sandbox or a missing checkout reads as clean.
-    """
-    repo_name = str((repo or {}).get("name") or "")
-    if not repo_name:
-        return _OriginRepoState()
-    try:
-        backend = await get_sandbox_backend(thread_id)
-        repo_dir = shlex.quote(await resolve_repo_dir(backend, repo_name))
-        branch = await backend.aexecute(f"git -C {repo_dir} rev-parse --abbrev-ref HEAD")
-        dirty = await backend.aexecute(f"git -C {repo_dir} status --porcelain")
-        # Commits on no remote branch: committed to a local branch and never pushed.
-        unpushed = await backend.aexecute(
-            f"git -C {repo_dir} log --branches --not --remotes --format=%h"
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not read the origin checkout for %s", thread_id, exc_info=True)
-        return _OriginRepoState()
-    reasons: list[str] = []
-    if dirty.exit_code == 0 and dirty.output.strip():
-        reasons.append("uncommitted changes")
-    if unpushed.exit_code == 0 and unpushed.output.strip():
-        reasons.append("commits that were never pushed")
-    return _OriginRepoState(
-        branch=branch.output.strip() if branch.exit_code == 0 else "",
-        unshared=" and ".join(reasons),
-    )
-
-
 def _handoff_repo(repo: dict[str, Any] | None) -> dict[str, str] | None:
     owner = str((repo or {}).get("owner") or "")
     name = str((repo or {}).get("name") or "")
     return {"owner": owner, "name": name} if owner and name else None
+
+
+def _origin_branch(metadata: Mapping[str, Any] | None) -> str:
+    branch = (metadata or {}).get("branch_name")
+    return branch.strip() if isinstance(branch, str) else ""
 
 
 def _pull_request_url(metadata: Mapping[str, Any] | None) -> str:
@@ -357,7 +318,7 @@ async def _handoff_content(
     title: str,
     instructions: str,
     repo: dict[str, Any] | None,
-    repo_state: _OriginRepoState,
+    branch: str,
     pull_request_url: str,
     origin: Mapping[str, Any],
     origin_thread_id: str,
@@ -374,9 +335,7 @@ async def _handoff_content(
     )
 
     checkout_lines = [
-        f"- Branch to continue from: `{repo_state.branch}`"
-        if repo_state.branch
-        else "- No branch was started yet.",
+        f"- Branch to continue from: `{branch}`" if branch else "- No branch was started yet.",
         "- This session has its own fresh sandbox. The originating session's working "
         "tree is not shared with it, so everything you need is on the branch above, "
         "in the pull request, or in the task description.",
@@ -481,18 +440,6 @@ async def _create(
         active.get("thread_ts") or ""
     )
 
-    repo_state = await _origin_repo_state(thread_id, repo)
-    if repo_state.unshared:
-        return {
-            "success": False,
-            "error": (
-                f"This session's checkout has {repo_state.unshared}. The code channel gets a "
-                "fresh sandbox and cannot see this working tree, so that work would be lost. "
-                "Push it first — create a branch for it if there is none yet — then open the "
-                "channel."
-            ),
-        }
-
     try:
         thread = await client.threads.get(thread_id=thread_id)
         origin_metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
@@ -507,7 +454,7 @@ async def _create(
                 title=title,
                 instructions=instructions,
                 repo=repo,
-                repo_state=repo_state,
+                branch=_origin_branch(origin_metadata),
                 pull_request_url=_pull_request_url(origin_metadata),
                 origin=active,
                 origin_thread_id=thread_id,
