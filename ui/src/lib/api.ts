@@ -127,6 +127,7 @@ export interface ModelOption {
   efforts: Array<string>
   default_effort: string
   supports_images: boolean
+  can_be_default?: boolean
   context_window?: number | null
 }
 

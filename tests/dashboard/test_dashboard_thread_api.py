@@ -16,7 +16,7 @@ from agent.dashboard.ttft import AssistantTextObservation
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
-_FABLE = "anthropic:claude-fable-5"
+_FABLE = "anthropic:claude-fable-5-1"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
