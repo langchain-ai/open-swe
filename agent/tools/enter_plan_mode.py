@@ -5,10 +5,10 @@ from typing import Annotated
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId
-from langgraph.config import get_config
 from langgraph.types import Command
 
 from agent.dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
+from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,4 @@ async def enter_plan_mode(
 
 
 def _thread_id_from_config() -> str | None:
-    try:
-        config = get_config()
-    except Exception:
-        return None
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
-    return str(thread_id) if thread_id else None
+    return RunConfig.from_runtime().thread_id or None

@@ -7,6 +7,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.run_config import RunConfig
+
 logger = logging.getLogger(__name__)
 
 # Treat tokens with <= this many seconds remaining as expired so we re-auth
@@ -125,21 +127,12 @@ def _cached_token_if_fresh(
 
 
 def _thread_id_from_config(run_config: Mapping[str, Any]) -> str | None:
-    configurable = run_config.get("configurable", {})
-    if not isinstance(configurable, Mapping):
-        return None
-    thread_id = configurable.get("thread_id")
-    return thread_id if isinstance(thread_id, str) and thread_id else None
+    return RunConfig.from_config(run_config).thread_id or None
 
 
 def _principal_from_config(run_config: Mapping[str, Any]) -> str | None:
-    configurable = run_config.get("configurable", {})
-    if not isinstance(configurable, Mapping):
-        return None
-    return github_token_principal(
-        login=configurable.get("github_login"),
-        email=configurable.get("user_email"),
-    )
+    cfg = RunConfig.from_config(run_config)
+    return github_token_principal(login=cfg.github_login, email=cfg.user_email)
 
 
 def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:

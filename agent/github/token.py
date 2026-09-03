@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 import httpx
 import jwt
-from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
@@ -20,6 +19,7 @@ from agent.github.thread_token import (
     github_token_principal,
 )
 from agent.linear.client import comment_on_linear_issue
+from agent.run_config import RunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -246,12 +246,10 @@ async def leave_failure_comment(
     message: str,
 ) -> None:
     """Leave an auth failure comment for the appropriate source."""
-    config = get_config()
-    configurable = config.get("configurable", {})
+    cfg = RunConfig.from_runtime()
 
     if source == "linear":
-        linear_issue = configurable.get("linear_issue", {})
-        issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
+        issue_id = cfg.linear_issue.id if cfg.linear_issue else None
         if issue_id:
             logger.info(
                 "Posting auth failure comment to Linear issue %s (source=%s)",
@@ -261,12 +259,10 @@ async def leave_failure_comment(
             await comment_on_linear_issue(issue_id, message)
         return
     if source == "slack":
-        slack_thread = configurable.get("slack_thread", {})
-        thread_id = configurable.get("thread_id")
         active = await get_active_slack_thread(
             get_client(url=LANGGRAPH_URL),
-            thread_id if isinstance(thread_id, str) else None,
-            slack_thread if isinstance(slack_thread, dict) else None,
+            cfg.thread_id,
+            cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
         channel_id = active.get("channel_id") if active else None
         thread_ts = active.get("thread_ts") if active else None
@@ -295,7 +291,7 @@ async def leave_failure_comment(
                     "Open SWE couldn't resolve your GitHub account for this run. Sign in "
                     f"with GitHub and connect your Slack account in {link}, then mention it again."
                 ),
-                agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+                agent_thread_id=cfg.thread_id,
             )
         return
     if source in ("github", "github_push"):
@@ -355,9 +351,8 @@ async def resolve_token_from_email(
     source: str,
 ) -> tuple[str, str | None]:
     """Resolve and cache a GitHub token based on user email."""
-    config = get_config()
-    configurable = config.get("configurable", {})
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.from_runtime()
+    thread_id = cfg.thread_id
     if not thread_id:
         raise ValueError("GitHub auth failed: missing thread_id")
     if not email:
@@ -412,8 +407,8 @@ async def resolve_token_from_email(
         await leave_failure_comment(source, message)
         raise ValueError(f"No token found: {error}")
 
-    github_login = configurable.get("github_login")
-    if isinstance(github_login, str) and github_login.strip():
+    github_login = cfg.github_login
+    if github_login and github_login.strip():
         _schedule_legacy_auth_migration_impact(source, github_login.strip())
     else:
         logger.info(
@@ -428,7 +423,7 @@ async def resolve_token_from_email(
         token,
         expires_at=expires_at if isinstance(expires_at, str) else None,
         principal=github_token_principal(
-            login=configurable.get("github_login"),
+            login=cfg.github_login,
             email=email,
         ),
     )
@@ -491,22 +486,20 @@ async def resolve_github_token(
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
-    configurable = config.get("configurable")
-    if not isinstance(configurable, Mapping):
-        raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing configurable state")
-    source = configurable.get("source")
+    cfg = RunConfig.from_config(config)
+    source = cfg.source
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
 
-    github_login = configurable.get("github_login")
+    github_login = cfg.github_login
 
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
     # for sources that carry a mapped GitHub login (Slack, Linear, dashboard).
     # This is what lets the agent open PRs as the triggering user.
     if (
         source in ("slack", "linear", "dashboard", "schedule")
-        and isinstance(github_login, str)
+        and github_login
         and github_login.strip()
     ):
         try:
@@ -538,7 +531,7 @@ async def resolve_github_token(
             if not email:
                 raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
             return await resolve_token_from_email(email, source)
-        return await resolve_token_from_email(configurable.get("user_email"), source)
+        return await resolve_token_from_email(cfg.user_email, source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
         raise RuntimeError(str(exc)) from exc
