@@ -2,8 +2,6 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
-from langgraph.config import get_config
-
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -98,7 +96,7 @@ async def manage_code_channel(
     Files must be inside the active sandbox work directory, valid UTF-8, and at
     most 1 MB. Never publish secrets or credentials in a view.
     """
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "Missing thread_id in config"}

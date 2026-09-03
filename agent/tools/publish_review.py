@@ -775,7 +775,7 @@ async def _resolve_diff_line_set(
         state_cached = state.get("diff_line_set")
         if isinstance(state_cached, dict):
             return state_cached
-    cached = RunConfig.from_config(get_config()).diff_line_set
+    cached = RunConfig.from_runtime().diff_line_set
     if cached is not None:
         return cached
 

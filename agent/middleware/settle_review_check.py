@@ -11,7 +11,6 @@ import logging
 from typing import Any
 
 from langchain.agents.middleware import AgentState, after_agent
-from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from agent.github.thread_token import get_github_token
@@ -28,7 +27,7 @@ async def settle_review_check_on_exit(
     runtime: Runtime,
 ) -> dict[str, Any] | None:
     """Fail the tracked review check run if the run ended without publishing."""
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id or not cfg.repo:
         return None

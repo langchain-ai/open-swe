@@ -5,7 +5,6 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dashboard.agent_usage import record_agent_pr_usage
@@ -62,7 +61,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     metadata: Slack thread ids are shared across a conversation, so a cached
     token could belong to a prior triggering user.
     """
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
     source = cfg.source
     github_login = cfg.github_login
 
@@ -126,7 +125,7 @@ def _effective_draft(draft: bool) -> bool:
 
 def _configurable() -> RunConfig:
     try:
-        return RunConfig.from_config(get_config())
+        return RunConfig.from_runtime()
     except Exception:
         return RunConfig()
 
@@ -544,7 +543,7 @@ async def _record_pr_telemetry(
         return
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
-        cfg = RunConfig.from_config(get_config())
+        cfg = RunConfig.from_runtime()
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
@@ -753,7 +752,7 @@ async def _maybe_append_references(
     try:
         if _REFERENCES_HEADING in body:
             return body
-        cfg = RunConfig.from_config(get_config())
+        cfg = RunConfig.from_runtime()
         lines: list[str] = []
         plan_line = await _plan_reference_line(cfg)
         if plan_line:

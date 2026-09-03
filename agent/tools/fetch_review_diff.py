@@ -3,8 +3,6 @@
 import re
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.review.diff import changed_files, materialize_review_diff, review_diff_range
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
@@ -16,7 +14,7 @@ _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 async def fetch_review_diff() -> dict[str, Any]:
     """Write the current review diff to a file and return bounded metadata."""
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
 
     thread_id = cfg.thread_id
     if not thread_id:

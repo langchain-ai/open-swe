@@ -25,6 +25,7 @@ import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
+from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
 
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
@@ -212,6 +213,11 @@ class RunConfig(BaseModel):
         if not isinstance(config, Mapping):
             return cls()
         return cls.parse(config.get("configurable"))
+
+    @classmethod
+    def from_runtime(cls) -> "RunConfig":
+        """Parse the running graph's own ``configurable``."""
+        return cls.from_config(get_config())
 
     def dump(self) -> dict[str, Any]:
         """The JSON value to store, preserving exactly the keys that were set."""

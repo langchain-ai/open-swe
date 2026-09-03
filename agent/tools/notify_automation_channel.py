@@ -3,7 +3,6 @@ import logging
 from typing import Any
 from weakref import WeakValueDictionary
 
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.run_config import RunConfig
@@ -48,7 +47,7 @@ async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
 
 async def notify_automation_channel(message: str) -> dict[str, Any]:
     """Notify the configured automation channel once after a concrete requested action."""
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
     if cfg.source != "schedule":
         return {"success": False, "error": "This tool is only available to scheduled runs"}
 

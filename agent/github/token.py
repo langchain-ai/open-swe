@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 import httpx
 import jwt
-from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
@@ -247,7 +246,7 @@ async def leave_failure_comment(
     message: str,
 ) -> None:
     """Leave an auth failure comment for the appropriate source."""
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
 
     if source == "linear":
         issue_id = cfg.linear_issue.id if cfg.linear_issue else None
@@ -352,7 +351,7 @@ async def resolve_token_from_email(
     source: str,
 ) -> tuple[str, str | None]:
     """Resolve and cache a GitHub token based on user email."""
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         raise ValueError("GitHub auth failed: missing thread_id")

@@ -4,7 +4,6 @@ import logging
 from typing import Any
 
 from langchain.agents.middleware import AgentState, after_agent
-from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
@@ -43,7 +42,7 @@ async def notify_step_limit_reached(
     if _LIMIT_MARKER not in content:
         return None
 
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
         cfg.thread_id,

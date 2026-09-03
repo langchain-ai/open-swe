@@ -4,15 +4,13 @@ Tools re-check the triggering user against ``CONFIGURED_ADMINS`` so a thread who
 metadata says "admin" cannot act on behalf of someone who is not one.
 """
 
-from langgraph.config import get_config
-
 from agent.dashboard.admin import is_admin
 from agent.run_config import RunConfig
 
 
 def configurable() -> RunConfig:
     try:
-        return RunConfig.from_config(get_config())
+        return RunConfig.from_runtime()
     except Exception:
         return RunConfig()
 

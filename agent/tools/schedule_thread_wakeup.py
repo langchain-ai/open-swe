@@ -9,7 +9,6 @@ from weakref import WeakValueDictionary
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
@@ -276,7 +275,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
     if delay_seconds > _MAX_DELAY_SECONDS:
         return {"success": False, "error": "delay must be at most 1440 minutes (24 hours)"}
 
-    cfg = RunConfig.from_config(get_config())
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
