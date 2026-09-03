@@ -101,7 +101,7 @@ html.dark[data-agents-theme] {
   --input: color-mix(in srgb, #fff 8%, transparent);
   --ring: oklch(0.571 0.21 264);
 
-  --sidebar: var(--card);
+  --sidebar: #000;
   --sidebar-control-surface: var(--muted);
   --sidebar-row-hover: var(--accent);
   --sidebar-row-active: var(--accent);
