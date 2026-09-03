@@ -43,6 +43,42 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible();
   });
 
+  test("shows a sent Slack message before the tool call that follows it", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+
+    const send = await page.request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> E2E_SLACK_REPLY_ORDER reproduce the message order",
+      },
+    });
+    expect(send.ok()).toBeTruthy();
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+
+    await page.goto(`/agents/${threadId}`);
+    const sentMessage = page.getByText("On it!", { exact: true });
+    const ongoingToolCall = page.getByRole("button", {
+      name: /^Running · sleep 20 · 1 action$/,
+    });
+    await expect(sentMessage).toBeVisible();
+    await expect(ongoingToolCall).toBeVisible();
+
+    expect(
+      await sentMessage.evaluate(
+        (message, toolCall) =>
+          Boolean(
+            message.compareDocumentPosition(toolCall) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        await ongoingToolCall.elementHandle(),
+      ),
+    ).toBe(true);
+  });
+
   test("keeps follow-ups visible across the queued-to-transcript handoff", async ({
     page,
   }, testInfo) => {
