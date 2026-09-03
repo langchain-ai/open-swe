@@ -146,7 +146,7 @@ class _FakeSandboxClient:
     def __init__(self) -> None:
         self._http = _FakeSandboxHttp()
 
-    async def __aenter__(self) -> "_FakeSandboxClient":
+    async def __aenter__(self) -> _FakeSandboxClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> bool:

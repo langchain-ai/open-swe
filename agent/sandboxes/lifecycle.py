@@ -72,7 +72,7 @@ class SandboxCreateConfig:
     environment: Environment | None = None
 
     @classmethod
-    async def resolve(cls, environment_slug: str | None = None) -> "SandboxCreateConfig":
+    async def resolve(cls, environment_slug: str | None = None) -> SandboxCreateConfig:
         environment = await resolve_environment(environment_slug)
         if environment is None:
             return cls(snapshot_id=await get_admin_base_snapshot_id())

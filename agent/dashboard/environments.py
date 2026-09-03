@@ -421,7 +421,7 @@ class Environment(BaseModel):
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
     @classmethod
-    def seed(cls, create: EnvironmentCreate, created_by: str) -> "Environment":
+    def seed(cls, create: EnvironmentCreate, created_by: str) -> Environment:
         now = now_iso()
         return cls(
             slug=slugify(create.name),
