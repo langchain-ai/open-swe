@@ -321,6 +321,16 @@ def _thread_with_metadata(metadata: dict) -> dict:
     return {"thread_id": "t1", "status": "idle", "metadata": metadata}
 
 
+async def test_thread_summary_exposes_attention_reason() -> None:
+    flagged = await thread_api._thread_summary(
+        _thread_with_metadata({"title": "Ship it", "attention_reason": "prs_closed"})
+    )
+    quiet = await thread_api._thread_summary(_thread_with_metadata({"title": "Ship it"}))
+
+    assert flagged["attentionReason"] == "prs_closed"
+    assert quiet["attentionReason"] is None
+
+
 async def test_thread_summary_includes_pr_and_diff_stats() -> None:
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
@@ -1641,7 +1651,9 @@ async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
     assert updates[-1]["resolved"] is True
     assert isinstance(updates[-1]["resolved_at_ms"], int)
     assert updates[-1]["auto_resolved_by_prs"] is False
+    assert updates[-1]["attention_reason"] is None
     assert summary["resolved"] is True
+    assert summary["attentionReason"] is None
 
 
 async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
@@ -1706,6 +1718,7 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
                     "resolved": True,
                     "resolved_at_ms": 1700,
                     "auto_resolved_by_prs": True,
+                    "attention_reason": "prs_closed",
                 },
             }
 
@@ -1749,6 +1762,7 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
     assert updates[-1]["resolved"] is False
     assert updates[-1]["resolved_at_ms"] is None
     assert updates[-1]["auto_resolved_by_prs"] is False
+    assert updates[-1]["attention_reason"] is None
 
 
 def test_summary_matches_filters() -> None:

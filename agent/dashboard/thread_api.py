@@ -556,6 +556,7 @@ async def _thread_summary(
             else None
         ),
         "resolved": _is_thread_resolved(metadata),
+        "attentionReason": _metadata_string(metadata, "attention_reason"),
         "resolvedAt": (
             int(metadata["resolved_at_ms"])
             if isinstance(metadata.get("resolved_at_ms"), (int, float))
@@ -1666,12 +1667,16 @@ async def _enrich_run_start_command(
                 metadata_update["resolved_at_ms"] = None
             if metadata.get("auto_resolved_by_prs") is True:
                 metadata_update["auto_resolved_by_prs"] = False
+            if metadata.get("attention_reason"):
+                metadata_update["attention_reason"] = None
             metadata = {**metadata, **metadata_update}
             await client.threads.update(thread_id=thread_id, metadata=metadata)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
             metadata_update["resolved_at_ms"] = None
+        if metadata.get("attention_reason"):
+            metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
         await client.threads.update(thread_id=thread_id, metadata=metadata)
 
@@ -1786,11 +1791,15 @@ async def send_dashboard_message(
                 metadata_update["resolved_at_ms"] = None
             if metadata.get("auto_resolved_by_prs") is True:
                 metadata_update["auto_resolved_by_prs"] = False
+            if metadata.get("attention_reason"):
+                metadata_update["attention_reason"] = None
             await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
             metadata_update["resolved_at_ms"] = None
+        if metadata.get("attention_reason"):
+            metadata_update["attention_reason"] = None
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     queue_payload: dict[str, Any] = {
         "text": prompt,
@@ -1949,6 +1958,7 @@ async def resolve_dashboard_thread(
                 "resolved": resolved,
                 "resolved_at_ms": _now_ms() if resolved else None,
                 "auto_resolved_by_prs": False,
+                "attention_reason": None,
             }
             await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except HTTPException:

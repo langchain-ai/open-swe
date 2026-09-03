@@ -76,7 +76,10 @@ async def test_update_agent_thread_pr_state_updates_matching_thread() -> None:
     call_args = fake_client.threads.update.await_args
     assert call_args is not None
     assert call_args.kwargs["thread_id"] == "t1"
-    assert call_args.kwargs["metadata"] == {"pr_state": "closed"}
+    assert call_args.kwargs["metadata"] == {
+        "pr_state": "closed",
+        "attention_reason": "prs_closed",
+    }
 
 
 @pytest.mark.asyncio
@@ -221,7 +224,90 @@ async def test_update_agent_thread_pr_state_skips_resolution_without_resolves_th
 
     fake_client.threads.update.assert_awaited_once_with(
         thread_id="t1",
-        metadata={"pull_requests": [{**closing_pr, "state": "closed"}, merged_pr]},
+        metadata={
+            "pull_requests": [{**closing_pr, "state": "closed"}, merged_pr],
+            "attention_reason": "prs_closed",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_agent_thread_pr_state_does_not_flag_manually_resolved_thread() -> None:
+    closed_pr = {
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "url": "https://github.com/lc/repo/pull/7",
+        "state": "open",
+    }
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": closed_pr["url"],
+            "pr_state": "open",
+            "pr_urls": [closed_pr["url"]],
+            "pull_requests": [closed_pr],
+            "resolved": True,
+            "resolved_at_ms": 123,
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
+
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="t1",
+        metadata={
+            "pull_requests": [{**closed_pr, "state": "closed"}],
+            "pr_state": "closed",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_agent_thread_pr_state_clears_attention_when_pr_reopens() -> None:
+    closed_pr = {
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "url": "https://github.com/lc/repo/pull/7",
+        "state": "closed",
+    }
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": closed_pr["url"],
+            "pr_state": "closed",
+            "pr_urls": [closed_pr["url"]],
+            "pull_requests": [closed_pr],
+            "attention_reason": "prs_closed",
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="open"))
+
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="t1",
+        metadata={
+            "pull_requests": [{**closed_pr, "state": "open"}],
+            "pr_state": "open",
+            "attention_reason": None,
+        },
     )
 
 
@@ -349,7 +435,7 @@ async def test_update_agent_thread_pr_state_paginates_all_matching_threads() -> 
     ]
     fake_client.threads.update.assert_awaited_once_with(
         thread_id="t51",
-        metadata={"pr_state": "closed"},
+        metadata={"pr_state": "closed", "attention_reason": "prs_closed"},
     )
 
 

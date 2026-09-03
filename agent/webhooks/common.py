@@ -1069,6 +1069,7 @@ _GH_PR_AGENT_STATE_ACTIONS = frozenset(
     ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
 _TERMINAL_PR_STATES = frozenset(["closed", "merged"])
+_PRS_CLOSED_ATTENTION_REASON = "prs_closed"
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1392,8 +1393,9 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     the PR was opened (``open_pull_request``). Reviewer threads are skipped.
 
     A thread auto-resolves only when every tracked PR is merged or closed and the
-    agent opened at least one of them with ``resolves_thread=True``; legacy
-    threads and PRs attached without that flag never resolve on their own.
+    agent opened at least one of them with ``resolves_thread=True``. Without that
+    flag the thread is instead marked ``attention_reason="prs_closed"`` so a
+    person decides whether to resolve it; any PR reopening clears the mark.
     """
     pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
     if not isinstance(pull_request, dict):
@@ -1476,19 +1478,24 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 resolves_thread = any(
                     record.get("resolves_thread") is True for record in updated_pull_requests
                 )
-                if (
-                    all_terminal
-                    and resolves_thread
-                    and state_changed
-                    and metadata.get("resolved") is not True
-                ):
-                    metadata_update["resolved"] = True
-                    metadata_update["resolved_at_ms"] = int(datetime.now(UTC).timestamp() * 1000)
-                    metadata_update["auto_resolved_by_prs"] = True
-                elif not all_terminal and metadata.get("auto_resolved_by_prs") is True:
-                    metadata_update["resolved"] = False
-                    metadata_update["resolved_at_ms"] = None
-                    metadata_update["auto_resolved_by_prs"] = False
+                needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
+                if all_terminal:
+                    if state_changed and metadata.get("resolved") is not True:
+                        if resolves_thread:
+                            metadata_update["resolved"] = True
+                            metadata_update["resolved_at_ms"] = int(
+                                datetime.now(UTC).timestamp() * 1000
+                            )
+                            metadata_update["auto_resolved_by_prs"] = True
+                        elif not needs_attention:
+                            metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
+                else:
+                    if metadata.get("auto_resolved_by_prs") is True:
+                        metadata_update["resolved"] = False
+                        metadata_update["resolved_at_ms"] = None
+                        metadata_update["auto_resolved_by_prs"] = False
+                    if needs_attention:
+                        metadata_update["attention_reason"] = None
                 if metadata_update:
                     await langgraph_client.threads.update(
                         thread_id=thread_id, metadata=metadata_update
