@@ -62,6 +62,7 @@ class WorkflowPushChange:
     diff_stats: dict[str, int]
     diff_preview: str
     diff_preview_truncated: bool
+    inherited_from: str | None
     remote: str
     local_ref: str
     remote_ref: str
@@ -289,6 +290,33 @@ def _diff_stats(files: list[str], numstat: str) -> dict[str, int]:
     return {"files": len(files), "additions": additions, "deletions": deletions}
 
 
+async def _inherited_workflow_source(backend: Any, root: str, head: str) -> str | None:
+    parents = await _run_git(backend, root, f"rev-list --parents -n 1 {shlex.quote(head)}")
+    parts = _first_line(parents.output).split() if parents.ok else []
+    if len(parts) != 3:
+        return None
+    first_parent, merged_parent = parts[1:]
+    if first_parent == merged_parent:
+        return None
+    origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
+    source_ref = _first_line(origin_head.output) if origin_head.ok else ""
+    if not source_ref:
+        return None
+    source_contains_parent = await _run_git(
+        backend,
+        root,
+        f"merge-base --is-ancestor {shlex.quote(merged_parent)} {shlex.quote(source_ref)}",
+    )
+    if not source_contains_parent.ok:
+        return None
+    workflow_diff = await _run_git(
+        backend,
+        root,
+        f"diff --quiet {shlex.quote(merged_parent)} {shlex.quote(head)} -- .github/workflows",
+    )
+    return source_ref.removeprefix("origin/") if workflow_diff.ok else None
+
+
 def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     if not thread_id:
         return None
@@ -358,6 +386,7 @@ async def _workflow_change_for_push(
     numstat = await _run_git(backend, root, f"diff --numstat {range_expr} -- .github/workflows")
     diff_preview, diff_preview_truncated = _diff_preview(diff.output)
     diff_stats = _diff_stats(files, numstat.output if numstat.ok else "")
+    inherited_from = await _inherited_workflow_source(backend, root, head)
 
     remote = await _run_git(backend, root, "config --get remote.origin.url")
     repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
@@ -389,6 +418,7 @@ async def _workflow_change_for_push(
         diff_stats=diff_stats,
         diff_preview=diff_preview,
         diff_preview_truncated=diff_preview_truncated,
+        inherited_from=inherited_from,
         remote=parsed.remote,
         local_ref=parsed.local_ref,
         remote_ref=parsed.remote_ref,
@@ -446,15 +476,25 @@ def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None
     branch = change.branch or "the current branch"
     stats = change.diff_stats
     web_review = f"\n\n*Review diff:* <{approval_url}|Open in Web>" if approval_url else ""
+    if change.inherited_from:
+        headline = "*Confirm workflow changes inherited from the base branch*"
+        source = (
+            f"This branch now includes {len(change.files)} GitHub Actions files from merging "
+            f"`{change.inherited_from}`. Open SWE did not author these workflow changes."
+        )
+    else:
+        headline = "*Confirm GitHub Actions workflow changes*"
+        source = f"Open SWE is ready to push workflow changes in `{repo}` on `{branch}`."
     return (
-        "*Workflow file approval required*\n"
-        f"Open SWE is trying to push changes to GitHub workflow files in `{repo}` on `{branch}`.\n\n"
+        f"{headline}\n{source}\n\n"
+        "*Why confirmation is required:* Workflow files control CI jobs and may access "
+        "repository secrets.\n\n"
         f"*Files:*\n{files}\n\n"
         f"*Diff stat:* {stats.get('files', len(change.files))} files, "
         f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}\n"
-        f"*Fingerprint:* `{change.fingerprint}`{web_review}\n\n"
-        "Approve only if this exact workflow diff is expected. If the workflow files change, "
-        "a new fingerprint will be required."
+        f"*Approval ID:* `{change.fingerprint}`{web_review}\n\n"
+        "Approval resumes this exact push only. If the workflow files change, Open SWE will "
+        "ask again."
     )
 
 
@@ -510,6 +550,7 @@ async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) 
             diff_stats=change.diff_stats,
             diff_preview=change.diff_preview,
             diff_preview_truncated=change.diff_preview_truncated,
+            inherited_from=change.inherited_from,
             approval_url=approval_url,
         )
         await _post_slack_approval_if_needed(request, change, record)
