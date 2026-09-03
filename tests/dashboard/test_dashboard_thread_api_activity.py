@@ -37,19 +37,27 @@ class FakeRuns:
 
 
 class FakeStore:
-    async def get_item(self, namespace: tuple[str, str], key: str) -> None:
+    def __init__(self, messages: list[dict[str, Any]] | None = None) -> None:
+        self.messages = messages
+
+    async def get_item(self, namespace: tuple[str, str], key: str) -> dict[str, Any] | None:
         assert namespace == ("queue", "tid")
         assert key == "pending_messages"
-        return None
+        return {"value": {"messages": self.messages}} if self.messages is not None else None
 
 
 class FakeClient:
     def __init__(
-        self, metadata: dict[str, Any], run_status: str, *, thread_status: str = "idle"
+        self,
+        metadata: dict[str, Any],
+        run_status: str,
+        *,
+        thread_status: str = "idle",
+        queued_messages: list[dict[str, Any]] | None = None,
     ) -> None:
         self.threads = FakeThreads(metadata, status=thread_status)
         self.runs = FakeRuns(run_status)
-        self.store = FakeStore()
+        self.store = FakeStore(queued_messages)
 
 
 async def test_list_dashboard_threads_refreshes_finished_run_status(monkeypatch) -> None:
@@ -158,27 +166,18 @@ async def test_get_dashboard_thread_exposes_sanitized_queued_messages(monkeypatc
         },
         "running",
         thread_status="busy",
-    )
-
-    class QueuedStore:
-        async def get_item(self, namespace: tuple[str, str], key: str) -> dict[str, Any]:
-            return {
-                "value": {
-                    "messages": [
-                        {
-                            "content": {
-                                "id": "queued-1",
-                                "created_at_ms": 1234,
-                                "text": "follow up",
-                                "source": "dashboard",
-                                "github_token": "secret",
-                            }
-                        }
-                    ]
+        queued_messages=[
+            {
+                "content": {
+                    "id": "queued-1",
+                    "created_at_ms": 1234,
+                    "text": "follow up",
+                    "source": "dashboard",
+                    "github_token": "secret",
                 }
             }
-
-    client.store = QueuedStore()
+        ],
+    )
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")

@@ -10,7 +10,7 @@ import posixpath
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -35,7 +35,7 @@ from agent.dashboard.team_settings import get_team_default_model, get_team_fable
 from agent.dashboard.thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from agent.dashboard.user_mappings import email_for_login
-from agent.dispatch import dispatch_agent_run
+from agent.dispatch import ContentBlocks, dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
@@ -317,16 +317,19 @@ def _image_blocks(
 
 def _user_message_content(
     prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
-) -> str | list[ImageContentBlock | dict[str, str]]:
+) -> ContentBlocks:
     text = prompt.strip()
     if not text and not images:
         raise HTTPException(422, "prompt or image required")
     if not images:
         return text
-    return [
-        *_image_blocks(images, model_id=model_id),
-        *([{"type": "text", "text": text}] if text else []),
-    ]
+    return cast(
+        list[dict[str, Any]],
+        [
+            *_image_blocks(images, model_id=model_id),
+            *([{"type": "text", "text": text}] if text else []),
+        ],
+    )
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:

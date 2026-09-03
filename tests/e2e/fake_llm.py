@@ -1034,9 +1034,7 @@ def build_script() -> list[StepSpec]:
     return list(SCRIPT_LIBRARY["implement"])
 
 
-def _phase_hold(
-    text: str, step_index: int, step: StepSpec, *, after_tool: bool
-) -> float | None:
+def _phase_hold(text: str, step_index: int, step: StepSpec, *, after_tool: bool) -> float | None:
     match = _PHASE_HOLD_RE.search(text)
     if match is None:
         return None
@@ -1104,8 +1102,7 @@ class FakeScriptedChatModel(BaseChatModel):
                 context.last_text,
                 step_index,
                 step,
-                after_tool=last_human + 1 < len(messages)
-                and isinstance(messages[-1], ToolMessage),
+                after_tool=last_human + 1 < len(messages) and isinstance(messages[-1], ToolMessage),
             )
         )
         if delay is not None:
