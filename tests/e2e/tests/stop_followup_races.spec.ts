@@ -175,4 +175,45 @@ test.describe("stop followed by new input", () => {
       page.getByTestId("queued-message").filter({ hasText: followUp }),
     ).toBeVisible();
   });
+
+  test("preserves an unsent draft when switching threads", async ({ page }) => {
+    const threadId = await openHeldRun(page, PHASE_HELD_RUN);
+    const otherRun = await page.request.post("/mock/slack/send", {
+      data: { text: "<@U0BOT> create another thread for navigation" },
+    });
+    expect(otherRun.ok()).toBeTruthy();
+    const { thread_id: otherThreadId } = (await otherRun.json()) as {
+      thread_id: string;
+    };
+    const draft = "Keep this unsent draft while I inspect another thread.";
+    await typeDraft(page, draft);
+
+    await page.goto(`/agents/${otherThreadId}`);
+    await page.goto(`/agents/${threadId}`);
+
+    await expect(page.getByTestId("composer-editor")).toContainText(draft);
+  });
+
+  test("shows a queued follow-up in another client viewing the busy thread", async ({
+    page,
+    browser,
+  }) => {
+    const threadId = await openHeldRun(page, PHASE_HELD_RUN);
+    const otherContext = await browser.newContext();
+    const otherPage = await otherContext.newPage();
+    await loginAs(otherPage, SAME_USER);
+    await otherPage.goto(`/agents/${threadId}`);
+    await expect(
+      otherPage.getByRole("button", { name: "Stop run" }),
+    ).toBeVisible();
+    const followUp = "Mirror this queued instruction to the other client.";
+
+    await typeDraft(page, followUp);
+    await page.getByTestId("composer-editor").press("Enter");
+
+    await expect(
+      otherPage.getByTestId("queued-message").filter({ hasText: followUp }),
+    ).toBeVisible();
+    await otherContext.close();
+  });
 });
