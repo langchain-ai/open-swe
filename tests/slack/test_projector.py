@@ -204,8 +204,22 @@ async def test_closing_out_stops_a_transcript_left_open() -> None:
     with patch.object(projector, "stop_slack_stream", stop):
         await projector.close_transcript(client, thread_id="thread-1", run_key="prepare-1")
 
-    stop.assert_awaited_once_with("C1", "2.0")
+    stop.assert_awaited_once_with("C1", "2.0", [])
     assert client.store.get_item.await_args.args[0] == ("slack_transcript", "thread-1")
+
+
+async def test_closing_out_says_what_slack_had_held_back() -> None:
+    """A rate-limited append leaves words in the record; this is the last chance."""
+    held = [{"type": "markdown_text", "text": "the last thing it said"}]
+    client = AsyncMock()
+    client.store.get_item.return_value = {
+        "value": {"message_ts": "2.0", "channel_id": "C1", "pending": held}
+    }
+    stop = AsyncMock()
+    with patch.object(projector, "stop_slack_stream", stop):
+        await projector.close_transcript(client, thread_id="thread-1", run_key="prepare-1")
+
+    stop.assert_awaited_once_with("C1", "2.0", held)
 
 
 @pytest.mark.parametrize(

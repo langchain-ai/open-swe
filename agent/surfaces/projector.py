@@ -416,5 +416,12 @@ async def close_transcript(client: LangGraphClient, *, thread_id: str, run_key: 
         return
     if not message_ts or not channel_id or record.get("done"):
         return
+    # Whatever Slack held back on a rate limit is still in the record, and this
+    # is the last chance to say it: closing the stream without it would drop the
+    # words the run had already committed to.
+    pending = record.get("pending")
+    chunks = (
+        [chunk for chunk in pending if isinstance(chunk, dict)] if isinstance(pending, list) else []
+    )
     with suppress(SlackStreamError):
-        await stop_slack_stream(channel_id, message_ts)
+        await stop_slack_stream(channel_id, message_ts, chunks)
