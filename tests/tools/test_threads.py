@@ -346,6 +346,75 @@ async def test_get_thread_accepts_dashboard_url(monkeypatch: pytest.MonkeyPatch)
     client.threads.get_state.assert_awaited_once_with("thread-1")
 
 
+async def test_get_thread_accepts_langsmith_run_id_when_not_a_thread_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _DetailClient()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    locator = "11111111-1111-4111-8111-111111111111"
+    resolver = AsyncMock(return_value="thread-1")
+    monkeypatch.setattr(threads_tool, "get_open_swe_thread_id_from_langsmith", resolver)
+    get_dashboard_thread = AsyncMock(
+        side_effect=[
+            threads_tool.HTTPException(status_code=404, detail="Thread not found"),
+            {"id": "thread-1", "status": "finished"},
+        ]
+    )
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+
+    result = await threads_tool.get_thread(locator)
+
+    assert result["success"] is True
+    resolver.assert_awaited_once_with(locator)
+    assert get_dashboard_thread.await_args_list[1].args[0] == "thread-1"
+    client.threads.get.assert_awaited_once_with("thread-1")
+
+
+async def test_get_thread_accepts_langsmith_run_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _DetailClient()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    resolver = AsyncMock(return_value="thread-1")
+    monkeypatch.setattr(threads_tool, "get_open_swe_thread_id_from_langsmith", resolver)
+    get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "status": "finished"})
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+
+    locator = "https://smith.langchain.com/o/org/projects/p/project/r/run-1?poll=true"
+    result = await threads_tool.get_thread(locator)
+
+    assert result["success"] is True
+    resolver.assert_awaited_once_with(locator)
+    get_dashboard_thread.assert_awaited_once_with(
+        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+
+
+async def test_search_threads_resolves_langsmith_thread_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    get_dashboard_thread = AsyncMock(
+        return_value={"id": "thread-1", "title": "Fix race", "messages": []}
+    )
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+
+    locator = "https://smith.langchain.com/o/org/projects/p/project/t/thread-1"
+    result = await threads_tool.search_threads(locator)
+
+    assert result["items"][0]["id"] == "thread-1"
+    get_dashboard_thread.assert_awaited_once_with(
+        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
+    )
+
+
 async def test_search_threads_resolves_exact_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
@@ -424,9 +493,16 @@ async def test_search_threads_uses_general_query_and_pagination(
 
     assert result["items"][0]["id"] == "thread-2"
     assert result["has_more"] is True
-    assert page.await_args.kwargs["include_all"] is True
-    assert page.await_args.kwargs["query"] == "payments"
-    assert page.await_args.kwargs["scope"] == "interactive"
+    page.assert_awaited_once_with(
+        "octocat",
+        email="octocat@example.com",
+        limit=10,
+        offset=20,
+        include_all=True,
+        query="payments",
+        scope="interactive",
+        surfaced_only=True,
+    )
 
 
 async def test_get_thread_rejects_pr_locator_before_access(
@@ -440,7 +516,9 @@ async def test_get_thread_rejects_pr_locator_before_access(
 
     assert result == {
         "success": False,
-        "error": "thread_id must be an exact thread ID or Open SWE dashboard URL",
+        "error": (
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, or LangSmith trace URL"
+        ),
     }
     get_dashboard_thread.assert_not_awaited()
 
@@ -457,7 +535,9 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
 
     assert result == {
         "success": False,
-        "error": "thread_id must be an exact thread ID or Open SWE dashboard URL",
+        "error": (
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, or LangSmith trace URL"
+        ),
     }
     get_dashboard_thread.assert_not_awaited()
 

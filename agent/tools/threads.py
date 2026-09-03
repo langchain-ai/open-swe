@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
@@ -42,7 +43,12 @@ from agent.utils.dashboard_links import (
     dashboard_thread_url,
 )
 from agent.utils.json_types import as_json_object, thread_metadata
-from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
+from agent.utils.langsmith import (
+    LangSmithCostUnavailable,
+    get_langsmith_thread_cost,
+    get_open_swe_thread_id_from_langsmith,
+    parse_langsmith_locator,
+)
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 
@@ -470,6 +476,50 @@ def _compact_approvals(approvals: Mapping[str, Mapping[str, Any]]) -> list[dict[
     ]
 
 
+def _looks_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError):
+        return False
+    return True
+
+
+async def _authorized_locator(
+    locator: str, actor: _Actor
+) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
+    langsmith_locator = parse_langsmith_locator(locator)
+    thread_id = dashboard_thread_id(locator) or ""
+    if langsmith_locator:
+        thread_id = await get_open_swe_thread_id_from_langsmith(locator) or ""
+        if not thread_id:
+            return _failure("Could not resolve LangSmith trace to an Open SWE thread")
+    if not thread_id:
+        return _failure(
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, or LangSmith trace URL"
+        )
+    try:
+        summary = await get_dashboard_thread(
+            thread_id,
+            actor.login,
+            email=actor.email,
+            mark_viewed=False,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 404 or langsmith_locator or not _looks_uuid(locator):
+            raise
+        resolved = await get_open_swe_thread_id_from_langsmith(locator)
+        if not resolved or resolved == thread_id:
+            raise
+        thread_id = resolved
+        summary = await get_dashboard_thread(
+            thread_id,
+            actor.login,
+            email=actor.email,
+            mark_viewed=False,
+        )
+    return thread_id, summary
+
+
 def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
     expected = parse_github_pr_url(locator)
     if expected is None:
@@ -500,7 +550,7 @@ async def search_threads(
     scope: ThreadScope = "all",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Search Open SWE threads by URL, ID, PR, title, repository, or branch."""
+    """Search Open SWE threads by Open SWE/LangSmith URL, ID, PR, title, repo, or branch."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -512,22 +562,22 @@ async def search_threads(
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
 
-    thread_id = dashboard_thread_id(query)
-    if thread_id:
+    exact_locator = parse_langsmith_locator(query) is not None or (
+        dashboard_thread_id(query) is not None and "/" in query
+    )
+    if exact_locator or _looks_uuid(query):
         try:
-            summary = await get_dashboard_thread(
-                thread_id,
-                actor.login,
-                email=actor.email,
-                mark_viewed=False,
-            )
+            resolved = await _authorized_locator(query, actor)
         except HTTPException as exc:
-            if exc.status_code != 404 or "/" in query:
+            if exc.status_code != 404 or exact_locator:
                 return _http_failure(exc)
         except Exception:
-            logger.exception("Could not search for thread %s", thread_id)
+            logger.exception("Could not search for thread locator %s", query)
             return _failure("Could not search threads")
         else:
+            if isinstance(resolved, dict):
+                return resolved
+            _, summary = resolved
             return {
                 "success": True,
                 "items": [_list_item(summary)],
@@ -600,21 +650,16 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Inspect an Open SWE thread from its exact thread ID or dashboard URL."""
+    """Inspect a thread from its exact ID, dashboard URL, or LangSmith trace URL/run ID."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
     locator = thread_id.strip()
-    thread_id = dashboard_thread_id(locator) or ""
-    if not thread_id:
-        return _failure("thread_id must be an exact thread ID or Open SWE dashboard URL")
     try:
-        summary = await get_dashboard_thread(
-            thread_id,
-            actor.login,
-            email=actor.email,
-            mark_viewed=False,
-        )
+        resolved = await _authorized_locator(locator, actor)
+        if isinstance(resolved, dict):
+            return resolved
+        thread_id, summary = resolved
         client = langgraph_client()
         async with asyncio.TaskGroup() as tasks:
             thread_task = tasks.create_task(client.threads.get(thread_id))
