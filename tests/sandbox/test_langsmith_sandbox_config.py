@@ -242,26 +242,18 @@ class _FakeSandboxClient:
 
 @pytest.mark.asyncio
 async def test_provider_passes_empty_snapshot_id_to_api() -> None:
-    sandbox = MagicMock()
-    sandbox.to_sync.return_value = MagicMock()
-    client = MagicMock()
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=None)
+    client = AsyncSandboxClient(api_key="key", api_endpoint="https://example.com/v2/sandboxes")
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"name": "sandbox-new", "status": "ready"}
+    post = AsyncMock(return_value=response)
+    client._http.post = post
 
-    with (
-        patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client),
-        patch("agent.integrations.langsmith._install_create_extra_fields") as install,
-        patch(
-            "agent.integrations.langsmith._create_sandbox_with_retry",
-            new_callable=AsyncMock,
-            return_value=sandbox,
-        ) as create,
-    ):
+    with patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client):
         await LangSmithProvider(api_key="key").get_or_create(snapshot_id="")
 
-    install.assert_called_once_with(client, {"snapshot_id": ""})
-    assert create.await_args is not None
-    assert create.await_args.kwargs["snapshot_id"] == ""
+    assert post.await_args is not None
+    assert post.await_args.kwargs["json"]["snapshot_id"] == ""
 
 
 @pytest.mark.asyncio

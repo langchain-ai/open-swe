@@ -772,15 +772,16 @@ class LangSmithProvider(SandboxProvider):
                 sandbox = await _reuse_existing_sandbox(client, sandbox_id)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
+            effective_snapshot_id = snapshot_id or ""
             extra_fields = _merge_sandbox_create_extra_fields(create_params)
-            if snapshot_id == "":
+            if not effective_snapshot_id:
                 extra_fields["snapshot_id"] = ""
             _install_create_extra_fields(client, extra_fields)
 
             try:
                 sandbox = await _create_sandbox_with_retry(
                     client,
-                    snapshot_id=snapshot_id,
+                    snapshot_id=effective_snapshot_id,
                     fs_capacity_bytes=fs_capacity_bytes,
                     vcpus=vcpus,
                     mem_bytes=mem_bytes,
