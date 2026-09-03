@@ -341,6 +341,11 @@ async def ensure_sandbox_for_thread(
         else get_recorded_proxy_base_config(thread_id)
     )
     created_proxy_config: dict[str, Any] | None = None
+    create_kwargs = (
+        {"langsmith_credentials": langsmith_credentials}
+        if langsmith_credentials is not None
+        else {}
+    )
 
     if sandbox_backend is None and sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
@@ -349,7 +354,7 @@ async def ensure_sandbox_for_thread(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
             environment_slug=environment_slug,
-            langsmith_credentials=langsmith_credentials,
+            **create_kwargs,
         )
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
         logger.info("Sandbox created: %s", sandbox_backend.id)
@@ -380,7 +385,7 @@ async def ensure_sandbox_for_thread(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
                     environment_slug=environment_slug,
-                    langsmith_credentials=langsmith_credentials,
+                    **create_kwargs,
                 )
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
             except Exception as create_exc:
