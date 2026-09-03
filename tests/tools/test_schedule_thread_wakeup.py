@@ -114,6 +114,7 @@ def _config(**overrides: Any) -> dict[str, Any]:
             "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
             "github_login": "johannes117",
             "user_email": "johannes@example.com",
+            "langgraph_auth_user": object(),
         }
     }
     base["configurable"].update(overrides)

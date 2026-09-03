@@ -219,9 +219,9 @@ class RunConfig(BaseModel):
         """Parse the running graph's own ``configurable``."""
         return cls.from_config(get_config())
 
-    def dump(self) -> dict[str, Any]:
+    def dump(self, *, include: set[str] | None = None) -> dict[str, Any]:
         """The JSON value to store, preserving exactly the keys that were set."""
-        return self.model_dump(mode="json", exclude_unset=True)
+        return self.model_dump(mode="json", exclude_unset=True, include=include)
 
     def get(self, key: str) -> Any:
         """Value for ``key``, whether it is a declared field or an extra."""

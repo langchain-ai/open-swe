@@ -40,20 +40,17 @@ def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
         "agent_model_id",
         "agent_effort",
     )
-    dumped = cfg.dump()
+    dumped = cfg.dump(include=set(allowed))
     result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
     result["thread_id"] = thread_id
     return result
 
 
 def _source_context(cfg: RunConfig) -> SourceContext:
-    dumped = cfg.dump()
+    allowed = {"slack_thread", "linear_issue", "github_issue"}
+    dumped = cfg.dump(include=allowed)
     return SourceContext.parse(
-        {
-            key: dumped[key]
-            for key in ("slack_thread", "linear_issue", "github_issue")
-            if isinstance(dumped.get(key), Mapping)
-        }
+        {key: dumped[key] for key in allowed if isinstance(dumped.get(key), Mapping)}
     )
 
 
