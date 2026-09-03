@@ -531,9 +531,67 @@ async def test_search_threads_normalizes_and_filters_github_pr(
         include_all=False,
         query="https://github.com/acme/repo/pull/42",
         scope="all",
+        filter_participant_login=None,
         surfaced_only=True,
         admin_threads=None,
     )
+
+
+async def test_search_threads_filters_all_threads_by_participant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(
+        return_value={
+            "items": [{"id": "thread-1", "messages": []}],
+            "limit": 25,
+            "offset": 0,
+            "hasMore": False,
+        }
+    )
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.search_threads(participant="other-user")
+
+    assert result["items"][0]["id"] == "thread-1"
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.args[0] == "octocat"
+    assert awaited.kwargs["filter_participant_login"] == "other-user"
+    assert awaited.kwargs["include_all"] is False
+    assert awaited.kwargs["surfaced_only"] is True
+
+
+async def test_search_threads_participant_filter_requires_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.search_threads(participant="other-user")
+
+    assert result == {
+        "success": False,
+        "error": "Only workspace admins can search other users' threads",
+    }
+    page.assert_not_awaited()
+
+
+async def test_search_threads_rejects_participant_with_all_users(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.search_threads(participant="other-user", all_users=True)
+
+    assert result == {
+        "success": False,
+        "error": "participant and all_users cannot be used together",
+    }
+    page.assert_not_awaited()
 
 
 async def test_search_threads_admin_filter_searches_all_admin_threads(
@@ -605,6 +663,7 @@ async def test_search_threads_uses_general_query_and_pagination(
         include_all=True,
         query="payments",
         scope="interactive",
+        filter_participant_login=None,
         surfaced_only=True,
         admin_threads=None,
     )

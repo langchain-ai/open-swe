@@ -562,6 +562,7 @@ def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
 
 async def search_threads(
     query: str = "",
+    participant: str | None = None,
     all_users: bool = False,
     limit: int = 25,
     offset: int = 0,
@@ -574,11 +575,15 @@ async def search_threads(
     if actor is None:
         return _failure("No verified triggering user is available")
     query = query.strip()
-    if not query and admin_threads is not True:
-        return _failure("query is required unless admin_threads is true")
+    requested = participant.strip() if participant and participant.strip() else None
+    if not query and admin_threads is not True and requested is None:
+        return _failure("query, participant, or admin_threads=true is required")
+    if requested and all_users:
+        return _failure("participant and all_users cannot be used together")
     if admin_threads is not None and not actor.admin:
         return _failure("Only workspace admins can filter admin threads")
-    if all_users and not actor.admin:
+    cross_user = bool(requested and requested.lower() != actor.login.lower())
+    if (all_users or cross_user) and not actor.admin:
         return _failure("Only workspace admins can search other users' threads")
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
@@ -609,6 +614,7 @@ async def search_threads(
 
     pr_ref = parse_github_pr_url(query)
     normalized_query = pr_ref.url if pr_ref else query
+    filter_participant_login = requested if cross_user else None
     try:
         page = await list_dashboard_threads_page(
             actor.login,
@@ -618,6 +624,7 @@ async def search_threads(
             include_all=all_users or admin_threads is True,
             query=normalized_query,
             scope=scope,
+            filter_participant_login=filter_participant_login,
             surfaced_only=True,
             admin_threads=admin_threads,
         )
