@@ -12,9 +12,11 @@ snapshot, which today means a per-run model override.
 
 import logging
 from collections.abc import Mapping
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
-from . import ttl_cache
+from pydantic import TypeAdapter, ValidationError
+
+from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +32,16 @@ class ThreadSettings(TypedDict, total=False):
     repo_instructions: str | None
 
 
+_THREAD_SETTINGS_ADAPTER = TypeAdapter(ThreadSettings)
+
+
 def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettings, bool]:
-    """Remove participant settings that are now resolved for each message."""
-    value = dict(settings)
-    removed = {
-        "create_prs",
-        "draft_prs",
-        "user_instructions",
-        "commit_name",
-        "commit_email",
-        "display_name",
-        "owner_login",
-    }
-    changed = not removed.isdisjoint(value)
-    for key in removed:
-        value.pop(key, None)
-    return cast(ThreadSettings, value), changed
+    """Remove obsolete or invalid settings from stored thread metadata."""
+    try:
+        value = _THREAD_SETTINGS_ADAPTER.validate_python(settings, strict=True)
+    except ValidationError:
+        return {}, bool(settings)
+    return value, value != settings
 
 
 def _cache_key(thread_id: str) -> str:
@@ -59,8 +55,7 @@ async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
         thread = await client.threads.get(thread_id=thread_id)
         metadata = thread.get("metadata") or {}
         stored = metadata.get(THREAD_SETTINGS_KEY)
-        settings: ThreadSettings = dict(stored) if isinstance(stored, dict) else {}  # type: ignore[assignment]
-        return settings
+        return normalize_thread_settings(stored)[0] if isinstance(stored, dict) else {}
 
     try:
         return await ttl_cache.cached(_cache_key(thread_id), _CACHE_TTL_SECONDS, _load)

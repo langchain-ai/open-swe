@@ -140,7 +140,7 @@ async def request_with_safe_redirects(
                     **request_kwargs,
                 )
                 break
-            except (httpx.ConnectError, httpx.ConnectTimeout):
+            except httpx.ConnectError, httpx.ConnectTimeout:
                 if address_index == len(pinned_ips) - 1:
                     raise
 

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowUpRight, CircleAlert as CircleAlertIcon } from "lucide-react"
+import {
+  ArrowUpRight,
+  CircleAlert as CircleAlertIcon,
+  GitMerge as GitMergeIcon,
+} from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 
 import type {
@@ -16,7 +20,6 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -268,27 +271,22 @@ export function AgentThreadView({
             </Alert>
           </div>
         )}
-        <WorkflowApprovalCard
-          threadId={thread.id}
-          pollWhileActive={isStreaming}
-        />
+        {thread.attentionReason === "prs_closed" && !thread.resolved && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+            <Alert variant="info">
+              <GitMergeIcon />
+              <AlertDescription>
+                <span>
+                  Every pull request from this thread is merged or closed.
+                  Resolve the thread if the work is done, or send a follow-up to
+                  keep going.
+                </span>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {hasConversation ? (
-            <Messages
-              messages={baseMessages}
-              threadId={thread.id}
-              showPlanArtifact={
-                thread.planStatus === "ready" || thread.planStatus === "shared"
-              }
-              onOpenFile={handleOpenFile}
-              queuedMessages={queuedMessages}
-              isStreaming={isStreaming}
-              streamIsLoading={stream.isLoading}
-              isThinking={isThinking}
-              settingUpSandbox={settingUpSandbox}
-              contentWidthClass="max-w-3xl"
-            />
-          ) : isHydrating ? (
+          {isHydrating ? (
             <div className="flex flex-1 items-center justify-center px-6">
               <img
                 src="/logo-mark.png"
@@ -297,23 +295,40 @@ export function AgentThreadView({
               />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-              {hydrationFailed ? (
-                <Alert variant="error" className="max-w-3xl">
-                  <CircleAlertIcon />
-                  <AlertDescription>
-                    <span>
-                      This thread&apos;s messages could not be loaded. Reload to
-                      try again.
-                    </span>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <p className="text-xs text-muted-foreground/70">
-                  This thread has no messages yet.
-                </p>
-              )}
-            </div>
+            <Messages
+              messages={baseMessages}
+              threadId={thread.id}
+              showPlanArtifact={
+                thread.planStatus === "ready" || thread.planStatus === "shared"
+              }
+              emptyState={
+                <div className="flex min-h-60 items-center justify-center">
+                  {hydrationFailed ? (
+                    <Alert variant="error" className="max-w-3xl">
+                      <CircleAlertIcon />
+                      <AlertDescription>
+                        <span>
+                          This thread&apos;s messages could not be loaded.
+                          Reload to try again.
+                        </span>
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <p className="text-xs text-muted-foreground/70">
+                      This thread has no messages yet.
+                    </p>
+                  )}
+                </div>
+              }
+              onOpenFile={handleOpenFile}
+              queuedMessages={queuedMessages}
+              isStreaming={isStreaming}
+              streamIsLoading={stream.isLoading}
+              isThinking={isThinking}
+              settingUpSandbox={settingUpSandbox}
+              pollWorkflowApprovalsWhileActive={isStreaming}
+              contentWidthClass="max-w-3xl"
+            />
           )}
           {!isHydrating && (
             <AgentComposerDock>

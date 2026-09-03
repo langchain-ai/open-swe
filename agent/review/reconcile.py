@@ -1,6 +1,6 @@
 from typing import Any
 
-from .findings import (
+from agent.review.findings import (
     Finding,
     FindingInteraction,
     comment_ids_for_finding,
@@ -11,7 +11,7 @@ from .findings import (
     set_surface_state,
     thread_ids_for_finding,
 )
-from .publish import parse_review_comment_marker
+from agent.review.publish import parse_review_comment_marker
 
 ReviewThread = dict[str, Any]
 ReviewThreadMatch = tuple[ReviewThread, int | None]

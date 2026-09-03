@@ -12,6 +12,7 @@ class ModelOption(TypedDict):
     efforts: list[str]
     default_effort: str
     supports_images: bool
+    can_be_default: NotRequired[bool]
     context_window: NotRequired[int | None]
 
 
@@ -31,11 +32,12 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "anthropic:claude-fable-5",
-        "label": "Fable 5",
+        "id": "anthropic:claude-fable-5-1",
+        "label": "Fable 5.1",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "can_be_default": False,
     },
     {
         "id": "openai:gpt-5.6-sol",
@@ -59,8 +61,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "google_genai:gemini-3.7-flash",
-        "label": "Gemini 3.7 Flash",
+        "id": "google_genai:gemini-3.8-flash",
+        "label": "Gemini 3.8 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
@@ -101,13 +103,18 @@ SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODEL
 FABLE_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
 )
+NON_DEFAULT_MODEL_IDS: frozenset[str] = frozenset(
+    m["id"] for m in SUPPORTED_MODELS if not m.get("can_be_default", True)
+)
 
 DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
     {
         "anthropic:claude-opus-4-8",
+        "anthropic:claude-fable-5",
         "openai:gpt-5.5",
         "google_genai:gemini-3.5-flash",
         "google_genai:gemini-3.6-flash",
+        "google_genai:gemini-3.7-flash",
         "fireworks:accounts/fireworks/models/kimi-k2p7-code",
         "fireworks:accounts/fireworks/models/kimi-k3-code",
         "fireworks:accounts/fireworks/models/glm-5p2",
@@ -191,6 +198,8 @@ def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[M
             "default_effort": model["default_effort"],
             "supports_images": model["supports_images"],
         }
+        if "can_be_default" in model:
+            option["can_be_default"] = model["can_be_default"]
         context_window = model_profile_context_window(model["id"])
         if context_window is not None:
             option["context_window"] = context_window

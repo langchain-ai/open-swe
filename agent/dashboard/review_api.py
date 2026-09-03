@@ -17,21 +17,21 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
-from agent.thread_ids import reviewer_thread_id
-
-from ..review.findings import (
+from agent.github.app import get_github_app_installation_token
+from agent.github.checks import github_headers
+from agent.github.pull_request_diff import build_pr_diff_files
+from agent.github.webhook import trigger_pr_review_from_ref
+from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
     comment_ids_for_finding,
     is_thread_resolved,
 )
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_checks import github_headers
-from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
-from ..utils.thread_ops import langgraph_client
-from ..webhooks.common import fetch_github_pr_metadata
-from ..webhooks.github import trigger_pr_review_from_ref
-from .pr_diff import build_pr_diff_files
+from agent.run_config import Repo, RunConfig
+from agent.thread_ids import reviewer_thread_id
+from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
+from agent.utils.thread_ops import langgraph_client
+from agent.webhooks.common import fetch_github_pr_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -730,7 +730,7 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
-    from ..utils.slack import GitHubPrRef
+    from agent.slack.client import GitHubPrRef
 
     pr_ref = GitHubPrRef(
         owner=owner,
@@ -748,9 +748,9 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
     """Resolve a PR to its author coding-agent thread without running a review."""
     from dataclasses import asdict
 
-    from ..review.trace_context import resolve_pr_trace
-    from ..utils.github_app import get_github_app_installation_token_with_expiry
-    from ..utils.slack import GitHubPrRef
+    from agent.github.app import get_github_app_installation_token_with_expiry
+    from agent.review.trace_context import resolve_pr_trace
+    from agent.slack.client import GitHubPrRef
 
     pr_ref = GitHubPrRef(
         owner=owner,
@@ -767,12 +767,12 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
 
     head = pr_metadata.get("head") or {}
     base = pr_metadata.get("base") or {}
-    configurable = {
-        "repo": {"owner": owner, "name": repo},
-        "pr_number": pr_number,
-        "pr_url": pr_metadata.get("html_url") or pr_ref.url,
-        "branch_name": head.get("ref", ""),
-        "head_sha": head.get("sha", ""),
-        "base_sha": base.get("sha", ""),
-    }
-    return asdict(await resolve_pr_trace(configurable=configurable))
+    cfg = RunConfig(
+        repo=Repo(owner=owner, name=repo),
+        pr_number=pr_number,
+        pr_url=pr_metadata.get("html_url") or pr_ref.url,
+        branch_name=head.get("ref", ""),
+        head_sha=head.get("sha", ""),
+        base_sha=base.get("sha", ""),
+    )
+    return asdict(await resolve_pr_trace(cfg=cfg))

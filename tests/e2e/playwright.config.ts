@@ -4,7 +4,11 @@ import { resolve } from "node:path";
 const repoRoot = resolve(__dirname, "..", "..");
 const PORT = Number(process.env.E2E_PORT ?? 2024);
 const UI_PORT = Number(process.env.E2E_UI_PORT ?? 3100);
-const baseURL = `http://127.0.0.1:${PORT}`;
+const harnessURL = `http://127.0.0.1:${PORT}`;
+// The app's own server, as a deployed browser sees it: it serves the pages and
+// fronts `/dashboard/api/*` itself. Driving the harness origin instead skipped
+// the app server's proxy, which is how a broken proxy shipped past a green run.
+const baseURL = `http://127.0.0.1:${UI_PORT}`;
 
 export default defineConfig({
   testDir: "./tests",
@@ -50,15 +54,15 @@ export default defineConfig({
       "uv run langgraph dev --config tests/e2e/langgraph.e2e.json " +
       `--port ${PORT} --no-browser --allow-blocking --no-reload`,
     cwd: repoRoot,
-    url: `${baseURL}/mock/github/data`,
+    url: `${harnessURL}/mock/github/data`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
     // Busy window for the specs that hold a run open so follow-ups land
     // mid-run. `E2E_BUSY_HOLD:<n>` overrides it per message; this is the
     // fallback for the specs that just say `E2E_BUSY_HOLD` and then cancel the
     // run, so it only has to outlast the assertions they make while it is busy.
-    // E2E_UI_SERVER is where the harness proxies page requests for rendering;
-    // global-setup starts that server on the same port.
+    // E2E_UI_SERVER is the app's own server, which global-setup starts on that
+    // port; the harness needs it to address the dashboard in "Open in Web" links.
     env: {
       ...process.env,
       E2E_BUSY_HOLD_SECONDS: "8",

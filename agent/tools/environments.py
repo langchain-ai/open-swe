@@ -8,9 +8,9 @@ metadata says "admin" cannot act on behalf of someone who is not one.
 import logging
 from typing import Any
 
-from ..dashboard import environments as store
-from .admin_gate import configurable as _configurable
-from .admin_gate import require_admin
+from agent.dashboard import environments as store
+from agent.tools.admin_gate import configurable as _configurable
+from agent.tools.admin_gate import require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ async def save_environment(
     existing = await store.ENVIRONMENTS.get(slug)
     try:
         if existing is None:
-            login = _configurable().get("github_login")
+            login = _configurable().github_login
             record = await store.ENVIRONMENTS.create(
                 store.EnvironmentCreate(
                     name=name,
@@ -187,12 +187,12 @@ async def capture_environment_snapshot(name: str) -> dict[str, Any]:
     if await store.ENVIRONMENTS.get(slug) is None:
         return {"ok": False, "error": f"no environment named {name!r}; call save_environment first"}
 
-    thread_id = _configurable().get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    thread_id = _configurable().thread_id
+    if not thread_id:
         return {"ok": False, "error": "no thread_id in the current run config"}
 
     try:
-        from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
+        from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.

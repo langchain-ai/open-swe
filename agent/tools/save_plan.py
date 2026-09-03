@@ -5,17 +5,17 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Any
 
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..dashboard.plan_store import (
+from agent.dashboard.plan_store import (
     PLAN_FILE_DIRECTORY,
     PLAN_STATUS_READY,
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
-from ..utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
-from ..utils.sandbox_state import get_sandbox_backend
+from agent.run_config import RunConfig
+from agent.sandboxes.state import get_sandbox_backend
+from agent.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +55,8 @@ async def save_plan(
             "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
         }
 
-    try:
-        config = get_config()
-    except Exception:
-        config = {}
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    cfg = RunConfig.from_runtime()
+    thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "no thread_id in run config"}
 
@@ -69,9 +65,7 @@ async def save_plan(
         if not content:
             return {"success": False, "error": "plan file cannot be empty"}
         document = wrap_html_artifact(content, title=_title_from_path(path))
-        await _save(
-            str(thread_id), document, path, plan_mode=_active_plan_mode(state, configurable)
-        )
+        await _save(str(thread_id), document, path, plan_mode=_active_plan_mode(state, cfg))
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
@@ -88,10 +82,10 @@ async def _save(thread_id: str, content: str, path: str, *, plan_mode: bool) -> 
     )
 
 
-def _active_plan_mode(state: dict[str, Any] | None, configurable: Any) -> bool:
+def _active_plan_mode(state: dict[str, Any] | None, cfg: RunConfig) -> bool:
     if isinstance(state, dict) and state.get("plan_mode") is True:
         return True
-    return isinstance(configurable, dict) and configurable.get("plan_mode") is True
+    return cfg.plan_mode is True
 
 
 async def _read_plan_file(thread_id: str, path: str) -> str:

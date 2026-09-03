@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock
 
-from agent import slack_thinking
+from agent.slack import thinking as slack_thinking
 
 
 class _Part:

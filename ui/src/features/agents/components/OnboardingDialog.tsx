@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api, slackConnectUrl } from "@/lib/api"
+import { api, connectService } from "@/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -49,7 +49,10 @@ export function OnboardingDialog() {
     )
   }, [])
 
-  const firstModel: ModelOption | undefined = options.data?.models[0]
+  const defaultModels = options.data?.models.filter(
+    (model) => model.can_be_default !== false
+  )
+  const firstModel: ModelOption | undefined = defaultModels?.[0]
   const defaultModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
   const defaultEffort =
     options.data?.default_agent_reasoning_effort ??
@@ -64,7 +67,7 @@ export function OnboardingDialog() {
   }, [modelId, defaultModel])
 
   const currentModel: ModelOption | undefined =
-    options.data?.models.find((m) => m.id === modelId) ?? firstModel
+    defaultModels?.find((m) => m.id === modelId) ?? firstModel
 
   useEffect(() => {
     if (!currentModel) return
@@ -134,7 +137,7 @@ export function OnboardingDialog() {
                       <SelectValue placeholder="Pick a model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {options.data?.models.map((m) => (
+                      {defaultModels?.map((m) => (
                         <SelectItem key={m.id} value={m.id}>
                           {m.label}
                         </SelectItem>
@@ -212,7 +215,11 @@ export function OnboardingDialog() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => window.location.assign(slackConnectUrl())}
+                  onClick={() =>
+                    void connectService("slack")?.finally(
+                      () => void mapping.refetch()
+                    )
+                  }
                 >
                   <IoLogoSlack className="size-4" />
                   Connect Slack

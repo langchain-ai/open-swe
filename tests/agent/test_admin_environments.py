@@ -7,7 +7,8 @@ from langgraph.graph.state import RunnableConfig
 from agent import server
 from agent.dashboard.environments import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
-from agent.tools import admin_gate
+from agent.run_config import RunConfig
+from agent.sandboxes import lifecycle
 from agent.tools import environments as env_tools
 
 _READY = Environment(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
@@ -23,24 +24,32 @@ def _config(**configurable: object) -> RunnableConfig:
 @pytest.mark.asyncio
 async def test_default_environment_snapshot_wins_over_base() -> None:
     with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
+        patch.object(lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            lifecycle,
+            "get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="admin-snap",
         ),
     ):
-        assert await server._resolve_snapshot_id() == "env-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
 @pytest.mark.asyncio
 async def test_environment_without_ready_snapshot_falls_back_to_base() -> None:
     capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
     with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=capturing),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=capturing
+        ),
+        patch.object(
+            lifecycle,
+            "get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="admin-snap",
         ),
     ):
-        assert await server._resolve_snapshot_id() == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"
 
 
 @pytest.mark.asyncio
@@ -49,12 +58,15 @@ async def test_snapshot_resolution_passes_the_threads_environment() -> None:
         return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
     )
     with (
-        patch.object(server, "resolve_environment", resolve),
+        patch.object(lifecycle, "resolve_environment", resolve),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            lifecycle,
+            "get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="admin-snap",
         ),
     ):
-        snapshot_id = await server._resolve_snapshot_id("staging")
+        snapshot_id = (await lifecycle.SandboxCreateConfig.resolve("staging")).snapshot_id
 
     assert snapshot_id == "staging-snap"
     resolve.assert_awaited_once_with("staging")
@@ -71,9 +83,12 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
         }
     )
     with patch.object(
-        server, "resolve_environment", new_callable=AsyncMock, return_value=environment
+        lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=environment
     ):
-        snapshot_id, resources, create_params = await server._resolve_sandbox_create_config("base")
+        config = await lifecycle.SandboxCreateConfig.resolve("base")
+        snapshot_id = config.snapshot_id
+        resources = config.resources
+        create_params = config.create_params
 
     assert snapshot_id == "env-snap"
     assert resources == {
@@ -85,10 +100,9 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
 
 
 def test_environment_slug_reads_the_run_config() -> None:
-    assert server._environment_slug({"environment": "staging"}) == "staging"
-    assert server._environment_slug({"environment": "  "}) is None
-    assert server._environment_slug({}) is None
-    assert server._environment_slug(None) is None
+    assert server._environment_slug(RunConfig(environment="staging")) == "staging"
+    assert server._environment_slug(RunConfig(environment="  ")) is None
+    assert server._environment_slug(RunConfig()) is None
 
 
 # --- admin thread gate ---
@@ -135,7 +149,7 @@ async def test_workspace_admin_resolves_email_for_github_login(
 @pytest.mark.asyncio
 async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with patch.object(admin_gate, "get_config", return_value=_config(github_login="someone-else")):
+    with patch("agent.run_config.get_config", return_value=_config(github_login="someone-else")):
         assert await env_tools.list_environments() == {
             "ok": False,
             "error": "Only workspace admins can manage environments.",
@@ -159,7 +173,7 @@ async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.Monk
         )
     )
     with (
-        patch.object(admin_gate, "get_config", return_value=_config(github_login="ramonn")),
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
             env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
         ),
@@ -189,7 +203,7 @@ async def test_save_environment_can_clear_sandbox_sizing(monkeypatch: pytest.Mon
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     update = AsyncMock(return_value=Environment(slug="base", name="base", prompt="prompt"))
     with (
-        patch.object(admin_gate, "get_config", return_value=_config(github_login="ramonn")),
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
             env_tools.store.ENVIRONMENTS,
             "get",
@@ -221,7 +235,7 @@ async def test_save_environment_rejects_clear_sizing_with_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with patch.object(admin_gate, "get_config", return_value=_config(github_login="ramonn")):
+    with patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")):
         result = await env_tools.save_environment("base", "prompt", vcpus=8, clear_sizing=True)
 
     assert result == {
@@ -234,9 +248,8 @@ async def test_save_environment_rejects_clear_sizing_with_values(
 async def test_capture_tool_requires_a_saved_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with (
-        patch.object(
-            admin_gate,
-            "get_config",
+        patch(
+            "agent.run_config.get_config",
             return_value=_config(github_login="ramonn", thread_id="t-1"),
         ),
         patch.object(

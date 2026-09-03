@@ -63,6 +63,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     assert "write_file" not in excluded
     assert "edit_file" not in excluded
     assert "execute" not in excluded
+    assert "browser_close" not in excluded
 
 
 class _FakeThreadsClient:
@@ -224,8 +225,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     saved: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        approve_plan_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",
@@ -313,8 +313,7 @@ async def test_approve_plan_tool_ignores_stale_state_approver(
     saved: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        approve_plan_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",
@@ -384,8 +383,7 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
     approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
     saved: dict[str, Any] = {}
     monkeypatch.setattr(
-        approve_plan_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",

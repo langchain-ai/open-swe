@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.3",
+  "version": "0.2.6",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -20,6 +20,11 @@
   "build": {
     "appId": "com.langchain.openswe",
     "productName": "Open SWE",
+    "publish": {
+      "provider": "github",
+      "owner": "langchain-ai",
+      "repo": "open-swe"
+    },
     "asar": true,
     "asarUnpack": [
       "node_modules/node-pty/**/*"
@@ -99,12 +104,13 @@
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
     "@electron/notarize": "3.1.1",
-    "@types/node": "22.20.1",
-    "electron": "41.10.3",
+    "@types/node": "26.3.0",
+    "electron": "43.4.1",
     "electron-builder": "26.15.3",
     "typescript": "5.9.3"
   },
   "dependencies": {
+    "electron-updater": "6.8.9",
     "node-pty": "1.1.0"
   }
 }

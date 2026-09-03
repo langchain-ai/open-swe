@@ -15,6 +15,7 @@ const ALLOWED_PERMISSIONS = new Set([
 const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
+const CONNECT_PROVIDERS = new Set(["slack", "notion"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");
@@ -83,6 +84,27 @@ function desktopLoginUrl(backendUrl, { challenge, port }) {
   target.searchParams.set("desktop_handoff", challenge);
   target.searchParams.set("desktop_port", String(port));
   return target.toString();
+}
+
+function isConnectProvider(value) {
+  return typeof value === "string" && CONNECT_PROVIDERS.has(value);
+}
+
+// The app requests this itself, with its own session cookie, and opens only
+// the provider URL it redirects to — the browser never sees an endpoint that
+// needs the session.
+function connectLoginUrl(backendUrl, provider, { challenge, port }) {
+  const target = new URL(`/dashboard/api/${provider}/login`, backendUrl);
+  target.searchParams.set("desktop_handoff", challenge);
+  target.searchParams.set("desktop_port", String(port));
+  return target.toString();
+}
+
+function connectExchangeUrl(backendUrl, provider) {
+  return new URL(
+    `/dashboard/api/${provider}/desktop/exchange`,
+    backendUrl,
+  ).toString();
 }
 
 function desktopExchangeUrl(backendUrl) {
@@ -159,12 +181,15 @@ module.exports = {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   SESSION_COOKIE_NAME,
   appRedirectUrl,
+  connectExchangeUrl,
+  connectLoginUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
   resolveAppRuntime,
   backendRequestUrl,
   isAppLoginUrl,
   isAppUrl,
+  isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,

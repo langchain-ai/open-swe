@@ -4,8 +4,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.agent_overrides import resolve_github_login
-from ..dashboard.skills import (
+from agent.dashboard.agent_overrides import resolve_github_login
+from agent.dashboard.skills import (
     SkillCreate,
     SkillUpdate,
     create_skill,
@@ -13,7 +13,7 @@ from ..dashboard.skills import (
     get_skill,
     update_skill,
 )
-from ..utils.json_types import as_json_object
+from agent.utils.json_types import as_json_object
 
 
 def _login() -> str | None:

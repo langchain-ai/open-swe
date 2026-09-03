@@ -63,7 +63,7 @@ from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.utils.slack import lookup_slack_thread_id  # noqa: E402
+from agent.slack.client import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -228,7 +228,7 @@ async def control_forget_slack_events() -> JSONResponse:
     A redelivery normally lands on a different instance than the original, which
     only has the LangGraph store to dedupe on. Clearing the local cache lets the
     E2E exercise that path instead of the same-process fast path."""
-    from agent.utils.slack_events import reset_slack_event_claims
+    from agent.slack.events import reset_slack_event_claims
 
     reset_slack_event_claims()
     return JSONResponse({"ok": True})
@@ -437,48 +437,10 @@ async def control_logout() -> JSONResponse:
     return resp
 
 
-# --- serve the REAL built ui/ app, same-origin so the session cookie works ----
-# The "Open in Web" link (DASHBOARD_BASE_URL/agents/{id}) lands on the real app;
-# it calls /dashboard/api/* (same origin) and streams via the dashboard proxy.
-#
-# HTML comes from the app's own Nitro server (started by ``global-setup.ts``) so
-# the tests exercise server rendering, the root session gate, and hydration —
-# serving the prerendered shell here would skip all three. Static assets are
-# still read off disk: same bytes, no extra hop.
+# The app is served by its own Nitro server, which the specs address directly and
+# which fronts these routes in turn — the shape a deployment has. This serves only
+# the one asset the fake Slack payloads point at.
 UI_PUBLIC = REPO_ROOT / "ui" / ".output" / "public"
-_ASSETS_ROOT = (UI_PUBLIC / "assets").resolve()
-UI_SERVER_URL = os.environ.get("E2E_UI_SERVER", "http://127.0.0.1:3100").rstrip("/")
-
-# Set by the proxy: the response is already decoded and re-framed by httpx.
-_DROPPED_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
-
-
-async def _render_app_route(request: Request) -> Response:
-    body = await request.body()
-    # Host is forwarded verbatim, as a reverse proxy does: the app derives its own
-    # origin from it, and swapping in the UI server's port would make every render
-    # look like it came from a different origin than the API.
-    headers = dict(request.headers)
-    try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
-            upstream = await client.request(
-                request.method,
-                f"{UI_SERVER_URL}{request.url.path}",
-                params=dict(request.query_params),
-                headers=headers,
-                content=body,
-            )
-    except httpx.HTTPError as exc:
-        raise HTTPException(
-            502, f"UI server unreachable at {UI_SERVER_URL} — is global-setup running it?"
-        ) from exc
-    return Response(
-        content=upstream.content,
-        status_code=upstream.status_code,
-        headers={
-            k: v for k, v in upstream.headers.items() if k.lower() not in _DROPPED_RESPONSE_HEADERS
-        },
-    )
 
 
 def _ui_file(name: str) -> FileResponse:
@@ -488,73 +450,9 @@ def _ui_file(name: str) -> FileResponse:
     return FileResponse(path)
 
 
-@app.get("/assets/{asset_path:path}")
-async def ui_asset(asset_path: str) -> FileResponse:
-    # Explicit route, not app.mount(StaticFiles): LangGraph's custom-app loader
-    # serves APIRoutes but drops sub-app Mounts, so a mount 404s under it.
-    target = (_ASSETS_ROOT / asset_path).resolve()
-    if not str(target).startswith(str(_ASSETS_ROOT)) or not target.is_file():
-        raise HTTPException(404, "asset not found")
-    return FileResponse(target)
-
-
-@app.get("/_shell.html", response_class=HTMLResponse)
-async def ui_shell() -> FileResponse:
-    return _ui_file("_shell.html")
-
-
-@app.get("/manifest.webmanifest")
-async def ui_manifest() -> FileResponse:
-    return _ui_file("manifest.webmanifest")
-
-
-@app.get("/favicon.png")
-async def ui_favicon() -> FileResponse:
-    return _ui_file("favicon.png")
-
-
-@app.get("/apple-touch-icon.png")
-async def ui_apple_icon() -> FileResponse:
-    return _ui_file("apple-touch-icon.png")
-
-
 @app.get("/logo-mark.png")
 async def ui_logo_mark() -> FileResponse:
     return _ui_file("logo-mark.png")
-
-
-# App routes used by the handoff tests. Kept explicit (no catch-all) so
-# LangGraph's own root routes — which the dashboard proxy calls server-side —
-# are untouched.
-@app.get("/my-settings", response_class=HTMLResponse)
-async def ui_settings(request: Request) -> Response:
-    return await _render_app_route(request)
-
-
-@app.get("/agents", response_class=HTMLResponse)
-async def ui_agents_home(request: Request) -> Response:
-    return await _render_app_route(request)
-
-
-@app.get("/agents/{thread_id}", response_class=HTMLResponse)
-async def ui_agents_thread(request: Request, thread_id: str) -> Response:  # noqa: ARG001
-    return await _render_app_route(request)
-
-
-@app.get("/agents/{thread_id}/plan", response_class=HTMLResponse)
-async def ui_agents_plan(request: Request, thread_id: str) -> Response:  # noqa: ARG001
-    return await _render_app_route(request)
-
-
-@app.get("/login", response_class=HTMLResponse)
-async def ui_login(request: Request) -> Response:
-    return await _render_app_route(request)
-
-
-# Server functions and the SSR data stream the rendered pages fetch after load.
-@app.api_route("/_serverFn/{fn_path:path}", methods=["GET", "POST"])
-async def ui_server_fn(request: Request, fn_path: str) -> Response:  # noqa: ARG001
-    return await _render_app_route(request)
 
 
 @app.get("/mock/users")

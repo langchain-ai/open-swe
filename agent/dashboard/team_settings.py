@@ -2,7 +2,7 @@
 
 A single record keyed ``"default"`` keeps all instance-wide reviewer
 configuration in one place. Per-repo style prompts live in
-:mod:`agent.dashboard.review_styles`.
+:mod:`agent.review.styles`.
 """
 
 import logging
@@ -12,12 +12,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from agent.store import get_value, now_iso, put_value
-
-from ..utils.gateway import resolve_gateway_enabled
-from .options import (
+from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
+    NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     default_model_pair,
@@ -25,6 +23,8 @@ from .options import (
     model_supports_effort,
     provider_fallback_pair,
 )
+from agent.store import get_value, now_iso, put_value
+from agent.utils.gateway import resolve_gateway_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
         return text
 
     @model_validator(mode="after")
-    def _validate_model_pairs(self) -> "TeamSettingsUpdate":
+    def _validate_model_pairs(self) -> TeamSettingsUpdate:
         self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
             self.default_agent_model,
             self.default_agent_reasoning_effort,
@@ -183,7 +183,12 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
             self.default_thread_title_reasoning_effort,
             "thread title",
         )
-        if not self.fable_enabled:
+        if self.fable_enabled:
+            for model_field, _ in _MODEL_PAIR_FIELDS:
+                model = getattr(self, model_field)
+                if model in NON_DEFAULT_MODEL_IDS:
+                    raise ValueError(f"{model!r} cannot be a default model")
+        else:
             # Disabling Fable is the ZDR kill switch and must always succeed: rather
             # than reject a payload that still carries a Fable default, swap each
             # Fable default to its safe non-Fable fallback (mirrors the runtime
@@ -446,6 +451,7 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
         isinstance(model, str)
         and isinstance(effort, str)
         and model in SUPPORTED_MODEL_IDS
+        and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
         return _resolve_default_pair(model, effort)
@@ -463,6 +469,7 @@ async def get_team_default_thread_title_model() -> tuple[str, str]:
         isinstance(model, str)
         and isinstance(effort, str)
         and model in SUPPORTED_MODEL_IDS
+        and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
         return _resolve_default_pair(model, effort)
@@ -550,6 +557,7 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
         isinstance(model, str)
         and isinstance(effort, str)
         and model in SUPPORTED_MODEL_IDS
+        and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
         return model, effort

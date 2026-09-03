@@ -8,6 +8,7 @@ _MIDDLEWARE_MODULES = {
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
+    "ModelErrorMiddleware": ".model_errors",
     "ModelFallbackMiddleware": ".model_fallback",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
@@ -35,6 +36,7 @@ __all__ = [
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
     "ModelCallTimeoutMiddleware",
+    "ModelErrorMiddleware",
     "ModelFallbackMiddleware",
     "BasePrepareRunMiddleware",
     "PlanModeMiddleware",
@@ -59,28 +61,29 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from .check_message_queue import check_message_queue_before_model
-    from .dynamic_tools import DynamicToolMiddleware, IntegrationGroup
-    from .exclude_tools import ExcludeToolsMiddleware
-    from .model_call_timeout import ModelCallTimeoutMiddleware
-    from .model_fallback import ModelFallbackMiddleware
-    from .notify_step_limit import notify_step_limit_reached
-    from .plan_mode import PlanModeMiddleware
-    from .pr_creation_guard import PullRequestCreationGuardMiddleware
-    from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
-    from .refresh_github_proxy import refresh_github_proxy_before_model
-    from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
-    from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
-    from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
-    from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
-    from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
-    from .settle_review_check import settle_review_check_on_exit
-    from .stable_tool_order import StableToolResultOrderMiddleware
-    from .subdir_agents import SubdirAgentsReadMiddleware
-    from .task_retry import task_on_failure, task_retry_on
-    from .timeout_wrapup import TimeoutWrapupMiddleware
-    from .tool_error_handler import ToolErrorMiddleware
-    from .workflow_push_guard import WorkflowPushGuardMiddleware
+    from agent.middleware.check_message_queue import check_message_queue_before_model
+    from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
+    from agent.middleware.exclude_tools import ExcludeToolsMiddleware
+    from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
+    from agent.middleware.model_errors import ModelErrorMiddleware
+    from agent.middleware.model_fallback import ModelFallbackMiddleware
+    from agent.middleware.notify_step_limit import notify_step_limit_reached
+    from agent.middleware.plan_mode import PlanModeMiddleware
+    from agent.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
+    from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+    from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+    from agent.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
+    from agent.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
+    from agent.middleware.sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
+    from agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
+    from agent.middleware.sanitize_tool_inputs import SanitizeToolInputsMiddleware
+    from agent.middleware.settle_review_check import settle_review_check_on_exit
+    from agent.middleware.stable_tool_order import StableToolResultOrderMiddleware
+    from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
+    from agent.middleware.task_retry import task_on_failure, task_retry_on
+    from agent.middleware.timeout_wrapup import TimeoutWrapupMiddleware
+    from agent.middleware.tool_error_handler import ToolErrorMiddleware
+    from agent.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 
 
 def _load_export(name: str) -> Any:

@@ -7,7 +7,7 @@ from uuid import UUID
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-slack_reply_tool = importlib.import_module("agent.tools.slack_thread_reply")
+slack_reply_tool = importlib.import_module("agent.slack.tools.thread_reply")
 
 
 @pytest.fixture(autouse=True)
@@ -312,7 +312,7 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
 
 
 def test_slack_action_ids_are_unique_and_recognized() -> None:
-    slack_routes = importlib.import_module("agent.webhooks.slack_routes")
+    slack_routes = importlib.import_module("agent.slack.routes")
     blocks = slack_reply_tool.build_workflow_approval_blocks("Review", "abc")
     actions = blocks[1]["elements"]
 

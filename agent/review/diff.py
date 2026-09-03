@@ -226,7 +226,7 @@ async def fetch_pr_diff(
     """
     import httpx
 
-    from ..utils.github_http import github_client, github_request
+    from agent.github.http import github_client, github_request
 
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
     try:
@@ -262,7 +262,7 @@ async def fetch_pr_metadata(
     """
     import httpx
 
-    from ..utils.github_http import github_client, github_request
+    from agent.github.http import github_client, github_request
 
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
     try:
@@ -303,7 +303,7 @@ def review_diff_path(work_dir: str, base_ref: str, head_ref: str, merge_base: bo
 
 
 async def materialize_review_diff(
-    sandbox_backend: "SandboxBackendProtocol",
+    sandbox_backend: SandboxBackendProtocol,
     *,
     work_dir: str,
     base_ref: str,
@@ -378,7 +378,7 @@ def _download_content(response: object) -> str | None:
 
 
 async def compute_diff_in_sandbox(
-    sandbox_backend: "SandboxBackendProtocol",
+    sandbox_backend: SandboxBackendProtocol,
     work_dir: str,
     base_ref: str,
     head_ref: str,

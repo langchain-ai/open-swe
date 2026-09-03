@@ -12,7 +12,7 @@ class _AsyncClient:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
         self.closed = False
 
-    async def __aenter__(self) -> "_AsyncClient":
+    async def __aenter__(self) -> _AsyncClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -39,9 +39,7 @@ class _Backend:
 
 def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClient:
     monkeypatch.setattr(
-        download_tool,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-1"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
 
     async def get_backend(_thread_id: str) -> _Backend:
@@ -52,7 +50,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
 
     client = _AsyncClient()
     monkeypatch.setattr(download_tool, "get_sandbox_backend", get_backend)
-    monkeypatch.setattr(download_tool, "aresolve_sandbox_work_dir", work_dir)
+    monkeypatch.setattr(download_tool, "resolve_sandbox_work_dir", work_dir)
     monkeypatch.setattr(download_tool, "unwrap_sandbox_backend", lambda value: value)
     monkeypatch.setattr(download_tool, "get_async_sandbox_client", lambda: client)
     return client

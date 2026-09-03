@@ -2,7 +2,7 @@
 
 Kept deliberately light (no dashboard/server imports) so the eval harness in the
 GitHub Action can publish progress to the store without importing the FastAPI
-dashboard. Both ``agent.dashboard.eval_jobs`` (reader) and
+dashboard. Both ``agent.review.eval_jobs`` (reader) and
 ``evals.reviewer.store_reporter`` (writer) import from here.
 """
 

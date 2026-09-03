@@ -4,10 +4,9 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph.config import get_config
-
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_state import get_sandbox_backend
+from agent.run_config import RunConfig
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.state import get_sandbox_backend
 
 OUTPUT_CHUNK_CHARS = 500
 
@@ -21,14 +20,12 @@ def chunk_output_as_jsonl(content: str) -> str:
 
 
 async def write_sandbox_output(tool_name: str, content: str, extension: str) -> str:
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    thread_id = RunConfig.from_runtime().thread_id
     if not thread_id:
         raise RuntimeError("no thread_id in run config")
 
     backend = await get_sandbox_backend(str(thread_id))
-    work_dir = await aresolve_sandbox_work_dir(backend)
+    work_dir = await resolve_sandbox_work_dir(backend)
     suffix = extension.removeprefix(".")
     path = posixpath.join(work_dir, f"{tool_name}-{uuid.uuid4().hex}.{suffix}")
     result = await backend.awrite(path, content)

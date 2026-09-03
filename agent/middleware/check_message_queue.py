@@ -15,17 +15,17 @@ from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
-from ..dashboard.options import model_supports_images
-from ..input_messages import (
+from agent.dashboard.options import model_supports_images
+from agent.input_messages import (
     PersonIdentity,
     SystemIdentity,
     build_input_messages,
     visible_dynamic_context_hashes,
 )
-from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
-from ..utils.thread_ops import MAX_QUEUED_MESSAGES, PENDING_MESSAGES_KEY, QUEUE_MESSAGE_KEY_PREFIX
+from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
+from agent.utils.thread_ops import MAX_QUEUED_MESSAGES, PENDING_MESSAGES_KEY, QUEUE_MESSAGE_KEY_PREFIX
 
 logger = logging.getLogger(__name__)
 

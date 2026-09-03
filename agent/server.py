@@ -12,8 +12,7 @@ import hashlib
 import logging
 import os
 import warnings
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -37,43 +36,46 @@ from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
+from deepagents.graph import DeepAgentState
+from deepagents.middleware.filesystem import FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from .dashboard.admin import is_admin, is_observability_authorized
-from .dashboard.agent_overrides import (
+from agent.dashboard.admin import is_admin, is_observability_authorized
+from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_draft_prs,
     resolve_github_login,
 )
-from .dashboard.agent_usage import record_agent_run_usage
-from .dashboard.environments import (
-    SandboxResources,
+from agent.dashboard.agent_usage import record_agent_run_usage
+from agent.dashboard.environments import (
     resolve_environment,
 )
-from .dashboard.options import (
+from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from .dashboard.sandbox_settings import get_admin_base_snapshot_id
-from .dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from .dashboard.team_settings import (
+from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
-from .dashboard.user_mappings import email_for_login
-from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
-from .input_messages import (
+from agent.dashboard.user_mappings import email_for_login
+from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
+from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.github.org_membership import is_user_active_org_member
+from agent.github.token import resolve_github_token
+from agent.input_messages import (
     SystemIdentity,
     build_input_messages,
     dynamic_context_hash,
@@ -81,27 +83,13 @@ from .input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from .integrations.corridor_mcp import (
-    CORRIDOR_TOOL_NAMES,
-    corridor_configured,
-    load_corridor_tools,
-)
-from .integrations.currents_tools import load_currents_tools
-from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith import (
-    _configure_github_proxy,
-    _get_sandbox_proxy_config,
-    create_langsmith_sandbox_from_params,
-)
-from .integrations.langsmith_tools import load_langsmith_tools
-from .integrations.notion_mcp import load_notion_tools
-from .integrations.stagehand_browser import load_browser_tools
-from .middleware import (
+from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     IntegrationGroup,
     ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -120,20 +108,45 @@ from .middleware import (
     task_on_failure,
     task_retry_on,
 )
-from .middleware.prepare_run import PrepareRunState
-from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from .prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
-from .runtime.constants import (
+from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.prompt import (
+    construct_sender_context,
+    construct_system_prompt,
+    render_open_swe_shared_base,
+)
+from agent.run_config import RunConfig
+from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
 )
-from .runtime.constants import (
+from agent.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
-from .runtime.execution import graph_loaded_for_execution
-from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from .tools import (
+from agent.runtime.execution import graph_loaded_for_execution
+from agent.sandboxes.lifecycle import (
+    ensure_sandbox_for_thread,
+    get_cached_sandbox_backend,
+)
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.state import (
+    SandboxUnreachableError,
+    get_or_create_sandbox_backend_proxy,
+)
+from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.tool_loaders.corridor_mcp import (
+    CORRIDOR_TOOL_NAMES,
+    corridor_configured,
+    load_corridor_tools,
+)
+from agent.tool_loaders.currents import load_currents_tools
+from agent.tool_loaders.datadog_mcp import load_datadog_tools
+from agent.tool_loaders.langsmith import load_langsmith_tools
+from agent.tool_loaders.notion_mcp import load_notion_tools
+from agent.tool_loaders.stagehand_browser import load_browser_tools
+from agent.tools import (
     approve_plan,
     background_execute,
     background_task,
@@ -187,55 +200,35 @@ from .tools import (
     update_automation,
     web_search,
 )
-from .utils import ttl_cache
-from .utils.auth import resolve_github_token
-from .utils.authorship import (
-    OPEN_SWE_BOT_EMAIL,
-    OPEN_SWE_BOT_NAME,
+from agent.utils import ttl_cache
+from agent.utils.authorship import (
     CollaboratorIdentity,
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
-from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
-from .utils.deferred_model import make_deferred_error_model
-from .utils.gateway import gateway_env_default
-from .utils.github_app import get_github_app_installation_token_with_expiry
-from .utils.github_org_membership import is_user_active_org_member
-from .utils.github_proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
-from .utils.json_types import as_json_object, thread_metadata
-from .utils.model import (
+from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
+from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.gateway import gateway_env_default
+from agent.utils.json_types import as_json_object, thread_metadata
+from agent.utils.model import (
     DEFAULT_LLM_REASONING,
     ModelKwargs,
     fallback_model_id_for,
     make_model,
     provider_model_kwargs,
 )
-from .utils.read_only_backend import ReadOnlyBackend
-from .utils.sandbox import SandboxGoneError, create_sandbox
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import (
-    SANDBOX_BACKENDS,
-    SandboxBackendProxy,
-    SandboxUnreachableError,
-    get_or_create_sandbox_backend_proxy,
-    get_sandbox_id_from_metadata,
-    get_sandbox_metadata,
-    set_sandbox_backend,
-    unwrap_sandbox_backend,
-)
-from .utils.startup_trace import aphase
-from .utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
-from .utils.thread_settings import (
+from agent.utils.startup_trace import aphase
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from agent.utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
     normalize_thread_settings,
     store_thread_settings,
 )
-from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+from agent.utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
 
-_SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
@@ -280,15 +273,11 @@ def _tool_loader_timeout_seconds() -> float:
     return timeout
 
 
-async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
-    repo_config = configurable.get("repo")
-    if isinstance(repo_config, dict):
-        owner = repo_config.get("owner")
-        name = repo_config.get("name")
-        if isinstance(owner, str) and isinstance(name, str):
-            return {"owner": owner, "name": name}
+async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
+    if cfg.repo:
+        return {"owner": cfg.repo.owner, "name": cfg.repo.name}
 
-    if configurable.get("repo_explicitly_none") is True:
+    if cfg.repo_explicitly_none is True:
         return None
 
     try:
@@ -305,7 +294,7 @@ async def _resolve_repo_custom_instructions(
     if not default_repo or not default_repo.get("owner") or not default_repo.get("name"):
         return None
     try:
-        from .dashboard.agent_instructions import get_repo_agent_instructions
+        from agent.dashboard.agent_instructions import get_repo_agent_instructions
 
         return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
     except Exception:
@@ -329,451 +318,12 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     if not login:
         return None
     try:
-        from .dashboard.user_instructions import get_user_custom_instructions
+        from agent.dashboard.user_instructions import get_user_custom_instructions
 
         return await get_user_custom_instructions(login)
     except Exception:
         logger.debug("Failed to load user custom agent instructions", exc_info=True)
         return None
-
-
-async def _resolve_proxy_token(
-    github_proxy_token: str | None,
-) -> tuple[str | None, str | None, None]:
-    """Resolve the proxy token and its expiry."""
-    if github_proxy_token:
-        return github_proxy_token, None, None
-    token, expires_at = await get_github_app_installation_token_with_expiry()
-    return token, expires_at, None
-
-
-async def _resolve_sandbox_create_config(
-    environment_slug: str | None = None,
-) -> tuple[str | None, SandboxResources, dict[str, Any]]:
-    """Resolve the snapshot, VM sizing, and create parameters for a new sandbox."""
-    environment = await resolve_environment(environment_slug)
-    resources = environment.sandbox_resources() if environment else SandboxResources()
-    create_params = environment.sandbox_create_params() if environment else {}
-    if environment and environment.ready_snapshot_id:
-        return environment.ready_snapshot_id, resources, create_params
-    return await get_admin_base_snapshot_id(), resources, create_params
-
-
-async def _resolve_snapshot_id(environment_slug: str | None = None) -> str | None:
-    """Resolve the snapshot a new sandbox boots from."""
-    snapshot_id, _, _ = await _resolve_sandbox_create_config(environment_slug)
-    return snapshot_id
-
-
-async def _create_sandbox_with_proxy(
-    github_proxy_token: str | None = None,
-    *,
-    thread_id: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    environment_slug: str | None = None,
-) -> SandboxBackendProtocol:
-    """Create a new sandbox with GitHub proxy auth configured."""
-    async with aphase(thread_id, "sandbox.resolve_snapshot"):
-        snapshot_id, resources, create_params = await _resolve_sandbox_create_config(
-            environment_slug
-        )
-    async with aphase(thread_id, "sandbox.boot", snapshot_id=snapshot_id):
-        if create_params:
-            sandbox_backend = await create_sandbox(
-                snapshot_id=snapshot_id,
-                create_params=create_params,
-                **resources,
-            )
-        else:
-            sandbox_backend = await create_sandbox(snapshot_id=snapshot_id, **resources)
-
-    identity = _start_git_identity(thread_id, sandbox_backend)
-    failed = True
-    try:
-        sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
-        if sandbox_type == "langsmith":
-            async with aphase(thread_id, "sandbox.proxy_token"):
-                token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-            if not token:
-                msg = "Cannot configure proxy: GitHub App installation token is unavailable"
-                logger.error(msg)
-                raise ValueError(msg)
-            proxy_config = _get_sandbox_proxy_config(create_params)
-            async with aphase(thread_id, "sandbox.proxy_configure"):
-                if proxy_config is not None:
-                    await _configure_github_proxy(
-                        sandbox_backend.id,
-                        token,
-                        base_proxy_config=proxy_config,
-                    )
-                else:
-                    await _configure_github_proxy(sandbox_backend.id, token)
-            record_proxy_token_expiry(
-                thread_id,
-                expires_at,
-                repositories=github_proxy_repositories,
-                permissions=permissions,
-                base_proxy_config=proxy_config,
-            )
-        failed = False
-    finally:
-        await _settle_git_identity(identity, failed=failed)
-
-    return sandbox_backend
-
-
-async def _refresh_github_proxy(
-    sandbox_backend: SandboxBackendProtocol,
-    github_proxy_token: str | None = None,
-    *,
-    thread_id: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    base_proxy_config: dict[str, Any] | None = None,
-) -> None:
-    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
-        return
-
-    async with aphase(thread_id, "sandbox.proxy_token"):
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-    if not token:
-        logger.warning(
-            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
-            sandbox_backend.id,
-        )
-        return
-
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
-    async with aphase(thread_id, "sandbox.proxy_refresh"):
-        if base_proxy_config is not None:
-            await _configure_github_proxy(
-                current_backend.id,
-                token,
-                base_proxy_config=base_proxy_config,
-            )
-        else:
-            await _configure_github_proxy(current_backend.id, token)
-    record_proxy_token_expiry(
-        thread_id,
-        expires_at,
-        repositories=github_proxy_repositories,
-        permissions=permissions,
-        base_proxy_config=base_proxy_config,
-    )
-
-
-async def _refresh_github_proxy_or_fail(
-    sandbox_backend: SandboxBackendProtocol,
-    thread_id: str,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    base_proxy_config: dict[str, Any] | None = None,
-) -> SandboxBackendProtocol:
-    """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
-    try:
-        await _refresh_github_proxy(
-            sandbox_backend,
-            github_proxy_token,
-            thread_id=thread_id,
-            github_proxy_repositories=github_proxy_repositories,
-            base_proxy_config=base_proxy_config,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to refresh GitHub proxy for sandbox %s on thread %s",
-            sandbox_backend.id,
-            thread_id,
-            exc_info=True,
-        )
-        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
-    return sandbox_backend
-
-
-async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await sandbox_backend.aexecute(
-        f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
-    )
-
-
-def _start_git_identity(
-    thread_id: str | None, sandbox_backend: SandboxBackendProtocol
-) -> asyncio.Task[None]:
-    """Write the bot identity while the proxy is being configured.
-
-    The identity needs the box, not the proxy, and the cost is the round trip
-    rather than the two `git config` calls — on a cold sandbox that round trip
-    is over a second of the critical path before the first model call.
-    """
-
-    async def run() -> None:
-        async with aphase(thread_id, "sandbox.git_identity"):
-            await _configure_git_identity(sandbox_backend)
-
-    return asyncio.create_task(run())
-
-
-async def _settle_git_identity(task: asyncio.Task[None], *, failed: bool) -> None:
-    """Join the identity write, or drop it when its sandbox is already lost."""
-    if failed:
-        task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
-            await task
-        return
-    await task
-
-
-async def _connect_existing_sandbox(
-    thread_id: str,
-    *,
-    cached: SandboxBackendProtocol | None,
-    sandbox_id: str | None,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    base_proxy_config: dict[str, Any] | None = None,
-) -> SandboxBackendProtocol:
-    """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
-
-    A ``SandboxGoneError`` propagates untouched so the caller recreates. Nothing
-    pings the box first: refreshing the proxy below has to reach it anyway, and
-    raises the same unreachable error when it cannot.
-    """
-    if cached is not None:
-        logger.info("Using cached sandbox backend for thread %s", thread_id)
-        sandbox_backend = cached
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        try:
-            async with aphase(thread_id, "sandbox.reconnect", sandbox_id=sandbox_id):
-                sandbox_backend = await create_sandbox(str(sandbox_id))
-        except SandboxGoneError:
-            raise
-        except Exception as exc:
-            logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
-            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-    identity = _start_git_identity(thread_id, sandbox_backend)
-    failed = True
-    try:
-        refreshed = await _refresh_github_proxy_or_fail(
-            sandbox_backend,
-            thread_id,
-            github_proxy_token,
-            github_proxy_repositories,
-            base_proxy_config,
-        )
-        failed = False
-    finally:
-        await _settle_git_identity(identity, failed=failed)
-    return refreshed
-
-
-async def ensure_sandbox_for_thread(
-    thread_id: str,
-    *,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    environment_slug: str | None = None,
-    allow_replacement: bool = False,
-) -> SandboxBackendProtocol:
-    """Get-or-create a healthy sandbox bound to ``thread_id``.
-
-    Three cases (dispatch uses ``multitask_strategy="interrupt"``, so a thread
-    never provisions two sandboxes concurrently — no cross-process sentinel is
-    needed):
-
-    1. Cached in memory -> ping, then refresh proxy.
-    2. Metadata has an id -> reconnect, then refresh proxy.
-    3. No sandbox at all -> create one and persist the id.
-
-    A sandbox that exists but can't be reached raises ``SandboxUnreachableError``
-    instead of being replaced, because a replacement is empty and swapping one in
-    silently destroys whatever the agent had not yet committed. A *deleted* one
-    (``SandboxGoneError``) is always replaced: it holds nothing, and the stale id
-    in thread metadata is what every later run keeps reconnecting to, so refusing
-    would brick the thread permanently.
-
-    ``allow_replacement`` extends replacement to merely unreachable sandboxes,
-    for callers whose sandbox holds nothing but a re-derivable checkout — the
-    read-only reviewer, which re-preps the repo every run.
-
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
-    created sandboxes boot from the environment's snapshot when one is ready,
-    otherwise the base snapshot (admin setting, else
-    ``DEFAULT_SANDBOX_SNAPSHOT_ID``).
-    Re-applies git identity every run because reused/reconnected sandboxes can
-    lose their ``--global`` config, and Vercel preview deploys reject commits
-    whose author email can't be resolved to a GitHub account.
-    """
-    cached_proxy = SANDBOX_BACKENDS.get(thread_id)
-    sandbox_backend = (
-        unwrap_sandbox_backend(cached_proxy)
-        if cached_proxy is not None and cached_proxy.has_backend
-        else None
-    )
-    async with aphase(thread_id, "sandbox.thread_metadata"):
-        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-        sandbox_metadata = await get_sandbox_metadata(thread_id) if sandbox_id is not None else {}
-    metadata_proxy_config = sandbox_metadata.get(_SANDBOX_PROXY_CONFIG_METADATA_KEY)
-    base_proxy_config = (
-        metadata_proxy_config
-        if isinstance(metadata_proxy_config, dict)
-        else get_recorded_proxy_base_config(thread_id)
-    )
-    created_proxy_config: dict[str, Any] | None = None
-
-    if sandbox_backend is None and sandbox_id is None:
-        logger.info("Creating new sandbox for thread %s", thread_id)
-        sandbox_backend = await _create_sandbox_with_proxy(
-            github_proxy_token,
-            thread_id=thread_id,
-            github_proxy_repositories=github_proxy_repositories,
-            environment_slug=environment_slug,
-        )
-        created_proxy_config = get_recorded_proxy_base_config(thread_id)
-        logger.info("Sandbox created: %s", sandbox_backend.id)
-    else:
-        try:
-            sandbox_backend = await _connect_existing_sandbox(
-                thread_id,
-                cached=sandbox_backend,
-                sandbox_id=sandbox_id,
-                github_proxy_token=github_proxy_token,
-                github_proxy_repositories=github_proxy_repositories,
-                base_proxy_config=base_proxy_config,
-            )
-        except (SandboxGoneError, SandboxUnreachableError) as exc:
-            gone = isinstance(exc, SandboxGoneError)
-            if not (gone or allow_replacement):
-                raise
-            logger.warning(
-                "Replacing %s sandbox %s for thread %s",
-                "deleted" if gone else "unreachable",
-                sandbox_id,
-                thread_id,
-            )
-            try:
-                sandbox_backend = await _create_sandbox_with_proxy(
-                    github_proxy_token,
-                    thread_id=thread_id,
-                    github_proxy_repositories=github_proxy_repositories,
-                    environment_slug=environment_slug,
-                )
-                created_proxy_config = get_recorded_proxy_base_config(thread_id)
-            except Exception as create_exc:
-                # Keep the failure typed so callers still recognize "this run has no
-                # sandbox" and can notify the user.
-                logger.warning(
-                    "Failed to replace sandbox %s for thread %s",
-                    sandbox_id,
-                    thread_id,
-                    exc_info=True,
-                )
-                raise SandboxUnreachableError(
-                    thread_id, sandbox_id, str(create_exc)
-                ) from create_exc
-            logger.info("Replacement sandbox created: %s", sandbox_backend.id)
-
-    # Bind the thread only once the sandbox is created and initialized: a run
-    # that dies earlier leaves no id to reconnect to, so the next run creates
-    # rather than adopting a half-built box.
-    if sandbox_id != sandbox_backend.id:
-        sandbox_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
-        if created_proxy_config is not None:
-            sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
-        async with aphase(thread_id, "sandbox.bind_thread"):
-            await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
-
-    # Publishing last is what makes a failure above visible. Callers reach the
-    # proxy's cached backend without awaiting the startup task that produced it,
-    # so a backend published before this point would be used by the rest of the
-    # run while the initialization that failed is only logged.
-    return set_sandbox_backend(thread_id, sandbox_backend)
-
-
-async def reset_sandbox_for_thread(
-    thread_id: str,
-    create_params: dict[str, Any],
-) -> tuple[str, str]:
-    """Bind a thread to a fresh sandbox created from raw provider options."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
-        raise ValueError("sandbox_reset is only supported by the LangSmith sandbox provider")
-
-    cached = SANDBOX_BACKENDS.get(thread_id)
-    metadata_sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-    old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
-    if not old_sandbox_id:
-        raise ValueError(f"Thread {thread_id} has no sandbox to reset")
-
-    new_sandbox = await create_langsmith_sandbox_from_params(create_params)
-    if new_sandbox.id == old_sandbox_id:
-        raise RuntimeError("Sandbox provider did not create a distinct sandbox")
-
-    proxy_config = _get_sandbox_proxy_config(create_params)
-    token, expires_at, permissions = await _resolve_proxy_token(None)
-    if not token:
-        raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
-    if proxy_config is not None:
-        await _configure_github_proxy(new_sandbox.id, token, base_proxy_config=proxy_config)
-    else:
-        await _configure_github_proxy(new_sandbox.id, token)
-    await _configure_git_identity(new_sandbox)
-    sandbox_metadata: dict[str, Any] = {
-        "sandbox_id": new_sandbox.id,
-        _SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config,
-    }
-    await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
-    set_sandbox_backend(thread_id, new_sandbox)
-    record_proxy_token_expiry(
-        thread_id,
-        expires_at,
-        permissions=permissions,
-        base_proxy_config=proxy_config,
-    )
-    logger.info(
-        "Reset thread %s from sandbox %s to sandbox %s",
-        thread_id,
-        old_sandbox_id,
-        new_sandbox.id,
-    )
-    return old_sandbox_id, new_sandbox.id
-
-
-async def recreate_sandbox_for_thread(
-    thread_id: str,
-    *,
-    environment_slug: str | None = None,
-) -> tuple[str, str]:
-    """Bind a thread to a fresh sandbox while preserving its previous sandbox."""
-    cached = SANDBOX_BACKENDS.get(thread_id)
-    metadata_sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-    old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
-    if not old_sandbox_id:
-        raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
-
-    new_sandbox = await _create_sandbox_with_proxy(
-        thread_id=thread_id,
-        environment_slug=environment_slug,
-    )
-    if new_sandbox.id == old_sandbox_id:
-        raise RuntimeError("Sandbox provider did not create a distinct sandbox")
-
-    await _configure_git_identity(new_sandbox)
-    sandbox_metadata: dict[str, Any] = {"sandbox_id": new_sandbox.id}
-    base_proxy_config = get_recorded_proxy_base_config(thread_id)
-    if base_proxy_config is not None:
-        sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = base_proxy_config
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata=sandbox_metadata,
-    )
-    set_sandbox_backend(thread_id, new_sandbox)
-    logger.info(
-        "Rebound thread %s from sandbox %s to sandbox %s",
-        thread_id,
-        old_sandbox_id,
-        new_sandbox.id,
-    )
-    return old_sandbox_id, new_sandbox.id
 
 
 # Mutating external tools hidden from the model while plan mode is active so it
@@ -791,6 +341,10 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
+        "browser_act",
+        "browser_extract",
+        "browser_navigate",
+        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -824,8 +378,23 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """
     return cast(
         list[AgentMiddleware[Any, Any, Any]],
-        [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        [
+            SanitizeOpenAIResponsesMiddleware(),
+            ModelErrorMiddleware(),
+            ModelCallTimeoutMiddleware(),
+        ],
     )
+
+
+def _subagent_middleware(
+    dynamic_tools: DynamicToolMiddleware | None,
+) -> list[AgentMiddleware[Any, Any, Any]]:
+    middleware: list[AgentMiddleware[Any, Any, Any]] = []
+    if dynamic_tools is not None:
+        middleware.append(dynamic_tools)
+    middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
+    middleware.extend(_subagent_model_middleware())
+    return middleware
 
 
 def _is_subagent_excluded_tool(tool: Any) -> bool:
@@ -863,70 +432,11 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": [
-            *([dynamic_tools] if dynamic_tools else []),
-            ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
-            *_subagent_model_middleware(),
-        ],
+        "middleware": _subagent_middleware(dynamic_tools),
     }
     if skills:
         subagent["skills"] = skills
     return subagent
-
-
-BROWSER_SUBAGENT_DESCRIPTION = (
-    "Drives sandbox-local Chromium with Stagehand to "
-    "accomplish tasks that require interacting with live web pages: logging "
-    "into dashboards, clicking through flows, filling forms, reading "
-    "JS-rendered content, reproducing UI bugs, and extracting structured data. "
-    "Prefer the `fetch_url` tool for static page reads; delegate here only when "
-    "the task needs interaction or JavaScript-rendered content."
-)
-
-BROWSER_SUBAGENT_SYSTEM_PROMPT = """You are a browser automation specialist. You control a real Chromium \
-browser via Stagehand tools.
-
-Workflow:
-1. Call `browser_navigate` to open the browser and go to the starting URL.
-2. Use `browser_observe` to find actionable elements before acting when the \
-page is unfamiliar.
-3. Use `browser_act` for clicks/typing/navigation with concise \
-natural-language instructions (one action per call).
-4. Use `browser_extract` to pull the specific data the caller asked for, \
-passing a JSON schema when you need a precise shape.
-5. Always call `browser_close` when finished to release the session.
-
-Guidance:
-- Take one concrete step at a time and verify the result before the next.
-- Keep instructions specific and grounded in what `browser_observe`/\
-`browser_extract` returned.
-- Do not exfiltrate credentials or secrets. Only act on the task you were \
-delegated.
-- Return a concise summary of what you did and the data you extracted; include \
-the session replay URL if one was returned."""
-
-
-def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
-    return {
-        "name": "browser",
-        "description": BROWSER_SUBAGENT_DESCRIPTION,
-        "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
-        "tools": tools,
-        "model": model,
-        "middleware": _subagent_model_middleware(),
-    }
-
-
-def _get_cached_sandbox_backend(
-    thread_id: str,
-    *,
-    reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
-) -> SandboxBackendProxy:
-    return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
-
-
-get_cached_sandbox_backend = _get_cached_sandbox_backend
-configure_git_identity = _configure_git_identity
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -935,13 +445,11 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     Gates on admin / explicitly-authorized emails so prompt-injected runs from
     untrusted contributors cannot reach the team's Datadog/LangSmith data.
     """
-    configurable = (config or {}).get("configurable") or {}
-    slack_thread = configurable.get("slack_thread") or {}
-    config_login = configurable.get("github_login")
-    candidate_login = profile_login or (config_login if isinstance(config_login, str) else None)
+    cfg = RunConfig.from_config(config)
+    candidate_login = profile_login or cfg.github_login
     candidate_emails = [
-        configurable.get("user_email"),
-        slack_thread.get("triggering_user_email"),
+        cfg.user_email,
+        cfg.slack_thread.triggering_user_email if cfg.slack_thread else None,
     ]
     if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
         return True
@@ -974,18 +482,15 @@ ADMIN_TOOLS = (
 )
 
 
-def _environment_slug(configurable: Mapping[str, Any] | None) -> str | None:
+def _environment_slug(cfg: RunConfig) -> str | None:
     """The environment this thread selected, if any."""
-    slug = (configurable or {}).get("environment")
-    return slug.strip() or None if isinstance(slug, str) else None
+    return (cfg.environment or "").strip() or None
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    configurable = (config or {}).get("configurable") or {}
-    config_login = configurable.get("github_login")
-    login = profile_login or (config_login if isinstance(config_login, str) else None)
-    email = configurable.get("user_email")
-    if is_admin(email if isinstance(email, str) else None, login=login):
+    cfg = RunConfig.from_config(config)
+    login = profile_login or cfg.github_login
+    if is_admin(cfg.user_email, login=login):
         return True
     return is_admin(await email_for_login(login), login=login)
 
@@ -997,8 +502,7 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
     capability to a non-admin who later messages it.
     """
-    configurable = (config or {}).get("configurable") or {}
-    return configurable.get("admin_thread") is True and await _workspace_admin(
+    return RunConfig.from_config(config).admin_thread is True and await _workspace_admin(
         config, profile_login
     )
 
@@ -1015,9 +519,7 @@ async def _cached_allowed_org_member(config: RunnableConfig, profile_login: str 
 
 
 def _org_member_login(config: RunnableConfig, profile_login: str | None) -> str | None:
-    configurable = (config or {}).get("configurable") or {}
-    config_login = configurable.get("github_login")
-    return profile_login or (config_login if isinstance(config_login, str) else None)
+    return profile_login or RunConfig.from_config(config).github_login
 
 
 async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -1150,27 +652,20 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) -> bool:
+def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
     """Return whether signed sandbox file downloads are available for this run."""
-    resolved = configurable or {}
     return (
         os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
-        and resolved.get("stop_summary") is not True
-        and not is_desktop_run(resolved)
+        and cfg.stop_summary is not True
+        and not is_desktop_run(cfg)
     )
 
 
-def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
+def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
-    if configurable.get("source") not in {"slack", "schedule"}:
+    if cfg.source not in {"slack", "schedule"} or cfg.slack_thread is None:
         return False
-    slack_thread = configurable.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return False
-    return all(
-        isinstance(slack_thread.get(key), str) and bool(slack_thread[key].strip())
-        for key in ("channel_id", "thread_ts")
-    )
+    return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
 
 
 def _make_model_or_defer(
@@ -1223,12 +718,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
-        configurable = (self._config or {}).get("configurable") or {}
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id"),
+            "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
             "source": self._source,
-            "repo": configurable.get("repo"),
+            "repo": cfg.repo.model_dump() if cfg.repo else None,
             "plan_mode": self._plan_mode,
             "draft_prs": self._draft_prs,
             "model": self._model_id,
@@ -1290,11 +785,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
-        if is_desktop_run(configurable):
+        cfg = RunConfig.parse(configurable)
+        if is_desktop_run(cfg):
+            if cfg.local_project_path:
+                schedule_worktree_branch_rename(
+                    worktree_path=cfg.local_project_path,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             async with aphase(self._thread_id, "prepare.work_dir"):
-                work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+                work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
                 "work_dir": work_dir,
                 "rendered_system_prompt": construct_system_prompt(
@@ -1305,7 +807,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.github_token"):
             github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         async with aphase(self._thread_id, "prepare.default_repo"):
-            prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+            prompt_default_repo = await _resolve_prompt_default_repo(cfg)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
                 resolve_triggering_user_identity, as_json_object(self._config), github_token
@@ -1329,9 +831,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             raise
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
-            work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.environment"):
-            environment = await resolve_environment(_environment_slug(configurable))
+            environment = await resolve_environment(_environment_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):
             sender_instructions, participant_identities = await asyncio.gather(
                 _resolve_user_custom_instructions(self._profile_login),
@@ -1358,10 +860,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "plan_mode": self._plan_mode,
                     },
                 )
-                prepare_run_id = configurable.get("prepare_run_id")
-                if isinstance(prepare_run_id, str):
+                if cfg.prepare_run_id:
                     await record_agent_run_usage(
-                        run_id=prepare_run_id,
+                        run_id=cfg.prepare_run_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
                         user_email=self._user_email,
@@ -1391,16 +892,21 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
                 source=self._source,
-                slack_context=_slack_tools_enabled(configurable),
-                sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
+                slack_context=_slack_tools_enabled(cfg),
+                sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
             ),
         }
+
+
+class DesktopAgentState(FilesystemState, DeepAgentState):
+    """Desktop agent state including snapshotted skill files."""
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.parse(configurable)
+    thread_id = cfg.thread_id
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -1413,23 +919,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
-        _configurable: dict[str, Any] = configurable,
+        _cfg: RunConfig = cfg,
     ) -> SandboxBackendProtocol:
-        if is_desktop_run(_configurable):
-            return create_desktop_backend(_configurable)
+        if is_desktop_run(_cfg):
+            return create_desktop_backend(_cfg)
         return await ensure_sandbox_for_thread(
             _thread_id,
-            environment_slug=_environment_slug(_configurable),
+            environment_slug=_environment_slug(_cfg),
         )
 
-    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization and credentialed integrations, which stay personal to them.
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
-    local_run = is_desktop_run(configurable)
+    local_run = is_desktop_run(cfg)
     profile_login = resolve_github_login(as_json_object(config))
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
@@ -1438,7 +944,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     if local_run:
-        from .dashboard.options import default_model_pair
+        from agent.dashboard.options import default_model_pair
 
         team_defaults = (default_model_pair(), default_model_pair())
         title_defaults = team_defaults[0]
@@ -1461,7 +967,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_fable_enabled(),
             )
 
-    linear_issue = as_json_object(configurable.get("linear_issue"))
+    linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
@@ -1505,8 +1011,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     # An explicit per-run model choice is the one thing allowed to move a thread
     # off its stored settings; the new choice is then stored in turn.
-    per_thread_model = configurable.get("agent_model_id")
-    per_thread_effort = configurable.get("agent_effort")
+    per_thread_model = cfg.agent_model_id
+    per_thread_effort = cfg.agent_effort
     canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
     if canonical_per_thread is not None:
         per_thread_model, per_thread_effort = canonical_per_thread
@@ -1530,12 +1036,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
+    cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
     else:
         async with aphase(thread_id, "factory.repo_instructions"):
             repo_instructions = await _resolve_repo_custom_instructions(
-                await _resolve_prompt_default_repo(configurable)
+                await _resolve_prompt_default_repo(cfg)
             )
     # Stored before the Fable gate so a deployment-wide toggle still applies on
     # every run rather than being frozen into the thread.
@@ -1591,10 +1098,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
-    source_value = configurable.get("source")
-    source = source_value if isinstance(source_value, str) else "dashboard"
-    user_email = configurable.get("user_email")
-    user_email = user_email if isinstance(user_email, str) else ""
+    source = cfg.source or "dashboard"
+    user_email = cfg.user_email or ""
 
     # Plan mode is entered only when the model decides to (the `enter_plan_mode`
     # tool sets it in run state). The configurable value just carries that
@@ -1602,7 +1107,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # fresh run with nothing set starts out of plan mode. Installed
     # unconditionally and state-aware: it also restricts tools after a mid-run
     # `enter_plan_mode` call, not just when plan mode is set up front.
-    plan_mode = configurable.get("plan_mode") is True
+    plan_mode = cfg.plan_mode is True
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
     plan_mode_middleware: list[Any] = [
@@ -1614,14 +1119,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
-    stop_summary_mode = configurable.get("stop_summary") is True
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
+    stop_summary_mode = cfg.stop_summary is True
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     observability_tools: list[Any] = []
-    browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
         observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1694,7 +1197,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     elif stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
-    if not _slack_tools_enabled(configurable):
+    if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
@@ -1702,6 +1205,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
+    if not stop_summary_mode and not local_run:
+        browser_tools = load_browser_tools()
+        if browser_tools:
+            integration_tool_groups["Browser"] = browser_tools
     # Corridor's catalog is a static allowlist, so the MCP handshake that used to
     # run before every first model call now waits until the agent asks for it.
     if not stop_summary_mode and not local_run and corridor_configured():
@@ -1724,7 +1231,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
         ),
     }
-    if is_desktop_run(configurable):
+    if is_desktop_run(cfg):
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
         skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         # The default backend is the user's project, so offloads would land in
@@ -1771,10 +1278,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
-            *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         skills=skill_sources,
         backend=agent_backend,
+        state_schema=DesktopAgentState if local_run else None,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
@@ -1827,6 +1334,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelErrorMiddleware(),
                 # Innermost, so the deadline covers the provider call itself and a
                 # timeout escalates outward to the fallback model.
                 ModelCallTimeoutMiddleware(),

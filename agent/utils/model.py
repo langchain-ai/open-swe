@@ -4,9 +4,12 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
-from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
-from .gateway import gateway_env_default, gateway_overrides
-from .openai_oauth import build_desktop_openai_oauth_model, desktop_openai_oauth_available
+from agent.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
+from agent.utils.gateway import gateway_env_default, gateway_overrides
+from agent.utils.openai_oauth import (
+    build_desktop_openai_oauth_model,
+    desktop_openai_oauth_available,
+)
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
@@ -79,7 +82,7 @@ class OpenAIReasoning(TypedDict, total=False):
     summary: OpenAIReasoningSummary
 
 
-DEFAULT_LLM_REASONING: "OpenAIReasoning" = {"effort": "medium", "summary": "auto"}
+DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium", "summary": "auto"}
 
 
 class AnthropicThinking(TypedDict, total=False):
