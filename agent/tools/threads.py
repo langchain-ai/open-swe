@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
@@ -35,9 +36,20 @@ from agent.dashboard.workflow_approval import (
     workflow_push_approval_responses,
 )
 from agent.input_messages import input_message_text, message_sender_id
-from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from agent.utils.dashboard_links import (
+    dashboard_plan_url,
+    dashboard_thread_id,
+    dashboard_thread_url,
+)
 from agent.utils.json_types import as_json_object, thread_metadata
-from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
+from agent.utils.langsmith import (
+    LangSmithCostUnavailable,
+    get_langsmith_thread_cost,
+    get_open_swe_thread_id_from_langsmith,
+    parse_langsmith_locator,
+)
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 
@@ -63,6 +75,11 @@ PlanFormat = Literal["html", "markdown"]
 _MAX_MESSAGE_CHARS = 20_000
 _MAX_COMMENT_CHARS = 20_000
 _MAX_DETAIL_MESSAGE_CHARS = 4_000
+_MAX_TRANSCRIPT_MESSAGES = 100
+_MAX_TRANSCRIPT_CHARS = 50_000
+_MAX_RUNS = 25
+_MAX_INSPECTION_CONTENT_CHARS = 50_000
+_MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
 
 
@@ -128,12 +145,69 @@ def _web_link(item: Mapping[str, Any]) -> str | None:
     return dashboard_thread_url(thread_id) if isinstance(thread_id, str) else None
 
 
-def _list_item(item: Mapping[str, Any]) -> dict[str, Any]:
+def _langsmith_identifiers(trace_url: Any, locator: str | None = None) -> dict[str, Any]:
+    trusted = parse_langsmith_locator(trace_url) if isinstance(trace_url, str) else None
+    supplied = parse_langsmith_locator(locator) if locator else None
+    supplied_run_id = locator.strip() if locator and _looks_uuid(locator) else None
+    return {
+        "trace_url": trace_url if trusted else None,
+        "thread_id": trusted.id if trusted and trusted.kind == "thread" else None,
+        "run_id": supplied.id if supplied and supplied.kind == "run" else supplied_run_id,
+    }
+
+
+def _slack_identifiers(locator: str | None) -> dict[str, str] | None:
+    parsed = parse_slack_thread_url(locator or "")
+    if parsed is None:
+        return None
+    return {"url": locator or "", "channel_id": parsed[0], "thread_ts": parsed[1]}
+
+
+def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[str, Any]:
     result = dict(item)
     result.pop("messages", None)
     result.pop("sandboxId", None)
     result["webUrl"] = _web_link(item)
+    langsmith = _langsmith_identifiers(item.get("traceUrl"), locator)
+    if any(value is not None for value in langsmith.values()):
+        result["langsmith"] = langsmith
+    if slack := _slack_identifiers(locator):
+        result["slack"] = slack
     return result
+
+
+def _exact_locator_filters(
+    *,
+    participant: str | None,
+    all_users: bool,
+    resolved: bool | None,
+    viewed: bool | None,
+    source: str | None,
+    status: str | None,
+    scope: ThreadScope,
+    automation_id: str | None,
+    admin_threads: bool | None,
+) -> list[str]:
+    filters = []
+    if participant:
+        filters.append("participant")
+    if all_users:
+        filters.append("all_users")
+    if resolved is not None:
+        filters.append("resolved")
+    if viewed is not None:
+        filters.append("viewed")
+    if source:
+        filters.append("source")
+    if status:
+        filters.append("status")
+    if scope != "all":
+        filters.append("scope")
+    if automation_id:
+        filters.append("automation_id")
+    if admin_threads is not None:
+        filters.append("admin_threads")
+    return filters
 
 
 async def list_threads(
@@ -148,9 +222,10 @@ async def list_threads(
     query: str | None = None,
     scope: ThreadScope = "all",
     automation_id: str | None = None,
+    admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List Open SWE threads the current user, one other participant, or everyone joined."""
+    """List surfaced threads by locator, participant, admin mode, status, source, or text."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -161,36 +236,83 @@ async def list_threads(
         return _failure("participant and all_users cannot be used together")
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
-    cross_user = bool(requested and requested.lower() != actor.login.lower())
-    if (all_users or cross_user) and not actor.admin:
-        return _failure("Only workspace admins can list other users' threads")
 
-    filter_participant_login = requested if cross_user else None
+    normalized_query = query.strip() if isinstance(query, str) else ""
+    exact_locator = (
+        parse_langsmith_locator(normalized_query) is not None
+        or parse_slack_thread_url(normalized_query) is not None
+        or (dashboard_thread_id(normalized_query) is not None and "/" in normalized_query)
+    )
+    if exact_locator or _looks_uuid(normalized_query):
+        incompatible = _exact_locator_filters(
+            participant=requested,
+            all_users=all_users,
+            resolved=resolved,
+            viewed=viewed,
+            source=source,
+            status=status,
+            scope=scope,
+            automation_id=automation_id,
+            admin_threads=admin_threads,
+        )
+        if incompatible:
+            return _failure(
+                "Exact thread locators cannot be combined with filters: " + ", ".join(incompatible)
+            )
+        try:
+            resolved_locator = await _authorized_locator(normalized_query, actor)
+        except HTTPException as exc:
+            if exc.status_code != 404 or exact_locator:
+                return _http_failure(exc)
+        except Exception:
+            logger.exception("Could not list thread locator %s", normalized_query)
+            return _failure("Could not list threads")
+        else:
+            if isinstance(resolved_locator, dict):
+                return resolved_locator
+            _, summary = resolved_locator
+            return {
+                "success": True,
+                "items": [_list_item(summary, locator=normalized_query)],
+                "limit": 1,
+                "offset": 0,
+                "has_more": False,
+            }
+
+    pr_ref = parse_github_pr_url(normalized_query)
+    search_query = pr_ref.url if pr_ref else normalized_query or None
+    filter_participant_login = (
+        requested if requested and requested.lower() != actor.login.lower() else None
+    )
     try:
         page = await list_dashboard_threads_page(
             actor.login,
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users,
+            include_all=all_users or (admin_threads is True and requested is None),
             resolved=resolved,
             viewed=viewed,
             source=source,
             status=status,
-            query=query,
+            query=search_query,
             scope=scope,
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
             surfaced_only=True,
+            admin_threads=admin_threads,
         )
     except HTTPException as exc:
         return _http_failure(exc)
     except Exception:
         logger.exception("Could not list threads")
         return _failure("Could not list threads")
+    items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
+    if pr_ref:
+        items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
     return {
         "success": True,
-        "items": [_list_item(item) for item in page.get("items", [])],
+        "items": [_list_item(item) for item in items],
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),
@@ -229,7 +351,13 @@ def _plain_message_text(content: Any) -> str | None:
     values = content if isinstance(content, list) else [content]
     texts: list[str] = []
     for value in values:
-        text = value.get("text") if isinstance(value, Mapping) else value
+        if isinstance(value, Mapping):
+            block_type = value.get("type")
+            if block_type not in {None, "text"}:
+                continue
+            text = value.get("text")
+        else:
+            text = value
         if not isinstance(text, str):
             continue
         stripped = text.strip()
@@ -242,12 +370,14 @@ def _plain_message_text(content: Any) -> str | None:
     return combined or None
 
 
-def _last_user_message(state: Any) -> dict[str, Any] | None:
+def _state_messages(state: Any) -> list[Any]:
     values = _value(state, "values")
     messages = values.get("messages") if isinstance(values, Mapping) else None
-    if not isinstance(messages, list):
-        return None
-    for message in reversed(messages):
+    return messages if isinstance(messages, list) else []
+
+
+def _last_user_message(state: Any) -> dict[str, Any] | None:
+    for message in reversed(_state_messages(state)):
         kind = _message_kind(message)
         if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"human", "user"}:
             continue
@@ -263,6 +393,65 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
             "timestamp": _message_timestamp(message),
         }
     return None
+
+
+def _message_id(message: Any) -> str | None:
+    value = _value(message, "id")
+    return str(value) if value else None
+
+
+def _transcript(state: Any) -> dict[str, Any]:
+    messages = _state_messages(state)
+    visible: list[dict[str, Any]] = []
+    omitted = 0
+    used_chars = 0
+    for message in messages:
+        kind = _message_kind(message)
+        if kind not in {"human", "user", "ai", "assistant"}:
+            omitted += 1
+            continue
+        content = _message_content(message)
+        text = _plain_message_text(content)
+        if not text:
+            omitted += 1
+            continue
+        if len(visible) >= _MAX_TRANSCRIPT_MESSAGES or used_chars >= _MAX_TRANSCRIPT_CHARS:
+            omitted += 1
+            continue
+        remaining = _MAX_TRANSCRIPT_CHARS - used_chars
+        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
+        visible.append(
+            {
+                "id": _message_id(message),
+                "role": "user" if kind in {"human", "user"} else "assistant",
+                "text": returned_text,
+                "truncated": len(returned_text) < len(text),
+                "sender_id": message_sender_id(content),
+                "timestamp": _message_timestamp(message),
+            }
+        )
+        used_chars += len(returned_text)
+    return {
+        "messages": visible,
+        "message_count": len(messages),
+        "returned_count": len(visible),
+        "omitted_count": omitted,
+        "truncated": omitted > 0 or any(item["truncated"] for item in visible),
+    }
+
+
+def _state_summary(state: Any) -> dict[str, Any]:
+    tasks = _value(state, "tasks")
+    next_nodes = _value(state, "next")
+    return {
+        "checkpoint_id": str(checkpoint_id)
+        if (checkpoint_id := _value(state, "checkpoint_id"))
+        else None,
+        "created_at": str(created_at) if (created_at := _value(state, "created_at")) else None,
+        "next": [str(node) for node in next_nodes] if isinstance(next_nodes, (list, tuple)) else [],
+        "task_count": len(tasks) if isinstance(tasks, (list, tuple)) else 0,
+        "message_count": len(_state_messages(state)),
+    }
 
 
 def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
@@ -290,6 +479,16 @@ def _run_detail(run: Any) -> dict[str, Any] | None:
         "status": status.lower() if isinstance(status, str) else None,
         "created_at": str(created) if (created := _value(run, "created_at")) else None,
         "updated_at": str(updated) if (updated := _value(run, "updated_at")) else None,
+    }
+
+
+def _run_history(runs: list[Any]) -> dict[str, Any]:
+    returned = [detail for run in runs[:_MAX_RUNS] if (detail := _run_detail(run)) is not None]
+    return {
+        "runs": returned,
+        "returned_count": len(returned),
+        "limit": _MAX_RUNS,
+        "truncated": len(runs) > _MAX_RUNS,
     }
 
 
@@ -334,6 +533,19 @@ async def _queued_message_count(client: Any, thread_id: str) -> int:
 
 def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) -> dict[str, Any]:
     approved_by = content.get("approved_by")
+    raw_content = content.get("html") or content.get("markdown")
+    plan_content = raw_content if isinstance(raw_content, str) else None
+    returned_comments = [
+        {
+            "id": comment.get("id"),
+            "author": comment.get("author"),
+            "author_login": comment.get("author_login"),
+            "body": str(comment.get("body") or "")[:_MAX_DETAIL_MESSAGE_CHARS],
+            "anchor": comment.get("anchor") if isinstance(comment.get("anchor"), Mapping) else None,
+            "created_at": comment.get("created_at"),
+        }
+        for comment in comments[:_MAX_PLAN_COMMENTS]
+    ]
     return {
         "status": content.get("status"),
         "format": "html"
@@ -341,7 +553,13 @@ def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) ->
         else "markdown"
         if content.get("markdown")
         else None,
+        "content": plan_content[:_MAX_INSPECTION_CONTENT_CHARS] if plan_content else None,
+        "content_truncated": bool(
+            plan_content and len(plan_content) > _MAX_INSPECTION_CONTENT_CHARS
+        ),
+        "comments": returned_comments,
         "comment_count": len(comments),
+        "comments_truncated": len(returned_comments) < len(comments),
         "approved_by": dict(approved_by) if isinstance(approved_by, Mapping) else None,
         "approved_at": content.get("approved_at"),
     }
@@ -362,6 +580,84 @@ def _compact_approvals(approvals: Mapping[str, Mapping[str, Any]]) -> list[dict[
         }
         for item in workflow_push_approval_responses(approvals)
     ]
+
+
+def _looks_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError):
+        return False
+    return True
+
+
+async def _authorized_locator(
+    locator: str, actor: _Actor
+) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
+    langsmith_locator = parse_langsmith_locator(locator)
+    slack_locator = parse_slack_thread_url(locator)
+    thread_id = dashboard_thread_id(locator) or ""
+    if langsmith_locator:
+        thread_id = await get_open_swe_thread_id_from_langsmith(locator) or ""
+        if not thread_id:
+            return _failure("Could not resolve LangSmith trace to an Open SWE thread")
+    elif slack_locator:
+        client = langgraph_client()
+        thread_id = await lookup_slack_thread_id(client, *slack_locator) or ""
+        if not thread_id:
+            thread_id = (
+                await lookup_slack_thread_id(client, slack_locator[0], CODE_CHANNEL_SESSION_TS)
+                or ""
+            )
+        if not thread_id:
+            return _failure("Could not resolve Slack link to an Open SWE thread")
+    if not thread_id:
+        return _failure(
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, "
+            "or LangSmith trace URL"
+        )
+    try:
+        summary = await get_dashboard_thread(
+            thread_id,
+            actor.login,
+            email=actor.email,
+            mark_viewed=False,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 404 or langsmith_locator or not _looks_uuid(locator):
+            raise
+        resolved = await get_open_swe_thread_id_from_langsmith(locator)
+        if not resolved or resolved == thread_id:
+            raise
+        thread_id = resolved
+        summary = await get_dashboard_thread(
+            thread_id,
+            actor.login,
+            email=actor.email,
+            mark_viewed=False,
+        )
+    return thread_id, summary
+
+
+def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
+    expected = parse_github_pr_url(locator)
+    if expected is None:
+        return False
+    pr = summary.get("pr")
+    pull_requests = summary.get("pullRequests")
+    records = [pr] if isinstance(pr, Mapping) else []
+    if isinstance(pull_requests, list):
+        records.extend(record for record in pull_requests if isinstance(record, Mapping))
+    for record in records:
+        url = record.get("url")
+        actual = parse_github_pr_url(url) if isinstance(url, str) else None
+        if (
+            actual is not None
+            and actual.owner.lower() == expected.owner.lower()
+            and actual.repo.lower() == expected.repo.lower()
+            and actual.number == expected.number
+        ):
+            return True
+    return False
 
 
 def _available_actions(
@@ -398,25 +694,21 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Get bounded operational details for one Open SWE thread."""
+    """Inspect a thread from its ID, dashboard/Slack/LangSmith URL, or LangSmith run ID."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
-    thread_id = thread_id.strip()
-    if not thread_id:
-        return _failure("thread_id is required")
+    locator = thread_id.strip()
     try:
-        summary = await get_dashboard_thread(
-            thread_id,
-            actor.login,
-            email=actor.email,
-            mark_viewed=False,
-        )
+        resolved = await _authorized_locator(locator, actor)
+        if isinstance(resolved, dict):
+            return resolved
+        thread_id, summary = resolved
         client = langgraph_client()
         async with asyncio.TaskGroup() as tasks:
             thread_task = tasks.create_task(client.threads.get(thread_id))
             state_task = tasks.create_task(client.threads.get_state(thread_id))
-            runs_task = tasks.create_task(client.runs.list(thread_id, limit=1))
+            runs_task = tasks.create_task(client.runs.list(thread_id, limit=_MAX_RUNS + 1))
             plan_content_task = tasks.create_task(get_plan_content(thread_id))
             plan_comments_task = tasks.create_task(list_plan_comments(thread_id))
             approvals_task = tasks.create_task(get_workflow_push_approvals(thread_id))
@@ -453,19 +745,25 @@ async def get_thread(
     }
     logins = participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))
     returned_participants = logins[:100]
+    slack_locator = parse_slack_thread_url(locator)
     return {
         "success": True,
-        "thread": _list_item(summary),
+        "thread": _list_item(summary, locator=locator),
         "participant_logins": returned_participants,
         "participant_count": len(logins),
         "participants_truncated": len(returned_participants) < len(logins),
         "latest_run": _run_detail(latest_run),
+        "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
+        "transcript": _transcript(thread_state),
+        "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
         "cost": cost,
         "plan": plan,
         "workflow_approvals": _compact_approvals(approvals),
         "links": links,
+        "langsmith": _langsmith_identifiers(summary.get("traceUrl"), locator),
+        "slack": slack_locator and _slack_identifiers(locator),
         "available_actions": _available_actions(
             admin=actor.admin,
             admin_thread=summary.get("adminThread") is True,

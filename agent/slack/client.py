@@ -1382,7 +1382,7 @@ async def fetch_slack_thread_message_by_ts(
 
 
 SLACK_MESSAGE_URL_RE = re.compile(
-    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>]*)?"
+    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>|]*)?"
 )
 
 
@@ -1399,6 +1399,17 @@ def parse_slack_message_url(url: str) -> tuple[str, str] | None:
     raw_ts = match.group(2)
     message_ts = f"{raw_ts[:10]}.{raw_ts[10:]}"
     return channel_id, message_ts
+
+
+def parse_slack_thread_url(url: str) -> tuple[str, str] | None:
+    """Parse a Slack permalink into its channel and root thread timestamp."""
+    match = SLACK_MESSAGE_URL_RE.search(url)
+    if not match:
+        return None
+    channel_id, message_ts = parse_slack_message_url(match.group(0)) or ("", "")
+    query = httpx.QueryParams(urlparse(match.group(0)).query)
+    thread_ts = query.get("thread_ts", "").strip()
+    return channel_id, thread_ts if _SLACK_MESSAGE_TS_RE.fullmatch(thread_ts) else message_ts
 
 
 def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:

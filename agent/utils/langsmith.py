@@ -7,7 +7,8 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import unquote, urlsplit
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
@@ -27,6 +28,12 @@ class LangSmithThreadCost:
     total_cost: float
     last_end_time: datetime
     target_end_time: datetime
+
+
+@dataclass(frozen=True)
+class LangSmithLocator:
+    kind: Literal["thread", "run"]
+    id: str
 
 
 class LangSmithCostUnavailable(RuntimeError):
@@ -114,6 +121,86 @@ async def get_langsmith_trace_url(
     isn't configured. This is a best-effort convenience link, not an error path."""
     project_url = await _compose_langsmith_project_url(project_name)
     return f"{project_url}/t/{thread_id}" if project_url else None
+
+
+def _langsmith_web_origins() -> set[str]:
+    values = ["https://smith.langchain.com", os.environ.get("LANGSMITH_URL_PROD", "")]
+    origins: set[str] = set()
+    for value in values:
+        try:
+            parsed = urlsplit(value.strip())
+            port = parsed.port
+        except ValueError:
+            continue
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        default_port = 443 if parsed.scheme == "https" else 80
+        suffix = f":{port}" if port is not None and port != default_port else ""
+        origins.add(f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{suffix}")
+    return origins
+
+
+def parse_langsmith_locator(locator: str) -> LangSmithLocator | None:
+    """Parse a trusted LangSmith thread or run URL without fetching it."""
+    value = locator.strip().strip("<>")
+    if "|" in value:
+        value = value.split("|", 1)[0]
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    default_port = 443 if parsed.scheme == "https" else 80
+    suffix = f":{port}" if port is not None and port != default_port else ""
+    origin = f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{suffix}"
+    if origin not in _langsmith_web_origins():
+        return None
+    segments = parsed.path.split("/")
+    for index in range(len(segments) - 2, -1, -1):
+        if segments[index] not in {"t", "r"} or index + 2 != len(segments):
+            continue
+        try:
+            identifier = unquote(segments[index + 1], errors="strict")
+        except UnicodeDecodeError:
+            return None
+        if not identifier or "/" in identifier:
+            return None
+        return LangSmithLocator(kind="thread" if segments[index] == "t" else "run", id=identifier)
+    return None
+
+
+async def get_open_swe_thread_id_from_langsmith(locator: str) -> str | None:
+    """Resolve a LangSmith thread/run URL or run UUID to its Open SWE thread ID."""
+    parsed = parse_langsmith_locator(locator)
+    if parsed is None:
+        try:
+            run_id = str(uuid.UUID(locator.strip()))
+        except (ValueError, AttributeError):
+            return None
+        parsed = LangSmithLocator(kind="run", id=run_id)
+    if parsed.kind == "thread":
+        return parsed.id
+    client = _build_prod_langsmith_client()
+    if client is None:
+        return None
+    try:
+        run = await client.read_run(parsed.id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not resolve LangSmith run %s", parsed.id, exc_info=True)
+        return None
+    metadata = _langsmith_value(run, "metadata")
+    if not isinstance(metadata, dict):
+        extra = _langsmith_value(run, "extra")
+        metadata = extra.get("metadata") if isinstance(extra, dict) else None
+    thread_id = metadata.get("thread_id") if isinstance(metadata, dict) else None
+    return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
 def _langsmith_value(value: Any, name: str) -> Any:
