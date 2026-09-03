@@ -128,6 +128,7 @@ async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.Monk
         automation_id=None,
         filter_participant_login=None,
         surfaced_only=True,
+        admin_threads=None,
     )
 
 
@@ -143,6 +144,39 @@ async def test_list_threads_denies_cross_user_query_for_non_admin(
     assert result == {
         "success": False,
         "error": "Only workspace admins can list other users' threads",
+    }
+    page.assert_not_awaited()
+
+
+async def test_list_threads_admin_filter_searches_all_admin_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.list_threads(admin_threads=True)
+
+    assert result["success"] is True
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["include_all"] is True
+    assert awaited.kwargs["admin_threads"] is True
+    assert awaited.kwargs["surfaced_only"] is True
+
+
+async def test_list_threads_admin_filter_requires_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.list_threads(admin_threads=True)
+
+    assert result == {
+        "success": False,
+        "error": "Only workspace admins can filter admin threads",
     }
     page.assert_not_awaited()
 
@@ -498,7 +532,49 @@ async def test_search_threads_normalizes_and_filters_github_pr(
         query="https://github.com/acme/repo/pull/42",
         scope="all",
         surfaced_only=True,
+        admin_threads=None,
     )
+
+
+async def test_search_threads_admin_filter_searches_all_admin_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(
+        return_value={
+            "items": [{"id": "admin-1", "adminThread": True, "messages": []}],
+            "limit": 25,
+            "offset": 0,
+            "hasMore": False,
+        }
+    )
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.search_threads(admin_threads=True)
+
+    assert result["items"][0]["id"] == "admin-1"
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["include_all"] is True
+    assert awaited.kwargs["query"] == ""
+    assert awaited.kwargs["admin_threads"] is True
+    assert awaited.kwargs["surfaced_only"] is True
+
+
+async def test_search_threads_admin_filter_requires_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.search_threads(admin_threads=True)
+
+    assert result == {
+        "success": False,
+        "error": "Only workspace admins can filter admin threads",
+    }
+    page.assert_not_awaited()
 
 
 async def test_search_threads_uses_general_query_and_pagination(
@@ -530,6 +606,7 @@ async def test_search_threads_uses_general_query_and_pagination(
         query="payments",
         scope="interactive",
         surfaced_only=True,
+        admin_threads=None,
     )
 
 

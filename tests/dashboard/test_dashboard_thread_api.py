@@ -1807,6 +1807,28 @@ def test_metadata_matches_filters() -> None:
         scope="automation",
         automation_id="schedule-2",
     )
+    assert not thread_api._metadata_matches_filters(
+        metadata, resolved=None, source=None, query=None, admin_threads=True
+    )
+    assert thread_api._metadata_matches_filters(
+        {**metadata, "admin_thread": True},
+        resolved=None,
+        source=None,
+        query=None,
+        admin_threads=True,
+    )
+    assert not thread_api._metadata_matches_filters(
+        {**metadata, "admin_thread": True},
+        resolved=None,
+        source=None,
+        query=None,
+        admin_threads=False,
+    )
+
+
+def test_search_metadata_filter_includes_admin_threads() -> None:
+    assert thread_api._search_metadata_filter({}, admin_threads=True) == {"admin_thread": True}
+    assert thread_api._search_metadata_filter({}, admin_threads=False) == {}
 
 
 def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]]:

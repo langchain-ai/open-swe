@@ -701,6 +701,7 @@ def _search_metadata_filter(
     resolved: bool | None = None,
     source: str | None = None,
     automation_id: str | None = None,
+    admin_threads: bool | None = None,
 ) -> dict[str, Any]:
     metadata = dict(search_filter)
     if resolved is True:
@@ -709,6 +710,8 @@ def _search_metadata_filter(
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
+    if admin_threads is True:
+        metadata["admin_thread"] = True
     return metadata
 
 
@@ -765,12 +768,15 @@ def _metadata_matches_filters(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    admin_threads: bool | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     thread_repo = _metadata_repo(metadata)[2]
     if repo and thread_repo.lower() != repo.lower():
         return False
     if ownerless and thread_repo:
+        return False
+    if admin_threads is not None and (metadata.get("admin_thread") is True) is not admin_threads:
         return False
     is_automation = _is_automation_thread(metadata)
     if scope == "interactive" and is_automation:
@@ -910,6 +916,7 @@ async def _collect_thread_candidates(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    admin_threads: bool | None = None,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
@@ -923,6 +930,7 @@ async def _collect_thread_candidates(
             resolved=resolved,
             source=source,
             automation_id=automation_id,
+            admin_threads=admin_threads,
         )
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
@@ -947,6 +955,7 @@ async def _collect_thread_candidates(
                     automation_id=automation_id,
                     repo=repo,
                     ownerless=ownerless,
+                    admin_threads=admin_threads,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -1071,6 +1080,7 @@ async def list_dashboard_threads_page(
     ownerless: bool = False,
     filter_participant_login: str | None = None,
     surfaced_only: bool = False,
+    admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -1096,6 +1106,7 @@ async def list_dashboard_threads_page(
         automation_id=automation_id,
         repo=repo,
         ownerless=ownerless,
+        admin_threads=admin_threads,
         target_per_search=target,
         surfaced_only=surfaced_only,
         sort_by=sort_by,

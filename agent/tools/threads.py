@@ -178,6 +178,7 @@ async def list_threads(
     query: str | None = None,
     scope: ThreadScope = "all",
     automation_id: str | None = None,
+    admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """List Open SWE threads the current user, one other participant, or everyone joined."""
@@ -192,6 +193,8 @@ async def list_threads(
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
     cross_user = bool(requested and requested.lower() != actor.login.lower())
+    if admin_threads is not None and not actor.admin:
+        return _failure("Only workspace admins can filter admin threads")
     if (all_users or cross_user) and not actor.admin:
         return _failure("Only workspace admins can list other users' threads")
 
@@ -202,7 +205,7 @@ async def list_threads(
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users,
+            include_all=all_users or admin_threads is True,
             resolved=resolved,
             viewed=viewed,
             source=source,
@@ -212,6 +215,7 @@ async def list_threads(
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
             surfaced_only=True,
+            admin_threads=admin_threads,
         )
     except HTTPException as exc:
         return _http_failure(exc)
@@ -557,20 +561,23 @@ def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
 
 
 async def search_threads(
-    query: str,
+    query: str = "",
     all_users: bool = False,
     limit: int = 25,
     offset: int = 0,
     scope: ThreadScope = "all",
+    admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Search Open SWE threads by Open SWE/LangSmith URL, ID, PR, title, repo, or branch."""
+    """Search Open SWE threads by identifiers, with optional admin-thread filtering."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
     query = query.strip()
-    if not query:
-        return _failure("query is required")
+    if not query and admin_threads is not True:
+        return _failure("query is required unless admin_threads is true")
+    if admin_threads is not None and not actor.admin:
+        return _failure("Only workspace admins can filter admin threads")
     if all_users and not actor.admin:
         return _failure("Only workspace admins can search other users' threads")
     if scope not in {"all", "interactive", "automation"}:
@@ -608,10 +615,11 @@ async def search_threads(
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users,
+            include_all=all_users or admin_threads is True,
             query=normalized_query,
             scope=scope,
             surfaced_only=True,
+            admin_threads=admin_threads,
         )
     except HTTPException as exc:
         return _http_failure(exc)
