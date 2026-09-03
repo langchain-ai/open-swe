@@ -209,11 +209,11 @@ async def capture_snapshot_with_tag(
             kwargs["json"] = {**payload, "tag": tag}
         return await original_post(url, *args, **kwargs)
 
-    client._http.post = post_with_tag
+    client._http.post = post_with_tag  # ty: ignore[invalid-assignment]
     try:
         return await client.capture_snapshot(sandbox_id, name, timeout=timeout)
     finally:
-        client._http.post = original_post
+        client._http.post = original_post  # ty: ignore[invalid-assignment]
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
