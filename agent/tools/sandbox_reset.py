@@ -6,8 +6,10 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.dashboard.user_credentials import get_langsmith_credentials
+from agent.dashboard.agent_overrides import resolve_github_login
+from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.tools.admin_gate import configurable, require_admin
+from agent.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +68,8 @@ async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
     try:
         from agent.sandboxes.lifecycle import reset_sandbox_for_thread
 
-        credentials = (
-            await get_langsmith_credentials(cfg.github_login) if cfg.github_login else None
-        )
+        login = resolve_github_login({"configurable": as_json_object(cfg.dump())})
+        credentials = await get_sandbox_langsmith_credentials(login) if login else None
         kwargs = {"langsmith_credentials": credentials} if credentials is not None else {}
         old_sandbox_id, new_sandbox_id = await reset_sandbox_for_thread(
             thread_id,

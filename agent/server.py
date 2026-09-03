@@ -70,7 +70,7 @@ from agent.dashboard.team_settings import (
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
-from agent.dashboard.user_credentials import get_langsmith_credentials
+from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
@@ -928,7 +928,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if is_desktop_run(_cfg):
             return create_desktop_backend(_cfg)
         credentials = (
-            await get_langsmith_credentials(_profile_login)
+            await get_sandbox_langsmith_credentials(_profile_login)
             if _profile_login and os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
             else None
         )

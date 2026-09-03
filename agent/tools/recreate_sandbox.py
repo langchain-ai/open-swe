@@ -3,8 +3,10 @@
 import logging
 from typing import Any
 
-from agent.dashboard.user_credentials import get_langsmith_credentials
+from agent.dashboard.agent_overrides import resolve_github_login
+from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.run_config import RunConfig
+from agent.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +29,8 @@ async def recreate_sandbox() -> dict[str, Any]:
         from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
         from agent.server import _environment_slug
 
-        credentials = (
-            await get_langsmith_credentials(cfg.github_login) if cfg.github_login else None
-        )
+        login = resolve_github_login({"configurable": as_json_object(cfg.dump())})
+        credentials = await get_sandbox_langsmith_credentials(login) if login else None
         kwargs = {"langsmith_credentials": credentials} if credentials is not None else {}
         old_sandbox_id, new_sandbox_id = await recreate_sandbox_for_thread(
             thread_id,
