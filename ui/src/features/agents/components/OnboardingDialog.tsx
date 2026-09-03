@@ -214,7 +214,7 @@ export function OnboardingDialog() {
                   size="sm"
                   onClick={() =>
                     void connectService("slack")?.finally(
-                      () => void mapping.refetch(),
+                      () => void mapping.refetch()
                     )
                   }
                 >
