@@ -1252,7 +1252,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             skill_update = (
                 await skill_middleware.abefore_agent(
                     cast(SkillsState, {}),
-                    cast(Runtime[None], runtime),
+                    runtime,
                     self._config,
                 )
                 or {}
