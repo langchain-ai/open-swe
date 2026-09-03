@@ -7,7 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent.api.app import app
-from agent.webhooks import common, github
+from agent.github import webhook as github
+from agent.webhooks import common
 
 _SECRET = "baby-sit-webhook-secret"
 

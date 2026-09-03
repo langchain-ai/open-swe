@@ -4,13 +4,17 @@ import logging
 from typing import Any
 
 from langchain.agents.middleware import AgentState, after_agent
-from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
-from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
-from ..utils.user_messages import warning
-from .message_content import content_to_text
+from agent.middleware.message_content import content_to_text
+from agent.run_config import RunConfig
+from agent.slack.client import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply,
+)
+from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +42,11 @@ async def notify_step_limit_reached(
     if _LIMIT_MARKER not in content:
         return None
 
-    config = get_config()
-    configurable = config.get("configurable", {})
-    slack_thread = configurable.get("slack_thread") if isinstance(configurable, dict) else None
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    cfg = RunConfig.from_runtime()
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
-        thread_id if isinstance(thread_id, str) else None,
-        slack_thread if isinstance(slack_thread, dict) else None,
+        cfg.thread_id,
+        cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     if not active:
         logger.info("No Slack thread config — cannot send step-limit notification")
@@ -74,7 +75,7 @@ async def notify_step_limit_reached(
             channel_id,
             thread_ts,
             message,
-            agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+            agent_thread_id=cfg.thread_id,
         )
         logger.info("Sent step-limit notification to Slack thread %s", thread_ts)
     except Exception:

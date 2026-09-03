@@ -158,10 +158,8 @@ async def test_clear_plan_comments_deletes_each(monkeypatch: pytest.MonkeyPatch)
 async def test_save_plan_requires_run_context() -> None:
     from agent.tools.save_plan import save_plan
 
-    # No LangGraph run context → no thread_id → graceful error, not a crash.
-    result = await save_plan("/workspace/plans/2026-06-29-test-plan.html")
-    assert result["success"] is False
-    assert "thread_id" in result["error"]
+    with pytest.raises(RuntimeError, match="outside of a runnable context"):
+        await save_plan("/workspace/plans/2026-06-29-test-plan.html")
 
 
 async def test_save_plan_rejects_empty_path() -> None:
@@ -229,9 +227,7 @@ async def test_save_plan_reads_html_file_from_sandbox(
         )
 
     monkeypatch.setattr(
-        save_plan_tool,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-1"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
@@ -276,9 +272,7 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
         saved.update(kwargs)
 
     monkeypatch.setattr(
-        save_plan_tool,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-1"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
@@ -320,9 +314,7 @@ async def test_save_plan_preserves_plan_mode_from_state_when_active(
         saved.update(plan_mode=plan_mode, status=status)
 
     monkeypatch.setattr(
-        save_plan_tool,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-1"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
 
     async def fake_backend(thread_id: str) -> _Backend:
@@ -369,8 +361,7 @@ async def test_save_plan_preserves_plan_mode_from_config_when_active(
         saved.update(plan_mode=plan_mode, status=status)
 
     monkeypatch.setattr(
-        save_plan_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {"configurable": {"thread_id": "thread-1", "plan_mode": True}},
     )
 
@@ -511,7 +502,7 @@ class _FakeReq:
         self.tools = tools
         self.state = state
 
-    def override(self, **kw: Any) -> "_FakeReq":
+    def override(self, **kw: Any) -> _FakeReq:
         return _FakeReq(kw.get("tools", self.tools), self.state)
 
 

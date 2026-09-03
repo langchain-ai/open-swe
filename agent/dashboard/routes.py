@@ -24,22 +24,19 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..utils.thread_ops import langgraph_url
-from ..utils.timing import server_timing_header
-from .admin import is_admin
-from .agent_instructions import (
+from agent.dashboard.admin import is_admin
+from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
     AgentInstructions,
     AgentInstructionsCreate,
     AgentInstructionsUpdate,
 )
-from .agent_usage import list_agent_usage_leaderboard
-from .analyzer_cron import remove_continual_cron
-from .enabled_repos import (
+from agent.dashboard.agent_usage import list_agent_usage_leaderboard
+from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
-from .environments import (
+from agent.dashboard.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
     ENVIRONMENTS,
     Environment,
@@ -48,18 +45,14 @@ from .environments import (
     list_environment_options,
     slugify,
 )
-from .eval_jobs import (
-    get_reviewer_eval_status,
-)
-from .github_token_auth import admin_session_for_github_token, bearer_github_token
-from .notion_oauth import (
+from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
     exchange_notion_code,
     pop_notion_oauth_flow,
     store_notion_oauth_flow,
 )
-from .oauth import (
+from agent.dashboard.oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
@@ -67,29 +60,32 @@ from .oauth import (
     decode_state,
     decode_terminal_ticket,
     desktop_callback_url,
+    desktop_handoff_from_state,
     enforce_org_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
+    issue_connect_handoff,
     issue_desktop_handoff,
     issue_session,
     issue_state,
     issue_terminal_ticket,
     new_state_nonce,
+    redeem_connect_handoff,
     redeem_desktop_handoff,
     require_same_origin_for_mutations,
     require_session,
     sanitize_redirect_to,
     valid_handoff_challenge,
 )
-from .oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
-from .options import (
+from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
+from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
     gate_fable_model,
     models_with_profile_context_windows,
 )
-from .profiles import (
+from agent.dashboard.profiles import (
     ProfileUpdate,
     get_profile,
     get_valid_access_token,
@@ -97,15 +93,14 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
-from .pull_request_checks import PullRequestState
-from .repo_access import require_repo_access_for_user
-from .repo_cache import (
+from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.dashboard.repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
     schedule_repo_cache_refresh,
     write_cached_repos,
 )
-from .review_api import (
+from agent.dashboard.review_api import (
     create_review_comment,
     dry_run_trace_resolution,
     get_review,
@@ -116,7 +111,7 @@ from .review_api import (
     trigger_re_review,
     update_review_comment,
 )
-from .review_chat_api import (
+from agent.dashboard.review_chat_api import (
     delete_review_chat_thread,
     get_review_chat,
     list_review_chat_threads,
@@ -125,24 +120,12 @@ from .review_chat_api import (
     proxy_review_chat_state,
     proxy_review_chat_stream_events,
 )
-from .review_style_jobs import (
-    cancel_review_style_analysis,
-    start_bootstrap_analysis,
-    sync_review_style_run_status,
-)
-from .review_styles import (
-    REVIEW_STYLES,
-    ReviewStyle,
-    ReviewStyleCreate,
-    ReviewStylePromptUpdate,
-    normalize_repo_full_name,
-)
-from .sandbox_settings import (
+from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
     get_sandbox_settings,
     upsert_sandbox_settings,
 )
-from .schedules import (
+from agent.dashboard.schedules import (
     ScheduleCreateBody,
     ScheduleUpdateBody,
     create_agent_schedule,
@@ -151,7 +134,7 @@ from .schedules import (
     trigger_agent_schedule,
     update_agent_schedule,
 )
-from .skills import (
+from agent.dashboard.skills import (
     DEFAULT_SKILLS_PAGE_SIZE,
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
@@ -165,15 +148,7 @@ from .skills import (
     update_organization_skill,
     update_skill,
 )
-from .slack_oauth import (
-    SLACK_STATE_COOKIE_NAME,
-    build_authorize_url,
-    exchange_slack_code,
-    fetch_slack_identity,
-    slack_oauth_configured,
-    verify_team,
-)
-from .team_credentials import (
+from agent.dashboard.team_credentials import (
     DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
     connect_datadog,
@@ -182,7 +157,7 @@ from .team_credentials import (
     disconnect_langsmith,
     get_team_credentials_status,
 )
-from .team_settings import (
+from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
     get_team_default_model,
@@ -192,7 +167,7 @@ from .team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from .thread_api import (
+from agent.dashboard.thread_api import (
     ThreadMessageBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
@@ -221,7 +196,7 @@ from .thread_api import (
     stream_dashboard_thread,
     unpin_dashboard_thread,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,
     UserLangSmithCredentialsUpdate,
     connect_currents,
@@ -231,28 +206,56 @@ from .user_credentials import (
     get_currents_status,
     get_notion_status,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     connect_langsmith as connect_user_langsmith,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     disconnect_langsmith as disconnect_user_langsmith,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     get_langsmith_status as get_user_langsmith_status,
 )
-from .user_instructions import (
+from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
     delete_user_instructions,
     get_user_instructions,
     set_user_instructions,
 )
-from .user_mappings import (
+from agent.dashboard.user_mappings import (
     delete_mapping,
     get_mapping,
     list_mappings,
     upsert_mapping,
 )
-from .voice import transcribe_audio
+from agent.dashboard.voice import transcribe_audio
+from agent.github.pull_request_checks import PullRequestState
+from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.eval_jobs import (
+    get_reviewer_eval_status,
+)
+from agent.review.style_jobs import (
+    cancel_review_style_analysis,
+    start_bootstrap_analysis,
+    sync_review_style_run_status,
+)
+from agent.review.styles import (
+    REVIEW_STYLES,
+    ReviewStyle,
+    ReviewStyleCreate,
+    ReviewStylePromptUpdate,
+    normalize_repo_full_name,
+)
+from agent.slack.oauth import (
+    SLACK_STATE_COOKIE_NAME,
+    build_authorize_url,
+    exchange_slack_code,
+    fetch_slack_identity,
+    slack_oauth_configured,
+    verify_team,
+)
+from agent.utils.thread_ops import langgraph_url
+from agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
@@ -330,7 +333,7 @@ class _RepoScopedRecord(Protocol):
 RepoRecordT = TypeVar("RepoRecordT", bound=_RepoScopedRecord)
 
 
-async def _filter_repo_models_for_user(
+async def _filter_repo_models_for_user[RepoRecordT: _RepoScopedRecord](
     login: str,
     records: list[RepoRecordT],
 ) -> list[RepoRecordT]:
@@ -494,10 +497,8 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
-    is_desktop = isinstance(state_payload.get("handoff_challenge"), str) and isinstance(
-        state_payload.get("handoff_port"), int
-    )
-    if not is_desktop and (
+    handoff = desktop_handoff_from_state(state_payload)
+    if handoff is None and (
         not isinstance(state_nonce_hash, str)
         or not cookie_nonce
         or not hmac.compare_digest(hash_state_nonce(cookie_nonce), state_nonce_hash)
@@ -521,19 +522,18 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
-    challenge = state_payload.get("handoff_challenge")
-    port = state_payload.get("handoff_port")
-    if isinstance(challenge, str) and isinstance(port, int):
+    if handoff is not None:
         # Desktop login runs in the user's own browser, so the session belongs to
         # the app rather than to this browser: hand back a PKCE-bound code the
         # app redeems for one, and leave no session cookie behind here.
-        handoff = issue_desktop_handoff(
+        challenge, port = handoff
+        handoff_code = issue_desktop_handoff(
             login=login,
             email=email,
             avatar_url=user.get("avatar_url"),
             challenge=challenge,
         )
-        response = RedirectResponse(desktop_callback_url(port, handoff), status_code=302)
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         _clear_state_cookie(response)
         return response
 
@@ -730,8 +730,17 @@ async def disconnect_my_notion(
     return status.get("notion", {"connected": False})
 
 
+class DesktopConnectExchange(BaseModel):
+    """Body of a desktop connect handoff redemption."""
+
+    code: str
+    verifier: str
+
+
 @router.get("/notion/login")
 async def notion_login(
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     redirect_uri = f"{_api_base_url()}/dashboard/api/notion/callback"
@@ -740,6 +749,8 @@ async def notion_login(
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
         nonce_hash=nonce_hash,
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     try:
         url = await store_notion_oauth_flow(
@@ -762,34 +773,38 @@ async def notion_callback(
     code: str | None = None,
     error: str | None = None,
     error_description: str | None = None,
-    session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     state_payload = decode_state(state)
     nonce_hash = state_payload.get("nonce_hash")
-    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
-    if (
-        not isinstance(nonce_hash, str)
-        or not cookie_nonce
-        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash)
-    ):
+    handoff = desktop_handoff_from_state(state_payload)
+    if not isinstance(nonce_hash, str):
         raise HTTPException(400, "oauth state mismatch — please retry")
-
-    flow = await pop_notion_oauth_flow(session["sub"], nonce_hash)
-    if flow is None:
-        raise HTTPException(400, "oauth flow expired — please retry")
     if error:
         detail = error_description or error
         raise HTTPException(400, f"Notion OAuth failed: {detail}")
     if not code:
         raise HTTPException(400, "Notion OAuth callback missing code")
 
-    try:
-        token_data = await exchange_notion_code(code, flow)
-        await connect_notion(session["sub"], token_data, flow)
-    except NotionOAuthError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    if handoff is not None:
+        # This browser can't prove it is the login the pending flow is stored
+        # under, so carry the code back over the loopback port and exchange it
+        # under the session the desktop app already holds.
+        challenge, port = handoff
+        handoff_code = issue_connect_handoff(
+            provider="notion",
+            challenge=challenge,
+            claims={"nonce_hash": nonce_hash, "code": code},
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        _clear_notion_state_cookie(response)
+        return response
+
+    session = require_session(request)
+    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
+    if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
+        raise HTTPException(400, "oauth state mismatch — please retry")
+
+    await _complete_notion_connection(session["sub"], nonce_hash, code)
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
@@ -797,8 +812,39 @@ async def notion_callback(
     return response
 
 
+async def _complete_notion_connection(login: str, nonce_hash: str, code: str) -> None:
+    flow = await pop_notion_oauth_flow(login, nonce_hash)
+    if flow is None:
+        raise HTTPException(400, "oauth flow expired — please retry")
+    try:
+        token_data = await exchange_notion_code(code, flow)
+        await connect_notion(login, token_data, flow)
+    except NotionOAuthError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/notion/desktop/exchange")
+async def notion_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop Notion connection with the app's own session."""
+    claims = redeem_connect_handoff(provider="notion", code=body.code, verifier=body.verifier)
+    nonce_hash = claims.get("nonce_hash")
+    notion_code = claims.get("code")
+    if not isinstance(nonce_hash, str) or not isinstance(notion_code, str):
+        raise HTTPException(400, "malformed handoff code")
+
+    await _complete_notion_connection(session["sub"], nonce_hash, notion_code)
+    return {"connected": True}
+
+
 @router.get("/slack/login")
 async def slack_login(
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     _session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     """Start the Sign in with Slack flow to link the current GitHub account."""
@@ -809,6 +855,8 @@ async def slack_login(
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
         nonce_hash=hash_state_nonce(nonce),
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     response = RedirectResponse(
         build_authorize_url(redirect_uri=redirect_uri, state=state), status_code=302
@@ -822,7 +870,6 @@ async def slack_callback(
     request: Request,
     code: str,
     state: str,
-    session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     """Link the verified Slack identity to the logged-in GitHub user.
 
@@ -830,6 +877,23 @@ async def slack_callback(
     user can only ever link their own Slack account — no self-asserted values.
     """
     state_payload = decode_state(state)
+    handoff = desktop_handoff_from_state(state_payload)
+
+    if handoff is not None:
+        # Same as the Notion flow: hand the verified identity back over the
+        # loopback port, for the app to redeem under the session it holds.
+        challenge, port = handoff
+        slack_user_id, work_email = await _verified_slack_identity(code)
+        handoff_code = issue_connect_handoff(
+            provider="slack",
+            challenge=challenge,
+            claims={"slack_user_id": slack_user_id, "email": work_email},
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        _clear_slack_state_cookie(response)
+        return response
+
+    session = require_session(request)
     nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
     if (
@@ -839,26 +903,51 @@ async def slack_callback(
     ):
         raise HTTPException(400, "oauth state mismatch — please retry")
 
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
-
-    access_token = await exchange_slack_code(code, redirect_uri)
-    identity = await fetch_slack_identity(access_token)
-    verify_team(identity)
-    if not identity.email or not identity.email_verified:
-        raise HTTPException(400, "your Slack account has no verified email to link")
-
+    slack_user_id, work_email = await _verified_slack_identity(code)
     await upsert_mapping(
         github_login=session["sub"],
-        work_email=identity.email,
-        slack_user_id=identity.user_id,
+        work_email=work_email,
+        slack_user_id=slack_user_id,
         source="slack_oauth",
         status="active",
     )
 
+    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
     _clear_slack_state_cookie(response)
     return response
+
+
+async def _verified_slack_identity(code: str) -> tuple[str, str]:
+    """Resolve an authorization code to a Slack member id and verified email."""
+    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
+    verify_team(identity)
+    if not identity.email or not identity.email_verified:
+        raise HTTPException(400, "your Slack account has no verified email to link")
+    return identity.user_id, identity.email
+
+
+@router.post("/slack/desktop/exchange")
+async def slack_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop Slack link with the app's own session."""
+    claims = redeem_connect_handoff(provider="slack", code=body.code, verifier=body.verifier)
+    slack_user_id = claims.get("slack_user_id")
+    email = claims.get("email")
+    if not isinstance(slack_user_id, str) or not isinstance(email, str):
+        raise HTTPException(400, "malformed handoff code")
+
+    await upsert_mapping(
+        github_login=session["sub"],
+        work_email=email,
+        slack_user_id=slack_user_id,
+        source="slack_oauth",
+        status="active",
+    )
+    return {"connected": True}
 
 
 @router.get("/team-settings")
@@ -2056,7 +2145,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1013, reason="Cloud terminal capacity reached")
         return
     try:
-        from ..integrations.langsmith import connect_async_langsmith_sandbox
+        from agent.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
 
         client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
         cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"

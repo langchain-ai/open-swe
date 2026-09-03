@@ -1,10 +1,7 @@
 from typing import Any
 
-from langgraph.config import get_config
-
-from agent.auth.thread_token import get_github_token
-
-from ..review.findings import (
+from agent.github.thread_token import get_github_token
+from agent.review.findings import (
     FindingInteraction,
     ReviewerThreadMissingError,
     append_finding_interaction,
@@ -14,7 +11,8 @@ from ..review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
-from ..review.publish import reply_to_review_comment
+from agent.review.publish import reply_to_review_comment
+from agent.run_config import RunConfig
 
 
 async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
@@ -22,16 +20,8 @@ async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
     if not body.strip():
         return {"success": False, "error": "Reply body is required"}
 
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
-    pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
-    if (
-        not isinstance(repo_config, dict)
-        or not repo_config.get("owner")
-        or not repo_config.get("name")
-        or not isinstance(pr_number, int)
-    ):
+    cfg = RunConfig.from_runtime()
+    if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 
     token = get_github_token()
@@ -42,9 +32,9 @@ async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
         return await _reply_to_finding_thread_async(
             finding_id=finding_id,
             body=body,
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
-            pr_number=pr_number,
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
+            pr_number=cfg.pr_number,
             token=token,
         )
     except ReviewerThreadMissingError as exc:

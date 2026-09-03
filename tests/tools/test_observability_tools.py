@@ -7,7 +7,8 @@ from langchain_core.tools import StructuredTool
 
 from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
-from agent.integrations import datadog_mcp, langsmith_tools, notion_mcp
+from agent.tool_loaders import datadog_mcp, notion_mcp
+from agent.tool_loaders import langsmith as langsmith_tools
 
 
 @pytest.fixture(autouse=True)

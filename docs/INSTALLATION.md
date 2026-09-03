@@ -12,11 +12,11 @@ Open SWE has two runnable pieces:
 
 ## Prerequisites
 
-- **Python 3.11 – 3.13** (3.14 is not yet supported due to dependency constraints)
+- **Python 3.14+**
 - [uv](https://docs.astral.sh/uv/) package manager
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
-- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/pnpm-lock.yaml` is the canonical lockfile.
+- Node 22.22.2+ and [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). The root `pnpm-lock.yaml` is the canonical lockfile.
 
 ## 1. Clone and install
 
@@ -170,7 +170,7 @@ DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"
 ```
 
-A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot must include the GitHub CLI; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+`DEFAULT_SANDBOX_SNAPSHOT_ID` is optional when `SANDBOX_TYPE=langsmith`. When no selected environment snapshot, admin setting, or environment variable supplies one, LangSmith's root snapshot is used. Custom snapshots must include the GitHub CLI; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
 
 ### Environments
 
@@ -270,7 +270,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 **Configure team-to-repo mapping:**
 
-Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/utils/linear_team_repo_map.py`:
+Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/linear/team_repo_map.py`:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -527,7 +527,7 @@ PUBLIC_REPO_ORG_GATE=""
 # === Sandbox (optional) ===
 # Provider: langsmith (default), modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
 SANDBOX_TYPE="langsmith"
-DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith unless set at runtime by an admin (see step 4b)
+DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Optional custom base snapshot; defaults to LangSmith's root snapshot
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 128 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
@@ -751,7 +751,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If sandbox creation fails with `No base snapshot configured`, build a snapshot (see step 4b) and either export its UUID as `DEFAULT_SANDBOX_SNAPSHOT_ID` or set it as the base snapshot on the admin **Sandbox** page
+- If a custom sandbox snapshot fails to boot, verify that its UUID belongs to the workspace selected by the sandbox LangSmith credentials
 - If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
 - If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 

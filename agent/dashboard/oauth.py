@@ -18,10 +18,9 @@ import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
-from agent.utils.github_org_membership import is_user_active_org_member
-
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from .github_token_auth import bearer_github_token
+from agent.github.org_membership import is_user_active_org_member
+from agent.github.token_auth import bearer_github_token
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -298,30 +297,24 @@ def desktop_callback_url(port: int, code: str) -> str:
     return f"http://127.0.0.1:{port}/callback?code={quote(code, safe='')}"
 
 
-def issue_desktop_handoff(
-    *, login: str, email: str | None, avatar_url: str | None, challenge: str
-) -> str:
-    """Mint the code the browser hands back to the desktop app.
+def _mint_handoff(*, challenge: str, claims: dict[str, Any]) -> str:
+    """Sign a PKCE-bound code for the browser to hand back to the desktop app.
 
-    Carries the identity a session will be minted from, never a session
-    itself: a JWT is signed but not encrypted, so anything that sees the
-    loopback URL — browser history, an extension — can read the payload, and a
-    session in there would be a bearer token that makes the verifier pointless.
+    A JWT is signed but not encrypted, and this one rides in a URL the browser
+    records, so its claims have to be inert to whoever reads them: the identity
+    a session is minted from, never a session itself; what was connected, never
+    whose account to connect it to.
     """
     now = int(time.time())
-    payload = {
-        "sub": login,
-        "email": email,
-        "avatar_url": avatar_url,
-        "challenge": challenge,
-        "iat": now,
-        "exp": now + HANDOFF_TTL_SECONDS,
-    }
-    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+    return jwt.encode(
+        {**claims, "challenge": challenge, "iat": now, "exp": now + HANDOFF_TTL_SECONDS},
+        _secret(),
+        algorithm=JWT_ALG,
+    )
 
 
-def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
-    """Mint the session a desktop handoff code was issued for.
+def _decode_handoff(*, code: str, verifier: str) -> dict[str, Any]:
+    """Return a handoff code's claims, proving the caller holds the verifier.
 
     The code reaches a loopback port through the user's browser, so redeeming
     it also requires the verifier the challenge committed to — and that never
@@ -332,11 +325,29 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     except jwt.PyJWTError as e:
         raise HTTPException(400, f"invalid handoff code: {e}") from e
     challenge = payload.get("challenge")
-    login = payload.get("sub")
-    if not isinstance(challenge, str) or not isinstance(login, str) or not login:
+    if not isinstance(challenge, str):
         raise HTTPException(400, "malformed handoff code")
     if not hmac.compare_digest(_s256(verifier), challenge):
         raise HTTPException(400, "handoff verifier mismatch")
+    return payload
+
+
+def issue_desktop_handoff(
+    *, login: str, email: str | None, avatar_url: str | None, challenge: str
+) -> str:
+    """Mint the code the browser hands back after a desktop login."""
+    return _mint_handoff(
+        challenge=challenge,
+        claims={"sub": login, "email": email, "avatar_url": avatar_url},
+    )
+
+
+def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
+    """Mint the session a desktop handoff code was issued for."""
+    payload = _decode_handoff(code=code, verifier=verifier)
+    login = payload.get("sub")
+    if not isinstance(login, str) or not login:
+        raise HTTPException(400, "malformed handoff code")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
     return issue_session(
@@ -344,6 +355,33 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
     )
+
+
+def issue_connect_handoff(*, provider: str, challenge: str, claims: dict[str, Any]) -> str:
+    """Mint the code the browser hands back after a desktop connect flow."""
+    return _mint_handoff(challenge=challenge, claims={**claims, "provider": provider})
+
+
+def redeem_connect_handoff(*, provider: str, code: str, verifier: str) -> dict[str, Any]:
+    """Return a connect code's claims, pinned to the provider that minted them.
+
+    Without the pin, a code from one connect flow could be redeemed by another
+    provider's endpoint.
+    """
+    payload = _decode_handoff(code=code, verifier=verifier)
+    code_provider = payload.get("provider")
+    if not isinstance(code_provider, str) or not hmac.compare_digest(code_provider, provider):
+        raise HTTPException(400, "handoff provider mismatch")
+    return payload
+
+
+def desktop_handoff_from_state(state_payload: dict[str, Any]) -> tuple[str, int] | None:
+    """Return the PKCE challenge and loopback port a desktop flow was started with."""
+    challenge = state_payload.get("handoff_challenge")
+    port = state_payload.get("handoff_port")
+    if isinstance(challenge, str) and isinstance(port, int):
+        return challenge, port
+    return None
 
 
 # Dashboard route where users manage their GitHub↔Slack link.

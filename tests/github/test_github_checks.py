@@ -3,8 +3,8 @@ from typing import Any
 import httpx
 import pytest
 
+from agent.github import checks as github_checks
 from agent.review import publish as reviewer_publish
-from agent.utils import github_checks
 
 
 class _FakeResponse:
@@ -36,7 +36,7 @@ class _FakeAsyncClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:

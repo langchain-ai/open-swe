@@ -48,6 +48,7 @@ async def test_list_workflow_push_approvals_returns_records(monkeypatch) -> None
             "diffStats": {"files": 1, "additions": 1, "deletions": 0},
             "diffPreview": "diff --git ...",
             "diffPreviewTruncated": False,
+            "inheritedFrom": None,
             "approvalUrl": None,
             "requestedAt": "2026-07-07T00:00:00+00:00",
             "decidedAt": None,

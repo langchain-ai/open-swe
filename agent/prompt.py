@@ -5,13 +5,13 @@ from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
-from .utils.authorship import (
+from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
     build_pr_attribution_footer,
 )
-from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - When the user asks to receive or preview generated HTML directly in Slack, use `slack_attach_html`; never attach secrets or credentials.
 - When asked to move or continue the current thread in another Slack thread, use `slack_move_thread` with a concise, non-sensitive message to preserve history and detach the original thread.
 - When asked to break out work, use `slack_start_new_thread` with a headline-only title and self-contained instructions.
-- When a task warrants its own dedicated Slack channel, use `manage_code_channel` to move this session into a code channel. Inside one, use that tool for status, title, context and resources, runtime commands, HTML/diff/Block Kit/canvas views, canvas comments and revisions, and archival with a closing summary. Keep stable `view_key` values so view updates replace existing tabs.
+- Create or move work into a code channel only when the user explicitly asks. Inside one, use `manage_code_channel` for status, title, context and resources, runtime commands, HTML/diff/Block Kit/canvas views, canvas comments and revisions, and archival with a closing summary. Keep stable `view_key` values so view updates replace existing tabs.
 - When a plan is ready, send its review link with `slack_thread_reply`, pass `options=["Approve & implement", "Request changes"]`, and invite manual feedback too; use these options rather than constructing custom Block Kit."""
 
 LINEAR_SOURCE_GUIDANCE = """This run was triggered from Linear.
@@ -348,7 +348,7 @@ Steps, in order:
 1. **Lint & format.** Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: `yarn format` then `yarn lint`; Go: find the commands from `Makefile`/`go.mod`/CI). Then review your diff for correctness and unintended changes.
 
 2. **Push & open/update the PR.** Commit locally and `git push origin <branch>`.
-   - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the triggering user.
+   - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the triggering user. Pass `resolves_thread=true` unless you know more PRs are coming for this thread (a stack, a planned follow-up); then set it only on the last one. It lets the thread auto-resolve once its PRs are merged or closed.
    - **Update an existing PR** (edit body, mark ready, etc.) with `gh pr edit`. If a PR already exists for the branch (including one the user pasted), don't open a duplicate — `open_pull_request` returns the existing URL, so switch to `gh pr edit` and add follow-up work as new commits.
 
     Follow the repository's PR title and description conventions. Inspect `AGENTS.md`, PR templates, `.changelog/README.md`, and nearby docs before choosing the format. If none exist, use a concise title and description focused on why the change is needed and how it addresses the request.
