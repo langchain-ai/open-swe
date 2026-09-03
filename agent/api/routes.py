@@ -24,35 +24,14 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from agent.dashboard.admin import is_admin
-from agent.dashboard.agent_instructions import (
-    AGENT_INSTRUCTIONS,
-    AgentInstructions,
-    AgentInstructionsCreate,
-    AgentInstructionsUpdate,
-)
-from agent.dashboard.agent_usage import list_agent_usage_leaderboard
-from agent.dashboard.enabled_repos import (
-    list_enabled_review_repos,
-    set_review_repo_enabled,
-)
-from agent.dashboard.environments import (
-    DEFAULT_ENVIRONMENT_SLUG,
-    ENVIRONMENTS,
-    Environment,
-    EnvironmentCreate,
-    EnvironmentUpdate,
-    list_environment_options,
-    slugify,
-)
-from agent.dashboard.notion_oauth import (
+from agent.api.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
     exchange_notion_code,
     pop_notion_oauth_flow,
     store_notion_oauth_flow,
 )
-from agent.dashboard.oauth import (
+from agent.api.oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
@@ -75,7 +54,78 @@ from agent.dashboard.oauth import (
     sanitize_redirect_to,
     valid_handoff_challenge,
 )
-from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
+from agent.api.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
+from agent.api.review_chat import (
+    delete_review_chat_thread,
+    get_review_chat,
+    list_review_chat_threads,
+    proxy_review_chat_commands,
+    proxy_review_chat_history,
+    proxy_review_chat_state,
+    proxy_review_chat_stream_events,
+)
+from agent.api.reviews import (
+    create_review_comment,
+    dry_run_trace_resolution,
+    get_review,
+    get_review_diff,
+    list_review_comments,
+    list_reviews,
+    proxy_pr_image,
+    trigger_re_review,
+    update_review_comment,
+)
+from agent.api.threads import (
+    ThreadMessageBody,
+    ThreadResolveBody,
+    admin_cancel_dashboard_thread,
+    cancel_dashboard_thread,
+    delete_dashboard_thread,
+    get_dashboard_pull_request_checks,
+    get_dashboard_terminal_sandbox,
+    get_dashboard_thread,
+    get_dashboard_thread_branch_diff,
+    get_dashboard_thread_pull_request_context,
+    get_dashboard_thread_pull_request_status,
+    get_dashboard_thread_recovery_patch,
+    get_dashboard_thread_state,
+    get_dashboard_thread_working_tree_diff,
+    list_dashboard_pinned_threads,
+    list_dashboard_thread_projects,
+    list_dashboard_threads,
+    list_dashboard_threads_page,
+    pin_dashboard_thread,
+    proxy_dashboard_thread_commands,
+    proxy_dashboard_thread_history,
+    proxy_dashboard_thread_run_cancel,
+    proxy_dashboard_thread_stream_events,
+    resolve_dashboard_thread,
+    send_dashboard_message,
+    stream_dashboard_thread,
+    unpin_dashboard_thread,
+)
+from agent.api.voice import transcribe_audio
+from agent.dashboard.admin import is_admin
+from agent.dashboard.agent_instructions import (
+    AGENT_INSTRUCTIONS,
+    AgentInstructions,
+    AgentInstructionsCreate,
+    AgentInstructionsUpdate,
+)
+from agent.dashboard.agent_usage import list_agent_usage_leaderboard
+from agent.dashboard.enabled_repos import (
+    list_enabled_review_repos,
+    set_review_repo_enabled,
+)
+from agent.dashboard.environments import (
+    DEFAULT_ENVIRONMENT_SLUG,
+    ENVIRONMENTS,
+    Environment,
+    EnvironmentCreate,
+    EnvironmentUpdate,
+    list_environment_options,
+    slugify,
+)
 from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
@@ -96,26 +146,6 @@ from agent.dashboard.repo_cache import (
     read_cached_repos,
     schedule_repo_cache_refresh,
     write_cached_repos,
-)
-from agent.dashboard.review_api import (
-    create_review_comment,
-    dry_run_trace_resolution,
-    get_review,
-    get_review_diff,
-    list_review_comments,
-    list_reviews,
-    proxy_pr_image,
-    trigger_re_review,
-    update_review_comment,
-)
-from agent.dashboard.review_chat_api import (
-    delete_review_chat_thread,
-    get_review_chat,
-    list_review_chat_threads,
-    proxy_review_chat_commands,
-    proxy_review_chat_history,
-    proxy_review_chat_state,
-    proxy_review_chat_stream_events,
 )
 from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
@@ -164,35 +194,6 @@ from agent.dashboard.team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from agent.dashboard.thread_api import (
-    ThreadMessageBody,
-    ThreadResolveBody,
-    admin_cancel_dashboard_thread,
-    cancel_dashboard_thread,
-    delete_dashboard_thread,
-    get_dashboard_pull_request_checks,
-    get_dashboard_terminal_sandbox,
-    get_dashboard_thread,
-    get_dashboard_thread_branch_diff,
-    get_dashboard_thread_pull_request_context,
-    get_dashboard_thread_pull_request_status,
-    get_dashboard_thread_recovery_patch,
-    get_dashboard_thread_state,
-    get_dashboard_thread_working_tree_diff,
-    list_dashboard_pinned_threads,
-    list_dashboard_thread_projects,
-    list_dashboard_threads,
-    list_dashboard_threads_page,
-    pin_dashboard_thread,
-    proxy_dashboard_thread_commands,
-    proxy_dashboard_thread_history,
-    proxy_dashboard_thread_run_cancel,
-    proxy_dashboard_thread_stream_events,
-    resolve_dashboard_thread,
-    send_dashboard_message,
-    stream_dashboard_thread,
-    unpin_dashboard_thread,
-)
 from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,
     UserLangSmithCredentialsUpdate,
@@ -224,7 +225,6 @@ from agent.dashboard.user_mappings import (
     list_mappings,
     upsert_mapping,
 )
-from agent.dashboard.voice import transcribe_audio
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 from agent.review.analyzer_cron import remove_continual_cron

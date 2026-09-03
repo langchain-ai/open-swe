@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from agent.dashboard import thread_api
+from agent.api import threads as thread_api
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:

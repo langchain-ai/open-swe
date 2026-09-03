@@ -62,7 +62,7 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
 from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
-from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from agent.api.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from agent.slack.client import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]

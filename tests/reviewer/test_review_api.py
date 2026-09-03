@@ -1,8 +1,8 @@
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import review_api
-from agent.dashboard.review_api import (
+from agent.api import reviews as review_api
+from agent.api.reviews import (
     _ALLOWED_IMAGE_CONTENT_TYPES,
     _finding_counts,
     _is_allowed_image_url,
@@ -133,7 +133,7 @@ async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
     async def fake_github_get(path, token, **kwargs):
         return {"body": "see ![diagram](https://x.githubusercontent.com/a.png)"}
 
-    monkeypatch.setattr("agent.dashboard.review_api._github_get", fake_github_get)
+    monkeypatch.setattr("agent.api.reviews._github_get", fake_github_get)
 
     # A URL not present in the PR body (cross-repo IDOR attempt) is rejected.
     with pytest.raises(HTTPException) as exc:

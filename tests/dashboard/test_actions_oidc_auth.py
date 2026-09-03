@@ -8,8 +8,8 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
-from agent.dashboard import oidc_auth
-from agent.dashboard.oidc_auth import (
+from agent.api import oidc_auth
+from agent.api.oidc_auth import (
     DEFAULT_OIDC_AUDIENCE,
     GITHUB_ACTIONS_ISSUER,
     actions_oidc_configured,

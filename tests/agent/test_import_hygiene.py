@@ -38,7 +38,7 @@ def test_webapp_does_not_import_agent_stack() -> None:
 
 
 def test_server_does_not_import_exa_or_dashboard_routes() -> None:
-    loaded = _closure_check("agent.server", ["exa_py", "agent.dashboard.routes", "agent.webapp"])
+    loaded = _closure_check("agent.server", ["exa_py", "agent.api.routes", "agent.webapp"])
     assert not any(loaded.values()), f"forbidden modules imported by agent.server: {loaded}"
 
 

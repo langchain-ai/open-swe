@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from langchain_core.tools import BaseTool
 
-from agent.dashboard.notion_oauth import NOTION_MCP_URL
+from agent.api.notion_oauth import NOTION_MCP_URL
 from agent.dashboard.user_credentials import get_notion_access_token
 from agent.utils.thread_participants import resolve_participant
 

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.dashboard import plan_api
+from agent.api import plans as plan_api
 from agent.slack import webhook as slack_webhook
 
 
