@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from agent import server
+from agent.run_config import RunConfig
 
 ask_tool = importlib.import_module("agent.slack.tools.ask_user_choice")
 reply_tool = importlib.import_module("agent.slack.tools.reply_to_message")
@@ -139,9 +140,9 @@ async def test_a_choice_needs_a_question_and_up_to_five_answers(
 
 
 def test_a_channel_session_gets_the_reply_tool_that_matches_it() -> None:
-    channel_tools = server._session_reply_tools({"slack_thread": CHANNEL})
-    thread_tools = server._session_reply_tools({"slack_thread": THREAD})
+    channel_tools = server._session_reply_tools(RunConfig.parse({"slack_thread": CHANNEL}))
+    thread_tools = server._session_reply_tools(RunConfig.parse({"slack_thread": THREAD}))
 
     assert channel_tools == [server.slack_reply_to_message]
     assert thread_tools == [server.slack_thread_reply]
-    assert server._session_reply_tools({}) == [server.slack_thread_reply]
+    assert server._session_reply_tools(RunConfig()) == [server.slack_thread_reply]

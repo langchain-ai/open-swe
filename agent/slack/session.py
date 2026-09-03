@@ -9,30 +9,24 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from agent.run_config import RunConfig
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
-from agent.source_context import SlackThreadRef
 from agent.utils.run_usage import RunUsageSummary
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 
 def current_run_id(config: Mapping[str, Any]) -> str | None:
-    candidates = [config.get("run_id")]
-    configurable = config.get("configurable")
-    if isinstance(configurable, dict):
-        candidates.append(configurable.get("run_id"))
+    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
     return next((str(candidate) for candidate in candidates if candidate), None)
 
 
-def triggering_user_id(configurable: object) -> str | None:
-    if not isinstance(configurable, dict):
-        return None
-    slack_thread = SlackThreadRef.parse(configurable.get("slack_thread"))
-    return slack_thread.triggering_user_id or None if slack_thread else None
+def triggering_user_id(cfg: RunConfig) -> str | None:
+    return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
 
 
 def option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:

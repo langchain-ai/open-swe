@@ -4,9 +4,9 @@ import uuid
 from typing import Any
 
 from fastapi import HTTPException
-from langgraph.config import get_config
 
 from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
@@ -68,7 +68,7 @@ def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str,
     return text
 
 
-def _resolve_repo(configurable: dict[str, Any], default_repo: str | None) -> dict[str, str] | None:
+def _resolve_repo(cfg: RunConfig, default_repo: str | None) -> dict[str, str] | None:
     if default_repo and default_repo.strip():
         candidate = default_repo.strip()
         if not _REPO_RE.fullmatch(candidate):
@@ -76,12 +76,8 @@ def _resolve_repo(configurable: dict[str, Any], default_repo: str | None) -> dic
         owner, name = candidate.split("/", 1)
         return {"owner": owner, "name": name}
 
-    repo = configurable.get("repo")
-    if isinstance(repo, dict):
-        owner = repo.get("owner")
-        name = repo.get("name")
-        if isinstance(owner, str) and owner.strip() and isinstance(name, str) and name.strip():
-            return {"owner": owner.strip(), "name": name.strip()}
+    if cfg.repo and cfg.repo.owner.strip() and cfg.repo.name.strip():
+        return {"owner": cfg.repo.owner.strip(), "name": cfg.repo.name.strip()}
     return None
 
 
@@ -146,17 +142,14 @@ async def slack_start_new_thread(
     default_repo: str | None = None,
 ) -> dict[str, Any]:
     """Start a Slack thread with a headline root and instructions as the first reply."""
-    config = get_config()
-    configurable = config.get("configurable", {})
-    configured_slack_thread = configurable.get("slack_thread")
-    if not isinstance(configured_slack_thread, dict):
+    cfg = RunConfig.from_runtime()
+    if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}
     client = langgraph_client()
-    thread_id_value = configurable.get("thread_id")
     current_slack_thread = await get_active_slack_thread(
         client,
-        thread_id_value if isinstance(thread_id_value, str) else None,
-        configured_slack_thread,
+        cfg.thread_id,
+        cfg.slack_thread.dump(),
     )
     if not current_slack_thread:
         return {"success": False, "error": "Current Slack location is unavailable"}
@@ -175,7 +168,7 @@ async def slack_start_new_thread(
     if isinstance(clean_instructions, dict):
         return clean_instructions
 
-    repo = _resolve_repo(configurable, default_repo)
+    repo = _resolve_repo(cfg, default_repo)
     if default_repo and default_repo.strip() and repo is None:
         return {
             "success": False,
@@ -190,8 +183,8 @@ async def slack_start_new_thread(
                     f"Repository {repo['owner']}/{repo['name']} is not on the deployment allowlist"
                 ),
             }
-        github_login = configurable.get("github_login")
-        if not isinstance(github_login, str) or not github_login.strip():
+        github_login = cfg.github_login
+        if not (github_login or "").strip():
             return {
                 "success": False,
                 "error": (
@@ -201,7 +194,7 @@ async def slack_start_new_thread(
             }
         try:
             await require_repo_access_for_user(
-                github_login.strip(), f"{repo['owner']}/{repo['name']}"
+                (github_login or "").strip(), f"{repo['owner']}/{repo['name']}"
             )
         except HTTPException as exc:
             return {
@@ -263,7 +256,7 @@ async def slack_start_new_thread(
     session = await spawn_slack_session(
         client,
         destination=SpawnDestination(channel_id=clean_channel_id, thread_ts=message_ts),
-        origin=SpawnOrigin.from_config(configurable, current_slack_thread),
+        origin=SpawnOrigin.from_config(cfg, current_slack_thread),
         handoff=SpawnHandoff(
             title=clean_title,
             content=await _run_prompt(

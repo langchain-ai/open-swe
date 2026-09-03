@@ -7,9 +7,8 @@ by the dashboard chat proxy.
 
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.review.findings import list_findings as list_findings_async
+from agent.run_config import RunConfig
 
 _COMPACT_FIELDS = (
     "id",
@@ -49,12 +48,8 @@ async def list_review_findings(status_filter: str | None = None) -> dict[str, An
     if status_filter is not None and status_filter not in {"open", "resolved", "dismissed"}:
         return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
 
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    reviewer_thread_id = (
-        configurable.get("reviewer_thread_id") if isinstance(configurable, dict) else None
-    )
-    if not isinstance(reviewer_thread_id, str) or not reviewer_thread_id:
+    reviewer_thread_id = RunConfig.from_runtime().reviewer_thread_id
+    if not reviewer_thread_id:
         return {"findings": [], "count": 0, "error": "reviewer thread unavailable"}
 
     try:

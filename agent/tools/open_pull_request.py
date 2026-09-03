@@ -5,14 +5,18 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
-from agent.slack.client import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
+from agent.run_config import RunConfig
+from agent.slack.client import (
+    get_active_slack_thread,
+    get_slack_permalink,
+    parse_github_pr_url,
+)
 from agent.slack.surfaces import slack_surface
 from agent.source_context import SlackThreadRef
 from agent.utils.dashboard_links import dashboard_plan_url
@@ -52,11 +56,11 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     metadata: Slack thread ids are shared across a conversation, so a cached
     token could belong to a prior triggering user.
     """
-    configurable = get_config().get("configurable", {})
-    source = configurable.get("source")
-    github_login = configurable.get("github_login")
+    cfg = RunConfig.from_runtime()
+    source = cfg.source
+    github_login = cfg.github_login
 
-    if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
+    if source in _USER_TOKEN_SOURCES and github_login and github_login.strip():
         from ..dashboard.profiles import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
@@ -110,18 +114,15 @@ def _github_response_summary(resp: httpx.Response | None) -> str:
 
 
 def _effective_draft(draft: bool) -> bool:
-    configurable = _configurable()
-    preference = configurable.get("draft_prs")
-    return preference if isinstance(preference, bool) else draft
+    preference = _configurable().draft_prs
+    return preference if preference is not None else draft
 
 
-def _configurable() -> dict[str, Any]:
+def _configurable() -> RunConfig:
     try:
-        config = get_config()
+        return RunConfig.from_runtime()
     except Exception:
-        return {}
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    return dict(configurable) if isinstance(configurable, dict) else {}
+        return RunConfig()
 
 
 def _head_branch_for_repo(owner: str, head: str) -> str | None:
@@ -183,7 +184,7 @@ def _record_open_pr_failure_telemetry(
     branch_pushed: bool | None,
     failed_step: str,
 ) -> None:
-    configurable = _configurable()
+    cfg = _configurable()
     logger.warning(
         "open_pull_request_failed code=%s owner=%s repo=%s head=%s base=%s "
         "http_status=%s token_kind=%s branch_pushed=%s thread_id=%s source=%s",
@@ -195,8 +196,8 @@ def _record_open_pr_failure_telemetry(
         http_status,
         token_kind,
         branch_pushed,
-        configurable.get("thread_id"),
-        configurable.get("source"),
+        cfg.thread_id,
+        cfg.source,
         extra={
             "open_pull_request_failure": {
                 "code": code,
@@ -209,8 +210,8 @@ def _record_open_pr_failure_telemetry(
                 "branch_pushed": branch_pushed,
                 "pr_created": False,
                 "failed_step": failed_step,
-                "thread_id": configurable.get("thread_id"),
-                "source": configurable.get("source"),
+                "thread_id": cfg.thread_id,
+                "source": cfg.source,
             }
         },
     )
@@ -537,17 +538,13 @@ async def _record_pr_telemetry(
         return
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
-        config = get_config()
-        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-        thread_id = configurable.get("thread_id")
-        github_login = configurable.get("github_login")
-        user_email = configurable.get("user_email")
-        if not isinstance(github_login, str) or not github_login.strip():
-            from ..dashboard.user_mappings import login_for_email
+        cfg = RunConfig.from_runtime()
+        thread_id = cfg.thread_id
+        github_login = cfg.github_login
+        if not (github_login or "").strip():
+            from agent.dashboard.user_mappings import login_for_email
 
-            github_login = (
-                await login_for_email(user_email if isinstance(user_email, str) else None) or ""
-            )
+            github_login = await login_for_email(cfg.user_email) or ""
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
@@ -559,9 +556,9 @@ async def _record_pr_telemetry(
         changed_files_value = details.get("changed_files")
         changed_files = changed_files_value if isinstance(changed_files_value, int) else 0
         await record_agent_pr_usage(
-            thread_id=thread_id if isinstance(thread_id, str) else None,
+            thread_id=thread_id,
             github_login=github_login,
-            user_email=user_email if isinstance(user_email, str) else None,
+            user_email=cfg.user_email,
             owner=owner,
             repo=repo,
             pr_number=pr_number,
@@ -632,11 +629,10 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
-            slack_thread = configurable.get("slack_thread")
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,
-                slack_thread if isinstance(slack_thread, dict) else None,
+                cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
             surface = slack_surface(SlackThreadRef.parse(active))
             if surface is not None and surface.has_chrome:
@@ -671,9 +667,9 @@ async def _record_pr_telemetry(
         )
 
 
-async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str):
+async def _plan_reference_line(cfg: RunConfig) -> str | None:
+    thread_id = cfg.thread_id
+    if not thread_id:
         return None
     try:
         plan = await get_plan_content(thread_id)
@@ -688,18 +684,16 @@ async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
     return f"- Plan: {plan_url}"
 
 
-async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[str]:
+async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
     """Build source reference lines for the run."""
-    source = configurable.get("source")
+    source = cfg.source
     lines: list[str] = []
 
     if source == "slack":
-        slack_thread = configurable.get("slack_thread") or {}
-        thread_id = configurable.get("thread_id")
         active = await get_active_slack_thread(
             get_client(),
-            thread_id if isinstance(thread_id, str) else None,
-            slack_thread if isinstance(slack_thread, dict) else None,
+            cfg.thread_id,
+            cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
         slack_thread = active or {}
         channel_id = slack_thread.get("channel_id")
@@ -712,17 +706,17 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
         if isinstance(permalink, str) and permalink.strip():
             lines.append(f"- Slack thread: {permalink.strip()}")
     elif source == "linear":
-        linear_issue = configurable.get("linear_issue") or {}
-        url = linear_issue.get("url")
-        identifier = linear_issue.get("identifier")
+        linear_issue = cfg.linear_issue
+        url = linear_issue.url if linear_issue else ""
+        identifier = linear_issue.identifier if linear_issue else ""
         if url:
             lines.append(f"- Linear ticket: [{identifier or url}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
     elif source in ("github", "github_issue"):
-        github_issue = configurable.get("github_issue") or {}
-        url = github_issue.get("url")
-        number = github_issue.get("number")
+        github_issue = cfg.github_issue
+        url = github_issue.url if github_issue else ""
+        number = github_issue.number if github_issue else None
         if url:
             label = f"#{number}" if number else url
             lines.append(f"- GitHub issue: [{label}]({url})")
@@ -748,15 +742,13 @@ async def _maybe_append_references(
     try:
         if _REFERENCES_HEADING in body:
             return body
-        configurable = get_config().get("configurable", {})
-        if not isinstance(configurable, dict):
-            configurable = {}
+        cfg = RunConfig.from_runtime()
         lines: list[str] = []
-        plan_line = await _plan_reference_line(configurable)
+        plan_line = await _plan_reference_line(cfg)
         if plan_line:
             lines.append(plan_line)
         try:
-            source_lines = await _build_source_reference_lines(configurable)
+            source_lines = await _build_source_reference_lines(cfg)
             if source_lines and await _is_private_repo(client, token, owner, repo):
                 lines.extend(source_lines)
         except Exception:

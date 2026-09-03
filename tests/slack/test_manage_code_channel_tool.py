@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.run_config import RunConfig
+
 manage_tool = import_module("agent.slack.tools.manage_code_channel")
 surfaces_slack = import_module("agent.slack.surfaces.channel")
 
@@ -136,7 +138,7 @@ async def _create(client: Any = None, **overrides: Any) -> dict[str, Any]:
         ORIGIN,
         "Fix flaky tests",
         {"owner": "langchain-ai", "name": "open-swe"},
-        configurable={"github_login": "octocat"},
+        cfg=RunConfig(github_login="octocat"),
         **{
             "instructions": "Fix the flaky login test on the pushed branch.",
             "invite": ["U1"],

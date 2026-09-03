@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from agent import server
 from agent.middleware import slack_transcript as middleware_module
 from agent.middleware.slack_transcript import SlackTranscriptMiddleware
+from agent.run_config import RunConfig
 from agent.slack.surfaces import projector
 
 CHANNEL_LOCATION = {
@@ -276,15 +277,18 @@ async def test_no_store_means_no_transcript_rather_than_a_failed_run(
 def test_only_a_channel_session_gets_a_transcript(
     configurable: dict[str, Any], expected: int
 ) -> None:
-    assert len(server._transcript_middleware(configurable, "thread-1")) == expected
+    cfg = RunConfig.parse(configurable)
+    assert len(server._transcript_middleware(cfg, "thread-1")) == expected
 
 
 def test_the_transcript_is_told_where_to_write() -> None:
     (transcript,) = server._transcript_middleware(
-        {
-            "slack_thread": {**CHANNEL_LOCATION, "reply_thread_ts": "1717171718.000200"},
-            "prepare_run_id": "p1",
-        },
+        RunConfig.parse(
+            {
+                "slack_thread": {**CHANNEL_LOCATION, "reply_thread_ts": "1717171718.000200"},
+                "prepare_run_id": "p1",
+            }
+        ),
         "thread-1",
     )
 

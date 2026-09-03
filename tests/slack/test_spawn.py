@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.run_config import RunConfig
 from agent.slack import spawn
 from agent.slack.spawn import (
     SpawnDestination,
@@ -36,13 +37,15 @@ class _Client:
 
 def _origin() -> SpawnOrigin:
     return SpawnOrigin.from_config(
-        {
-            "thread_id": "parent-thread",
-            "github_login": "octocat",
-            "user_email": "Octocat@Example.com",
-            "agent_model_id": "claude-opus-5",
-            "repo": {"owner": "acme", "name": "billing"},
-        },
+        RunConfig.parse(
+            {
+                "thread_id": "parent-thread",
+                "github_login": "octocat",
+                "user_email": "Octocat@Example.com",
+                "agent_model_id": "claude-opus-5",
+                "repo": {"owner": "acme", "name": "billing"},
+            }
+        ),
         {
             "channel_id": "C-origin",
             "thread_ts": "1717171717.000100",

@@ -22,6 +22,7 @@ from typing import Any
 from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import ContentBlocks, dispatch_agent_run
+from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -60,17 +61,16 @@ class SpawnOrigin:
 
     thread_id: str
     slack_thread: SlackThreadRef
-    configurable: Mapping[str, Any]
+    config: RunConfig
 
     @classmethod
     def from_config(
-        cls, configurable: Mapping[str, Any], active_slack: Mapping[str, Any] | SlackThreadRef
+        cls, cfg: RunConfig, active_slack: Mapping[str, Any] | SlackThreadRef
     ) -> "SpawnOrigin":
-        thread_id = configurable.get("thread_id")
         return cls(
-            thread_id=thread_id if isinstance(thread_id, str) else "",
+            thread_id=cfg.thread_id or "",
             slack_thread=SlackThreadRef.parse(active_slack) or SlackThreadRef(),
-            configurable=configurable,
+            config=cfg,
         )
 
 
@@ -128,12 +128,10 @@ def _metadata(
         metadata["repo"] = handoff.repo
         metadata["repo_owner"] = handoff.repo["owner"]
         metadata["repo_name"] = handoff.repo["name"]
-    github_login = origin.configurable.get("github_login")
-    if isinstance(github_login, str) and github_login:
-        metadata["github_login"] = github_login
-    user_email = origin.configurable.get("user_email")
-    if isinstance(user_email, str) and user_email:
-        metadata["triggering_user_email"] = user_email.strip().lower()
+    if origin.config.github_login:
+        metadata["github_login"] = origin.config.github_login
+    if origin.config.user_email:
+        metadata["triggering_user_email"] = origin.config.user_email.strip().lower()
     return metadata
 
 
@@ -142,7 +140,7 @@ def _configurable(location: SlackThreadRef, origin: SpawnOrigin, handoff: SpawnH
     if handoff.repo:
         configurable["repo"] = handoff.repo
     for key in _INHERITED_CONFIG_KEYS:
-        value = origin.configurable.get(key)
+        value = origin.config.get(key)
         if value:
             configurable[key] = value
     return configurable

@@ -24,6 +24,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.run_config import RunConfig
 from agent.slack import client as slack_utils
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.spawn import CodeChannelError, SpawnOrigin, open_code_channel
@@ -528,7 +529,7 @@ async def process_code_channel_command(command: dict[str, Any]) -> None:
             # Whoever ran the command, plus anyone they named in it.
             invite=[user_id, *re.findall(r"<@([A-Z0-9]+)", prompt)],
             origin=SpawnOrigin.from_config(
-                {"github_login": login or "", "user_email": ""},
+                RunConfig(github_login=login or "", user_email=""),
                 SlackThreadRef(
                     channel_id=channel_id,
                     triggering_user_id=user_id,
@@ -926,7 +927,7 @@ async def _process_slack_mention_impl(
         surface="slack_channel" if code_channel else "slack_thread",
         triggering_user_id=user_id,
         triggering_user_name=user_name,
-        triggering_user_email=user_email,
+        triggering_user_email=user_email or "",
         triggering_user_timezone=user_timezone,
         triggering_event_ts=event_ts,
         reply_thread_ts=reply_thread_ts if code_channel else "",

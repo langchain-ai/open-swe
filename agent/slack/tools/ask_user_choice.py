@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from agent.run_config import RunConfig
 from agent.slack.client import get_active_slack_thread
 from agent.slack.session import (
     current_run_id,
@@ -41,8 +42,8 @@ async def ask_user_choice(
     *bold*, _italic_, <url|link text>, bullet lists with "• ".
     """
     config = get_config()
-    configurable = config.get("configurable", {})
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.from_config(config)
+    thread_id = cfg.thread_id
     if not question.strip():
         return {"success": False, "error": "question is required"}
     choices = [option.strip() for option in options if option.strip()]
@@ -55,11 +56,10 @@ async def ask_user_choice(
         }
 
     client = get_langgraph_client()
-    slack_thread = configurable.get("slack_thread")
     active = await get_active_slack_thread(
         client,
-        thread_id if isinstance(thread_id, str) else None,
-        slack_thread if isinstance(slack_thread, dict) else None,
+        thread_id,
+        cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     location = SlackThreadRef.parse(active) if active else None
     if location is None or not location.channel_id:
@@ -79,5 +79,5 @@ async def ask_user_choice(
         usage=summarize_run_usage(state),
         agent_thread_id=surface.viewer_link_thread_id(str(thread_id or "")),
         run_id=current_run_id(config),
-        triggering_user=triggering_user_id(configurable),
+        triggering_user=triggering_user_id(cfg),
     )

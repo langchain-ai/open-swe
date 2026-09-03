@@ -38,9 +38,13 @@ class SlackThreadRef(BaseModel):
     channel_id: str = ""
     thread_ts: str = ""
     team_id: str = ""
+    # A thread the user started inside a code channel, which the agent answers
+    # in rather than at channel level.
+    reply_thread_ts: str = ""
+    trace_message_ts: str = ""
     triggering_user_id: str = ""
     triggering_user_name: str = ""
-    triggering_user_email: str | None = None
+    triggering_user_email: str = ""
     triggering_user_timezone: str = ""
     triggering_event_ts: str = ""
     permalink: str = ""
@@ -48,9 +52,6 @@ class SlackThreadRef(BaseModel):
     # None on locations written before this field existed, and on a kind this
     # deployment does not know; `agent.slack.surfaces` falls back to `thread_ts` there.
     surface: SlackSurfaceKind | None = None
-    # A thread the user started inside a code channel, which the agent answers
-    # in rather than at channel level.
-    reply_thread_ts: str = ""
 
     # An unknown kind makes the kind unknown, not the whole location worth
     # discarding — see the parsing rule in the module docstring.
@@ -72,10 +73,6 @@ class SlackThreadRef(BaseModel):
             logger.warning("Unparseable Slack thread ref, ignoring", exc_info=True)
             return None
 
-    def dump(self) -> dict[str, Any]:
-        """The JSON value to store, preserving exactly the keys that were set."""
-        return self.model_dump(mode="json", exclude_unset=True)
-
     @property
     def location(self) -> tuple[str, str] | None:
         """``(channel_id, thread_ts)`` when both are present."""
@@ -86,17 +83,24 @@ class SlackThreadRef(BaseModel):
     def is_at(self, channel_id: str, thread_ts: str) -> bool:
         return self.channel_id == channel_id and self.thread_ts == thread_ts
 
+    def dump(self) -> dict[str, Any]:
+        """The JSON value to store, preserving exactly the keys that were set."""
+        return self.model_dump(mode="json", exclude_unset=True)
+
 
 class LinearIssueRef(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str = ""
+    identifier: str = ""
+    url: str = ""
 
 
 class GitHubIssueRef(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     number: int | None = None
+    url: str = ""
 
 
 class SourceContext(BaseModel):

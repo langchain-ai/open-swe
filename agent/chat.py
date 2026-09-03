@@ -55,6 +55,7 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
+from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -160,27 +161,18 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
 
     def _prepare_config_fingerprint(self) -> object:
-        configurable = self._config.get("configurable", {})
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id")
-            if isinstance(configurable, dict)
-            else None,
-            "repo_owner": configurable.get("chat_repo_owner")
-            if isinstance(configurable, dict)
-            else None,
-            "repo_name": configurable.get("chat_repo_name")
-            if isinstance(configurable, dict)
-            else None,
-            "pr_number": configurable.get("chat_pr_number")
-            if isinstance(configurable, dict)
-            else None,
+            "prepare_run_id": cfg.prepare_run_id,
+            "repo_owner": cfg.chat_repo_owner,
+            "repo_name": cfg.chat_repo_name,
+            "pr_number": cfg.chat_pr_number,
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         configurable = self._config.get("configurable") or {}
-        repo_owner = str(configurable.get("chat_repo_owner") or "")
-        repo_name = str(configurable.get("chat_repo_name") or "")
-        pr_number = configurable.get("chat_pr_number")
+        cfg = RunConfig.parse(configurable)
+        repo_name = cfg.chat_repo_name or ""
         token = await get_github_app_installation_token(
             repositories=[repo_name] if repo_name else None
         )
@@ -188,20 +180,20 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
             configurable["chat_github_token"] = token
         return {
             "rendered_system_prompt": CHAT_PROMPT.format(
-                repo_owner=repo_owner or "<owner>",
+                repo_owner=cfg.chat_repo_owner or "<owner>",
                 repo_name=repo_name or "<repo>",
-                pr_number=pr_number if isinstance(pr_number, int) else "?",
+                pr_number=cfg.chat_pr_number if cfg.chat_pr_number is not None else "?",
             )
         }
 
 
-async def _resolve_chat_model(configurable: dict[str, Any]) -> tuple[str, str]:
-    model_id = configurable.get("chat_model_id")
-    effort = configurable.get("chat_effort")
+async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
+    model_id = cfg.chat_model_id
+    effort = cfg.chat_effort
     if (
-        isinstance(model_id, str)
+        model_id is not None
         and model_id in SUPPORTED_MODEL_IDS
-        and isinstance(effort, str)
+        and effort is not None
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
@@ -218,12 +210,12 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
     config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.parse(configurable)
 
-    if thread_id is None or not graph_loaded_for_execution(config):
+    if cfg.thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    model_id, effort = await _resolve_chat_model(configurable)
+    model_id, effort = await _resolve_chat_model(cfg)
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
     )

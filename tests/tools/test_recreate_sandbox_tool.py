@@ -14,7 +14,7 @@ async def test_recreate_sandbox_returns_old_and_new_ids() -> None:
         }
     }
     with (
-        patch("agent.tools.recreate_sandbox.get_config", return_value=config),
+        patch("agent.run_config.get_config", return_value=config),
         patch(
             "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -36,7 +36,7 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
     config = {"configurable": {"thread_id": "thread-1"}}
 
     with (
-        patch("agent.tools.recreate_sandbox.get_config", return_value=config),
+        patch("agent.run_config.get_config", return_value=config),
         patch(
             "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
             new_callable=AsyncMock,

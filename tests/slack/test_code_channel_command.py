@@ -89,7 +89,7 @@ async def test_the_caller_inherits_their_github_identity(command: dict[str, Any]
     await slack_webhook.process_code_channel_command(dict(COMMAND))
 
     origin = command["open_code_channel"].await_args.kwargs["origin"]
-    assert origin.configurable["github_login"] == "octocat"
+    assert origin.config.github_login == "octocat"
     assert origin.slack_thread.triggering_user_id == "U1"
     assert origin.slack_thread.triggering_user_name == "Ramon"
 
