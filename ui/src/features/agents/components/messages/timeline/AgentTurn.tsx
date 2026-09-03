@@ -291,7 +291,9 @@ export function AgentTurn({
     renderItems.map((item, index) => [item.key, index])
   )
   const foldIndex = visibleItems.filter(
-    (item) => (renderItemIndex.get(item.key) ?? 0) < firstWorkIndex
+    (item) =>
+      (renderItemIndex.get(item.key) ?? Number.POSITIVE_INFINITY) <
+      firstWorkIndex
   ).length
 
   return (

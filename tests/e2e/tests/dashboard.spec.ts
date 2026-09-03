@@ -79,6 +79,46 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBe(true);
   });
 
+  test("keeps grouped live work after its fold row", async ({ page }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+
+    const send = await page.request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> E2E_SLACK_REPLY_GROUPED_ORDER reproduce grouped order",
+      },
+    });
+    expect(send.ok()).toBeTruthy();
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+
+    await page.goto(`/agents/${threadId}`);
+    const sentMessage = page.getByText("On it!", { exact: true });
+    await expect(sentMessage).toBeVisible();
+    const stopRun = page.getByRole("button", { name: "Stop run" });
+    await expect(stopRun).toBeVisible();
+    await stopRun.click();
+
+    const workFold = page.getByRole("button", {
+      name: /^Worked(?: for .*)? · 1 action$/,
+    });
+    const liveGroupedWork = page.getByText("Task", { exact: true });
+    await expect(workFold).toBeVisible();
+    await expect(liveGroupedWork).toBeVisible();
+
+    expect(
+      await workFold.evaluate(
+        (fold, groupedWork) =>
+          Boolean(
+            fold.compareDocumentPosition(groupedWork) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        await liveGroupedWork.elementHandle(),
+      ),
+    ).toBe(true);
+  });
+
   test("keeps follow-ups visible across the queued-to-transcript handoff", async ({
     page,
   }, testInfo) => {
