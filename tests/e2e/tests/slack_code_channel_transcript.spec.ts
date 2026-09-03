@@ -218,7 +218,9 @@ test.describe("Slack code channel transcript", () => {
     );
   });
 
-  test("a tool the agent got wrong shows as failed", async ({ page }) => {
+  test("a failed tool the agent recovers from does not read as an error", async ({
+    page,
+  }) => {
     const channel = await channelWithSession(page);
     await sendInChannel(
       page,
@@ -226,16 +228,23 @@ test.describe("Slack code channel transcript", () => {
       "Try the bogus action E2E_CODE_CHANNEL_TOOL_FAILURE",
     );
 
+    // The agent's own words carry what went wrong.
     await expect
       .poll(
         async () =>
           (await streams(page.request, channel.id))
-            .flatMap((stream) => stream.timeline)
-            .filter((entry) => entry.kind === "task")
-            .map((entry) => entry.status),
+            .map((stream) => stream.text)
+            .join(""),
         { timeout: 60_000 },
       )
-      .toContain("error");
+      .toContain("That call was rejected.");
+
+    // The card stays quiet: the run recovered, so nothing about it went wrong.
+    const statuses = (await streams(page.request, channel.id))
+      .flatMap((stream) => stream.timeline)
+      .filter((entry) => entry.kind === "task")
+      .map((entry) => entry.status);
+    expect(statuses).not.toContain("error");
   });
 
   test("the dashboard links a channel session to its channel", async ({
