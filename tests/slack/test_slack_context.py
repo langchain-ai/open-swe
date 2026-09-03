@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import hmac
 from typing import cast
 from xml.etree import ElementTree
 
@@ -15,6 +17,7 @@ from agent.slack.client import (
     replace_bot_mention_with_username,
     select_slack_context_messages,
     strip_bot_mention,
+    verify_slack_signature,
 )
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
@@ -23,6 +26,20 @@ from agent.webhooks import common as webhook_common
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
     return "https://smith/x"
+
+
+def test_verify_slack_signature_uses_raw_request_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = "1700000000"
+    secret = "secret"
+    body = b"payload=\xff"
+    signature = "v0=" + hmac.new(
+        secret.encode("utf-8"),
+        b"v0:" + timestamp.encode("utf-8") + b":" + body,
+        hashlib.sha256,
+    ).hexdigest()
+    monkeypatch.setattr(slack_utils.time, "time", lambda: int(timestamp))
+
+    assert verify_slack_signature(body, timestamp, signature, secret)
 
 
 class _FakeNotFoundError(Exception):
