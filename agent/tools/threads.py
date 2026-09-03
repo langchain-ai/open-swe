@@ -36,7 +36,8 @@ from agent.dashboard.workflow_approval import (
     workflow_push_approval_responses,
 )
 from agent.input_messages import input_message_text, message_sender_id
-from agent.slack.client import parse_github_pr_url
+from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
     dashboard_plan_url,
     dashboard_thread_id,
@@ -155,6 +156,13 @@ def _langsmith_identifiers(trace_url: Any, locator: str | None = None) -> dict[s
     }
 
 
+def _slack_identifiers(locator: str | None) -> dict[str, str] | None:
+    parsed = parse_slack_thread_url(locator or "")
+    if parsed is None:
+        return None
+    return {"url": locator or "", "channel_id": parsed[0], "thread_ts": parsed[1]}
+
+
 def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[str, Any]:
     result = dict(item)
     result.pop("messages", None)
@@ -163,6 +171,8 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     langsmith = _langsmith_identifiers(item.get("traceUrl"), locator)
     if any(value is not None for value in langsmith.values()):
         result["langsmith"] = langsmith
+    if slack := _slack_identifiers(locator):
+        result["slack"] = slack
     return result
 
 
@@ -181,7 +191,7 @@ async def list_threads(
     admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List surfaced threads by participant, admin mode, status, source, scope, or text."""
+    """List surfaced threads by locator, participant, admin mode, status, source, or text."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -192,13 +202,39 @@ async def list_threads(
         return _failure("participant and all_users cannot be used together")
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
-    cross_user = bool(requested and requested.lower() != actor.login.lower())
-    if admin_threads is not None and not actor.admin:
-        return _failure("Only workspace admins can filter admin threads")
-    if (all_users or cross_user) and not actor.admin:
-        return _failure("Only workspace admins can list other users' threads")
 
-    filter_participant_login = requested if cross_user else None
+    normalized_query = query.strip() if isinstance(query, str) else ""
+    exact_locator = (
+        parse_langsmith_locator(normalized_query) is not None
+        or parse_slack_thread_url(normalized_query) is not None
+        or (dashboard_thread_id(normalized_query) is not None and "/" in normalized_query)
+    )
+    if exact_locator or _looks_uuid(normalized_query):
+        try:
+            resolved_locator = await _authorized_locator(normalized_query, actor)
+        except HTTPException as exc:
+            if exc.status_code != 404 or exact_locator:
+                return _http_failure(exc)
+        except Exception:
+            logger.exception("Could not list thread locator %s", normalized_query)
+            return _failure("Could not list threads")
+        else:
+            if isinstance(resolved_locator, dict):
+                return resolved_locator
+            _, summary = resolved_locator
+            return {
+                "success": True,
+                "items": [_list_item(summary, locator=normalized_query)],
+                "limit": 1,
+                "offset": 0,
+                "has_more": False,
+            }
+
+    pr_ref = parse_github_pr_url(normalized_query)
+    search_query = pr_ref.url if pr_ref else normalized_query or None
+    filter_participant_login = (
+        requested if requested and requested.lower() != actor.login.lower() else None
+    )
     try:
         page = await list_dashboard_threads_page(
             actor.login,
@@ -210,7 +246,7 @@ async def list_threads(
             viewed=viewed,
             source=source,
             status=status,
-            query=query,
+            query=search_query,
             scope=scope,
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
@@ -222,9 +258,12 @@ async def list_threads(
     except Exception:
         logger.exception("Could not list threads")
         return _failure("Could not list threads")
+    items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
+    if pr_ref:
+        items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
     return {
         "success": True,
-        "items": [_list_item(item) for item in page.get("items", [])],
+        "items": [_list_item(item) for item in items],
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),
@@ -506,14 +545,26 @@ async def _authorized_locator(
     locator: str, actor: _Actor
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
+    slack_locator = parse_slack_thread_url(locator)
     thread_id = dashboard_thread_id(locator) or ""
     if langsmith_locator:
         thread_id = await get_open_swe_thread_id_from_langsmith(locator) or ""
         if not thread_id:
             return _failure("Could not resolve LangSmith trace to an Open SWE thread")
+    elif slack_locator:
+        client = langgraph_client()
+        thread_id = await lookup_slack_thread_id(client, *slack_locator) or ""
+        if not thread_id:
+            thread_id = (
+                await lookup_slack_thread_id(client, slack_locator[0], CODE_CHANNEL_SESSION_TS)
+                or ""
+            )
+        if not thread_id:
+            return _failure("Could not resolve Slack link to an Open SWE thread")
     if not thread_id:
         return _failure(
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, or LangSmith trace URL"
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, "
+            "or LangSmith trace URL"
         )
     try:
         summary = await get_dashboard_thread(
@@ -560,91 +611,6 @@ def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
     return False
 
 
-async def search_threads(
-    query: str = "",
-    participant: str | None = None,
-    all_users: bool = False,
-    limit: int = 25,
-    offset: int = 0,
-    scope: ThreadScope = "all",
-    admin_threads: bool | None = None,
-    state: Annotated[dict[str, Any] | None, InjectedState] = None,
-) -> dict[str, Any]:
-    """Search surfaced threads by text/URL/ID/PR, participant, scope, or admin mode."""
-    actor = await _actor(state)
-    if actor is None:
-        return _failure("No verified triggering user is available")
-    query = query.strip()
-    requested = participant.strip() if participant and participant.strip() else None
-    if not query and admin_threads is not True and requested is None:
-        return _failure("query, participant, or admin_threads=true is required")
-    if requested and all_users:
-        return _failure("participant and all_users cannot be used together")
-    if admin_threads is not None and not actor.admin:
-        return _failure("Only workspace admins can filter admin threads")
-    cross_user = bool(requested and requested.lower() != actor.login.lower())
-    if (all_users or cross_user) and not actor.admin:
-        return _failure("Only workspace admins can search other users' threads")
-    if scope not in {"all", "interactive", "automation"}:
-        return _failure("scope must be all, interactive, or automation")
-
-    exact_locator = parse_langsmith_locator(query) is not None or (
-        dashboard_thread_id(query) is not None and "/" in query
-    )
-    if exact_locator or _looks_uuid(query):
-        try:
-            resolved = await _authorized_locator(query, actor)
-        except HTTPException as exc:
-            if exc.status_code != 404 or exact_locator:
-                return _http_failure(exc)
-        except Exception:
-            logger.exception("Could not search for thread locator %s", query)
-            return _failure("Could not search threads")
-        else:
-            if isinstance(resolved, dict):
-                return resolved
-            _, summary = resolved
-            return {
-                "success": True,
-                "items": [_list_item(summary, locator=query)],
-                "limit": 1,
-                "offset": 0,
-                "has_more": False,
-            }
-
-    pr_ref = parse_github_pr_url(query)
-    normalized_query = pr_ref.url if pr_ref else query
-    filter_participant_login = requested if cross_user else None
-    try:
-        page = await list_dashboard_threads_page(
-            actor.login,
-            email=actor.email,
-            limit=limit,
-            offset=offset,
-            include_all=all_users or (admin_threads is True and requested is None),
-            query=normalized_query,
-            scope=scope,
-            filter_participant_login=filter_participant_login,
-            surfaced_only=True,
-            admin_threads=admin_threads,
-        )
-    except HTTPException as exc:
-        return _http_failure(exc)
-    except Exception:
-        logger.exception("Could not search threads")
-        return _failure("Could not search threads")
-    items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
-    if pr_ref:
-        items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
-    return {
-        "success": True,
-        "items": [_list_item(item) for item in items],
-        "limit": page.get("limit"),
-        "offset": page.get("offset"),
-        "has_more": page.get("hasMore", False),
-    }
-
-
 def _available_actions(
     *,
     admin: bool,
@@ -679,7 +645,7 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Inspect a thread from its exact ID, dashboard URL, or LangSmith trace URL/run ID."""
+    """Inspect a thread from its ID, dashboard/Slack/LangSmith URL, or LangSmith run ID."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -730,6 +696,7 @@ async def get_thread(
     }
     logins = participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))
     returned_participants = logins[:100]
+    slack_locator = parse_slack_thread_url(locator)
     return {
         "success": True,
         "thread": _list_item(summary, locator=locator),
@@ -747,6 +714,7 @@ async def get_thread(
         "workflow_approvals": _compact_approvals(approvals),
         "links": links,
         "langsmith": _langsmith_identifiers(summary.get("traceUrl"), locator),
+        "slack": slack_locator and _slack_identifiers(locator),
         "available_actions": _available_actions(
             admin=actor.admin,
             admin_thread=summary.get("adminThread") is True,

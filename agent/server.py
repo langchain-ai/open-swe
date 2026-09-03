@@ -188,7 +188,6 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
-    search_threads,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -393,7 +392,6 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "manage_code_channel",
         "list_threads",
         "manage_thread",
-        "search_threads",
         "notify_automation_channel",
         "read_user_settings",
     }
@@ -1177,7 +1175,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_search_issues,
         linear_update_issue,
         list_threads,
-        search_threads,
         get_thread,
         manage_thread,
         manage_baby_sit,

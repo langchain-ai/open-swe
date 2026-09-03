@@ -132,20 +132,19 @@ async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.Monk
     )
 
 
-async def test_list_threads_denies_cross_user_query_for_non_admin(
+async def test_list_threads_allows_cross_user_participant_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = AsyncMock()
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
     result = await threads_tool.list_threads(participant="other-user")
 
-    assert result == {
-        "success": False,
-        "error": "Only workspace admins can list other users' threads",
-    }
-    page.assert_not_awaited()
+    assert result["success"] is True
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["filter_participant_login"] == "other-user"
 
 
 async def test_list_threads_admin_filter_searches_all_admin_threads(
@@ -182,20 +181,20 @@ async def test_list_threads_intersects_participant_and_admin_filters(
     assert awaited.kwargs["admin_threads"] is True
 
 
-async def test_list_threads_admin_filter_requires_admin(
+async def test_list_threads_admin_filter_is_readable_by_non_admin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = AsyncMock()
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
     result = await threads_tool.list_threads(admin_threads=True)
 
-    assert result == {
-        "success": False,
-        "error": "Only workspace admins can filter admin threads",
-    }
-    page.assert_not_awaited()
+    assert result["success"] is True
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["include_all"] is True
+    assert awaited.kwargs["admin_threads"] is True
 
 
 async def test_list_threads_admin_participant_filter_keeps_admin_as_viewer(
@@ -215,11 +214,11 @@ async def test_list_threads_admin_participant_filter_keeps_admin_as_viewer(
     assert awaited.kwargs["surfaced_only"] is True
 
 
-async def test_list_threads_all_users_requires_admin_and_uses_server_filter(
+async def test_list_threads_all_users_uses_server_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = AsyncMock(return_value={"items": [], "limit": 10, "offset": 20, "hasMore": True})
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
     result = await threads_tool.list_threads(all_users=True, limit=10, offset=20, status="running")
@@ -404,6 +403,60 @@ async def test_get_thread_accepts_dashboard_url(monkeypatch: pytest.MonkeyPatch)
     client.threads.get_state.assert_awaited_once_with("thread-1")
 
 
+async def test_get_thread_accepts_slack_reply_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _DetailClient()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    lookup = AsyncMock(return_value="thread-1")
+    monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "status": "finished"})
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    locator = (
+        "https://workspace.slack.com/archives/C123/p1788431248678809"
+        "?thread_ts=1788425314.774339&cid=C123"
+    )
+
+    result = await threads_tool.get_thread(locator)
+
+    assert result["success"] is True
+    assert result["slack"] == {
+        "url": locator,
+        "channel_id": "C123",
+        "thread_ts": "1788425314.774339",
+    }
+    lookup.assert_awaited_once_with(client, "C123", "1788425314.774339")
+    get_dashboard_thread.assert_awaited_once_with(
+        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+
+
+async def test_list_threads_reports_unmapped_slack_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
+    get_dashboard_thread = AsyncMock()
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+
+    result = await threads_tool.list_threads(
+        query="https://workspace.slack.com/archives/C123/p1788431248678809"
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Could not resolve Slack link to an Open SWE thread",
+    }
+    assert [call.args[1:] for call in lookup.await_args_list] == [
+        ("C123", "1788431248.678809"),
+        ("C123", "0"),
+    ]
+    get_dashboard_thread.assert_not_awaited()
+
+
 async def test_get_thread_accepts_langsmith_run_id_when_not_a_thread_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -466,7 +519,7 @@ async def test_get_thread_accepts_langsmith_run_url(monkeypatch: pytest.MonkeyPa
     }
 
 
-async def test_search_threads_resolves_langsmith_thread_url(
+async def test_list_threads_resolves_langsmith_thread_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
@@ -481,7 +534,7 @@ async def test_search_threads_resolves_langsmith_thread_url(
     monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
 
     locator = "https://smith.langchain.com/o/org/projects/p/project/t/thread-1"
-    result = await threads_tool.search_threads(locator)
+    result = await threads_tool.list_threads(query=locator)
 
     assert result["items"][0]["id"] == "thread-1"
     assert result["items"][0]["langsmith"] == {
@@ -494,7 +547,7 @@ async def test_search_threads_resolves_langsmith_thread_url(
     )
 
 
-async def test_search_threads_resolves_exact_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_threads_resolves_exact_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     get_dashboard_thread = AsyncMock(
@@ -502,7 +555,9 @@ async def test_search_threads_resolves_exact_dashboard_url(monkeypatch: pytest.M
     )
     monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
 
-    result = await threads_tool.search_threads("https://dev.open-swe.langchain.dev/agents/thread-1")
+    result = await threads_tool.list_threads(
+        query="https://dev.open-swe.langchain.dev/agents/thread-1"
+    )
 
     assert result["items"][0]["id"] == "thread-1"
     get_dashboard_thread.assert_awaited_once_with(
@@ -510,7 +565,7 @@ async def test_search_threads_resolves_exact_dashboard_url(monkeypatch: pytest.M
     )
 
 
-async def test_search_threads_normalizes_and_filters_github_pr(
+async def test_list_threads_normalizes_and_filters_github_pr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
@@ -535,144 +590,74 @@ async def test_search_threads_normalizes_and_filters_github_pr(
     )
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
-    result = await threads_tool.search_threads(
-        "https://github.com/acme/repo/pull/42/files?diff=split"
+    result = await threads_tool.list_threads(
+        query="https://github.com/acme/repo/pull/42/files?diff=split"
     )
 
     assert [item["id"] for item in result["items"]] == ["thread-1"]
-    page.assert_awaited_once_with(
-        "octocat",
-        email="octocat@example.com",
-        limit=25,
-        offset=0,
-        include_all=False,
-        query="https://github.com/acme/repo/pull/42",
-        scope="all",
-        filter_participant_login=None,
-        surfaced_only=True,
-        admin_threads=None,
-    )
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["query"] == "https://github.com/acme/repo/pull/42"
 
 
-async def test_search_threads_filters_all_threads_by_participant(
+async def test_list_threads_resolves_slack_reply_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = AsyncMock(
-        return_value={
-            "items": [{"id": "thread-1", "messages": []}],
-            "limit": 25,
-            "offset": 0,
-            "hasMore": False,
-        }
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    lookup = AsyncMock(return_value="thread-1")
+    monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
+    get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "messages": []})
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    locator = (
+        "<https://workspace.slack.com/archives/C123/p1788431248678809"
+        "?thread_ts=1788425314.774339&cid=C123|message>"
     )
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
-    result = await threads_tool.search_threads(participant="other-user")
+    result = await threads_tool.list_threads(query=locator)
 
     assert result["items"][0]["id"] == "thread-1"
-    awaited = page.await_args
-    assert awaited is not None
-    assert awaited.args[0] == "octocat"
-    assert awaited.kwargs["filter_participant_login"] == "other-user"
-    assert awaited.kwargs["include_all"] is False
-    assert awaited.kwargs["surfaced_only"] is True
-
-
-async def test_search_threads_intersects_participant_and_admin_filters(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
-
-    result = await threads_tool.search_threads(participant="other-user", admin_threads=True)
-
-    assert result["success"] is True
-    awaited = page.await_args
-    assert awaited is not None
-    assert awaited.kwargs["include_all"] is False
-    assert awaited.kwargs["filter_participant_login"] == "other-user"
-    assert awaited.kwargs["admin_threads"] is True
-
-
-async def test_search_threads_participant_filter_requires_admin(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = AsyncMock()
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
-
-    result = await threads_tool.search_threads(participant="other-user")
-
-    assert result == {
-        "success": False,
-        "error": "Only workspace admins can search other users' threads",
+    assert result["items"][0]["slack"] == {
+        "url": locator,
+        "channel_id": "C123",
+        "thread_ts": "1788425314.774339",
     }
-    page.assert_not_awaited()
-
-
-async def test_search_threads_rejects_participant_with_all_users(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = AsyncMock()
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
-
-    result = await threads_tool.search_threads(participant="other-user", all_users=True)
-
-    assert result == {
-        "success": False,
-        "error": "participant and all_users cannot be used together",
-    }
-    page.assert_not_awaited()
-
-
-async def test_search_threads_admin_filter_searches_all_admin_threads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = AsyncMock(
-        return_value={
-            "items": [{"id": "admin-1", "adminThread": True, "messages": []}],
-            "limit": 25,
-            "offset": 0,
-            "hasMore": False,
-        }
+    awaited = lookup.await_args
+    assert awaited is not None
+    lookup.assert_awaited_once_with(awaited.args[0], "C123", "1788425314.774339")
+    get_dashboard_thread.assert_awaited_once_with(
+        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
-
-    result = await threads_tool.search_threads(admin_threads=True)
-
-    assert result["items"][0]["id"] == "admin-1"
-    awaited = page.await_args
-    assert awaited is not None
-    assert awaited.kwargs["include_all"] is True
-    assert awaited.kwargs["query"] == ""
-    assert awaited.kwargs["admin_threads"] is True
-    assert awaited.kwargs["surfaced_only"] is True
 
 
-async def test_search_threads_admin_filter_requires_admin(
+async def test_list_threads_slack_link_falls_back_to_code_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = AsyncMock()
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    lookup = AsyncMock(side_effect=[None, "code-thread"])
+    monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "code-thread", "messages": []}),
+    )
 
-    result = await threads_tool.search_threads(admin_threads=True)
+    result = await threads_tool.list_threads(
+        query="https://workspace.slack.com/archives/CODE1/p1788431248678809"
+    )
 
-    assert result == {
-        "success": False,
-        "error": "Only workspace admins can filter admin threads",
-    }
-    page.assert_not_awaited()
+    assert result["items"][0]["id"] == "code-thread"
+    assert [call.args[1:] for call in lookup.await_args_list] == [
+        ("CODE1", "1788431248.678809"),
+        ("CODE1", "0"),
+    ]
 
 
-async def test_search_threads_uses_general_query_and_pagination(
+async def test_list_threads_uses_general_query_and_pagination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     page = AsyncMock(
         return_value={
             "items": [{"id": "thread-2", "title": "Payments bug", "messages": []}],
@@ -683,24 +668,17 @@ async def test_search_threads_uses_general_query_and_pagination(
     )
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
-    result = await threads_tool.search_threads(
-        "payments", all_users=True, limit=10, offset=20, scope="interactive"
+    result = await threads_tool.list_threads(
+        query="payments", all_users=True, limit=10, offset=20, scope="interactive"
     )
 
     assert result["items"][0]["id"] == "thread-2"
     assert result["has_more"] is True
-    page.assert_awaited_once_with(
-        "octocat",
-        email="octocat@example.com",
-        limit=10,
-        offset=20,
-        include_all=True,
-        query="payments",
-        scope="interactive",
-        filter_participant_login=None,
-        surfaced_only=True,
-        admin_threads=None,
-    )
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["include_all"] is True
+    assert awaited.kwargs["query"] == "payments"
+    assert awaited.kwargs["scope"] == "interactive"
 
 
 async def test_get_thread_rejects_pr_locator_before_access(
@@ -715,7 +693,7 @@ async def test_get_thread_rejects_pr_locator_before_access(
     assert result == {
         "success": False,
         "error": (
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, or LangSmith trace URL"
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, or LangSmith trace URL"
         ),
     }
     get_dashboard_thread.assert_not_awaited()
@@ -734,7 +712,7 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
     assert result == {
         "success": False,
         "error": (
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, or LangSmith trace URL"
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, or LangSmith trace URL"
         ),
     }
     get_dashboard_thread.assert_not_awaited()
