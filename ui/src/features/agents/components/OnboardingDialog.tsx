@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api, slackConnectUrl } from "@/lib/api"
+import { api, connectService } from "@/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -212,7 +212,11 @@ export function OnboardingDialog() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => window.location.assign(slackConnectUrl())}
+                  onClick={() =>
+                    void connectService("slack")?.finally(
+                      () => void mapping.refetch()
+                    )
+                  }
                 >
                   <IoLogoSlack className="size-4" />
                   Connect Slack

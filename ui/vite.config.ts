@@ -19,7 +19,17 @@ const BACKEND_PREFIXES = [
   "/fake-slack",
   "/static",
   "/ok",
+  // LangGraph's own API, which the harness serves alongside the fake SaaS. The
+  // app router has no route under either, so fronting them shadows nothing.
+  "/threads",
+  "/store",
 ]
+
+// The harness-owned subset: everything but the two a deployment fronts and
+// `/static`, which would shadow nitro's own assets.
+const E2E_HARNESS_PREFIXES = BACKEND_PREFIXES.filter(
+  (prefix) => !["/dashboard/api", "/webhooks", "/static"].includes(prefix)
+)
 
 // Dev-only: when E2E_HARNESS is set (the `dev:mock` local harness) serve the app
 // and the harness from one origin by proxying the API routes + the Yjs collab
@@ -183,7 +193,16 @@ const config = defineConfig({
       // handler deliberately refuses to have. Only the two prefixes a deployed
       // dashboard fronts, since proxying `/static` would shadow nitro's assets.
       handlers: IS_PRODUCTION
-        ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
+        ? [
+            "/dashboard/api",
+            "/webhooks",
+            // A built server fronting the mock harness fronts its fake-SaaS and
+            // control routes too, so the E2E browser has the one origin a
+            // deployment gives it and reaches the backend the way it really
+            // does — through the handler below. Serving the app from the
+            // harness instead let the suite pass while this proxy was broken.
+            ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
+          ].map((prefix) => ({
             route: `${prefix}/**`,
             handler: "./server/backend-proxy.ts",
           }))
