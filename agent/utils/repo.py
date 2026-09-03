@@ -3,7 +3,7 @@
 import os
 import re
 
-_DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
+_DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "")
 
 
 def extract_repo_from_text(text: str, default_owner: str | None = None) -> dict[str, str] | None:

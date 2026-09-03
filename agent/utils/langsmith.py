@@ -11,13 +11,14 @@ from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
-from langsmith.utils import LangSmithNotFoundError
+from langsmith.utils import LangSmithNotFoundError, get_host_url
 
 from .tracing import AGENT_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
 
 _PROJECT_ID_CACHE: dict[str, str] = {}
+_TENANT_ID_CACHE: str | None = None
 _ASYNC_CLIENTS: dict[tuple[str, str], AsyncLangSmithClient] = {}
 _SYNC_CLIENTS: dict[tuple[str, str], LangSmithClient] = {}
 
@@ -56,19 +57,69 @@ def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
     return client
 
 
-def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
-    """Build a LangSmith client scoped to the prod tenant for project lookups."""
-    api_key = (
+def _prod_api_key() -> str | None:
+    return (
         os.environ.get("LANGSMITH_API_KEY_PROD")
         or os.environ.get("LANGSMITH_API_KEY")
         or os.environ.get("LANGCHAIN_API_KEY")
     )
-    if not api_key:
-        return None
-    api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
+
+
+def _prod_api_url() -> str:
+    return os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
         "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
     )
-    return async_langsmith_client(api_key, api_url)
+
+
+def langsmith_host_url() -> str:
+    """Web host for trace links: ``LANGSMITH_URL_PROD`` or derived from the API endpoint."""
+    explicit = os.environ.get("LANGSMITH_URL_PROD", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    return str(get_host_url(None, _prod_api_url())).rstrip("/")
+
+
+def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
+    """Build a LangSmith client scoped to the prod tenant for project lookups."""
+    api_key = _prod_api_key()
+    if not api_key:
+        return None
+    return async_langsmith_client(api_key, _prod_api_url())
+
+
+def _remember_tenant_id(value: Any) -> None:
+    global _TENANT_ID_CACHE
+    if value and _TENANT_ID_CACHE is None:
+        _TENANT_ID_CACHE = str(value)
+
+
+def _discover_tenant_id() -> str | None:
+    """Any project in the workspace carries the tenant id; read the first one."""
+    api_key = _prod_api_key()
+    if not api_key:
+        return None
+    client = sync_langsmith_client(api_key, _prod_api_url())
+    for project in client.list_projects(limit=1):
+        tenant_id = getattr(project, "tenant_id", None)
+        if tenant_id:
+            return str(tenant_id)
+    return None
+
+
+async def resolve_tenant_id() -> str | None:
+    """``LANGSMITH_TENANT_ID_PROD`` when set; otherwise discovered once and cached."""
+    explicit = os.environ.get("LANGSMITH_TENANT_ID_PROD", "").strip()
+    if explicit:
+        return explicit
+    if _TENANT_ID_CACHE:
+        return _TENANT_ID_CACHE
+    try:
+        discovered = await asyncio.to_thread(_discover_tenant_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not discover the LangSmith tenant id", exc_info=True)
+        return None
+    _remember_tenant_id(discovered)
+    return _TENANT_ID_CACHE
 
 
 async def _resolve_project_id_by_name(project_name: str) -> str | None:
@@ -89,22 +140,22 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     project_id = getattr(project, "id", None)
     resolved = str(project_id) if project_id else ""
     _PROJECT_ID_CACHE[project_name] = resolved
+    _remember_tenant_id(getattr(project, "tenant_id", None))
     return resolved or None
 
 
 async def _compose_langsmith_project_url(project_name: str = AGENT_TRACING_PROJECT) -> str | None:
     """Build the LangSmith project URL base, or None when tracing isn't configured
-    for the prod tenant. Bails before any API call when the tenant id is unset."""
-    tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")
+    for the prod tenant."""
+    tenant_id = await resolve_tenant_id()
     if not tenant_id:
         return None
-    host_url = os.environ.get("LANGSMITH_URL_PROD", "https://smith.langchain.com")
     project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
         "LANGSMITH_TRACING_PROJECT_ID_PROD"
     )
     if not project_id:
         return None
-    return f"{host_url}/o/{tenant_id}/projects/p/{project_id}"
+    return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project_id}"
 
 
 async def get_langsmith_trace_url(

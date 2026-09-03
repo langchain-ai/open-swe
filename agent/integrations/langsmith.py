@@ -288,10 +288,21 @@ async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -
         raise RuntimeError(msg) from e
 
 
+_DEFAULT_SNAPSHOT_NOTICE_LOGGED = False
+
+
+def _log_default_snapshot_notice() -> None:
+    global _DEFAULT_SNAPSHOT_NOTICE_LOGGED
+    if _DEFAULT_SNAPSHOT_NOTICE_LOGGED:
+        return
+    _DEFAULT_SNAPSHOT_NOTICE_LOGGED = True
+    logger.info("No base snapshot configured; booting from the LangSmith default snapshot")
+
+
 async def _create_sandbox_with_retry(
     client: AsyncSandboxClient,
     *,
-    snapshot_id: str,
+    snapshot_id: str | None,
     fs_capacity_bytes: int | None,
     vcpus: int | None,
     mem_bytes: int | None,
@@ -715,11 +726,10 @@ class LangSmithProvider(SandboxProvider):
     def validate_startup_config(cls) -> None:
         """Validate env-var configuration at server startup. Raises ValueError if invalid."""
         if not os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID"):
-            # Not fatal: an admin can set the base snapshot at runtime from the
-            # dashboard, which is stored outside the environment.
-            logger.warning(
-                "DEFAULT_SANDBOX_SNAPSHOT_ID is not set; sandbox creation will fail until a "
-                "base snapshot is configured in admin settings"
+            logger.info(
+                "DEFAULT_SANDBOX_SNAPSHOT_ID is not set; sandboxes boot from the LangSmith "
+                "default snapshot (git, gh, Python and Node preinstalled). Set it or the admin "
+                "Base snapshot to use a custom image."
             )
         for name in (
             "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES",
@@ -780,11 +790,7 @@ class LangSmithProvider(SandboxProvider):
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
             if not snapshot_id:
-                msg = (
-                    "No base snapshot configured: set it in admin settings or via "
-                    "DEFAULT_SANDBOX_SNAPSHOT_ID"
-                )
-                raise ValueError(msg)
+                _log_default_snapshot_notice()
 
             _install_create_extra_fields(
                 client,

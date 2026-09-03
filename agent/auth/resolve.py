@@ -460,7 +460,8 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
         raise RuntimeError(
             "Bot-token-only mode is active (LANGSMITH_API_KEY_PROD set without "
             "X_SERVICE_AUTH_JWT_SECRET) but the GitHub App is not configured. "
-            "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATION_ID."
+            "Set GITHUB_APP_CLIENT_ID and GITHUB_APP_PRIVATE_KEY (and "
+            "GITHUB_APP_INSTALLATION_ID when the app has more than one installation)."
         )
     logger.info(
         "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id

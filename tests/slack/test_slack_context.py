@@ -852,6 +852,100 @@ def test_get_slack_repo_config_applies_team_default_repo(
     assert repo == {"owner": "team-owner", "name": "team-repo"}
 
 
+def _team_default_repo(owner: str, name: str):
+    async def _get() -> dict[str, str]:
+        return {"owner": owner, "name": name}
+
+    return _get
+
+
+def _clear_env_repo_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    for attr in ("SLACK_REPO_OWNER", "SLACK_REPO_NAME", "DEFAULT_REPO_OWNER", "DEFAULT_REPO_NAME"):
+        monkeypatch.setattr(webhook_common, attr, "")
+
+
+def test_get_slack_repo_config_shorthand_uses_team_default_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+    _clear_env_repo_defaults(monkeypatch)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(
+        webhook_common, "get_team_default_repo", _team_default_repo("acme", "widgets")
+    )
+
+    repo = asyncio.run(
+        webhook_common.get_slack_repo_config(
+            "C123", "1.234", channel_context={"topic": "repo:tools"}, thread_id="mapped-thread"
+        )
+    )
+
+    assert repo == {"owner": "acme", "name": "tools"}
+
+
+def test_get_slack_repo_config_shorthand_prefers_env_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+    _clear_env_repo_defaults(monkeypatch)
+    monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "env-owner")
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(
+        webhook_common, "get_team_default_repo", _team_default_repo("acme", "widgets")
+    )
+
+    repo = asyncio.run(
+        webhook_common.get_slack_repo_config(
+            "C123", "1.234", channel_context={"topic": "repo:tools"}, thread_id="mapped-thread"
+        )
+    )
+
+    assert repo == {"owner": "env-owner", "name": "tools"}
+
+
+def test_get_slack_repo_config_shorthand_without_any_owner_falls_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+    _clear_env_repo_defaults(monkeypatch)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+
+    with pytest.raises(webhook_common.HTTPException) as excinfo:
+        asyncio.run(
+            webhook_common.get_slack_repo_config(
+                "C123", "1.234", channel_context={"topic": "repo:tools"}, thread_id="t"
+            )
+        )
+
+    assert excinfo.value.status_code == 400
+
+
+def test_get_slack_repo_config_never_mixes_team_owner_with_env_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+    _clear_env_repo_defaults(monkeypatch)
+    monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "env-repo")
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+
+    with pytest.raises(webhook_common.HTTPException):
+        asyncio.run(webhook_common.get_slack_repo_config("C123", "1.234", thread_id="t"))
+
+
+async def test_default_repo_owner_hint_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        webhook_common, "get_team_default_repo", _team_default_repo("acme", "widgets")
+    )
+
+    assert await webhook_common.default_repo_owner_hint("env-owner") == "env-owner"
+    assert await webhook_common.default_repo_owner_hint("") == "acme"
+
+    monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+    assert await webhook_common.default_repo_owner_hint("") == ""
+
+
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:

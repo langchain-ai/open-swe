@@ -1,5 +1,6 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
+import logging
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -391,3 +392,54 @@ async def test_reuse_keeps_other_failures_untyped() -> None:
     with pytest.raises(RuntimeError) as excinfo:
         await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
     assert not isinstance(excinfo.value, SandboxGoneError)
+
+
+def test_validate_startup_without_snapshot_is_informational(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with patch.dict("os.environ", {}, clear=True), caplog.at_level(logging.INFO):
+        LangSmithProvider.validate_startup_config()
+
+    assert any("LangSmith default snapshot" in record.message for record in caplog.records)
+    assert not any(record.levelno >= logging.WARNING for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_without_snapshot_uses_platform_default(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sandbox = MagicMock()
+    sandbox.to_sync.return_value = MagicMock(id="sandbox-default")
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.create_sandbox = AsyncMock(return_value=sandbox)
+
+    with (
+        patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client),
+        patch("agent.integrations.langsmith._get_sandbox_create_extra_fields", return_value={}),
+        caplog.at_level(logging.INFO),
+    ):
+        await LangSmithProvider(api_key="k").get_or_create(snapshot_id=None)
+
+    assert client.create_sandbox.await_args is not None
+    assert client.create_sandbox.await_args.kwargs["snapshot_id"] is None
+    assert any("LangSmith default snapshot" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_with_retry_accepts_no_snapshot(monkeypatch) -> None:  # noqa: ANN001
+    client = _FakeSandboxClient(failures=0)
+
+    await _create_sandbox_with_retry(
+        cast(AsyncSandboxClient, client),
+        snapshot_id=None,
+        fs_capacity_bytes=None,
+        vcpus=None,
+        mem_bytes=None,
+        idle_ttl_seconds=None,
+        delete_after_stop_seconds=None,
+        timeout=180,
+    )
+
+    assert client.last_kwargs["snapshot_id"] is None

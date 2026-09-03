@@ -183,6 +183,7 @@ async def slack_webhook(
         common.logger.warning("Invalid Slack signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
+    await common.ensure_slack_bot_identity()
     try:
         payload = common.json.loads(body)
     except common.json.JSONDecodeError:
@@ -576,6 +577,7 @@ async def slack_interactivity(
         common.logger.warning("Invalid Slack interactivity signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
+    await common.ensure_slack_bot_identity()
     form = common.parse_qs(body.decode("utf-8"))
     payload_raw = (form.get("payload") or [""])[0]
     try:
