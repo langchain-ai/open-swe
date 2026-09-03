@@ -5,12 +5,14 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.review.inline_review import REVIEWS
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
@@ -528,6 +530,50 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def _str_field(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _ref_sha(pr: dict[str, Any], side: str) -> str:
+    ref = pr.get(side)
+    return _str_field(ref, "sha") if isinstance(ref, dict) else ""
+
+
+async def _claim_inline_review(*, owner: str, repo: str, pr: dict[str, Any]) -> None:
+    """Claim review of this PR for the authoring thread's own self-review.
+
+    Fails open: without the claim the webhook reviewer takes the PR, which is
+    the status quo — better than blocking delivery on a store hiccup.
+    """
+    pr_number = pr.get("number")
+    if not isinstance(pr_number, int) or isinstance(pr_number, bool):
+        return
+    try:
+        configurable = get_config().get("configurable", {})
+    except Exception:
+        return
+    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    if not isinstance(thread_id, str) or not thread_id:
+        return
+    try:
+        await REVIEWS.claim(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            pr_url=_str_field(pr, "html_url"),
+            agent_thread_id=thread_id,
+            base_sha=_ref_sha(pr, "base"),
+            head_sha=_ref_sha(pr, "head"),
+        )
+    except Exception:
+        logger.warning(
+            "Failed to claim inline review",
+            extra={"github_owner": owner, "github_repo": repo, "github_pr_number": pr_number},
+            exc_info=True,
+        )
+
+
 async def _record_pr_telemetry(
     *,
     client: httpx.AsyncClient,
@@ -829,6 +875,7 @@ async def _open_pull_request(
         if resp.status_code == 201:
             pr = resp.json()
             if isinstance(pr, dict):
+                await _claim_inline_review(owner=owner, repo=repo, pr=pr)
                 await _record_pr_telemetry(
                     client=client,
                     token=token,
@@ -853,6 +900,7 @@ async def _open_pull_request(
         if resp.status_code == 422:  # noqa: PLR2004
             existing = await _find_existing_pr(client, token, owner, repo, head)
             if existing is not None:
+                await _claim_inline_review(owner=owner, repo=repo, pr=existing)
                 await _record_pr_telemetry(
                     client=client,
                     token=token,

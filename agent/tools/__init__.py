@@ -15,6 +15,7 @@ _TOOL_MODULES = {
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
+    "fetch_self_review_diff": ".inline_review",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
@@ -29,6 +30,7 @@ _TOOL_MODULES = {
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
+    "list_inline_findings": ".inline_review",
     "list_review_findings": ".list_review_findings",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
@@ -39,6 +41,7 @@ _TOOL_MODULES = {
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": "agent.github.tools.read_repo_file",
+    "record_inline_finding": ".inline_review",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
@@ -55,6 +58,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
+    "set_inline_finding_disposition": ".inline_review",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
@@ -80,6 +84,7 @@ __all__ = [
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
+    "fetch_self_review_diff",
     "fetch_url",
     "get_thread",
     "http_request",
@@ -94,6 +99,7 @@ __all__ = [
     "list_automations",
     "list_environments",
     "list_findings",
+    "list_inline_findings",
     "list_review_findings",
     "list_threads",
     "manage_baby_sit",
@@ -104,6 +110,7 @@ __all__ = [
     "output_iframe",
     "publish_review",
     "read_repo_file",
+    "record_inline_finding",
     "read_user_settings",
     "recreate_sandbox",
     "report_platform_issue",
@@ -120,6 +127,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
+    "set_inline_finding_disposition",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
@@ -173,6 +181,12 @@ if TYPE_CHECKING:
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request
+    from agent.tools.inline_review import (
+        fetch_self_review_diff,
+        list_inline_findings,
+        record_inline_finding,
+        set_inline_finding_disposition,
+    )
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit

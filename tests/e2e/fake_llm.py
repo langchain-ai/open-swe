@@ -178,6 +178,8 @@ _THREAD_TOOLS_RE = re.compile(
 _THREAD_TOOLS_TARGET_TITLE = "E2E Thread Tools Target"
 DELEGATE_MARKER = "E2E_DELEGATE"
 SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
+SELF_REVIEW_MARKER = "E2E_SELF_REVIEW"
+SELF_REVIEW_TASK_MARKER = "E2E_SELF_REVIEW_TASK"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -626,6 +628,222 @@ def _resolve_thread_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+# The self-review flow ships two helpers: one correct, one carrying a literal
+# defect the review pass is scripted to catch (``farewell`` greets instead of
+# saying goodbye), plus a design question it is scripted to defer.
+_SELF_REVIEW_SETUP_SCRIPT = f"""
+set -e
+rm -rf repo
+git clone "$E2E_REMOTE" repo
+cd repo
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+
+
+def farewell(name):
+    return f"Hello, {{name}}!"
+EOF
+git add -A
+git commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+echo PUSHED_OK
+""".strip()
+
+_SELF_REVIEW_FIX_SCRIPT = f"""
+set -e
+cd repo
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+
+
+def farewell(name):
+    return f"Goodbye, {{name}}!"
+EOF
+git add -A
+git commit -m "fix: farewell() returned a greeting"
+git push origin {FEATURE_BRANCH}
+echo FIX_PUSHED_OK
+""".strip()
+
+# The reviewer's own repo prep runs `gh repo clone`, which has no network here;
+# its prompt tells the model to re-prep the checkout itself, and this is that.
+_REVIEWER_PREP_SCRIPT = f"""
+set -e
+if [ ! -d {REPO}/.git ]; then git clone "$E2E_REMOTE" {REPO}; fi
+cd {REPO}
+git fetch origin '+refs/heads/*:refs/remotes/origin/*' --quiet
+git checkout --force origin/{FEATURE_BRANCH} --quiet
+git rev-parse HEAD
+""".strip()
+
+
+def _finding_id_for(messages: list[BaseMessage], category: str) -> str:
+    findings = _tool_payload(messages, "list_inline_findings").get("findings") or []
+    for finding in findings:
+        if isinstance(finding, dict) and finding.get("category") == category:
+            identifier = finding.get("id")
+            if isinstance(identifier, str):
+                return identifier
+    raise ValueError(f"no self-review finding in category {category}")
+
+
+def _self_review_task_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Reviewing the PR I just opened before handing it over.",
+        tool_calls=[
+            {
+                "name": "task",
+                "args": {
+                    "description": (
+                        f"{SELF_REVIEW_TASK_MARKER} review the pull request this thread "
+                        "just opened and record what you find"
+                    ),
+                    "subagent_type": "pr-self-review",
+                },
+                "id": "call-self-review-task",
+            }
+        ],
+    )
+
+
+def _fix_finding_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Recording the fix I pushed for the obvious defect.",
+        tool_calls=[
+            {
+                "name": "set_inline_finding_disposition",
+                "args": {
+                    "finding_id": _finding_id_for(messages, "correctness"),
+                    "disposition": "fixed",
+                    "note": "farewell() returned a greeting; corrected and pushed.",
+                },
+                "id": "call-disposition-fixed",
+            }
+        ],
+    )
+
+
+def _defer_finding_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Deferring the finding that needs a product decision.",
+        tool_calls=[
+            {
+                "name": "set_inline_finding_disposition",
+                "args": {
+                    "finding_id": _finding_id_for(messages, "design"),
+                    "disposition": "deferred",
+                    "note": (
+                        "Whether greet() should localise the salutation changes this PR's "
+                        "scope — do you want it in here?"
+                    ),
+                },
+                "id": "call-disposition-deferred",
+            }
+        ],
+    )
+
+
+def _self_review_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    findings = _tool_payload(messages, "list_inline_findings")
+    text = (
+        f"Opened <{url}|{PR_TITLE}> and reviewed it myself.\n\n"
+        f"{findings.get('markdown', '')}\n\n"
+        "I fixed the farewell() defect. The localisation question is yours to call."
+    )
+    return AIMessage(
+        content="Reporting the self-review in the Slack thread.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text},
+                "id": "call-self-review-reply",
+            }
+        ],
+    )
+
+
+_FAREWELL_BUG_DESCRIPTION = (
+    "`farewell()` returns the same greeting string as `greet()`, so every caller "
+    "saying goodbye greets instead."
+)
+_LOCALISATION_DESCRIPTION = (
+    "The salutation is hard-coded English. Whether this helper should localise is "
+    "a product decision, not a defect."
+)
+
+
+def _record_obvious_finding_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Recording the literal defect on the changed line.",
+        tool_calls=[
+            {
+                "name": "record_inline_finding",
+                "args": {
+                    "severity": "high",
+                    "confidence": "high",
+                    "category": "correctness",
+                    "file": FEATURE_FILE,
+                    "title": "farewell() returns a greeting",
+                    "description": _FAREWELL_BUG_DESCRIPTION,
+                    "start_line": 6,
+                    "end_line": 6,
+                },
+                "id": "call-record-finding-bug",
+            }
+        ],
+    )
+
+
+def _record_ambiguous_finding_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Recording the open design question.",
+        tool_calls=[
+            {
+                "name": "record_inline_finding",
+                "args": {
+                    "severity": "low",
+                    "confidence": "medium",
+                    "category": "design",
+                    "file": FEATURE_FILE,
+                    "title": "Salutation is not localisable",
+                    "description": _LOCALISATION_DESCRIPTION,
+                    "start_line": 2,
+                    "end_line": 2,
+                },
+                "id": "call-record-finding-design",
+            }
+        ],
+    )
+
+
+def _reviewer_add_finding_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Filing the finding against the changed line.",
+        tool_calls=[
+            {
+                "name": "add_finding",
+                "args": {
+                    "severity": "high",
+                    "confidence": "high",
+                    "category": "correctness",
+                    "file": FEATURE_FILE,
+                    "title": "farewell() returns a greeting",
+                    "description": _FAREWELL_BUG_DESCRIPTION,
+                    "start_line": 6,
+                    "end_line": 6,
+                },
+                "id": "call-reviewer-add-finding",
+            }
+        ],
+    )
+
+
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     # Parent turn: delegate to two general-purpose subagents in one step so the
     # transcript renders a subagent card grid. The subagents run this same fake
@@ -927,6 +1145,97 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
+    # Parent turn: implement, open the PR, self-review it, act on the findings.
+    "self_review": (
+        _tool_step(
+            "Acknowledging the request before starting work.",
+            "slack_thread_reply",
+            {"message": "On it — I'll review my own PR before handing it over."},
+            "call-self-review-ack",
+        ),
+        _tool_step(
+            "Implementing both helpers and pushing the branch.",
+            "execute",
+            {"command": _SELF_REVIEW_SETUP_SCRIPT},
+            "call-self-review-setup",
+        ),
+        _tool_step(
+            "Opening a pull request.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": PR_TITLE,
+                "body": "Adds `greet()` and `farewell()` helpers.",
+                "draft": False,
+            },
+            "call-self-review-pr",
+        ),
+        _dynamic_step(_self_review_task_step),
+        _tool_step(
+            "Reading what the self-review found.",
+            "list_inline_findings",
+            {},
+            "call-list-inline-findings",
+        ),
+        _tool_step(
+            "Fixing the defect the review found.",
+            "execute",
+            {"command": _SELF_REVIEW_FIX_SCRIPT},
+            "call-self-review-fix",
+        ),
+        _dynamic_step(_fix_finding_step),
+        _dynamic_step(_defer_finding_step),
+        _tool_step(
+            "Re-reading the findings with their dispositions before reporting.",
+            "list_inline_findings",
+            {},
+            "call-list-inline-findings-final",
+        ),
+        _dynamic_step(_self_review_reply_step),
+    ),
+    # The pr-self-review subagent: the diff, then one finding of each kind.
+    "pr_self_review": (
+        _tool_step(
+            "Materializing the PR diff.",
+            "fetch_self_review_diff",
+            {},
+            "call-fetch-self-review-diff",
+        ),
+        _dynamic_step(_record_obvious_finding_step),
+        _dynamic_step(_record_ambiguous_finding_step),
+        StepSpec(
+            content=(
+                "Recorded 2 findings: farewell() returns a greeting (high, correctness) "
+                "and the salutation is not localisable (low, design)."
+            )
+        ),
+    ),
+    # The reviewer graph: what lands on a PR that is NOT self-reviewed.
+    "reviewer": (
+        _tool_step(
+            "Preparing the checkout at the PR head.",
+            "execute",
+            {"command": _REVIEWER_PREP_SCRIPT},
+            "call-reviewer-prep",
+        ),
+        _tool_step(
+            "Materializing the review diff.",
+            "fetch_review_diff",
+            {},
+            "call-reviewer-diff",
+        ),
+        _dynamic_step(_reviewer_add_finding_step),
+        _tool_step(
+            "Publishing the review.",
+            "publish_review",
+            {"summary": "One correctness defect on a changed line."},
+            "call-reviewer-publish",
+        ),
+        StepSpec(content="Published the review with 1 inline comment."),
+    ),
     "followup": (_dynamic_step(_followup_step),),
 }
 
@@ -973,6 +1282,14 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "pr_self_review",
+        lambda ctx: ctx.human_count <= 1 and SELF_REVIEW_TASK_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
+        "self_review",
+        lambda ctx: ctx.human_count <= 1 and SELF_REVIEW_MARKER in ctx.first_text,
+    ),
     ScriptRule(
         "subagent_task",
         lambda ctx: ctx.human_count <= 1 and SUBAGENT_TASK_MARKER in ctx.first_text,
@@ -1026,10 +1343,6 @@ def _script_for(context: ScriptContext) -> tuple[StepSpec, ...]:
     return SCRIPT_LIBRARY["followup"]
 
 
-def build_script() -> list[StepSpec]:
-    return list(SCRIPT_LIBRARY["implement"])
-
-
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
@@ -1039,6 +1352,10 @@ class FakeScriptedChatModel(BaseChatModel):
         "max_input_tokens": 128_000,
     }
     script: list[Any] = []
+    # Set to a SCRIPT_LIBRARY key to pin this model to one script. The reviewer
+    # graph uses it: its turn arrives as webhook input rather than a user
+    # message, so there is no prompt text worth routing on.
+    pinned_script: str | None = None
 
     @property
     def _llm_type(self) -> str:
@@ -1064,7 +1381,9 @@ class FakeScriptedChatModel(BaseChatModel):
             last_text=_text(humans[-1].content) if humans else "",
             human_count=len(humans),
         )
-        script = _script_for(context)
+        script = (
+            list(SCRIPT_LIBRARY[self.pinned_script]) if self.pinned_script else _script_for(context)
+        )
 
         last_human = max(
             (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1

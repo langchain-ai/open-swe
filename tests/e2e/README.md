@@ -7,6 +7,12 @@ This drives the **whole happy path** through two mock UIs:
    **local temp-dir sandbox**, pushes a branch, and opens a PR on a **fake GitHub**.
 3. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
 
+The **real reviewer graph** runs here too, so the two review paths can be
+asserted against each other: a PR Open SWE opened is reviewed inline by the
+authoring thread (findings on the thread, nothing on the PR), and anyone else's
+PR gets the webhook reviewer's inline comments. `self_review.spec.ts` and
+`auto_review_standdown.spec.ts` cover the pair.
+
 ## What is faked vs. real
 
 Only the **LLM** and the **external SaaS HTTP boundaries** are faked. All agent
@@ -20,7 +26,8 @@ code runs for real.
 | Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
-| `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
+| `api.github.com` REST + GraphQL — PR create, raw diff, reviews, inline comments and replies, issue comments, check runs, thread resolve — plus dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github` |
+| Reviewer graph, findings storage, `publish_review`, the review check run | **real** |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
 | Environment tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
@@ -35,14 +42,29 @@ so what Playwright asserts on is exactly what the real agent produced.
 
 - `e2e_env.py` — env + constants set before any `agent.*` import (sandbox=local,
   fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
-- `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
+- `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece). A
+  script is chosen per turn from markers in the request text; the reviewer graph
+  instead gets a model pinned to the `reviewer` script, since its turn arrives as
+  webhook input with no prompt text to route on.
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
 - `agent_entrypoint.py` — langgraph `agent` graph: applies patches, re-exports the
   real `traced_agent`.
 - `harness.py` — langgraph `http.app`: the real `agent.webapp` plus the fake
   GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
-- `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote.
-- `langgraph.e2e.json` — dev-server config pointing at the two entrypoints above.
+- `reviewer_apis.py` — the fake GitHub *review* surfaces (raw PR diff, reviews,
+  inline comments + replies, issue comments, check runs, repo contents) and the
+  control endpoints that drive them: `/control/review-state`,
+  `/control/open-pull-request` (a PR Open SWE did not open, so it carries no
+  inline-review claim), `/control/github-webhook` (a signed delivery to the real
+  `/webhooks/github`), `/control/review-repo-enabled`, and
+  `/control/forget-review-state` (drops a PR's reviewer thread + inline-review
+  claim; PR numbers restart at 1 on reset, and that state outlives the process).
+- `reviewer_entrypoint.py` — langgraph `reviewer` graph: patches, then the real
+  `traced_reviewer_agent`.
+- `fakes.py` — in-memory PR/Slack/review stores (reviews, inline comments, issue
+  comments, check runs) + git seeding of the bare remote. PR base/head shas are
+  real commits, so the reviewer can check out and diff what it reviews.
+- `langgraph.e2e.json` — dev-server config pointing at the entrypoints above.
 - `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't
   run locally). The dashboard is **not** mocked — it's the real `ui/` app.
 - `global-setup.ts` — builds the real `ui/` SPA (once) so the harness can serve it.

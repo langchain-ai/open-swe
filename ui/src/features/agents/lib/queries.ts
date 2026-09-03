@@ -42,6 +42,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
+  selfReview: (threadId: string) =>
+    ["agent-threads", threadId, "self-review"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
@@ -670,6 +672,29 @@ export function useWorkflowApprovals(
       query.state.data?.approvals.some(
         (approval) => approval.status === "pending"
       )
+        ? 3000
+        : false,
+    retry: false,
+  })
+}
+
+/**
+ * The self-review findings attached to this thread, if it authored a PR.
+ *
+ * Polls while the run is active: the review is written mid-run, so a mount that
+ * happens first would otherwise cache an empty list and keep serving it.
+ */
+export function useThreadSelfReview(
+  threadId: string,
+  options: { pollWhileActive?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.selfReview(threadId),
+    queryFn: () => agentsApi.getSelfReview(threadId),
+    enabled: Boolean(threadId),
+    refetchInterval: (query) =>
+      options.pollWhileActive ||
+      query.state.data?.reviews.some((review) => review.status !== "complete")
         ? 3000
         : false,
     retry: false,

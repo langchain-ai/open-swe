@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
 from agent.dashboard import router as dashboard_router
+from agent.dashboard.inline_review_api import inline_review_router
 from agent.dashboard.plan_api import plan_router
 from agent.dashboard.workflow_approval_api import workflow_approval_router
 from agent.github.routes import router as github_webhook_router
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
         )
     app.include_router(dashboard_router)
     app.include_router(plan_router)
+    app.include_router(inline_review_router)
     app.include_router(workflow_approval_router)
     app.include_router(linear_webhook_router)
     app.include_router(slack_webhook_router)

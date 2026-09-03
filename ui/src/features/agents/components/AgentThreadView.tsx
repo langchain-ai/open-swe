@@ -28,6 +28,7 @@ import { Messages } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { useRightPanelStore } from "@/features/agents/lib/rightPanelStore"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
@@ -167,6 +168,11 @@ export function AgentThreadView({
     },
     [thread.id]
   )
+  const openPanelSurface = useRightPanelStore((state) => state.open)
+  const handleOpenSelfReview = useCallback(() => {
+    openPanelSurface({ scope: "cloud", threadId: thread.id }, "review")
+    handlePanelCollapsedChange(false)
+  }, [handlePanelCollapsedChange, openPanelSurface, thread.id])
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [revealChangesKey, setRevealChangesKey] = useState(0)
   const handleOpenFile = useCallback(
@@ -301,6 +307,8 @@ export function AgentThreadView({
               showPlanArtifact={
                 thread.planStatus === "ready" || thread.planStatus === "shared"
               }
+              showSelfReview={Boolean(thread.pr)}
+              onOpenSelfReview={handleOpenSelfReview}
               emptyState={
                 <div className="flex min-h-60 items-center justify-center">
                   {hydrationFailed ? (

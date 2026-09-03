@@ -32,6 +32,7 @@ patches.apply()
 
 import fakes  # noqa: E402
 import httpx  # noqa: E402
+import reviewer_apis  # noqa: E402
 from e2e_env import (  # noqa: E402
     BASE_URL,
     BOT_USER_ID,
@@ -45,6 +46,7 @@ from fastapi.responses import (  # noqa: E402
     FileResponse,
     HTMLResponse,
     JSONResponse,
+    PlainTextResponse,
     RedirectResponse,
     Response,
 )
@@ -548,6 +550,44 @@ async def mock_github_data() -> JSONResponse:
     )
 
 
+def _review_section(pr: dict[str, Any]) -> str:
+    """Render what a reviewer published on this PR — empty when none did."""
+    owner, repo, number = pr["owner"], pr["repo"], pr["number"]
+    reviews = fakes.reviews_for(owner, repo, number)
+    comments = fakes.review_comments_for(owner, repo, number)
+    checks = [
+        run
+        for run in fakes.CHECK_RUNS
+        if run["owner"] == owner and run["repo"] == repo and run["head_sha"] == pr["head_sha"]
+    ]
+    comment_items = "".join(
+        f'<li class="review-comment" data-file="{escape(str(comment["path"]))}" '
+        f'data-line="{escape(str(comment["line"]))}" '
+        f'data-resolved="{str(comment["resolved"]).lower()}">'
+        f"<code>{escape(str(comment['path']))}:{escape(str(comment['line']))}</code> "
+        f'<span class="body">{escape(str(comment["body"]))}</span></li>'
+        for comment in comments
+    )
+    review_items = "".join(
+        f'<li class="review" data-review="{review["id"]}">'
+        f'<span class="state">{escape(str(review["state"]))}</span> '
+        f'<span class="body">{escape(str(review["body"]))}</span></li>'
+        for review in reviews
+    )
+    check_items = "".join(
+        f'<li class="check-run" data-name="{escape(str(run["name"]))}" '
+        f'data-conclusion="{escape(str(run["conclusion"]))}">{escape(str(run["name"]))}: '
+        f"{escape(str(run['conclusion'] or run['status']))}</li>"
+        for run in checks
+    )
+    return f"""<h3>Reviews (<span id="review-count">{len(reviews)}</span>)</h3>
+        <ul id="pr-reviews">{review_items}</ul>
+        <h3>Review comments (<span id="review-comment-count">{len(comments)}</span>)</h3>
+        <ul id="pr-review-comments">{comment_items}</ul>
+        <h3>Checks</h3>
+        <ul id="pr-checks">{check_items}</ul>"""
+
+
 @app.get("/mock/github/{owner}/{repo}/pull/{number}", response_class=HTMLResponse)
 async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  # noqa: ARG001
     pr = fakes.find_pull(number)
@@ -571,6 +611,7 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
         <h3>Description</h3><pre id="pr-body">{pr["body"]}</pre>
         <h3>Files changed ({len(pr["files"])})</h3>
         <ul id="pr-files">{files}</ul>
+        {_review_section(pr)}
         </body>"""
     )
 
@@ -592,12 +633,19 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
             "avatar_url": f"{BASE_URL}/logo-mark.png",
         },
         "head": {"ref": pr["head"], "sha": pr["head_sha"]},
-        "base": {"ref": pr["base"], "repo": {"private": fakes.repo_private()}},
+        "base": {
+            "ref": pr["base"],
+            "sha": pr.get("base_sha", ""),
+            "repo": {"id": 1, "private": fakes.repo_private()},
+        },
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
         "created_at": pr["created_at"],
     }
+
+
+reviewer_apis.register(app, webhook_secret=GITHUB_WEBHOOK_SECRET, pr_json=_gh_pr_json)
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
@@ -613,8 +661,18 @@ async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # 
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")
-async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
-    return JSONResponse([])
+async def gh_list_pulls(owner: str, repo: str, state: str = "open", head: str = "") -> JSONResponse:
+    branch = head.split(":", 1)[-1] if head else ""
+    return JSONResponse(
+        [
+            _gh_pr_json(pull)
+            for pull in fakes.PULLS
+            if pull["owner"] == owner
+            and pull["repo"] == repo
+            and (not state or state == "all" or pull["state"] == state)
+            and (not branch or pull["head"] == branch)
+        ]
+    )
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls")
@@ -633,10 +691,14 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_get_pull(owner: str, repo: str, number: int) -> JSONResponse:
+async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> Response:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
+    # The reviewer asks for the same URL with a diff media type; that response is
+    # the diff GitHub validates inline-comment anchors against.
+    if "diff" in request.headers.get("accept", ""):
+        return PlainTextResponse(fakes.pull_diff(owner, repo, pr["base"], pr["head"]))
     return JSONResponse(_gh_pr_json(pr))
 
 
@@ -659,21 +721,34 @@ async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
 @app.post("/fake-gh/graphql")
 async def gh_graphql(request: Request) -> JSONResponse:
     body = await request.json()
+    query = body.get("query", "")
     variables = body.get("variables", {})
+    if "resolveReviewThread" in query:
+        thread_id = variables.get("threadId")
+        if not isinstance(thread_id, str) or not fakes.resolve_review_thread(thread_id):
+            return JSONResponse({"errors": [{"message": "Thread not found"}]})
+        return JSONResponse(
+            {"data": {"resolveReviewThread": {"thread": {"id": thread_id, "isResolved": True}}}}
+        )
     owner = variables.get("owner")
     repo = variables.get("repo")
-    number = variables.get("number")
+    number = variables.get("number") or variables.get("pr")
     if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
         return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    # Threads come from two places: fixtures a spec injected via
+    # /control/pull-request-health, and the inline comments the reviewer itself
+    # published (which is what a re-review has to reconcile against).
     review_threads = {
-        "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
+        "nodes": [
+            *[fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
+            *fakes.published_threads_graphql(owner, repo, number),
+        ],
         "pageInfo": {"hasNextPage": False, "endCursor": None},
     }
     pull_request: dict[str, Any] = {"reviewThreads": review_threads}
-    query = body.get("query", "")
     if "PullRequestFixReviews" in query:
         pull_request.update(
             {

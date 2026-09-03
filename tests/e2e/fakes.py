@@ -221,6 +221,41 @@ def branch_exists(owner: str, repo: str, branch: str) -> bool:
         return False
 
 
+def branch_sha(owner: str, repo: str, ref: str) -> str:
+    """Resolve a ref to a real commit sha in the bare remote."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return ""
+    try:
+        return _git("--git-dir", str(remote), "rev-parse", ref).strip()
+    except subprocess.CalledProcessError:
+        return ""
+
+
+def pull_diff(owner: str, repo: str, base: str, head: str) -> str:
+    """The unified merge-base diff GitHub would serve for a PR."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return ""
+    try:
+        return _git("--git-dir", str(remote), "diff", f"{base}...{head}")
+    except subprocess.CalledProcessError:
+        return ""
+
+
+def file_at_ref(owner: str, repo: str, ref: str, path: str) -> bytes | None:
+    """A file's bytes at ``ref`` in the bare remote, or None when absent."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return None
+    result = subprocess.run(
+        ["git", "--git-dir", str(remote), "show", f"{ref}:{path}"],
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
 def create_pull(
     owner: str, repo: str, *, head: str, base: str, title: str, body: str, draft: bool
 ) -> dict[str, Any]:
@@ -232,7 +267,10 @@ def create_pull(
         "owner": owner,
         "repo": repo,
         "head": head,
-        "head_sha": f"{number:040x}",
+        # Real shas: the reviewer fetches and checks these out with real git,
+        # and its diff range is computed from them.
+        "head_sha": branch_sha(owner, repo, head) or f"{number:040x}",
+        "base_sha": branch_sha(owner, repo, base),
         "base": base,
         "title": title,
         "body": body,
@@ -316,6 +354,7 @@ def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
             }
         ]
     return {
+        "id": thread.get("node_id", "PRRT_fixture"),
         "isResolved": bool(thread.get("is_resolved", False)),
         "isOutdated": bool(thread.get("is_outdated", False)),
         "path": thread.get("path", ""),
@@ -333,6 +372,35 @@ def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
             "pageInfo": {"hasNextPage": False, "endCursor": None},
         },
     }
+
+
+def published_threads_graphql(owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+    """The reviewer's own inline comments, as the review threads they become."""
+    threads: dict[str, dict[str, Any]] = {}
+    for comment in review_comments_for(owner, repo, number):
+        root_id = comment["in_reply_to_id"] or comment["id"]
+        thread = threads.get(str(root_id))
+        node = {
+            "databaseId": comment["id"],
+            "author": {"login": comment["author"]},
+            "authorAssociation": "MEMBER",
+            "body": comment["body"],
+            "createdAt": "2026-01-01T00:00:00Z",
+        }
+        if thread is None:
+            threads[str(root_id)] = {
+                "id": comment["node_id"],
+                "isResolved": comment["resolved"],
+                "isOutdated": False,
+                "path": comment["path"],
+                "line": comment["line"],
+                "originalLine": comment["line"],
+                "comments": {"nodes": [node]},
+            }
+            continue
+        thread["comments"]["nodes"].append(node)
+        thread["isResolved"] = thread["isResolved"] or comment["resolved"]
+    return list(threads.values())
 
 
 def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
@@ -404,12 +472,203 @@ def record_snapshot_delete(snapshot_id: str) -> None:
     DELETED_SNAPSHOTS.append(snapshot_id)
 
 
+# --- GitHub review state (what the reviewer agent publishes) ---------------
+# One entry per submitted review; ``comments`` are its inline comments.
+REVIEWS: list[dict[str, Any]] = []
+# Inline review comments across every review, in post order.
+REVIEW_COMMENTS: list[dict[str, Any]] = []
+# Issue-level PR comments (the reviewer's status comment lives here).
+ISSUE_COMMENTS: list[dict[str, Any]] = []
+# Check runs created/updated by the review check (`Open SWE Review`).
+CHECK_RUNS: list[dict[str, Any]] = []
+_review_seq = [0]
+_comment_seq = [0]
+_check_run_seq = [0]
+
+
+def add_review(
+    owner: str,
+    repo: str,
+    number: int,
+    *,
+    body: str,
+    event: str,
+    comments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Record a submitted review and its inline comments."""
+    _review_seq[0] += 1
+    review_id = _review_seq[0]
+    recorded: list[dict[str, Any]] = []
+    for comment in comments:
+        _comment_seq[0] += 1
+        entry = {
+            "id": _comment_seq[0],
+            "owner": owner,
+            "repo": repo,
+            "pull_number": number,
+            "review_id": review_id,
+            "path": comment.get("path", ""),
+            "line": comment.get("line"),
+            "start_line": comment.get("start_line"),
+            "side": comment.get("side", "RIGHT"),
+            "body": comment.get("body", ""),
+            "author": "open-swe[bot]",
+            "in_reply_to_id": None,
+            "node_id": f"PRRT_{_comment_seq[0]}",
+            "resolved": False,
+        }
+        REVIEW_COMMENTS.append(entry)
+        recorded.append(entry)
+    review = {
+        "id": review_id,
+        "owner": owner,
+        "repo": repo,
+        "pull_number": number,
+        "body": body,
+        "event": event,
+        "state": "COMMENTED" if event == "COMMENT" else event,
+        "author": "open-swe[bot]",
+        "comments": recorded,
+    }
+    REVIEWS.append(review)
+    return review
+
+
+def reviews_for(owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+    return [
+        review
+        for review in REVIEWS
+        if review["owner"] == owner and review["repo"] == repo and review["pull_number"] == number
+    ]
+
+
+def review_comments_for(owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+    return [
+        comment
+        for comment in REVIEW_COMMENTS
+        if comment["owner"] == owner
+        and comment["repo"] == repo
+        and comment["pull_number"] == number
+    ]
+
+
+def find_review_comment(comment_id: int) -> dict[str, Any] | None:
+    return next((c for c in REVIEW_COMMENTS if c["id"] == comment_id), None)
+
+
+def reply_to_review_comment(comment_id: int, body: str) -> dict[str, Any] | None:
+    parent = find_review_comment(comment_id)
+    if parent is None:
+        return None
+    _comment_seq[0] += 1
+    reply = {
+        **parent,
+        "id": _comment_seq[0],
+        "body": body,
+        "in_reply_to_id": comment_id,
+        "node_id": f"PRRT_{_comment_seq[0]}",
+    }
+    REVIEW_COMMENTS.append(reply)
+    return reply
+
+
+def resolve_review_thread(node_id: str) -> bool:
+    """Mark every comment sharing a thread node id resolved."""
+    matched = [c for c in REVIEW_COMMENTS if c["node_id"] == node_id]
+    for comment in matched:
+        comment["resolved"] = True
+    return bool(matched)
+
+
+def add_issue_comment(owner: str, repo: str, number: int, body: str) -> dict[str, Any]:
+    _comment_seq[0] += 1
+    comment = {
+        "id": _comment_seq[0],
+        "owner": owner,
+        "repo": repo,
+        "issue_number": number,
+        "body": body,
+        "author": "open-swe[bot]",
+    }
+    ISSUE_COMMENTS.append(comment)
+    return comment
+
+
+def issue_comments_for(owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+    return [
+        comment
+        for comment in ISSUE_COMMENTS
+        if comment["owner"] == owner
+        and comment["repo"] == repo
+        and comment["issue_number"] == number
+    ]
+
+
+def update_issue_comment(comment_id: int, body: str) -> dict[str, Any] | None:
+    comment = next((c for c in ISSUE_COMMENTS if c["id"] == comment_id), None)
+    if comment is not None:
+        comment["body"] = body
+    return comment
+
+
+def delete_issue_comment(comment_id: int) -> bool:
+    for index, comment in enumerate(ISSUE_COMMENTS):
+        if comment["id"] == comment_id:
+            del ISSUE_COMMENTS[index]
+            return True
+    return False
+
+
+def create_check_run(owner: str, repo: str, payload: dict[str, Any]) -> dict[str, Any]:
+    _check_run_seq[0] += 1
+    check_run = {
+        "id": _check_run_seq[0],
+        "owner": owner,
+        "repo": repo,
+        "name": payload.get("name", ""),
+        "head_sha": payload.get("head_sha", ""),
+        "status": payload.get("status", "queued"),
+        "conclusion": payload.get("conclusion"),
+        "details_url": payload.get("details_url", ""),
+        "output": payload.get("output", {}),
+    }
+    CHECK_RUNS.append(check_run)
+    return check_run
+
+
+def update_check_run(check_run_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
+    check_run = next((run for run in CHECK_RUNS if run["id"] == check_run_id), None)
+    if check_run is None:
+        return None
+    for key in ("status", "conclusion", "output", "details_url"):
+        if key in payload:
+            check_run[key] = payload[key]
+    return check_run
+
+
+def review_state(owner: str, repo: str, number: int) -> dict[str, Any]:
+    """Everything the reviewer published for one PR, for spec assertions."""
+    return {
+        "reviews": reviews_for(owner, repo, number),
+        "review_comments": review_comments_for(owner, repo, number),
+        "issue_comments": issue_comments_for(owner, repo, number),
+        "check_runs": [run for run in CHECK_RUNS if run["owner"] == owner and run["repo"] == repo],
+    }
+
+
 def reset() -> None:
     SLACK_MESSAGES.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
+    REVIEWS.clear()
+    REVIEW_COMMENTS.clear()
+    ISSUE_COMMENTS.clear()
+    CHECK_RUNS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
+    _review_seq[0] = 0
+    _comment_seq[0] = 0
+    _check_run_seq[0] = 0
     seed_bare_remotes()

@@ -355,7 +355,13 @@ Steps, in order:
 
    `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Keep commit messages concise and focused on the "why".
 
-3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary plus the PR link when one exists, using the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch.
+3. **Self-review the PR.** Delegate exactly one `pr-self-review` task. The reviewer that comments on pull requests stands down for the ones you open, and these findings are never posted to the PR — this pass is the only review the code gets before a human reads it. When it returns, call `list_inline_findings` and give every finding a disposition with `set_inline_finding_disposition`:
+   - **`fixed`** — an obvious defect in code this PR introduced: wrong identifier or key, inverted condition, dropped await, a changed contract its callsite no longer satisfies. Fix it, re-run lint/format, commit, push, and say in the note what you changed.
+   - **`deferred`** — the right fix is a judgment call, or fixing it would pull in work this PR did not set out to do. Leave the code alone and state the decision you need in the note.
+   - **`dismissed`** — the finding is wrong once you check it. The note says why.
+   One pass per delivery: do not delegate a second `pr-self-review` to re-check your own fixes.
+
+4. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary plus the PR link when one exists, using the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch. Report the self-review in that same message: what you fixed, and for every `deferred` finding the specific decision you need from the user — then end your turn so they can answer.
 
 **Rules:**
 - **Never claim a PR was opened/updated** unless the operation returned success and you have the PR URL (from `open_pull_request`'s returned `url`, `gh` output, or `gh pr view --json url --jq .url`). If push or PR creation fails, or there are no changes, say so explicitly. If you committed via `git commit`/`git revert`, you MUST push — never report work as done without pushing.

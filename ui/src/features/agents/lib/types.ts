@@ -259,6 +259,45 @@ export interface WorkflowPushApprovalsResponse {
   approvals: Array<WorkflowPushApproval>
 }
 
+export type SelfReviewSeverity = "low" | "medium" | "high" | "critical"
+export type SelfReviewConfidence = "low" | "medium" | "high"
+export type SelfReviewDisposition =
+  | "pending"
+  | "fixed"
+  | "deferred"
+  | "dismissed"
+
+/** One finding from the agent's review of a PR it authored. Never posted to GitHub. */
+export interface SelfReviewFinding {
+  id: string
+  severity: SelfReviewSeverity
+  confidence: SelfReviewConfidence
+  category: string
+  title: string
+  description: string
+  suggestion: string | null
+  file: string
+  start_line: number | null
+  end_line: number | null
+  disposition: SelfReviewDisposition
+  disposition_note: string
+  created_at: string
+}
+
+export interface SelfReview {
+  prNumber: number
+  prUrl: string
+  repoFullName: string
+  headSha: string
+  status: "claimed" | "reviewing" | "complete"
+  updatedAt: string
+  findings: Array<SelfReviewFinding>
+}
+
+export interface SelfReviewResponse {
+  reviews: Array<SelfReview>
+}
+
 export interface AgentPullRequestSummary {
   number: number
   title: string

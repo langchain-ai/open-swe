@@ -21,6 +21,10 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
   showPlanArtifact?: boolean
+  /** Show the pointer card to the thread's self-review findings. */
+  showSelfReview?: boolean
+  /** Reveal the Review surface; the card only points at it. */
+  onOpenSelfReview?: () => void
   emptyState?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>

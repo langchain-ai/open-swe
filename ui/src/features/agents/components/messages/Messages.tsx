@@ -17,6 +17,7 @@ import { UserMessage } from "./UserMessage"
 import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
+import { SelfReviewCard } from "@/features/agents/components/SelfReviewCard"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
@@ -68,6 +69,8 @@ export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
   showPlanArtifact = false,
+  showSelfReview = false,
+  onOpenSelfReview,
   emptyState,
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
@@ -307,6 +310,13 @@ export const Messages = memo(function MessagesComponent({
             })}
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
+            )}
+            {threadId && showSelfReview && (
+              <SelfReviewCard
+                threadId={threadId}
+                pollWhileActive={Boolean(isStreaming || streamIsLoading)}
+                {...(onOpenSelfReview ? { onOpen: onOpenSelfReview } : {})}
+              />
             )}
             {threadId && (
               <WorkflowApprovalCard
