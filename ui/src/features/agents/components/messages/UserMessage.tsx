@@ -6,8 +6,43 @@ import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
+import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 
-export function UserMessage({ message }: { message: Message }) {
+interface UserImage {
+  src: string
+  alt: string
+}
+
+function userImages(
+  message: Message,
+  threadId: string | undefined
+): Array<UserImage> {
+  const images: Array<UserImage> = []
+  for (const chunk of message.chunks) {
+    if (chunk.kind === "image") {
+      images.push({
+        src: `data:${chunk.mimeType};base64,${chunk.base64}`,
+        alt: chunk.fileName || "image",
+      })
+    } else if (chunk.kind === "attachment" && threadId) {
+      images.push({
+        src: dashboardApiUrl(
+          `/threads/${encodeURIComponent(threadId)}/media/${encodeURIComponent(chunk.name)}`
+        ),
+        alt: chunk.fileName || "image",
+      })
+    }
+  }
+  return images
+}
+
+export function UserMessage({
+  message,
+  threadId,
+}: {
+  message: Message
+  threadId?: string
+}) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -15,7 +50,7 @@ export function UserMessage({ message }: { message: Message }) {
     .map((c) => c.text)
     .join("")
 
-  const images = message.chunks.filter((c) => c.kind === "image")
+  const images = userImages(message, threadId)
   const [expanded, setExpanded] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
   const [scrolledFromTop, setScrolledFromTop] = useState(false)
@@ -101,8 +136,8 @@ export function UserMessage({ message }: { message: Message }) {
                     className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
                   >
                     <img
-                      src={`data:${img.mimeType};base64,${img.base64}`}
-                      alt={img.fileName || "image"}
+                      src={img.src}
+                      alt={img.alt}
                       className="block h-auto max-h-[220px] w-full object-cover"
                     />
                   </div>

@@ -79,6 +79,7 @@ from agent.github.token import (
 from agent.linear.client import post_linear_trace_comment  # noqa: F401
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.linear.team_repo_map import LINEAR_TEAM_TO_REPO
+from agent.media import media_data  # noqa: F401
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -144,10 +145,9 @@ from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
 from agent.utils.langsmith import create_langsmith_thread_feedback
 from agent.utils.multimodal import (
+    attach_linked_images,  # noqa: F401
     dedupe_urls,  # noqa: F401
     extract_image_urls,  # noqa: F401
-    fetch_image_block,  # noqa: F401
-    vision_not_supported_warning,  # noqa: F401
 )
 from agent.utils.repo import extract_repo_from_text
 from agent.utils.thread_ops import queue_message_for_thread  # noqa: F401
@@ -220,6 +220,7 @@ __all__ = [
     "_trigger_or_queue_run",
     "_upsert_slack_thread_repo_metadata",
     "append_finding_interaction",
+    "attach_linked_images",
     "build_pr_prompt",
     "claim_slack_event",
     "complete_review_check_run",
@@ -234,7 +235,6 @@ __all__ = [
     "extract_pr_context",
     "extract_repo_from_text",
     "fetch_github_pr_metadata",
-    "fetch_image_block",
     "fetch_issue_comments",
     "fetch_linear_issue_details",
     "fetch_pr_comments_since_last_tag",
@@ -263,6 +263,7 @@ __all__ = [
     "login_for_email",
     "login_for_slack_id",
     "lookup_slack_thread_id",
+    "media_data",
     "model_supports_images",
     "normalize_slack_channel_context",
     "parse_qs",
@@ -300,6 +301,7 @@ __all__ = [
     "verify_github_signature",
     "verify_linear_signature",
     "verify_slack_signature",
+    "vision_model_override",
 ]
 
 logger = logging.getLogger(__name__)
@@ -713,6 +715,25 @@ async def _source_context_with_slack_permalink(
     if permalink:
         slack_thread.permalink = permalink
     return enriched
+
+
+async def vision_model_override(
+    github_login: str | None, image_count: int
+) -> tuple[str, str] | None:
+    """The model pair a run with images needs when the sender's model is text-only."""
+    resolved_model_id = await resolve_agent_model_id(github_login)
+    if model_supports_images(resolved_model_id):
+        return None
+    fallback_model_id, fallback_effort = default_vision_model_pair()
+    logger.info(
+        "Using vision fallback model for attached images",
+        extra={
+            "fallback_model_id": fallback_model_id,
+            "configured_model_id": resolved_model_id,
+            "image_count": image_count,
+        },
+    )
+    return fallback_model_id, fallback_effort
 
 
 async def upsert_agent_thread_metadata(

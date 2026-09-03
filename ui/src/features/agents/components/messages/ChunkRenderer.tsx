@@ -51,5 +51,8 @@ export function ChunkRenderer({
           className="max-h-48 max-w-48 rounded border border-border"
         />
       )
+    case "attachment":
+      // User attachments render inside UserMessage, which knows the thread.
+      return null
   }
 }

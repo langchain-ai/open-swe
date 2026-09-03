@@ -1541,7 +1541,7 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         bot_user_id="UBOT",
         event_ts="9.0",
         request_text="do the thing",
-        request_blocks=[{"type": "text", "text": "do the thing"}],
+        request_media=[],
         operational_context="## Open SWE Links",
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
@@ -1687,7 +1687,7 @@ def _trigger_identities(
         event_ts=event_ts,
         trigger_user_id=trigger_user_id,
         request_text="do the thing",
-        request_blocks=[{"type": "text", "text": "do the thing"}],
+        request_media=[],
         operational_context="## Open SWE Links",
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]

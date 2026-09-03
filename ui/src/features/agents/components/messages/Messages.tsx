@@ -283,7 +283,13 @@ export const Messages = memo(function MessagesComponent({
                 message.author === "user" ||
                 message.structuredSenderKind === "system"
               ) {
-                return <UserMessage key={message.id} message={message} />
+                return (
+                  <UserMessage
+                    key={message.id}
+                    message={message}
+                    threadId={threadId}
+                  />
+                )
               }
 
               return (

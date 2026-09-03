@@ -141,6 +141,8 @@ function getChunkRenderKey(chunk: Chunk, sourceIndex: number): string {
       return `list-${sourceIndex}`
     case "image":
       return `image-${sourceIndex}`
+    case "attachment":
+      return `attachment-${sourceIndex}`
     default:
       return `chunk-${sourceIndex}`
   }

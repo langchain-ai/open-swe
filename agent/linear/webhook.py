@@ -4,10 +4,7 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from typing import Any, cast
-
-import httpx
-from langchain_core.messages.content import create_text_block
+from typing import Any
 
 from agent.input_messages import (
     PersonIdentity,
@@ -184,43 +181,15 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
-    description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
-    image_blocks_by_url: dict[str, dict[str, Any]] = {}
-
     # Resolve the GitHub login from the Linear email via the same user-mapping
     # store Slack uses, so PRs open *as the triggering user* and the thread is
     # tagged for the dashboard.
     mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
 
-    image_model_override: tuple[str, str] | None = None
-    if image_urls:
-        image_urls = common.dedupe_urls(image_urls)
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
-        if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
-            common.logger.info(
-                "Using vision fallback model %s for %d Linear image(s); configured model %s "
-                "does not support images",
-                fallback_model_id,
-                len(image_urls),
-                resolved_model_id,
-            )
-            resolved_model_id = fallback_model_id
-            image_model_override = (fallback_model_id, fallback_effort)
-        common.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-        common.logger.debug("Image URLs: %s", image_urls)
-
-        async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
-            for image_url in image_urls:
-                image_block = await common.fetch_image_block(image_url, client)
-                if image_block:
-                    image_blocks_by_url[image_url] = cast(dict[str, Any], image_block)
-        description_blocks.extend(
-            image_blocks_by_url[url]
-            for url in common.dedupe_urls(description_image_urls)
-            if url in image_blocks_by_url
-        )
-        common.logger.info("Built %d description content block(s)", len(description_blocks))
+    image_urls = common.dedupe_urls(image_urls)
+    image_model_override = (
+        await common.vision_model_override(mapped_login, len(image_urls)) if image_urls else None
+    )
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -258,13 +227,19 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         title=title or identifier or "Linear issue",
         source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
     )
+    media_by_url = await common.attach_linked_images(thread_id, image_urls)
+
+    def media_for(urls: list[str]) -> dict[str, object]:
+        return common.media_data(
+            media_by_url[url] for url in common.dedupe_urls(urls) if url in media_by_url
+        )
 
     run_messages = [
         system_introduction(
             {"id": "system:linear-issue", "display_name": "Linear issue", "platform": "linear"}
         ),
         system_input(
-            description_blocks if len(description_blocks) > 1 else prompt,
+            prompt,
             {
                 "sender_id": "system:linear-issue",
                 "surface": "linear",
@@ -276,7 +251,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                         "url": ticket_url,
                         "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
                         "title": title,
-                    }
+                    },
+                    **media_for(description_image_urls),
                 },
             },
         ),
@@ -294,28 +270,18 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         if sender_id not in introduced:
             run_messages.append(person_introduction(person))
             introduced.add(sender_id)
-        body = str(comment.get("body", ""))
-        comment_image_blocks = [
-            image_blocks_by_url[url]
-            for url in common.dedupe_urls(
-                image_urls_by_comment_id.get(str(comment.get("id", "")), [])
-            )
-            if url in image_blocks_by_url
-        ]
-        blocks: str | list[dict[str, Any]] = body
-        if comment_image_blocks:
-            blocks = [
-                cast(dict[str, Any], create_text_block(body)),
-                *comment_image_blocks,
-            ]
+        comment_id = str(comment.get("id", ""))
         run_messages.append(
             human_input(
-                blocks,
+                str(comment.get("body", "")),
                 {
                     "sender_id": sender_id,
                     "surface": "linear",
                     "kind": "human",
-                    "data": {"comment_id": str(comment.get("id", ""))},
+                    "data": {
+                        "comment_id": comment_id,
+                        **media_for(image_urls_by_comment_id.get(comment_id, [])),
+                    },
                 },
             )
         )

@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException
-from langchain_core.messages.content import ImageContentBlock, create_image_block
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.dashboard.admin import is_admin
@@ -46,6 +46,15 @@ from agent.input_messages import (
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
+from agent.media import (
+    IMAGE_EXTENSIONS,
+    MAX_MEDIA_BYTES,
+    MediaRef,
+    MediaUpload,
+    attach_thread_media,
+    media_data,
+    read_thread_media,
+)
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     parse_github_pr_url,
@@ -64,6 +73,8 @@ from agent.utils.json_types import (
 )
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import (
+    QueuedMessage,
+    QueuedSender,
     get_thread_active_status,
     langgraph_client,
     langgraph_url,
@@ -93,9 +104,7 @@ _DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "checkpoints",
     "events",
 )
-_SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
-_MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _DISCOVERY_HISTORY_LIMIT = 5
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
@@ -231,47 +240,55 @@ def _parse_repo(full_name: str | None) -> dict[str, str] | None:
     return {"owner": owner, "name": name}
 
 
-def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
-    if image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
+def _decode_dashboard_image(image: DashboardImageBody) -> MediaUpload:
+    if image.mime_type not in IMAGE_EXTENSIONS:
         raise HTTPException(422, f"unsupported image type: {image.mime_type}")
     try:
         data = base64.b64decode(image.base64, validate=True)
     except binascii.Error as exc:
         raise HTTPException(422, "invalid image data") from exc
-    if len(data) > _MAX_DASHBOARD_IMAGE_BYTES:
+    if len(data) > MAX_MEDIA_BYTES:
         raise HTTPException(422, "image exceeds 10MB limit")
-    return data
+    return MediaUpload(data=data, mime_type=image.mime_type, file_name=image.file_name)
 
 
-def _image_blocks(
+def _dashboard_media_uploads(
     images: list[DashboardImageBody], *, model_id: str | None
-) -> list[ImageContentBlock]:
+) -> list[MediaUpload]:
+    """Validate attached images against the limits and the run's model (raises 422)."""
     if len(images) > _MAX_DASHBOARD_IMAGES:
         raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
     if images and (not model_id or not model_supports_images(model_id)):
         model_label = model_id or "the current model"
         raise HTTPException(422, f"model {model_label} does not support image input")
-    return [
-        create_image_block(
-            base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
-            mime_type=image.mime_type,
-        )
-        for image in images
-    ]
+    return [_decode_dashboard_image(image) for image in images]
 
 
-def _user_message_content(
-    prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
-) -> str | list[ImageContentBlock | dict[str, str]]:
-    text = prompt.strip()
-    if not text and not images:
+def _require_prompt_or_images(prompt: str, images: list[DashboardImageBody]) -> None:
+    if not prompt.strip() and not images:
         raise HTTPException(422, "prompt or image required")
-    if not images:
-        return text
-    return [
-        *_image_blocks(images, model_id=model_id),
-        *([{"type": "text", "text": text}] if text else []),
-    ]
+
+
+async def _attach_dashboard_media(
+    thread_id: str, uploads: list[MediaUpload], metadata: Mapping[str, Any]
+) -> list[MediaRef]:
+    """Store the attachments in the thread's sandbox (502 when the sandbox cannot take them)."""
+    if not uploads:
+        return []
+    environment = metadata.get("environment")
+    try:
+        return await attach_thread_media(
+            thread_id,
+            uploads,
+            environment_slug=environment if isinstance(environment, str) and environment else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to store dashboard attachments",
+            extra={"thread_id": thread_id, "upload_count": len(uploads)},
+            exc_info=True,
+        )
+        raise HTTPException(502, "failed to store attachment") from exc
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
@@ -1267,7 +1284,8 @@ async def _create_dashboard_thread_record(
         resolved_effort,
         has_images=bool(images),
     )
-    _user_message_content(prompt, images or [], model_id=resolved_model)
+    _require_prompt_or_images(prompt, images or [])
+    _dashboard_media_uploads(images or [], model_id=resolved_model)
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
@@ -1474,13 +1492,6 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
     return images
 
 
-def _validate_command_images(content: Any, *, model_id: str | None) -> None:
-    """Reject images for text-only models / oversize attachments (raises 422)."""
-    images = _dashboard_images_from_content(content)
-    if images:
-        _image_blocks(images, model_id=model_id)
-
-
 async def _enrich_run_start_command(
     thread_id: str,
     login: str,
@@ -1571,10 +1582,8 @@ async def _enrich_run_start_command(
                     break
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
-        _validate_command_images(content, model_id=run_model)
 
-    if content is None:
-        content = ""
+    uploads = _dashboard_media_uploads(command_images, model_id=run_model)
     sender_id = f"github:{login}"
     injected = injected_dynamic_context_hashes_from_metadata(metadata)
     persisted_message_ids: set[str] = set()
@@ -1602,8 +1611,13 @@ async def _enrich_run_start_command(
     if email:
         person["email"] = email
     structured = build_input_messages(
-        content,
-        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        _command_prompt_text(content),
+        {
+            "sender_id": sender_id,
+            "surface": "web",
+            "kind": "human",
+            "data": media_data(await _attach_dashboard_media(thread_id, uploads, metadata)),
+        },
         people=[person],
         systems=(
             [
@@ -1780,8 +1794,10 @@ async def send_dashboard_message(
             "thread is idle; start a run via the stream commands endpoint",
         )
 
-    active_model = _metadata_model_id(metadata) if body.images else None
-    content = _user_message_content(prompt, body.images, model_id=active_model)
+    _require_prompt_or_images(prompt, body.images)
+    uploads = _dashboard_media_uploads(
+        body.images, model_id=_metadata_model_id(metadata) if body.images else None
+    )
     if pr_linked or metadata.get("auto_resolved_by_prs") is True:
         async with agent_thread_pr_state_lock(client, thread_id):
             current = await client.threads.get(thread_id)
@@ -1801,22 +1817,18 @@ async def send_dashboard_message(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    queue_payload: dict[str, Any] = {
-        "text": prompt,
-        "source": _DASHBOARD_SOURCE,
-        "surface": "web",
-        "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
-            **({"email": email} if email else {}),
-        },
-    }
-    if isinstance(content, list):
-        queue_payload["images"] = [
-            block for block in content if isinstance(block, dict) and block.get("type") != "text"
-        ]
-    queued = await queue_message_for_thread(thread_id, queue_payload)
+    media = await _attach_dashboard_media(thread_id, uploads, metadata)
+    queued = await queue_message_for_thread(
+        thread_id,
+        QueuedMessage(
+            text=prompt,
+            source=_DASHBOARD_SOURCE,
+            sender=QueuedSender(
+                id=f"github:{login}", platform="github", github_login=login, email=email
+            ),
+            media=media,
+        ),
+    )
     if not queued:
         raise HTTPException(502, "failed to queue follow-up message")
     try:
@@ -1968,6 +1980,30 @@ async def resolve_dashboard_thread(
         raise HTTPException(502, "failed to update thread") from exc
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return await _thread_summary(thread)
+
+
+async def get_dashboard_thread_media(
+    thread_id: str, file_name: str, login: str, *, email: str | None = None
+) -> Response:
+    """One attachment from the thread's sandbox; content-addressed, so cacheable forever."""
+    await _authorized_thread(thread_id, login, email=email)
+    try:
+        found = await read_thread_media(thread_id, file_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not read thread media",
+            extra={"thread_id": thread_id, "media_file": file_name},
+            exc_info=True,
+        )
+        raise HTTPException(404, "attachment unavailable") from exc
+    if found is None:
+        raise HTTPException(404, "attachment not found")
+    data, mime_type = found
+    return Response(
+        content=data,
+        media_type=mime_type,
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
 
 
 async def _authorized_thread_metadata(

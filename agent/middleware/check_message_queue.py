@@ -1,30 +1,32 @@
 """Before-model middleware that injects queued messages into state.
 
-Checks the LangGraph store for pending messages (e.g. follow-up Linear
-comments that arrived while the agent was busy) and injects them as new
-human messages before the next model call.
+Checks the LangGraph store for pending messages (follow-ups that arrived
+while the agent was busy) and injects them as new human messages before the
+next model call.
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Any, cast
 
-import httpx
 from langchain.agents.middleware import AgentState, before_model
-from langgraph.config import get_config, get_store
+from langgraph.config import get_store
 from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
-from langgraph_sdk import get_client
 
-from agent.dashboard.options import model_supports_images
 from agent.input_messages import (
-    PersonIdentity,
+    InputMessageContext,
+    MessageKind,
+    RunMessage,
+    Surface,
     SystemIdentity,
     build_input_messages,
     visible_dynamic_context_hashes,
 )
+from agent.media import MediaRef, media_data
+from agent.run_config import RunConfig
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
-from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
+from agent.utils.thread_ops import QueuedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -35,113 +37,68 @@ class LinearNotifyState(AgentState):
     linear_messages_sent_count: int
 
 
-async def _resolve_thread_model_id(thread_id: str) -> str | None:
-    """Read the resolved model from thread metadata (set by ``get_agent``)."""
-    try:
-        client = get_client()
-        thread = await client.threads.get(thread_id)
-        metadata = thread.get("metadata") if isinstance(thread, dict) else None
-        if not isinstance(metadata, dict):
-            return None
-        model = metadata.get("model")
-        return model if isinstance(model, str) and model else None
-    except Exception:
-        logger.debug("Could not read thread metadata for model resolution", exc_info=True)
-        return None
-
-
-async def _build_blocks_from_payload(
-    payload: dict[str, Any],
-    *,
-    model_id: str | None = None,
-) -> list[dict[str, Any]]:
-    text = payload.get("text", "")
-    image_urls = payload.get("image_urls", []) or []
-    images = payload.get("images", []) or []
-    blocks: list[dict[str, Any]] = []
-    if text:
-        blocks.append({"type": "text", "text": text})
-    if isinstance(images, list):
-        blocks.extend(image for image in images if isinstance(image, dict))
-
-    if not image_urls:
-        return blocks
-    if model_id and not model_supports_images(model_id):
-        logger.warning(
-            "Skipping %d queued image(s): model %s does not support images",
-            len(image_urls),
-            model_id,
-        )
-        if text:
-            blocks[0] = {
-                "type": "text",
-                "text": text + vision_not_supported_warning(model_id, len(image_urls)),
-            }
-        return blocks
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        for image_url in image_urls:
-            image_block = await fetch_image_block(image_url, client)
-            if image_block:
-                blocks.append(cast(dict[str, Any], image_block))
-    return blocks
-
-
-def _is_dashboard_queued_message(content: object) -> bool:
-    return isinstance(content, dict) and content.get("source") == "dashboard"
-
-
 _QUEUE_SYSTEM: SystemIdentity = {
     "id": "system:thread-queue",
     "display_name": "Queued message",
     "platform": "open-swe",
 }
+_DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
+    "id": "system:dashboard-handoff",
+    "display_name": "Dashboard handoff",
+    "platform": "open-swe",
+}
 
 
-# Each structured envelope has to arrive as its own message: the transcript
-# parses one envelope per message, so packing several into one message's blocks
-# renders the concatenation as raw XML.
-def _merge_text_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    texts = [
-        block["text"]
-        for block in blocks
-        if block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]
-    ]
-    others = [block for block in blocks if block.get("type") != "text"]
-    merged: list[dict[str, Any]] = [{"type": "text", "text": "\n\n".join(texts)}] if texts else []
-    return merged + others
+def _context(
+    sender_id: str, surface: Surface, kind: MessageKind, media: list[MediaRef]
+) -> InputMessageContext:
+    context: InputMessageContext = {"sender_id": sender_id, "surface": surface, "kind": kind}
+    if media:
+        context["data"] = media_data(media)
+    return context
 
 
-def _flush_blocks(
-    messages: list[dict[str, Any]], blocks: list[dict[str, Any]], injected: set[str]
-) -> None:
-    if not blocks:
-        return
-    messages.extend(
-        cast(
-            list[dict[str, Any]],
+class _QueuedUpdates:
+    """Messages to inject, with unattributed notices batched into one envelope.
+
+    Each structured envelope has to arrive as its own message: the transcript
+    parses one envelope per message, so several packed into one message's
+    blocks render as raw XML. Notices without a sender share a single system
+    envelope instead.
+    """
+
+    def __init__(self, injected: set[str]) -> None:
+        self.messages: list[RunMessage] = []
+        self._injected = injected
+        self._notices: list[str] = []
+        self._notice_media: list[MediaRef] = []
+
+    def notice(self, text: str, media: list[MediaRef] | None = None) -> None:
+        if text:
+            self._notices.append(text)
+        self._notice_media.extend(media or [])
+
+    def envelope(self, text: str, context: InputMessageContext, **identities: Any) -> None:
+        self.flush()
+        self.messages.extend(
             build_input_messages(
-                _merge_text_blocks(blocks),
-                {"sender_id": _QUEUE_SYSTEM["id"], "surface": "automation", "kind": "system"},
-                systems=[_QUEUE_SYSTEM],
-                injected_dynamic_context_hashes=injected,
-            ),
+                text, context, injected_dynamic_context_hashes=self._injected, **identities
+            )
         )
-    )
-    blocks.clear()
 
-
-def _message_update(
-    queued: list[dict[str, Any]],
-    thread_id: str,
-) -> dict[str, Any] | None:
-    if not queued:
-        return None
-    logger.info(
-        "Injected %d queued message(s) into state for thread %s",
-        len(queued),
-        thread_id,
-    )
-    return {"messages": queued}
+    def flush(self) -> None:
+        if not self._notices and not self._notice_media:
+            return
+        self.messages.extend(
+            build_input_messages(
+                "\n\n".join(self._notices),
+                _context(_QUEUE_SYSTEM["id"], "automation", "system", self._notice_media),
+                systems=[_QUEUE_SYSTEM],
+                injected_dynamic_context_hashes=self._injected,
+            )
+        )
+        self._notices.clear()
+        self._notice_media.clear()
 
 
 async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
@@ -151,7 +108,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
         item = await store.aget(namespace, "pending_event")
     except Exception:  # noqa: BLE001
         logger.debug(
-            "Could not read pending auto-fix event for thread %s", thread_id, exc_info=True
+            "Could not read pending auto-fix event", extra={"thread_id": thread_id}, exc_info=True
         )
         return None
     if item is None or not item.value.get("reason"):
@@ -160,7 +117,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
         await store.adelete(namespace, "pending_event")
     except Exception:  # noqa: BLE001
         logger.debug(
-            "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
+            "Could not clear pending auto-fix event", extra={"thread_id": thread_id}, exc_info=True
         )
     message = (
         "A PR babysitting event arrived while you were already working on this PR. "
@@ -176,143 +133,82 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
     return message
 
 
+async def _take_queued_messages(store: BaseStore, thread_id: str) -> list[QueuedMessage]:
+    """Pull and clear the thread's pending follow-ups, oldest first."""
+    namespace = ("queue", thread_id)
+    try:
+        item = await store.aget(namespace, "pending_messages")
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to read queued messages", extra={"thread_id": thread_id})
+        return []
+    if item is None:
+        return []
+    # Delete before processing so a retried model call cannot inject twice.
+    await store.adelete(namespace, "pending_messages")
+    raw_messages = item.value.get("messages", [])
+    if not isinstance(raw_messages, list):
+        return []
+    queued = [
+        message
+        for raw in raw_messages
+        if isinstance(raw, Mapping) and (message := QueuedMessage.parse(raw.get("content")))
+    ]
+    if queued:
+        logger.info(
+            "Found queued messages for thread",
+            extra={"thread_id": thread_id, "queued_count": len(queued)},
+        )
+    return queued
+
+
 @before_model(state_schema=LinearNotifyState)
-async def check_message_queue_before_model(  # noqa: PLR0911
-    state: LinearNotifyState,  # noqa: ARG001
+async def check_message_queue_before_model(
+    state: LinearNotifyState,
     runtime: Runtime,  # noqa: ARG001
 ) -> dict[str, Any] | None:
-    """Middleware that checks for queued messages before each model call.
-
-    If messages are found in the queue for this thread, it extracts all messages,
-    adds them to the conversation state as new human messages, and clears the queue.
-    Messages are processed in FIFO order (oldest first).
-
-    This enables handling of follow-up comments that arrive while the agent is busy.
-    The agent will see the new messages and can incorporate them into its response.
-    """
+    """Inject follow-ups that arrived while the agent was busy, in FIFO order."""
     try:
-        config = get_config()
-        configurable = config.get("configurable", {})
-        thread_id = configurable.get("thread_id")
-
+        thread_id = RunConfig.from_runtime().thread_id
         if not thread_id:
             return None
-
         try:
             store = get_store()
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Could not get store from context: %s", e)
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not get store from context", exc_info=True)
             return None
-
         if store is None:
             return None
 
-        queued_updates: list[dict[str, Any]] = []
-        content_blocks: list[dict[str, Any]] = []
-        injected = visible_dynamic_context_hashes(state)
+        updates = _QueuedUpdates(visible_dynamic_context_hashes(state))
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
         if pending_autofix:
-            content_blocks.append({"type": "text", "text": pending_autofix})
+            updates.notice(pending_autofix)
 
-        namespace = ("queue", thread_id)
-
-        try:
-            queued_item = await store.aget(namespace, "pending_messages")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to get queued item: %s", e)
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
-
-        if queued_item is None:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
-
-        queued_value = queued_item.value
-        queued_messages = queued_value.get("messages", [])
-
-        # Delete early to prevent duplicate processing if middleware runs again
-        await store.adelete(namespace, "pending_messages")
-
-        if not queued_messages:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
-
-        logger.info(
-            "Found %d queued message(s) for thread %s, injecting into state",
-            len(queued_messages),
-            thread_id,
-        )
-
-        has_images = any(
-            isinstance(msg.get("content"), dict)
-            and (msg["content"].get("image_urls") or msg["content"].get("images"))
-            for msg in queued_messages
-        )
-        resolved_model_id: str | None = None
-        if has_images:
-            resolved_model_id = await _resolve_thread_model_id(thread_id)
-
-        for msg in queued_messages:
-            content = msg.get("content")
-            if _is_dashboard_queued_message(content):
-                handoff = build_input_messages(
+        for queued in await _take_queued_messages(store, thread_id):
+            if queued.source == "dashboard":
+                updates.envelope(
                     DASHBOARD_HANDOFF_BODY,
-                    {
-                        "sender_id": "system:dashboard-handoff",
-                        "surface": "automation",
-                        "kind": "system",
-                    },
-                    systems=[
-                        {
-                            "id": "system:dashboard-handoff",
-                            "display_name": "Dashboard handoff",
-                            "platform": "open-swe",
-                        }
-                    ],
-                    injected_dynamic_context_hashes=injected,
+                    _context(_DASHBOARD_HANDOFF_SYSTEM["id"], "automation", "system", []),
+                    systems=[_DASHBOARD_HANDOFF_SYSTEM],
                 )
-                _flush_blocks(queued_updates, content_blocks, injected)
-                queued_updates.extend(cast(list[dict[str, Any]], handoff))
-            if isinstance(content, dict) and (
-                "text" in content or "image_urls" in content or "images" in content
-            ):
-                logger.debug("Queued message contains text + image URLs")
-                blocks = await _build_blocks_from_payload(content, model_id=resolved_model_id)
-                sender = content.get("sender")
-                if isinstance(sender, dict) and isinstance(sender.get("id"), str):
-                    person: PersonIdentity = {"id": sender["id"]}
-                    for key in (
-                        "display_name",
-                        "handle",
-                        "platform",
-                        "github_login",
-                        "email",
-                        "timezone",
-                    ):
-                        value = sender.get(key)
-                        if isinstance(value, str):
-                            cast(dict[str, str], person)[key] = value
-                    structured = build_input_messages(
-                        blocks,
-                        {"sender_id": person["id"], "surface": "web", "kind": "human"},
-                        people=[person],
-                        injected_dynamic_context_hashes=injected,
-                    )
-                    _flush_blocks(queued_updates, content_blocks, injected)
-                    queued_updates.extend(cast(list[dict[str, Any]], structured))
-                else:
-                    content_blocks.extend(blocks)
+            if not queued.text and not queued.media:
                 continue
-            if isinstance(content, list):
-                logger.debug("Queued message contains %d content block(s)", len(content))
-                content_blocks.extend(content)
-                continue
-            if isinstance(content, str) and content:
-                logger.debug("Queued message contains text content")
-                content_blocks.append({"type": "text", "text": content})
-
-        _flush_blocks(queued_updates, content_blocks, injected)
-        return _message_update(queued_updates, thread_id)  # noqa: TRY300
+            if queued.sender is None:
+                updates.notice(queued.text, queued.media)
+            else:
+                updates.envelope(
+                    queued.text,
+                    _context(queued.sender.id, "web", "human", queued.media),
+                    people=[queued.sender.identity()],
+                )
+        updates.flush()
+        if not updates.messages:
+            return None
+        logger.info(
+            "Injected queued messages into state",
+            extra={"thread_id": thread_id, "injected_count": len(updates.messages)},
+        )
+        return {"messages": cast(list[Any], updates.messages)}
     except Exception:
         logger.exception("Error in check_message_queue_before_model")
     return None

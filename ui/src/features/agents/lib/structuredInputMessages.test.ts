@@ -44,6 +44,39 @@ describe("structured input messages", () => {
     )
   })
 
+  it("surfaces media data items as attachments served from the sandbox", () => {
+    const sha = "a".repeat(64)
+    const envelope = [
+      '<input-message sender="github:alice" surface="web" kind="human">',
+      "<media>",
+      "<item>",
+      `<path>/workspace/.open-swe-media/${sha}.png</path>`,
+      "<mime_type>image/png</mime_type>",
+      `<sha256>${sha}</sha256>`,
+      "<size>3</size>",
+      "<file_name>Screen &amp; shot.png</file_name>",
+      "</item>",
+      "</media>",
+      "<content>see attached</content>",
+      "</input-message>",
+    ].join("\n")
+
+    expect(parseStructuredInput(envelope)).toEqual({
+      type: "message",
+      content: "see attached",
+      sender: "github:alice",
+      senderKind: "person",
+      surface: "web",
+      attachments: [
+        {
+          name: `${sha}.png`,
+          mimeType: "image/png",
+          fileName: "Screen & shot.png",
+        },
+      ],
+    })
+  })
+
   it("ignores the data fields a real envelope carries beside its content", () => {
     expect(
       parseStructuredInput(

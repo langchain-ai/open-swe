@@ -1,10 +1,23 @@
 """Tests for Linear webhook PR author linking (reuse of the Slack user mapping)."""
 
 import asyncio
+import hashlib
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from agent.linear import webhook as linear_webhook
+from agent.media import MediaRef, media_refs_from_content
+
+
+def _media_ref(url: str) -> MediaRef:
+    digest = hashlib.sha256(url.encode()).hexdigest()
+    return MediaRef(
+        path=f"/workspace/.open-swe-media/{digest}.png",
+        mime_type="image/png",
+        sha256=digest,
+        size=1,
+        source_url=url,
+    )
 
 
 def _full_issue(*, user_email: str | None = "zhen@example.com", user_name: str = "Zhen") -> dict:
@@ -76,13 +89,17 @@ def _run_process(
             linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert
         ),
         patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
-        patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),
-        patch.object(linear_webhook.common, "model_supports_images", return_value=True),
         patch.object(
             linear_webhook.common,
-            "fetch_image_block",
+            "vision_model_override",
             new_callable=AsyncMock,
-            side_effect=lambda url, _client: {"type": "image_url", "image_url": {"url": url}},
+            return_value=None,
+        ),
+        patch.object(
+            linear_webhook.common,
+            "attach_linked_images",
+            new_callable=AsyncMock,
+            side_effect=lambda thread_id, urls, **_: {url: _media_ref(url) for url in urls},
         ),
     ):
         asyncio.run(linear_webhook.process_linear_issue(issue_data, repo_config))
@@ -139,7 +156,9 @@ def test_linear_description_images_stay_with_issue_without_comments() -> None:
 
     assert isinstance(content, dict)
     messages = content["messages"]
-    assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/issue.png"
+    assert media_refs_from_content(messages[1]["content"]) == [
+        _media_ref("https://example.com/issue.png")
+    ]
 
 
 def test_linear_comment_images_stay_with_their_comments() -> None:
@@ -165,8 +184,12 @@ def test_linear_comment_images_stay_with_their_comments() -> None:
     )
 
     assert isinstance(content, dict)
-    human_messages = [
-        message for message in content["messages"] if isinstance(message["content"], list)
+    comment_media = [
+        media_refs_from_content(message["content"])
+        for message in content["messages"]
+        if 'kind="human"' in message["content"]
     ]
-    assert human_messages[0]["content"][1]["image_url"]["url"].endswith("one.png")
-    assert human_messages[1]["content"][1]["image_url"]["url"].endswith("two.png")
+    assert comment_media == [
+        [_media_ref("https://example.com/one.png")],
+        [_media_ref("https://example.com/two.png")],
+    ]

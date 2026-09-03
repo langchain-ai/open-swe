@@ -1,6 +1,5 @@
-"""Utilities for building multimodal content blocks."""
+"""Finding and fetching the images a message links to."""
 
-import base64
 import logging
 import mimetypes
 import os
@@ -8,18 +7,18 @@ import re
 from urllib.parse import urlparse
 
 import httpx
-from langchain_core.messages.content import (
-    ImageContentBlock,
-    TextContentBlock,
-    create_image_block,
-    create_text_block,
-)
 
+from agent.media import (
+    IMAGE_EXTENSIONS,
+    MAX_MEDIA_BYTES,
+    MediaRef,
+    MediaUpload,
+    attach_thread_media,
+)
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
-
-_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 IMAGE_MARKDOWN_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
 IMAGE_URL_RE = re.compile(
@@ -29,27 +28,14 @@ IMAGE_URL_RE = re.compile(
 
 
 def extract_image_urls(text: str) -> list[str]:
-    """Extract image URLs from markdown image syntax and direct image links."""
+    """Image URLs from markdown image syntax and direct image links, deduplicated."""
     if not text:
         return []
-
-    urls: list[str] = []
-    urls.extend(IMAGE_MARKDOWN_RE.findall(text))
-    urls.extend(IMAGE_URL_RE.findall(text))
-
-    deduped = dedupe_urls(urls)
-    if deduped:
-        logger.debug("Extracted %d image URL(s)", len(deduped))
-    return deduped
+    return dedupe_urls([*IMAGE_MARKDOWN_RE.findall(text), *IMAGE_URL_RE.findall(text)])
 
 
-def vision_not_supported_warning(model_id: str, image_count: int) -> str:
-    """Build a prompt-visible warning when images are sent to a text-only model."""
-    return (
-        f"\n\n**Note:** {image_count} image(s) were attached but the current model "
-        f"({model_id}) does not support image input. The images were not included. "
-        "Please switch to a vision-enabled model to process images."
-    )
+def dedupe_urls(urls: list[str]) -> list[str]:
+    return list(dict.fromkeys(urls))
 
 
 def _image_provider(image_url: str) -> str | None:
@@ -69,28 +55,20 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
         linear_api_key = os.environ.get("LINEAR_API_KEY", "")
         if linear_api_key:
             return {"Authorization": linear_api_key}
-        logger.warning(
-            "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-            current_url,
-        )
     else:
         slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
         if slack_bot_token:
             return {"Authorization": f"Bearer {slack_bot_token}"}
-        logger.warning(
-            "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
-            current_url,
-        )
+    logger.warning(
+        "Provider credential not set; fetching image unauthenticated",
+        extra={"image_provider": provider, "image_url": current_url},
+    )
     return None
 
 
-async def fetch_image_block(
-    image_url: str,
-    client: httpx.AsyncClient,
-) -> ImageContentBlock | TextContentBlock | None:
-    """Fetch image bytes and build a model content block."""
+async def fetch_image(image_url: str, client: httpx.AsyncClient) -> MediaUpload | None:
+    """Download one linked image, or None when it is unusable."""
     try:
-        logger.debug("Fetching image from %s", image_url)
         response, blocked = await request_with_safe_redirects(
             client,
             "GET",
@@ -99,7 +77,8 @@ async def fetch_image_block(
         )
         if blocked:
             logger.warning(
-                "Refusing to fetch image (SSRF guard) %s: %s", image_url, blocked["content"]
+                "Refusing to fetch image",
+                extra={"image_url": image_url, "ssrf_reason": blocked["content"]},
             )
             return None
         if response is None:
@@ -107,45 +86,52 @@ async def fetch_image_block(
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
         if not content_type:
-            guessed, _ = mimetypes.guess_type(image_url)
-            if not guessed:
-                logger.warning(
-                    "Could not determine content type for %s; skipping image",
-                    image_url,
-                )
-                return None
-            content_type = guessed
-
-        supported_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-        if content_type not in supported_types:
+            content_type = mimetypes.guess_type(image_url)[0] or ""
+        if content_type not in IMAGE_EXTENSIONS:
             logger.warning(
-                "Unsupported content type '%s' for %s; skipping image",
-                content_type,
-                image_url,
+                "Skipping image with unsupported content type",
+                extra={"image_url": image_url, "content_type": content_type},
             )
             return None
-        if len(response.content) > _MAX_IMAGE_BYTES:
+        if len(response.content) > MAX_MEDIA_BYTES:
             logger.warning(
-                "Image %s exceeds the %d-byte limit; skipping image",
-                image_url,
-                _MAX_IMAGE_BYTES,
+                "Skipping image above the size limit",
+                extra={"image_url": image_url, "image_bytes": len(response.content)},
             )
-            return create_text_block(
-                "An attached image was skipped because it exceeded the 10 MiB size limit."
-            )
-
-        encoded = base64.b64encode(response.content).decode("ascii")
+            return None
         logger.info(
-            "Fetched image %s (%s, %d bytes)",
-            image_url,
-            content_type,
-            len(response.content),
+            "Fetched image",
+            extra={
+                "image_url": image_url,
+                "content_type": content_type,
+                "image_bytes": len(response.content),
+            },
         )
-        return create_image_block(base64=encoded, mime_type=content_type)
+        return MediaUpload(data=response.content, mime_type=content_type, source_url=image_url)
     except Exception:
-        logger.exception("Failed to fetch image from %s", image_url)
+        logger.exception("Failed to fetch image", extra={"image_url": image_url})
         return None
 
 
-def dedupe_urls(urls: list[str]) -> list[str]:
-    return list(dict.fromkeys(urls))
+async def fetch_images(image_urls: list[str]) -> dict[str, MediaUpload]:
+    """Fetch every URL that yields a usable image, keyed by URL."""
+    if not image_urls:
+        return {}
+    uploads: dict[str, MediaUpload] = {}
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        for image_url in dedupe_urls(image_urls):
+            upload = await fetch_image(image_url, client)
+            if upload is not None:
+                uploads[image_url] = upload
+    return uploads
+
+
+async def attach_linked_images(
+    thread_id: str, image_urls: list[str], *, environment_slug: str | None = None
+) -> dict[str, MediaRef]:
+    """Fetch linked images into the thread's sandbox, keyed by the URL each came from."""
+    uploads = await fetch_images(image_urls)
+    refs = await attach_thread_media(
+        thread_id, list(uploads.values()), environment_slug=environment_slug
+    )
+    return dict(zip(uploads, refs, strict=True))
