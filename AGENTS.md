@@ -6,7 +6,7 @@ Open SWE is a LangGraph + Deep Agents coding-agent framework. Each thread uses a
 
 ## Commands
 
-Dependencies are managed with `uv`. Tests use pytest, lint/format use Ruff, and type checking uses basedpyright. Python 3.14 is required.
+Dependencies are managed with `uv`. Tests use pytest, lint/format use Ruff, and type checking uses ty. Python 3.14 is required.
 
 ```bash
 make install
