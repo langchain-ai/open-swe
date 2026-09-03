@@ -26,6 +26,7 @@
 # misc
 .DS_Store
 node_modules/
+/artifacts/
 .vscode/
 *.pem
 *.key
