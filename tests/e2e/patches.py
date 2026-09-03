@@ -72,7 +72,7 @@ def apply() -> None:
     # Every module that bound the name at import time needs the stub: minting an
     # installation token needs the App's private key, which no test has.
     from agent import reviewer as reviewer_module
-    from agent.utils import github_app
+    from agent.github import app as github_app
     from agent.webhooks import common as webhook_common
 
     github_app.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry

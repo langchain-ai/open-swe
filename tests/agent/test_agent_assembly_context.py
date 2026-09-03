@@ -280,7 +280,10 @@ async def test_agent_loads_browser_tools_dynamically_without_a_browser_subagent(
     assert isinstance(middleware, list)
     assert isinstance(subagents, list)
     assert browser_tool not in tools
-    assert {subagent["name"] for subagent in subagents} == {"general-purpose"}
+    assert {subagent["name"] for subagent in subagents} == {
+        "general-purpose",
+        "pr-self-review",
+    }
 
     dynamic_tools = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
     loader = dynamic_tools.tools[0]
