@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import weakref
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -359,8 +360,8 @@ async def record_agent_run_completion(*, run_id: str, usage: RunUsageSummary | N
 
 
 async def record_agent_run_cost(*, run_id: str, cost_usd: float) -> None:
-    """Store the cumulative LangSmith thread cost for an existing run."""
-    if not run_id or cost_usd < 0:
+    """Store the LangSmith cost for an existing run."""
+    if not run_id or not math.isfinite(cost_usd) or cost_usd < 0:
         return
     key = _store_key("run", run_id)
 
@@ -611,7 +612,6 @@ def _new_user(key: str, record: dict[str, Any], aliases: dict[str, str]) -> dict
         "deletions": 0,
         "total_tokens": 0,
         "total_cost_usd": 0.0,
-        "thread_costs": {},
         "run_duration_ms": 0,
         "finished_runs": 0,
         "models": Counter(),
@@ -668,12 +668,13 @@ async def list_agent_usage_leaderboard(
         user["agent_runs"] += 1
         user["total_tokens"] += _int(record.get("total_tokens"))
         cost_usd = record.get("cost_usd")
-        if isinstance(cost_usd, int | float) and not isinstance(cost_usd, bool):
-            thread_id = record.get("thread_id")
-            if isinstance(thread_id, str) and thread_id:
-                user["thread_costs"][thread_id] = max(
-                    user["thread_costs"].get(thread_id, 0.0), float(cost_usd)
-                )
+        if (
+            isinstance(cost_usd, int | float)
+            and not isinstance(cost_usd, bool)
+            and math.isfinite(cost_usd)
+            and cost_usd >= 0
+        ):
+            user["total_cost_usd"] += float(cost_usd)
         created_at_ms = _timestamp_ms(record.get("created_at_ms"))
         finished_at_ms = _timestamp_ms(record.get("finished_at_ms"))
         if created_at_ms and finished_at_ms >= created_at_ms:
@@ -697,9 +698,6 @@ async def list_agent_usage_leaderboard(
         user["additions"] += additions
         user["deletions"] += deletions
         user["agent_loc"] += additions + deletions
-
-    for user in users.values():
-        user["total_cost_usd"] = sum(user["thread_costs"].values())
 
     ordered = sorted(
         users.values(),

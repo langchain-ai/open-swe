@@ -150,7 +150,7 @@ async def test_leaderboard_aggregates_run_usage_with_partial_data(monkeypatch):
 
     row = payload["rows"][0]
     assert row["total_tokens"] == 400
-    assert row["total_cost_usd"] == 1.25
+    assert row["total_cost_usd"] == 2.25
     assert row["avg_run_seconds"] == 20
 
 

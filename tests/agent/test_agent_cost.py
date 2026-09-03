@@ -26,7 +26,7 @@ def _state(attempt: int) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_refresh_writes_cumulative_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refresh_writes_run_cost(monkeypatch: pytest.MonkeyPatch) -> None:
     now = datetime.now(UTC)
     monkeypatch.setattr(
         agent_cost,
@@ -39,6 +39,9 @@ async def test_refresh_writes_cumulative_cost(monkeypatch: pytest.MonkeyPatch) -
     result = await agent_cost.run_agent_cost_refresh(_state(0), client=_Client())
 
     assert result == {"status": "updated"}
+    agent_cost.get_langsmith_thread_cost.assert_awaited_once_with(
+        "thread-1", "run-1", run_only=True
+    )
     record.assert_awaited_once_with(run_id="run-1", cost_usd=1.25)
 
 

@@ -142,8 +142,10 @@ async def get_langsmith_thread_cost(
     thread_id: str,
     prepare_run_id: str,
     project_name: str = AGENT_TRACING_PROJECT,
+    *,
+    run_only: bool = False,
 ) -> LangSmithThreadCost | None:
-    """Return a cumulative thread cost correlated to a completed agent run."""
+    """Return a fresh thread or run cost correlated to a completed agent run."""
     client = _build_prod_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
@@ -167,11 +169,13 @@ async def get_langsmith_thread_cost(
         ]
         if not target_times:
             return None
-        stats = await client.threads.stats(
-            thread_id,
-            session_id=project_id,
-            selects=["TOTAL_COST", "LAST_END_TIME"],
-        )
+        stats_kwargs: dict[str, Any] = {
+            "session_id": project_id,
+            "selects": ["TOTAL_COST", "LAST_END_TIME"],
+        }
+        if run_only:
+            stats_kwargs["filter"] = _langsmith_metadata_filter("prepare_run_id", prepare_run_id)
+        stats = await client.threads.stats(thread_id, **stats_kwargs)
     except LangSmithNotFoundError as exc:
         raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
     except Exception as exc:  # noqa: BLE001

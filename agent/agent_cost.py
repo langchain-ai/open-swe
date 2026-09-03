@@ -72,7 +72,7 @@ async def schedule_agent_cost_refresh(
 async def run_agent_cost_refresh(
     state: Mapping[str, Any], *, client: LangGraphClient | None = None
 ) -> dict[str, Any]:
-    """Store cumulative thread cost or enqueue the next bounded attempt."""
+    """Store one run's cost or enqueue the next bounded attempt."""
     client = client or langgraph_client()
     raw_attempt = state.get("attempt")
     attempt = (
@@ -83,7 +83,9 @@ async def run_agent_cost_refresh(
         return {"status": "unavailable", "reason": "invalid payload"}
 
     try:
-        snapshot = await get_langsmith_thread_cost(payload["thread_id"], payload["run_id"])
+        snapshot = await get_langsmith_thread_cost(
+            payload["thread_id"], payload["run_id"], run_only=True
+        )
     except LangSmithCostUnavailable as exc:
         return {"status": "unavailable", "reason": str(exc)}
     except Exception:  # noqa: BLE001
