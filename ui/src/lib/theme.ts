@@ -32,11 +32,17 @@ export function resolveTheme(theme: Theme): ResolvedTheme {
   return theme
 }
 
+/** Browser chrome colour per resolved theme, mirroring `--background`. */
+export const THEME_COLOR = { light: "#fcfcfc", dark: "#0a0a0a" } as const
+
 function applyTheme(resolved: ResolvedTheme) {
   if (typeof document === "undefined") return
   const root = document.documentElement
   root.classList.toggle("dark", resolved === "dark")
   root.style.colorScheme = resolved
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", THEME_COLOR[resolved])
 }
 
 /**
