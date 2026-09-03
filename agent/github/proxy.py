@@ -45,7 +45,7 @@ def _parse_expiry(expires_at: Any) -> datetime | None:
     if isinstance(expires_at, int | float):
         try:
             return datetime.fromtimestamp(float(expires_at), tz=UTC)
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             return None
     if isinstance(expires_at, str):
         raw = expires_at.strip()

@@ -28,6 +28,7 @@ from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
 
@@ -70,20 +71,57 @@ def verify_run_complete_token(token: str | None) -> bool:
     return token is not None and hmac.compare_digest(token, secret)
 
 
-def _failure_text(status: str, dashboard_url: str | None = None) -> str:
-    if status == "timeout":
-        reason = "timed out"
-    elif status == "interrupted":
-        reason = "was interrupted before it could finish"
-    else:
-        reason = "hit an unexpected error"
-    text = warning(
-        f"Open SWE wasn't able to finish that — the run {reason}. "
-        "Send another message and it will pick this back up."
-    )
+_REASON_TEXT = {
+    "provider_overloaded": "the model provider was overloaded and never recovered",
+    "provider_rate_limited": "the model provider rate-limited it",
+    "provider_unavailable": "the model provider kept returning errors",
+    "provider_timeout": "a model call timed out",
+    "context_too_long": "the conversation outgrew the model's context window",
+    "model_unavailable": "the selected model isn't available to this workspace",
+    "sandbox_unreachable": "the run lost its sandbox",
+    "step_limit": "the run hit its step limit",
+}
+_DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
+_REASON_FOLLOW_UP = {
+    "context_too_long": "Start a new thread to continue.",
+    "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+}
+
+
+def _failure_text(
+    status: str, dashboard_url: str | None = None, reason_code: str | None = None
+) -> str:
+    reason = _REASON_TEXT.get(reason_code or "")
+    if reason is None:
+        if status == "timeout":
+            reason = "the run timed out"
+        elif status == "interrupted":
+            reason = "the run was interrupted before it could finish"
+        else:
+            reason = "the run hit an unexpected error"
+    follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
+    text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
     if dashboard_url:
         text += f" You can view the error in <{dashboard_url}|Open SWE Web>."
     return text
+
+
+def _failure_reason_code(error: Any, metadata: dict[str, Any], run_id: str | None) -> str | None:
+    """Classify the failure, preferring the in-run record over the class name alone.
+
+    The recorded classification is only trusted when it names the same exception
+    the run actually died with — a run can log a transient error, recover from it,
+    and then fail for an unrelated reason.
+    """
+    error_type = error.get("error") if isinstance(error, dict) else None
+    error_type = error_type if isinstance(error_type, str) else None
+    recorded = metadata.get(LAST_MODEL_ERROR_KEY)
+    if isinstance(recorded, dict) and recorded.get("error_type") == error_type:
+        recorded_run = recorded.get("run_id")
+        code = recorded.get("code")
+        if isinstance(code, str) and (recorded_run is None or recorded_run == run_id):
+            return code
+    return code_for_error_type(error_type)
 
 
 async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]) -> None:
@@ -135,16 +173,18 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
         )
 
 
-async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: str) -> bool:
+async def _post_failure_reply(
+    thread_id: str, metadata: dict[str, Any], status: str, reason_code: str | None = None
+) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
     ctx = SourceContext.from_metadata(metadata)
-    text = _failure_text(status)
+    text = _failure_text(status, reason_code=reason_code)
 
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            slack_text = _failure_text(status, dashboard_thread_url(thread_id))
+            slack_text = _failure_text(status, dashboard_thread_url(thread_id), reason_code)
             return await post_slack_thread_reply(
                 location[0], location[1], slack_text, agent_thread_id=thread_id
             )
@@ -310,6 +350,27 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if status not in _TERMINAL_FAILURE_STATUSES:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
 
+    error = payload.get("error")
+    # The platform serializes the exception (class name, and the message when its
+    # type is allowlisted) — there is no traceback to attach on this side.
+    error_attributes = (
+        {"error": {"kind": error.get("error"), "message": error.get("message")}}
+        if isinstance(error, dict)
+        else {}
+    )
+    logger.error(
+        "Run failed",
+        extra={
+            **error_attributes,
+            "run_failure": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "status": status,
+                "error": error,
+            },
+        },
+    )
+
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -329,7 +390,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
 
-    posted = await _post_failure_reply(thread_id, metadata, status)
+    reason_code = _failure_reason_code(error, metadata, run_id)
+    posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 
@@ -340,5 +402,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
-    logger.info("Posted failure reply for thread %s (status=%s)", thread_id, status)
+    logger.info(
+        "Posted failure reply",
+        extra={"failure_reply": {"thread_id": thread_id, "status": status, "code": reason_code}},
+    )
     return {"status": "ok", "reason": "failure reply posted"}

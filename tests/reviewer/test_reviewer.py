@@ -42,7 +42,7 @@ def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
 
 
 class _DummyAgent:
-    def with_config(self, config: dict[str, object]) -> "_DummyAgent":
+    def with_config(self, config: dict[str, object]) -> _DummyAgent:
         self.config = config
         return self
 

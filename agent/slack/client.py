@@ -82,7 +82,7 @@ def _slack_auth_headers() -> dict[str, str]:
 def _parse_ts(ts: str | None) -> float:
     try:
         return float(ts or "0")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
 
 
@@ -881,7 +881,7 @@ async def upload_slack_thread_file(
     except httpx.HTTPError as exc:
         logger.exception("Slack file upload failed")
         return None, f"http_error: {type(exc).__name__}"
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.exception("Slack file upload returned an invalid response")
         return None, "invalid_slack_response"
 

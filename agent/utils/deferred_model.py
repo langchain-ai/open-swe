@@ -22,7 +22,7 @@ class DeferredErrorModel(BaseChatModel):
                 params["ls_provider"] = self.model_id.split(":", 1)[0]
         return params
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "DeferredErrorModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> DeferredErrorModel:
         return self
 
     def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any):
