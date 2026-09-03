@@ -1,4 +1,7 @@
+import getpass
 import json
+import os
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -7,6 +10,7 @@ import pytest
 from blockbuster import BlockBuster
 
 from agent.desktop import (
+    _artifacts_root,
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
@@ -96,3 +100,24 @@ async def test_artifact_routes_reject_a_traversing_thread_id(
     for backend in routes.values():
         root = Path(str(backend.cwd)).resolve()
         assert artifacts.resolve() in root.parents
+
+
+@pytest.mark.parametrize("username", ["ada", "Ada Lovelace", "../../etc", "DOMAIN\ada"])
+def test_artifacts_root_falls_back_to_the_login_name_without_getuid(
+    username: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``os.getuid`` is POSIX-only, so the desktop backend must not depend on it.
+
+    Exercised on every platform: without this the fallback is only ever reached
+    on Windows, which CI does not run.
+    """
+    monkeypatch.delenv("OPEN_SWE_LOCAL_ARTIFACTS_DIR", raising=False)
+    monkeypatch.delattr(os, "getuid", raising=False)
+    monkeypatch.setattr(getpass, "getuser", lambda: username)
+
+    root = _artifacts_root()
+
+    # One path segment directly under the temp dir — a hostile USERNAME must not
+    # escape it, since getpass.getuser() reads the environment.
+    assert root.parent == Path(tempfile.gettempdir())
+    assert root.name.startswith("open-swe-artifacts-")

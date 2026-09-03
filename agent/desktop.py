@@ -1,4 +1,5 @@
 import asyncio
+import getpass
 import json
 import os
 import re
@@ -71,7 +72,12 @@ def _artifacts_root() -> Path:
     configured = os.environ.get("OPEN_SWE_LOCAL_ARTIFACTS_DIR")
     if configured:
         return Path(configured)
-    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
+    # os.getuid is POSIX-only; fall back to the login name so the desktop
+    # backend still starts on Windows. The value only has to keep two users'
+    # artifact roots apart in a shared temp dir.
+    getuid = getattr(os, "getuid", None)
+    owner = getuid() if getuid else re.sub(r"[^A-Za-z0-9._-]", "-", getpass.getuser())
+    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{owner}"
 
 
 async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
