@@ -51,6 +51,34 @@ describe("groupThreadsForView", () => {
     ).toEqual(threads.map((item) => item.id).sort())
   })
 
+  it("surfaces a viewed thread whose pull requests all closed as needing attention", () => {
+    const groups = groupThreadsForView(
+      [
+        thread({
+          id: "prs",
+          status: "finished",
+          attentionReason: "prs_closed",
+        }),
+        thread({ id: "quiet", status: "finished" }),
+        thread({
+          id: "done",
+          status: "finished",
+          attentionReason: "prs_closed",
+          resolved: true,
+        }),
+      ],
+      "focus"
+    )
+
+    expect(
+      groups.map((group) => [group.key, group.threads.map((item) => item.id)])
+    ).toEqual([
+      ["attention", ["prs"]],
+      ["ready", ["quiet"]],
+      ["done", ["done"]],
+    ])
+  })
+
   it("uses the canonical status order without treating resolved as a status", () => {
     const groups = groupThreadsForView(
       [

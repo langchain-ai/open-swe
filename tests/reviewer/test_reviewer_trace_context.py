@@ -10,6 +10,7 @@ from agent.review.trace_context import (
     prepare_pr_trace_context,
     resolve_pr_trace,
 )
+from agent.run_config import RunConfig
 
 
 def _run(
@@ -93,7 +94,7 @@ class _CapturingSandbox:
         return [type("Result", (), {"error": None})()]
 
 
-def _config(**overrides: Any) -> dict[str, Any]:
+def _config(**overrides: Any) -> RunConfig:
     configurable: dict[str, Any] = {
         "repo": {"owner": "langchain-ai", "name": "open-swe"},
         "pr_number": 7,
@@ -103,7 +104,7 @@ def _config(**overrides: Any) -> dict[str, Any]:
         "base_sha": "def1234567890abcdef",
     }
     configurable.update(overrides)
-    return configurable
+    return RunConfig.parse(configurable)
 
 
 def _patches(client: _FakeLangSmithClient) -> Any:
@@ -131,7 +132,7 @@ async def test_prepare_pr_trace_context_resolves_on_branch_alone() -> None:
     p1, p2, p3, p4 = _patches(fake_client)
     with p1, p2, p3, p4:
         result = await prepare_pr_trace_context(
-            configurable=_config(),
+            cfg=_config(),
             sandbox_backend=sandbox,  # type: ignore[arg-type]
             work_dir="/workspace",
         )
@@ -176,7 +177,7 @@ async def test_prepare_pr_trace_context_picks_dominant_thread() -> None:
     p1, p2, p3, p4 = _patches(fake_client)
     with p1, p2, p3, p4:
         result = await prepare_pr_trace_context(
-            configurable=_config(branch_name="feature/dom"),
+            cfg=_config(branch_name="feature/dom"),
             sandbox_backend=sandbox,  # type: ignore[arg-type]
             work_dir="/workspace",
         )
@@ -192,7 +193,7 @@ async def test_prepare_pr_trace_context_falls_back_to_head_sha() -> None:
     p1, p2, p3, p4 = _patches(fake_client)
     with p1, p2, p3, p4:
         result = await prepare_pr_trace_context(
-            configurable=_config(branch_name="main"),
+            cfg=_config(branch_name="main"),
             sandbox_backend=sandbox,  # type: ignore[arg-type]
             work_dir="/workspace",
         )
@@ -211,7 +212,7 @@ async def test_prepare_pr_trace_context_returns_none_without_match() -> None:
     p1, p2, p3, p4 = _patches(fake_client)
     with p1, p2, p3, p4:
         result = await prepare_pr_trace_context(
-            configurable=_config(branch_name="main", head_sha=""),
+            cfg=_config(branch_name="main", head_sha=""),
             sandbox_backend=sandbox,  # type: ignore[arg-type]
             work_dir="/workspace",
         )
@@ -227,7 +228,7 @@ async def test_resolve_pr_trace_returns_resolution() -> None:
     fake_client = _FakeLangSmithClient()
     p1, p2, p3, p4 = _patches(fake_client)
     with p1, p2, p3, p4:
-        result = await resolve_pr_trace(configurable=_config())
+        result = await resolve_pr_trace(cfg=_config())
 
     assert result.resolved is True
     assert result.thread_id == "thread-1"
@@ -243,7 +244,7 @@ async def test_resolve_pr_trace_reports_reason_when_unresolved() -> None:
     fake_client = _FakeLangSmithClient()
     p1, p2, p3, p4 = _patches(fake_client)
     with p1, p2, p3, p4:
-        result = await resolve_pr_trace(configurable=_config(branch_name="main", head_sha=""))
+        result = await resolve_pr_trace(cfg=_config(branch_name="main", head_sha=""))
 
     assert result.resolved is False
     assert result.thread_id is None

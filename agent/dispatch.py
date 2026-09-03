@@ -44,11 +44,12 @@ from agent.input_messages import (
     SystemIdentity,
     build_run_input,
 )
+from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
-RunConfig = dict[str, Any]
+LangGraphRunConfig = dict[str, Any]
 
 # Mirrors ``langgraph_api.event_streaming``'s ``EVENT_STREAMING_V2_CONFIG_KEY``.
 # Not imported: ``langgraph-api`` is the serving runtime, not a dependency of
@@ -77,32 +78,29 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
     people: list[PersonIdentity] = []
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
-    login = configurable.get("github_login")
-    email = configurable.get("user_email")
-    slack_thread = configurable.get("slack_thread")
+    cfg = RunConfig.parse(configurable)
+    login = cfg.github_login
+    email = cfg.user_email
+    slack_thread = cfg.slack_thread
     sender_id = ""
     channel_id: str | None = None
-    if surface == "slack" and isinstance(slack_thread, dict):
-        user_id = slack_thread.get("triggering_user_id")
-        slack_channel_id = slack_thread.get("channel_id")
-        if isinstance(user_id, str) and user_id:
-            sender_id = f"slack:{user_id}"
+    if surface == "slack" and slack_thread is not None:
+        if slack_thread.triggering_user_id:
+            sender_id = f"slack:{slack_thread.triggering_user_id}"
             person: PersonIdentity = {"id": sender_id, "platform": "slack"}
-            display_name = slack_thread.get("triggering_user_name")
-            timezone = slack_thread.get("triggering_user_timezone")
-            if isinstance(display_name, str) and display_name:
-                person["display_name"] = display_name
-            if isinstance(timezone, str) and timezone:
-                person["timezone"] = timezone
-            if isinstance(login, str) and login:
+            if slack_thread.triggering_user_name:
+                person["display_name"] = slack_thread.triggering_user_name
+            if slack_thread.triggering_user_timezone:
+                person["timezone"] = slack_thread.triggering_user_timezone
+            if login:
                 person["github_login"] = login
-            if isinstance(email, str) and email:
+            if email:
                 person["email"] = email
             people.append(person)
-        if isinstance(slack_channel_id, str) and slack_channel_id:
-            channel_id = f"slack:{slack_channel_id}"
+        if slack_thread.channel_id:
+            channel_id = f"slack:{slack_thread.channel_id}"
             channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
-            channel_context = slack_thread.get("channel_context")
+            channel_context = slack_thread.channel_context
             if isinstance(channel_context, dict):
                 name = channel_context.get("name") or channel_context.get("name_normalized")
                 topic = channel_context.get("topic")
@@ -113,17 +111,16 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
                     channel["topic"] = topic
                 if isinstance(purpose, str) and purpose:
                     channel["purpose"] = purpose
-            thread_ts = slack_thread.get("thread_ts")
-            if isinstance(thread_ts, str) and thread_ts:
-                channel["thread_id"] = thread_ts
+            if slack_thread.thread_ts:
+                channel["thread_id"] = slack_thread.thread_ts
             channels.append(channel)
-    if not sender_id and isinstance(login, str) and login:
+    if not sender_id and login:
         sender_id = f"github:{login}"
         person = {"id": sender_id, "platform": "github", "github_login": login}
-        if isinstance(email, str) and email:
+        if email:
             person["email"] = email
         people.append(person)
-    if not sender_id and surface == "linear" and isinstance(email, str) and email:
+    if not sender_id and surface == "linear" and email:
         sender_id = f"linear:{email.lower()}"
         people.append({"id": sender_id, "platform": "linear", "email": email})
     kind = "human" if sender_id else "system"
@@ -212,9 +209,9 @@ def dispatch_client() -> LangGraphClient:
 
 
 def prepare_run_config(
-    config: RunConfig | None,
+    config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
-) -> RunConfig:
+) -> LangGraphRunConfig:
     run_config = dict(config or {})
     configurable = run_config.get("configurable")
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
@@ -236,7 +233,7 @@ async def create_durable_run(
     *,
     input: RunInput,
     source: str,
-    config: RunConfig | None = None,
+    config: LangGraphRunConfig | None = None,
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",

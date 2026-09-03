@@ -371,6 +371,7 @@ export interface AgentThread {
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
+  attentionReason?: string | null
   createdAt: number
   updatedAt: number
   traceUrl?: string | null

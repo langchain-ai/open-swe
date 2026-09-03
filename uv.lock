@@ -8,9 +8,9 @@ resolution-markers = [
 ]
 
 [manifest]
-constraints = [{ name = "langgraph-api", specifier = ">=0.12.6,<0.13" }]
+constraints = [{ name = "langgraph-api", specifier = ">=0.12.7,<0.13" }]
 overrides = [
-    { name = "deepagents", specifier = "==0.7.11" },
+    { name = "deepagents", specifier = "==0.7.6" },
     { name = "wcmatch", specifier = ">=11.0" },
 ]
 
@@ -643,7 +643,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.11"
+version = "0.7.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -654,9 +654,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/e8/dfa6b3a4d43ad87ab28894a6edba167d909fbdd8d59fb356c8db0ebb53c9/deepagents-0.7.11.tar.gz", hash = "sha256:240e31cb60e4a8e3c4f9aa1ab706618bae4ea69ae6495d9fc0e3e773d551927e", size = 293354, upload-time = "2026-08-28T23:10:48.665Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/10/ce2fc605f0980c8ae453aa58071b926f63d827a3db832bff017b906c6d20/deepagents-0.7.6.tar.gz", hash = "sha256:972f81f81eca7cd16c0bd7a3f8afdab420eed64331c0ff0e7efbaf860624c7e5", size = 274879, upload-time = "2026-08-13T20:41:15.603Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/38/7d3eb8671cafefe8798d945c48bb664abbd92015446fc453093e44895788/deepagents-0.7.11-py3-none-any.whl", hash = "sha256:7f8ca58b7aa8b11fb8a18d054aa5da937700cba221b1104b5eda4469e9531382", size = 320468, upload-time = "2026-08-28T23:10:47.569Z" },
+    { url = "https://files.pythonhosted.org/packages/42/6e/dd0f081742c3e898a83874d0b110f56b0664b6241aed7da7e407f62460d9/deepagents-0.7.6-py3-none-any.whl", hash = "sha256:e85e000475cc67ad6bf1131a536d9a136e6916c807fcd21fd09f145bea09fc98", size = 301185, upload-time = "2026-08-13T20:41:14.205Z" },
 ]
 
 [[package]]
@@ -1136,8 +1136,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "python_full_version < '3.12' or python_full_version >= '3.14' or sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "python_full_version < '3.12' or python_full_version >= '3.14' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
@@ -1648,7 +1648,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-api"
-version = "0.12.6"
+version = "0.12.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -1686,9 +1686,9 @@ dependencies = [
     { name = "websockets" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/94/bf/f1006f55a74e5685fa6f1ae484c0b5e96a0663965efd4b93971462e803d4/langgraph_api-0.12.6.tar.gz", hash = "sha256:b74deab7e06192e9fe1111c248bfc569115f4741411c63fe3a5263858b66f7d8", size = 760772, upload-time = "2026-08-18T20:41:39.685Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2d/d4/25a83b4efa5485188ed533f7265e237b0bef732d9f1c0da4e5bdae8adb16/langgraph_api-0.12.9.tar.gz", hash = "sha256:aca97ddccae94b85077508d15a6e37713e203ddeebd019b8bef7ae5a90fac57a", size = 760774, upload-time = "2026-08-28T02:31:52.044Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/2d/8c1090c490ed0cfe326a2b31c0247dc309adaacc54227015f0812d04d215/langgraph_api-0.12.6-py3-none-any.whl", hash = "sha256:2c0dab54f4713b5617399df977eac1e8631e86440d4a438b68de7f73214c9902", size = 616007, upload-time = "2026-08-18T20:41:37.728Z" },
+    { url = "https://files.pythonhosted.org/packages/32/f5/a25c98765b31b66ccc15fd555c589e7f3413e9f1d578563284c52fe6a17e/langgraph_api-0.12.9-py3-none-any.whl", hash = "sha256:44fe31f1bc7fc7b9431fc1f3b3206e54a136c7144d3c803ccc108dd5a1966cd3", size = 616003, upload-time = "2026-08-28T02:31:50.631Z" },
 ]
 
 [[package]]
@@ -2125,34 +2125,34 @@ dev = [
 requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.39.10" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "deepagents", specifier = "==0.7.11" },
-    { name = "exa-py", specifier = ">=2.16.2" },
+    { name = "deepagents", specifier = "==0.7.6" },
+    { name = "exa-py", specifier = ">=2.18.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
-    { name = "fireworks-ai", specifier = ">=1.2.5" },
+    { name = "fireworks-ai", specifier = ">=1.2.9" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "langchain", specifier = ">=1.3.9" },
-    { name = "langchain-anthropic", specifier = ">=1.5.4" },
+    { name = "langchain", specifier = ">=1.3.16" },
+    { name = "langchain-anthropic", specifier = ">=1.6.1" },
     { name = "langchain-daytona", specifier = ">=0.0.8" },
     { name = "langchain-e2b", specifier = "==0.0.6" },
-    { name = "langchain-fireworks", specifier = ">=1.5.2" },
-    { name = "langchain-google-genai", specifier = ">=4.3.2" },
-    { name = "langchain-mcp-adapters", specifier = ">=0.3.1" },
+    { name = "langchain-fireworks", specifier = ">=1.6.0" },
+    { name = "langchain-google-genai", specifier = ">=4.3.5" },
+    { name = "langchain-mcp-adapters", specifier = ">=0.3.2" },
     { name = "langchain-modal", specifier = ">=0.0.6" },
-    { name = "langchain-openai", specifier = ">=1.4.1,<2.0.0" },
+    { name = "langchain-openai", specifier = ">=1.6.0,<2.0.0" },
     { name = "langchain-runloop", specifier = ">=0.0.7" },
-    { name = "langgraph", specifier = ">=1.2.10" },
+    { name = "langgraph", specifier = ">=1.2.11" },
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.31" },
-    { name = "langgraph-sdk", specifier = ">=0.4.2" },
+    { name = "langgraph-sdk", specifier = ">=0.4.3" },
     { name = "langsmith", specifier = ">=0.12.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
-    { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.20.0" },
-    { name = "pyjwt", specifier = ">=2.12.1" },
+    { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.21.0" },
+    { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.1" },
-    { name = "stagehand", specifier = ">=3.22.0,<4.0.0" },
-    { name = "uvicorn", specifier = ">=0.52.0" },
-    { name = "websockets", specifier = ">=15.0.1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.4" },
+    { name = "stagehand", specifier = ">=3.23.0,<4.0.0" },
+    { name = "uvicorn", specifier = ">=0.52.4" },
+    { name = "websockets", specifier = ">=16.1.1" },
 ]
 provides-extras = ["dev"]
 
