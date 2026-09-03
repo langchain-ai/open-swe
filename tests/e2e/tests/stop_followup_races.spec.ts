@@ -112,11 +112,30 @@ async function raceQueuedSendAgainstStop(
   const response = await messageResponse;
   await page.waitForTimeout(250);
   cancellation.release();
+  await expect(
+    page.getByTestId("queued-message").filter({ hasText: followUp }),
+  ).toHaveCount(0);
   expect(response.status()).toBe(409);
 }
 
 test.describe("stop followed by new input", () => {
   test.setTimeout(45_000);
+
+  for (const stopWith of ["click", "escape"] as const) {
+    test(`keeps a follow-up visible after refresh when ${stopWith}-to-stop overtakes its queue request`, async ({
+      page,
+    }) => {
+      const threadId = await openHeldRun(page);
+      const followUp = `Keep the ${stopWith} follow-up after refresh.`;
+      await raceQueuedSendAgainstStop(page, threadId, followUp, stopWith);
+      await page.reload();
+
+      await expect(
+        page.getByTestId("user-message").filter({ hasText: followUp }),
+      ).toBeVisible();
+    });
+  }
+
   test("does not drop a follow-up whose queue request overlaps click-to-stop", async ({
     page,
   }) => {
