@@ -110,7 +110,7 @@ Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE ad
 - **GitHub** — Start tasks from issues, request changes from pull request conversations, run reviews, and continue work on the same branch.
 - **Slack** — Start from a channel, thread, or code channel and receive progress and delivery updates in context.
 - **Linear** — Invoke Open SWE from an issue and post results back to the issue.
-- **Desktop (experimental)** — Use the packaged dashboard and run the same agent against projects on your Mac with a local backend.
+- **Desktop (experimental)** — Run the same agent against local projects. Packaged releases currently target macOS; source builds also support Windows and Linux.
 
 ## Control and safety
 
@@ -129,7 +129,7 @@ Sandboxes can have network access and powerful tools. Deployments should use lea
 
 ## Getting started
 
-Open SWE includes a LangGraph backend, a web dashboard, and an experimental desktop client for macOS.
+Open SWE includes a LangGraph backend, a web dashboard, and an experimental desktop client.
 
 - **[Installation Guide](docs/INSTALLATION.md)** — Set up local development, the GitHub App, LangSmith, integrations, and production deployment
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
