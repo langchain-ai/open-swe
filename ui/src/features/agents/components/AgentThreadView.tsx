@@ -286,12 +286,39 @@ export function AgentThreadView({
           </div>
         )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {hasConversation ? (
+          {isHydrating ? (
+            <div className="flex flex-1 items-center justify-center px-6">
+              <img
+                src="/logo-mark.png"
+                alt="Loading conversation"
+                className="size-12 animate-pulse"
+              />
+            </div>
+          ) : (
             <Messages
               messages={baseMessages}
               threadId={thread.id}
               showPlanArtifact={
                 thread.planStatus === "ready" || thread.planStatus === "shared"
+              }
+              emptyState={
+                <div className="flex min-h-60 items-center justify-center">
+                  {hydrationFailed ? (
+                    <Alert variant="error" className="max-w-3xl">
+                      <CircleAlertIcon />
+                      <AlertDescription>
+                        <span>
+                          This thread&apos;s messages could not be loaded.
+                          Reload to try again.
+                        </span>
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <p className="text-xs text-muted-foreground/70">
+                      This thread has no messages yet.
+                    </p>
+                  )}
+                </div>
               }
               onOpenFile={handleOpenFile}
               queuedMessages={queuedMessages}
@@ -302,32 +329,6 @@ export function AgentThreadView({
               pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
             />
-          ) : isHydrating ? (
-            <div className="flex flex-1 items-center justify-center px-6">
-              <img
-                src="/logo-mark.png"
-                alt="Loading conversation"
-                className="size-12 animate-pulse"
-              />
-            </div>
-          ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-              {hydrationFailed ? (
-                <Alert variant="error" className="max-w-3xl">
-                  <CircleAlertIcon />
-                  <AlertDescription>
-                    <span>
-                      This thread&apos;s messages could not be loaded. Reload to
-                      try again.
-                    </span>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <p className="text-xs text-muted-foreground/70">
-                  This thread has no messages yet.
-                </p>
-              )}
-            </div>
           )}
           {!isHydrating && (
             <AgentComposerDock>

@@ -68,6 +68,7 @@ export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
   showPlanArtifact = false,
+  emptyState,
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   isStreaming,
@@ -276,6 +277,7 @@ export const Messages = memo(function MessagesComponent({
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
+            {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
               const isLastMessage = index === visibleMessages.length - 1
               const messageIsStreaming = isStreaming && isLastMessage
