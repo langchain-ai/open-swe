@@ -107,7 +107,7 @@ def exception_fields(exc: BaseException) -> dict[str, Any]:
 def _bounded(body: Any) -> Any:
     try:
         rendered = json.dumps(body, default=str)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         rendered = str(body)
     if len(rendered) <= _MAX_BODY_CHARS:
         return body

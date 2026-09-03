@@ -50,7 +50,7 @@ class ProfileUpdate(BaseModel):
     review_draft_prs: bool | None = None
 
     @model_validator(mode="after")
-    def _normalize_stale_model_pairs(self) -> "ProfileUpdate":
+    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
         model, effort = _normalize_stale_model_pair(
             self.default_model,
             self.reasoning_effort,

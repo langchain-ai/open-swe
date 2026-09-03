@@ -42,7 +42,7 @@ class _FakeClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_FakeClient":
+    async def __aenter__(self) -> _FakeClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -72,7 +72,7 @@ class _RoutingClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_RoutingClient":
+    async def __aenter__(self) -> _RoutingClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:

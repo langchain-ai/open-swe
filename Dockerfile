@@ -1,4 +1,4 @@
-FROM langchain/langgraph-api:0.13.2-py3.12
+FROM langchain/langgraph-api:0.13.3-py3.14
 
 ADD . /deps/open-swe
 RUN cd /deps/open-swe \

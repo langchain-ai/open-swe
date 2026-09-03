@@ -82,7 +82,7 @@ class OpenAIReasoning(TypedDict, total=False):
     summary: OpenAIReasoningSummary
 
 
-DEFAULT_LLM_REASONING: "OpenAIReasoning" = {"effort": "medium", "summary": "auto"}
+DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium", "summary": "auto"}
 
 
 class AnthropicThinking(TypedDict, total=False):

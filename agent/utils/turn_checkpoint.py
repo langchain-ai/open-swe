@@ -197,7 +197,7 @@ def _decode(value: Any) -> tuple[str | None, bool]:
         return None, False
     try:
         return base64.b64decode(value).decode("utf-8"), False
-    except (UnicodeDecodeError, binascii.Error, ValueError):
+    except UnicodeDecodeError, binascii.Error, ValueError:
         return None, True
 
 
@@ -281,7 +281,7 @@ async def read_turn_diff(
             isinstance(value, str) for value in (numstat_raw, name_status_raw, base_tree, head_tree)
         ):
             raise TypeError
-    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    except IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError:
         return {
             "status": "error",
             "files": [],
