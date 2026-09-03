@@ -36,7 +36,8 @@ async def slack_thread_reply(
 
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
-    bullet lists with "• ", ```code blocks```, > blockquotes.
+    bullet lists with "• ", ```code blocks```, > blockquotes. Code fences must be
+    bare triple backticks; do not add a language identifier such as ```sql.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
 
     To ask a user to choose from predefined options, pass `options`. Slack will
