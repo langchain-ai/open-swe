@@ -6,7 +6,6 @@ from typing import Annotated, Any
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from langgraph_sdk import get_client
@@ -39,11 +38,7 @@ async def approve_plan(
     Call this when the user approves the plan, asks to leave plan mode, or asks to
     start implementing the approved plan.
     """
-    try:
-        config = get_config()
-    except Exception:
-        config = {}
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "no thread_id in run config"}

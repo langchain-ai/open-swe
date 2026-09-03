@@ -4,8 +4,6 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.run_config import RunConfig
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.state import get_sandbox_backend
@@ -22,8 +20,7 @@ def chunk_output_as_jsonl(content: str) -> str:
 
 
 async def write_sandbox_output(tool_name: str, content: str, extension: str) -> str:
-    config = get_config()
-    thread_id = RunConfig.from_config(config).thread_id
+    thread_id = RunConfig.from_runtime().thread_id
     if not thread_id:
         raise RuntimeError("no thread_id in run config")
 

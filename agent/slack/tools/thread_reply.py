@@ -51,7 +51,7 @@ async def slack_thread_reply(
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
     Example: <@U06KD8BFY95> will tag that user in the message."""
     config = get_config()
-    cfg = RunConfig.parse(config.get("configurable"))
+    cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id

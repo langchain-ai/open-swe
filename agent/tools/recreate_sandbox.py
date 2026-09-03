@@ -3,8 +3,6 @@
 import logging
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -19,12 +17,7 @@ async def recreate_sandbox() -> dict[str, Any]:
 
     Returns ``success``, ``old_sandbox_id``, and ``new_sandbox_id`` on success.
     """
-    try:
-        config = get_config()
-    except Exception as exc:
-        return {"success": False, "error": f"Unable to read the current run config: {exc}"}
-
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not isinstance(thread_id, str) or not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}

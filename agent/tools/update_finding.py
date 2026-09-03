@@ -2,8 +2,6 @@
 
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
@@ -112,8 +110,7 @@ async def update_finding(
         if status in {"resolved", "dismissed"}:
             updates["resolution_note"] = normalized_note
 
-    config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
 
     if not updates:
         if suggestion_dropped:

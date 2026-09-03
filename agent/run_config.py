@@ -23,7 +23,7 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
@@ -52,8 +52,8 @@ class Repo(BaseModel):
     name: str = ""
 
     @classmethod
-    def parse(cls, raw: Any) -> "Repo | None":
-        if isinstance(raw, Repo):
+    def parse(cls, raw: Any) -> Self | None:
+        if isinstance(raw, cls):
             return raw
         if not isinstance(raw, Mapping):
             return None
@@ -183,9 +183,9 @@ class RunConfig(BaseModel):
     automation_slack_notification: AutomationSlackNotification | None = None
 
     @classmethod
-    def parse(cls, raw: Any) -> "RunConfig":
+    def parse(cls, raw: Any) -> Self:
         """Parse a ``configurable`` mapping, dropping only the fields that fail."""
-        if isinstance(raw, RunConfig):
+        if isinstance(raw, cls):
             return raw
         if not isinstance(raw, Mapping):
             return cls()
@@ -208,14 +208,14 @@ class RunConfig(BaseModel):
         return cls()
 
     @classmethod
-    def from_config(cls, config: Any) -> "RunConfig":
+    def from_config(cls, config: Any) -> Self:
         """Parse the ``configurable`` out of a ``RunnableConfig``."""
         if not isinstance(config, Mapping):
             return cls()
         return cls.parse(config.get("configurable"))
 
     @classmethod
-    def from_runtime(cls) -> "RunConfig":
+    def from_runtime(cls) -> Self:
         """Parse the running graph's own ``configurable``."""
         return cls.from_config(get_config())
 

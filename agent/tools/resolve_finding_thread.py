@@ -1,7 +1,5 @@
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.github.thread_token import get_github_token
 from agent.review.findings import (
     Finding,
@@ -54,8 +52,7 @@ async def resolve_finding_thread(
             "error": "Resolving or dismissing a finding requires a note with the message to post.",
         }
 
-    config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 

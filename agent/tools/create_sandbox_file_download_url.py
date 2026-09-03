@@ -2,8 +2,6 @@ import posixpath
 import shlex
 from typing import Any, Literal
 
-from langgraph.config import get_config
-
 from agent.run_config import RunConfig
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import get_async_sandbox_client
@@ -14,8 +12,7 @@ async def _resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
     if not isinstance(file_path, str) or not file_path.strip() or "\x00" in file_path:
         raise ValueError("file_path must be a non-empty sandbox path")
 
-    config = get_config()
-    thread_id = RunConfig.from_config(config).thread_id
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise ValueError("no thread_id in run config")
 

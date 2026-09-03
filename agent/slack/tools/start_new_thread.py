@@ -4,7 +4,6 @@ import uuid
 from typing import Any
 
 from fastapi import HTTPException
-from langgraph.config import get_config
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
@@ -162,8 +161,7 @@ async def slack_start_new_thread(
     default_repo: str | None = None,
 ) -> dict[str, Any]:
     """Start a Slack thread with a headline root and instructions as the first reply."""
-    config = get_config()
-    cfg = RunConfig.parse(config.get("configurable"))
+    cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}
     client = langgraph_client()

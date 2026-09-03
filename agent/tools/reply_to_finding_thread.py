@@ -1,7 +1,5 @@
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.github.thread_token import get_github_token
 from agent.review.findings import (
     FindingInteraction,
@@ -22,8 +20,7 @@ async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
     if not body.strip():
         return {"success": False, "error": "Reply body is required"}
 
-    config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 

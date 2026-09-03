@@ -5,7 +5,6 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Any
 
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.dashboard.plan_store import (
@@ -56,11 +55,7 @@ async def save_plan(
             "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
         }
 
-    try:
-        config = get_config()
-    except Exception:
-        config = {}
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "no thread_id in run config"}

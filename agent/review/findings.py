@@ -19,7 +19,6 @@ import weakref
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, TypedDict, cast
 
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 
@@ -424,8 +423,7 @@ def coerce_findings(value: Any) -> list[Finding]:
 
 def get_thread_id_from_runtime() -> str:
     """Return the thread id from the current LangGraph runnable config."""
-    config = get_config()
-    thread_id = RunConfig.from_config(config).thread_id
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         msg = "No thread_id available in runtime config"
         raise RuntimeError(msg)

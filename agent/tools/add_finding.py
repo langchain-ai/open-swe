@@ -2,7 +2,6 @@
 
 from typing import Annotated, Any
 
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.github.thread_token import get_github_token
@@ -114,8 +113,7 @@ async def add_finding(
     if start_line is not None and end_line is not None and end_line < start_line:
         return {"success": False, "error": "end_line must be >= start_line"}
 
-    config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = RunConfig.from_runtime()
     diff_line_set, diff_text = await _resolve_diff_context(state, cfg)
 
     in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(

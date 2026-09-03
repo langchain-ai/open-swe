@@ -8,8 +8,6 @@ import textwrap
 import uuid
 from typing import Any, Literal
 
-from langgraph.config import get_config
-
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 
@@ -273,8 +271,7 @@ async def _execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
 
 
 def _current_backend() -> tuple[str, Any]:
-    config = get_config()
-    thread_id = RunConfig.from_config(config).thread_id
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("No thread_id in current run config")
     backend = SANDBOX_BACKENDS.get(thread_id)
