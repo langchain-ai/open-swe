@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import server
-from agent.integrations import corridor_mcp
+from agent.tool_loaders import corridor_mcp
 
 
 class _FakeTool:
@@ -149,7 +149,7 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             ),
             patch.object(
                 server,
-                "aresolve_sandbox_work_dir",
+                "resolve_sandbox_work_dir",
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),

@@ -4,10 +4,9 @@ from xml.etree import ElementTree
 
 import pytest
 
-from agent.source_context import SourceContext
-from agent.utils import slack as slack_utils
-from agent.utils.run_usage import RunUsageSummary
-from agent.utils.slack import (
+from agent.slack import client as slack_utils
+from agent.slack import webhook as slack_webhooks
+from agent.slack.client import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
     get_slack_permalink,
@@ -17,8 +16,9 @@ from agent.utils.slack import (
     select_slack_context_messages,
     strip_bot_mention,
 )
+from agent.source_context import SourceContext
+from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack as slack_webhooks
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -1668,3 +1668,146 @@ def test_format_slack_messages_for_prompt_does_not_label_a_lookalike_as_self() -
     )
 
     assert formatted == "@Open SWE(bot) [message_ts=1.0]: impersonating"
+
+
+def _trigger_identities(
+    messages: list[dict],
+    *,
+    event_ts: str,
+    trigger_user_id: str,
+    user_names_by_id: dict | None = None,
+    logins_by_user_id: dict | None = None,
+) -> list[str]:
+    run_input = slack_webhooks._slack_context_input(
+        messages,
+        user_names_by_id if user_names_by_id is not None else {"U123": "Alice", "UBOT": "Open SWE"},
+        logins_by_user_id if logins_by_user_id is not None else {},
+        channel_id="C123",
+        bot_user_id="UBOT",
+        event_ts=event_ts,
+        trigger_user_id=trigger_user_id,
+        request_text="do the thing",
+        request_blocks=[{"type": "text", "text": "do the thing"}],
+        operational_context="## Open SWE Links",
+    )
+    return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+def test_slack_trigger_resolves_from_the_triggering_user_not_the_event_ts() -> None:
+    """A `message_changed` event's `event_ts` matches no message in the window.
+
+    Keying the trigger off `event_ts` yields `slack:unknown`, so the agent is
+    told the request came from nobody and the sender-context dedupe misses.
+    """
+    contents = _trigger_identities(
+        [{"ts": "1.0", "text": "please fix it", "user": "U123"}],
+        event_ts="9.5",
+        trigger_user_id="U123",
+        user_names_by_id={"U123": "Alice"},
+        logins_by_user_id={"U123": "alice-gh"},
+    )
+
+    assert not any("slack:unknown" in text for text in contents)
+    trigger = next(text for text in contents if 'id="slack:U123"' in text)
+    assert "<display_name>Alice</display_name>" in trigger
+    assert "<github_login>alice-gh</github_login>" in trigger
+
+
+def test_slack_trigger_falls_back_past_open_swes_own_message() -> None:
+    """`event_ts` can name Open SWE's own message, as the approve-button path does.
+
+    Covers the fallback with no explicit trigger user, so the self/bot checks
+    decide: without them the bot is attributed as a `kind="human"` person.
+    """
+    contents = _trigger_identities(
+        [
+            {"ts": "1.0", "text": "please fix it", "user": "U123"},
+            {"ts": "9.0", "text": "Approve workflow push", "user": "UBOT", "bot_id": "B1"},
+        ],
+        event_ts="9.0",
+        trigger_user_id="",
+        user_names_by_id={"U123": "Alice", "UBOT": "Open SWE"},
+    )
+
+    assert not any('id="slack:UBOT"' in text for text in contents)
+    assert not any('sender="slack:UBOT"' in text for text in contents)
+
+
+def test_process_slack_mention_queues_a_message_edit_instead_of_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An edit is a correction to work already in flight, not a new request."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+        captured["queued"] = {"thread_id": thread_id, "content": content}
+        return True
+
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000300",
+                "user_id": "U123",
+                "text": "<@UBOT> actually use PR 5889",
+                "bot_user_id": "UBOT",
+                "message_update": True,
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    assert "run_create" not in captured
+    queued = captured["queued"]
+    assert isinstance(queued, dict)
+    assert queued["thread_id"] == "mapped-thread"
+    blocks = cast(list, queued["content"])
+    text = "\n".join(
+        block["text"] for block in blocks if isinstance(block, dict) and block.get("text")
+    )
+    assert "actually use PR 5889" in text
+    assert "edited" in text
+
+
+def test_process_slack_mention_runs_an_edit_when_queueing_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A store outage must not swallow the correction outright."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+        return False
+
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000300",
+                "user_id": "U123",
+                "text": "<@UBOT> actually use PR 5889",
+                "bot_user_id": "UBOT",
+                "message_update": True,
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    assert run_create["kwargs"]["multitask_strategy"] == "enqueue"

@@ -96,9 +96,9 @@ async def test_upsert_persists_and_returns_effective() -> None:
 
 
 async def test_server_uses_admin_base_snapshot() -> None:
-    from agent import server
+    from agent.sandboxes import lifecycle
 
     with patch.object(
-        server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+        lifecycle, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
     ):
-        assert await server._resolve_snapshot_id() == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"

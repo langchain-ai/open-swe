@@ -39,17 +39,17 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.run_config import RunConfig
-
-from .dashboard.options import gate_fable_model
-from .dashboard.team_settings import (
+from agent.dashboard.options import gate_fable_model
+from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_org_review_guidelines,
     get_team_default_grouping_model,
     get_team_default_model_pair,
     get_team_fable_enabled,
 )
-from .middleware import (
+from agent.github.app import get_github_app_installation_token_with_expiry
+from agent.github.thread_token import cache_github_token_for_thread
+from agent.middleware import (
     BasePrepareRunMiddleware,
     ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
@@ -64,9 +64,9 @@ from .middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from .middleware.prepare_run import PrepareRunState
-from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from .review.diff import (
+from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
     fetch_pr_diff,
@@ -74,22 +74,23 @@ from .review.diff import (
     materialize_review_diff,
     review_diff_range,
 )
-from .review.findings import (
+from agent.review.findings import (
     REVIEW_FINDING_CAP,
     Finding,
 )
-from .review.findings import (
+from agent.review.findings import (
     list_findings as list_findings_async,
 )
-from .review.groups import maybe_generate_and_store_diff_groups
-from .review.publish import fetch_pr_review_threads
-from .review.reconcile import reconcile_findings_with_review_threads
-from .review.trace_context import (
+from agent.review.groups import maybe_generate_and_store_diff_groups
+from agent.review.publish import fetch_pr_review_threads
+from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.trace_context import (
     PRTraceContext,
     format_pr_trace_context_prompt,
     prepare_pr_trace_context,
 )
-from .runtime import (
+from agent.run_config import RunConfig
+from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
@@ -97,7 +98,10 @@ from .runtime import (
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
-from .tools import (
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
+from agent.sandboxes.state import SandboxUnreachableError
+from agent.tools import (
     add_finding,
     fetch_review_diff,
     fetch_url,
@@ -109,17 +113,12 @@ from .tools import (
     update_finding,
     web_search,
 )
-from .utils import ttl_cache
-from .utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
-from .utils.api_standards_skill import fetch_api_standards_skill
-from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token_with_expiry
-from .utils.github_token import cache_github_token_for_thread
-from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import SandboxUnreachableError
-from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
+from agent.utils import ttl_cache
+from agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
+from agent.utils.api_standards_skill import fetch_api_standards_skill
+from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from agent.utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review thread.** A
   "Pre-existing PR review threads" block below (when present) lists every
@@ -1004,7 +1003,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 self._config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
             )
             raise
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
 
         repo_owner = cfg.repo.owner if cfg.repo else ""
         repo_name = cfg.repo.name if cfg.repo else ""
@@ -1121,7 +1120,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
-            from .dashboard.review_styles import get_repo_custom_prompt
+            from agent.review.styles import get_repo_custom_prompt
 
             return await get_repo_custom_prompt(repo_owner, repo_name)
 

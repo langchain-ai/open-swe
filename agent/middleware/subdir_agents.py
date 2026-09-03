@@ -13,8 +13,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from agent.run_config import RunConfig
-
-from ..utils.sandbox_state import SANDBOX_BACKENDS
+from agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 

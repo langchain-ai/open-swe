@@ -2,6 +2,30 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
+function reclaimStaleUiServer(port: string, server: string) {
+  let output: string;
+  try {
+    output = execFileSync(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf8" },
+    );
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) return;
+    throw error;
+  }
+  const pids = new Set(output.match(/\d+/g) ?? []);
+  for (const pid of pids) {
+    const command = execFileSync("ps", ["-p", pid, "-o", "command="], {
+      encoding: "utf8",
+    }).trim();
+    if (!command.includes(server)) {
+      throw new Error(`E2E UI port ${port} is already in use by PID ${pid}`);
+    }
+  }
+  for (const pid of pids) process.kill(Number(pid), "SIGKILL");
+}
+
 // Build the real ui/ app once, then run its Nitro server so the harness can
 // proxy page requests to it — the tests exercise server rendering, not a
 // prerendered shell. Both API bases are baked in at build time, so they must
@@ -14,6 +38,8 @@ export default async function globalSetup() {
   const port = process.env.E2E_PORT ?? "2024";
   const uiPort = process.env.E2E_UI_PORT ?? "3100";
   const harness = `http://127.0.0.1:${port}`;
+
+  reclaimStaleUiServer(uiPort, server);
 
   if (!existsSync(server) || process.env.E2E_FORCE_UI_BUILD) {
     if (!existsSync(resolve(ui, "node_modules"))) {

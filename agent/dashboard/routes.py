@@ -22,24 +22,21 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from ..utils.thread_ops import langgraph_url
-from ..utils.timing import server_timing_header
-from .admin import is_admin
-from .agent_instructions import (
+from agent.dashboard.admin import is_admin
+from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
     AgentInstructions,
     AgentInstructionsCreate,
     AgentInstructionsUpdate,
 )
-from .agent_usage import list_agent_usage_leaderboard
-from .analyzer_cron import remove_continual_cron
-from .enabled_repos import (
+from agent.dashboard.agent_usage import list_agent_usage_leaderboard
+from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
-from .environments import (
+from agent.dashboard.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
     ENVIRONMENTS,
     Environment,
@@ -48,18 +45,14 @@ from .environments import (
     list_environment_options,
     slugify,
 )
-from .eval_jobs import (
-    get_reviewer_eval_status,
-)
-from .github_token_auth import admin_session_for_github_token, bearer_github_token
-from .notion_oauth import (
+from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
     exchange_notion_code,
     pop_notion_oauth_flow,
     store_notion_oauth_flow,
 )
-from .oauth import (
+from agent.dashboard.oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
@@ -82,14 +75,14 @@ from .oauth import (
     sanitize_redirect_to,
     valid_handoff_challenge,
 )
-from .oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
-from .options import (
+from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
+from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
     gate_fable_model,
     models_with_profile_context_windows,
 )
-from .profiles import (
+from agent.dashboard.profiles import (
     ProfileUpdate,
     get_profile,
     get_valid_access_token,
@@ -97,14 +90,14 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
-from .repo_access import require_repo_access_for_user
-from .repo_cache import (
+from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.dashboard.repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
     schedule_repo_cache_refresh,
     write_cached_repos,
 )
-from .review_api import (
+from agent.dashboard.review_api import (
     create_review_comment,
     dry_run_trace_resolution,
     get_review,
@@ -115,7 +108,7 @@ from .review_api import (
     trigger_re_review,
     update_review_comment,
 )
-from .review_chat_api import (
+from agent.dashboard.review_chat_api import (
     delete_review_chat_thread,
     get_review_chat,
     list_review_chat_threads,
@@ -124,24 +117,12 @@ from .review_chat_api import (
     proxy_review_chat_state,
     proxy_review_chat_stream_events,
 )
-from .review_style_jobs import (
-    cancel_review_style_analysis,
-    start_bootstrap_analysis,
-    sync_review_style_run_status,
-)
-from .review_styles import (
-    REVIEW_STYLES,
-    ReviewStyle,
-    ReviewStyleCreate,
-    ReviewStylePromptUpdate,
-    normalize_repo_full_name,
-)
-from .sandbox_settings import (
+from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
     get_sandbox_settings,
     upsert_sandbox_settings,
 )
-from .schedules import (
+from agent.dashboard.schedules import (
     ScheduleCreateBody,
     ScheduleUpdateBody,
     create_agent_schedule,
@@ -150,7 +131,7 @@ from .schedules import (
     trigger_agent_schedule,
     update_agent_schedule,
 )
-from .skills import (
+from agent.dashboard.skills import (
     DEFAULT_SKILLS_PAGE_SIZE,
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
@@ -164,15 +145,7 @@ from .skills import (
     update_organization_skill,
     update_skill,
 )
-from .slack_oauth import (
-    SLACK_STATE_COOKIE_NAME,
-    build_authorize_url,
-    exchange_slack_code,
-    fetch_slack_identity,
-    slack_oauth_configured,
-    verify_team,
-)
-from .team_credentials import (
+from agent.dashboard.team_credentials import (
     DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
     connect_datadog,
@@ -181,7 +154,7 @@ from .team_credentials import (
     disconnect_langsmith,
     get_team_credentials_status,
 )
-from .team_settings import (
+from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
     get_team_default_model,
@@ -191,12 +164,13 @@ from .team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from .thread_api import (
+from agent.dashboard.thread_api import (
     ThreadMessageBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
+    get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
@@ -205,9 +179,10 @@ from .thread_api import (
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     get_dashboard_thread_working_tree_diff,
+    list_dashboard_pinned_threads,
+    list_dashboard_thread_projects,
     list_dashboard_threads,
     list_dashboard_threads_page,
-    list_dashboard_threads_sidebar,
     pin_dashboard_thread,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
@@ -218,7 +193,7 @@ from .thread_api import (
     stream_dashboard_thread,
     unpin_dashboard_thread,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,
     UserLangSmithCredentialsUpdate,
     connect_currents,
@@ -228,28 +203,56 @@ from .user_credentials import (
     get_currents_status,
     get_notion_status,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     connect_langsmith as connect_user_langsmith,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     disconnect_langsmith as disconnect_user_langsmith,
 )
-from .user_credentials import (
+from agent.dashboard.user_credentials import (
     get_langsmith_status as get_user_langsmith_status,
 )
-from .user_instructions import (
+from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
     delete_user_instructions,
     get_user_instructions,
     set_user_instructions,
 )
-from .user_mappings import (
+from agent.dashboard.user_mappings import (
     delete_mapping,
     get_mapping,
     list_mappings,
     upsert_mapping,
 )
-from .voice import transcribe_audio
+from agent.dashboard.voice import transcribe_audio
+from agent.github.pull_request_checks import PullRequestState
+from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.eval_jobs import (
+    get_reviewer_eval_status,
+)
+from agent.review.style_jobs import (
+    cancel_review_style_analysis,
+    start_bootstrap_analysis,
+    sync_review_style_run_status,
+)
+from agent.review.styles import (
+    REVIEW_STYLES,
+    ReviewStyle,
+    ReviewStyleCreate,
+    ReviewStylePromptUpdate,
+    normalize_repo_full_name,
+)
+from agent.slack.oauth import (
+    SLACK_STATE_COOKIE_NAME,
+    build_authorize_url,
+    exchange_slack_code,
+    fetch_slack_identity,
+    slack_oauth_configured,
+    verify_team,
+)
+from agent.utils.thread_ops import langgraph_url
+from agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
@@ -1840,35 +1843,29 @@ async def api_list_threads(
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
-@router.get("/threads/sidebar")
-async def api_list_threads_sidebar(
-    active_limit: int = 50,
-    resolved_limit: int = 20,
-    active_thread_id: str | None = None,
+@router.get("/threads/projects")
+async def api_list_thread_projects(
+    include_resolved: bool = False,
     include_automations: bool = False,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
-) -> Response:
+) -> list[dict[str, Any]]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    timings: dict[str, float] = {}
-    counts: dict[str, int] = {}
-    started = perf_counter()
-    payload = await list_dashboard_threads_sidebar(
+    return await list_dashboard_thread_projects(
         session["sub"],
         email=session.get("email"),
-        active_limit=active_limit,
-        resolved_limit=resolved_limit,
-        active_thread_id=active_thread_id,
+        include_resolved=include_resolved,
         include_automations=include_automations,
         include_all=all,
-        timings=timings,
-        counts=counts,
     )
-    timings["total"] = (perf_counter() - started) * 1000
-    header = server_timing_header(timings, counts)
-    logger.info("thread sidebar timings login=%s %s", session["sub"], header)
-    return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.get("/threads/pinned")
+async def api_list_pinned_threads(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
@@ -1901,11 +1898,20 @@ async def api_list_threads_page(
     q: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
+    if repo and ownerless:
+        raise HTTPException(400, "repo and ownerless are mutually exclusive")
+    if repo:
+        owner, separator, name = repo.strip().partition("/")
+        if not separator or not owner or not name or "/" in name:
+            raise HTTPException(400, "repo must be owner/name")
+        repo = f"{owner}/{name}"
     return await list_dashboard_threads_page(
         session["sub"],
         email=session.get("email"),
@@ -1919,7 +1925,28 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        repo=repo,
+        ownerless=ownerless,
         sort_by=sort_by,
+    )
+
+
+class PullRequestChecksRef(BaseModel):
+    repoFullName: str = Field(max_length=140)
+    number: int = Field(ge=1)
+
+
+class PullRequestChecksRequest(BaseModel):
+    pullRequests: list[PullRequestChecksRef] = Field(default_factory=list, max_length=50)
+
+
+@router.post("/threads/pull-request-checks")
+async def api_get_pull_request_checks(
+    payload: PullRequestChecksRequest,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, PullRequestState]:
+    return await get_dashboard_pull_request_checks(
+        [ref.model_dump() for ref in payload.pullRequests], session["sub"]
     )
 
 
@@ -2029,7 +2056,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1013, reason="Cloud terminal capacity reached")
         return
     try:
-        from ..integrations.langsmith import connect_async_langsmith_sandbox
+        from agent.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
 
         client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
         cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"

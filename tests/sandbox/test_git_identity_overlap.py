@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.server import _create_sandbox_with_proxy
+from agent.sandboxes.lifecycle import SandboxCreateConfig, _create_sandbox_with_proxy
 
 
 def _backend(started: asyncio.Event) -> MagicMock:
@@ -31,19 +31,22 @@ async def test_identity_is_written_while_the_proxy_is_configured() -> None:
         await asyncio.wait_for(started.wait(), timeout=2)
 
     with (
-        patch("agent.server.create_sandbox", new_callable=AsyncMock, return_value=backend),
         patch(
-            "agent.server._resolve_sandbox_create_config",
+            "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
+        ),
+        patch.object(
+            SandboxCreateConfig,
+            "resolve",
             new_callable=AsyncMock,
-            return_value=("snap", {}, {}),
+            return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
-            "agent.server._resolve_proxy_token",
+            "agent.sandboxes.lifecycle._resolve_proxy_token",
             new_callable=AsyncMock,
             return_value=("token", None, None),
         ),
-        patch("agent.server._configure_github_proxy", side_effect=configure),
-        patch("agent.server.record_proxy_token_expiry"),
+        patch("agent.sandboxes.lifecycle._configure_github_proxy", side_effect=configure),
+        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
     ):
         assert await _create_sandbox_with_proxy(thread_id="thread-overlap") is backend
 
@@ -57,19 +60,22 @@ async def test_identity_failure_fails_the_sandbox() -> None:
     )
 
     with (
-        patch("agent.server.create_sandbox", new_callable=AsyncMock, return_value=backend),
         patch(
-            "agent.server._resolve_sandbox_create_config",
+            "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
+        ),
+        patch.object(
+            SandboxCreateConfig,
+            "resolve",
             new_callable=AsyncMock,
-            return_value=("snap", {}, {}),
+            return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
-            "agent.server._resolve_proxy_token",
+            "agent.sandboxes.lifecycle._resolve_proxy_token",
             new_callable=AsyncMock,
             return_value=("token", None, None),
         ),
-        patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
-        patch("agent.server.record_proxy_token_expiry"),
+        patch("agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
         pytest.raises(RuntimeError, match="identity failed"),
     ):
         await _create_sandbox_with_proxy(thread_id="thread-identity-fails")
@@ -86,23 +92,26 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
     backend = MagicMock(id="sandbox-new", aexecute=AsyncMock(side_effect=aexecute))
 
     with (
-        patch("agent.server.create_sandbox", new_callable=AsyncMock, return_value=backend),
         patch(
-            "agent.server._resolve_sandbox_create_config",
+            "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
+        ),
+        patch.object(
+            SandboxCreateConfig,
+            "resolve",
             new_callable=AsyncMock,
-            return_value=("snap", {}, {}),
+            return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
-            "agent.server._resolve_proxy_token",
+            "agent.sandboxes.lifecycle._resolve_proxy_token",
             new_callable=AsyncMock,
             return_value=("token", None, None),
         ),
         patch(
-            "agent.server._configure_github_proxy",
+            "agent.sandboxes.lifecycle._configure_github_proxy",
             new_callable=AsyncMock,
             side_effect=RuntimeError("proxy failed"),
         ),
-        patch("agent.server.record_proxy_token_expiry"),
+        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
         pytest.raises(RuntimeError, match="proxy failed"),
     ):
         await _create_sandbox_with_proxy(thread_id="thread-proxy-fails")

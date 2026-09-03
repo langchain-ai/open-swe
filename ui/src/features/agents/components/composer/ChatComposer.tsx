@@ -22,6 +22,7 @@ import { EnvironmentSelector } from "./EnvironmentSelector"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
+  LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
 import {
@@ -37,7 +38,11 @@ import type {
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
-import type { DesktopProject } from "@/desktop"
+import type {
+  DesktopProject,
+  DesktopProjectRef,
+  DesktopWorkspaceMode,
+} from "@/desktop"
 import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -109,13 +114,15 @@ export interface ChatComposerProps {
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
   selectedLocalProjectBranch?: string | null
-  localProjectBranches?: Array<string>
+  localProjectBranches?: Array<DesktopProjectRef>
+  localWorkspaceMode?: DesktopWorkspaceMode
+  localWorktreeLabel?: string
+  onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
   onRefreshLocalProjectBranch?: () => void
   onSelectLocalProjectBranch?: (branch: string) => void
-  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -233,12 +240,14 @@ export const ChatComposer = memo(function ChatComposer({
   selectedLocalProjectPath = null,
   selectedLocalProjectBranch = null,
   localProjectBranches = [],
+  localWorkspaceMode = "local",
+  localWorktreeLabel,
+  onLocalWorkspaceModeChange,
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
   onRefreshLocalProjectBranch,
   onSelectLocalProjectBranch,
-  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -280,6 +289,14 @@ export const ChatComposer = memo(function ChatComposer({
         shortcuts: ["shift+enter"],
         group: "Composer",
         showInPalette: false,
+      },
+      {
+        id: "open-model-picker",
+        label: "Choose model",
+        aliases: ["model picker", "change model", "reasoning effort"],
+        shortcuts: ["mod+shift+m"],
+        group: "Composer",
+        run: () => setModelPickerOpen(true),
       },
       ...(activeRun?.running
         ? [
@@ -661,53 +678,6 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
-        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
-          {runTarget && onRunTargetChange && (
-            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
-          )}
-          {runTarget !== "local" && onRepoChange && (
-            <RepoSelector
-              repos={repos}
-              selectedRepo={selectedRepo}
-              onRepoChange={onRepoChange}
-            />
-          )}
-          {runTarget !== "local" && onEnvironmentChange && (
-            <EnvironmentSelector
-              environments={environments}
-              selectedSlug={selectedEnvironment}
-              onChange={onEnvironmentChange}
-            />
-          )}
-          {runTarget === "local" &&
-            onSelectLocalProject &&
-            onAddLocalProject &&
-            onRemoveLocalProject && (
-              <LocalProjectSelector
-                onAddProject={onAddLocalProject}
-                onRemoveProject={onRemoveLocalProject}
-                onSelectProject={onSelectLocalProject}
-                projects={localProjects}
-                selectedProjectPath={selectedLocalProjectPath}
-              />
-            )}
-          {runTarget === "local" &&
-            onRefreshLocalProjectBranch &&
-            onSelectLocalProjectBranch &&
-            onCreateLocalProjectBranch && (
-              <LocalBranchSelector
-                branches={localProjectBranches}
-                disabled={!selectedLocalProjectPath}
-                onCreateBranch={onCreateLocalProjectBranch}
-                onRefresh={onRefreshLocalProjectBranch}
-                onSelectBranch={onSelectLocalProjectBranch}
-                selectedBranch={selectedLocalProjectBranch}
-              />
-            )}
-        </div>
-      )}
-
       {dictationError && (
         <div className="mb-2 px-1 text-xs text-destructive" role="alert">
           {dictationError}
@@ -722,11 +692,72 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       )}
 
+      {(onRepoChange ||
+        onRunTargetChange ||
+        onEnvironmentChange ||
+        onSelectLocalProjectBranch) && (
+        <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
+          {runTarget !== "local" && onRepoChange && (
+            <RepoSelector
+              emptySelectionLabel="Don't work in a project"
+              noMatchesLabel="No matching projects"
+              onRepoChange={onRepoChange}
+              placeholder="Select project"
+              repos={repos}
+              searchPlaceholder="Search projects…"
+              selectedRepo={selectedRepo}
+              side="top"
+            />
+          )}
+          {runTarget === "local" &&
+            onSelectLocalProject &&
+            onAddLocalProject &&
+            onRemoveLocalProject && (
+              <LocalProjectSelector
+                onAddProject={onAddLocalProject}
+                onRemoveProject={onRemoveLocalProject}
+                onSelectProject={onSelectLocalProject}
+                projects={localProjects}
+                selectedProjectPath={selectedLocalProjectPath}
+                side="top"
+              />
+            )}
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+          )}
+          {runTarget !== "local" && onEnvironmentChange && (
+            <EnvironmentSelector
+              environments={environments}
+              selectedSlug={selectedEnvironment}
+              onChange={onEnvironmentChange}
+            />
+          )}
+          {runTarget === "local" &&
+            onRefreshLocalProjectBranch &&
+            onSelectLocalProjectBranch && (
+              <LocalBranchSelector
+                refs={localProjectBranches}
+                disabled={!selectedLocalProjectPath}
+                onRefresh={onRefreshLocalProjectBranch}
+                onSelectBranch={onSelectLocalProjectBranch}
+                selectedBranch={selectedLocalProjectBranch}
+              />
+            )}
+          {runTarget === "local" && onSelectLocalProjectBranch && (
+            <LocalWorkspaceSelector
+              onChange={onLocalWorkspaceModeChange}
+              value={localWorkspaceMode}
+              worktreeLabel={localWorktreeLabel}
+            />
+          )}
+        </div>
+      )}
+
       <div
         className={cn(
-          "relative flex flex-col rounded-2xl border border-border bg-card px-3 py-2.5 shadow-sm transition-colors",
+          "relative z-10 flex flex-col rounded-2xl border-[0.75px] border-foreground/[0.06] bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.045)] transition-colors dark:shadow-none",
           compact ? "min-h-[88px]" : "min-h-[106px]",
-          dragKind && "border-primary"
+          dragKind && "border border-primary"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}

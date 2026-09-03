@@ -1,3 +1,3 @@
 # Files
 
-- [Testing Guide](overview.md) - How Open SWE's test suites are laid out, the pytest and Playwright conventions that govern them, and the commands to run the narrowest validation that proves a change.
+- [Testing Guide](overview.md) - Test-layer routing and focused test inventory for Open SWE, including dashboard thread contracts, shared pytest isolation, workspace suites, and the Playwright cross-boundary harness.

@@ -7,14 +7,17 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import post_github_comment
+from agent.github.thread_token import get_github_token
+from agent.linear.client import comment_on_linear_issue
 from agent.run_config import RunConfig
-
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_comments import post_github_comment
-from ..utils.github_token import get_github_token
-from ..utils.linear import comment_on_linear_issue
-from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
-from ..utils.user_messages import warning
+from agent.slack.client import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply,
+)
+from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 

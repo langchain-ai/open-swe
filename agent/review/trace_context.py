@@ -11,12 +11,11 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from agent.dashboard.team_credentials import get_langsmith_credentials
+from agent.dashboard.team_settings import get_team_review_tracing_project
 from agent.run_config import RunConfig
-
-from ..dashboard.team_credentials import get_langsmith_credentials
-from ..dashboard.team_settings import get_team_review_tracing_project
-from ..integrations.langsmith_tools import _client
-from ..utils.langsmith import get_langsmith_trace_url
+from agent.tool_loaders.langsmith import _client
+from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
 

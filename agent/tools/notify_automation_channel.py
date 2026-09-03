@@ -7,10 +7,12 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.run_config import RunConfig
+from agent.slack.client import (
+    append_slack_web_link_footer,
+    post_slack_top_level_message_with_ts,
+)
 from agent.store import delete_value, get_value, now_iso, put_value
-
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import append_slack_web_link_footer, post_slack_top_level_message_with_ts
+from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 

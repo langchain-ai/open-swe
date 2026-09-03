@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:5b91f6f48897eadb3df10cbbe51dce73881ee76bb2360a32c9880906f305560e",
+  "pageVersion": "sha256:8d88f0587df62f62e8c1c7490fac02b435eb19755ad9ccd9858bac6b6c6bdcd4",
   "claims": [
     {
       "id": "claim_ef765ffe40a34bb6bad1e4c5916b0ee9",
@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://agent/dashboard/options.py#L9-L99",
-          "version": "repo-lines-v1:sha256:b8ebd33ee2663ae9e185ed3894c3b1689012ce8bc381a47aca42ae1ae32be9fe:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY1YzIzZDNlMTY3YTg0ZjVlOTJjMDMwOGY4ZTNkNjU1OGNmYjM1MDRhODViMmRmOTM0Y2E5NDMzYjAwMDkxNjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdiNmU3NmVmNDVjZjkyZDVhMDkwOTg4NzI4YTg3YmVkMmE4YzBmNzQwOTEyMjIzNWUxMmM0YmNlMDcyZTdiN2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ3ZDNlZjQ5NDRjNWRmOWFjZjIxY2UyZjhkNTJkOTU0NTU1NDhiM2VmMmU5YjU5NjUwOWQ0NWZhNzliZWI3ZDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwMzNlNzY5MWU3NmZmYjQ2M2UyNzAzZGVmMGJiZGJjMTRiZjRlNzQ0ZDQxMGE3ZjI4NzVmMDQxODUwMTY0M2EifQ"
+          "version": "repo-lines-v1:sha256:927afb7e70a3283ed35e9ca7f7f2c4635aa5c2eebdac4ad5feef298f3761bd4d:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY1YzIzZDNlMTY3YTg0ZjVlOTJjMDMwOGY4ZTNkNjU1OGNmYjM1MDRhODViMmRmOTM0Y2E5NDMzYjAwMDkxNjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdiNmU3NmVmNDVjZjkyZDVhMDkwOTg4NzI4YTg3YmVkMmE4YzBmNzQwOTEyMjIzNWUxMmM0YmNlMDcyZTdiN2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ3ZDNlZjQ5NDRjNWRmOWFjZjIxY2UyZjhkNTJkOTU0NTU1NDhiM2VmMmU5YjU5NjUwOWQ0NWZhNzliZWI3ZDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwMzNlNzY5MWU3NmZmYjQ2M2UyNzAzZGVmMGJiZGJjMTRiZjRlNzQ0ZDQxMGE3ZjI4NzVmMDQxODUwMTY0M2EifQ"
         }
       ]
     },
@@ -18,25 +18,29 @@
       "evidence": [
         {
           "resource": "repo://agent/dashboard/options.py#L18-L97",
-          "version": "repo-lines-v1:sha256:55c461955449f25e2d22e043e2a16c637795fe674bd3fdfc2a6e159b8057fef5:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwYzBjMzNmOGU2NjY5YjVkNWRmMWI2MTZmYTI1MjE5NzY0ODhmNDNiMTg5NzRiOGMzZDU0YjEyMDJlOTQzOTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5NDE2ZTA5Zjc4YmEzMTZjMDMyNTY4MjEzYjg1NWVlNzU2ZTQxNTY1ZDkxOGYwOTUxOWM4MWZkNjIwZjQwNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY2Mjk0YzIyMzU0ZDMzYzAwY2MzNjZiNDhkNTViZTljNjRmOWQxNmIyMTBiZjM4MDUwNTIxMmQxMzM0MjM5MTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI3MjVhZThlOTVkZDIwYzAxOTM2N2RhMDhmYzEzZjMxYzBmZGRkNGZmNjA5MmE3MzE5MTU0MGJjYzY5NWU0YWEifQ"
+          "version": "repo-lines-v1:sha256:2900e23b666b408f50811017dff876ccfe0166cabb2b108451fa1d8fba033df0:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwYzBjMzNmOGU2NjY5YjVkNWRmMWI2MTZmYTI1MjE5NzY0ODhmNDNiMTg5NzRiOGMzZDU0YjEyMDJlOTQzOTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5NDE2ZTA5Zjc4YmEzMTZjMDMyNTY4MjEzYjg1NWVlNzU2ZTQxNTY1ZDkxOGYwOTUxOWM4MWZkNjIwZjQwNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY2Mjk0YzIyMzU0ZDMzYzAwY2MzNjZiNDhkNTViZTljNjRmOWQxNmIyMTBiZjM4MDUwNTIxMmQxMzM0MjM5MTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI3MjVhZThlOTVkZDIwYzAxOTM2N2RhMDhmYzEzZjMxYzBmZGRkNGZmNjA5MmE3MzE5MTU0MGJjYzY5NWU0YWEifQ"
         },
         {
-          "resource": "repo://agent/dashboard/options.py#L231-L242",
+          "resource": "repo://agent/dashboard/options.py#L227-L238",
           "version": "repo-lines-v1:sha256:93afd3d061c3b6cc5a35b1fd6c0e87a6c9db5d5d825450441da58611333f4ec5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ0YTU3MTI5ZjhkYTk4NzIwMmUyMGY3NDVjMDE3MzE4NjY1ZWFkMWQyNDU3N2I2MzdhNmNjOGUzOGM0ZWU1YzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1YmM0NzExZWNjYTA0NTBhZmM4MzI3NzlhODg2NzZhN2M2OTYwZmEzZGE1YWY0MTBlZTAyZDFlMDE1MTU5MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmN2MyZDFiZGI1YzRlNjgwNGI1NzViNDMyZTM0MTViY2ExZTc3ZDhjMjRlODI3ZjcxNzdmNzY1M2ZiZmJlOWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdhZjBjZjBiNTZjYWVjNTkzMzEwY2YzM2EwM2Q2NzA5MjhiMWE4NGFmYzdjMjNhMDM1MzEzZGUzMzYyOTBmZGIifQ"
         }
       ]
     },
     {
       "id": "claim_bb46dfb2fe4042f588e5749237cf0336",
-      "statement": "Retired model ids are migrated rather than discarded: DEPRECATED_MODEL_REPLACEMENTS maps them onto a replacement and canonical_model_pair applies that mapping (preserving effort when the replacement supports it), while provider_fallback_pair keeps an unsupported stored id on the same provider and, where possible, the same Claude family instead of falling through to the global default.",
+      "statement": "Deprecated model ids are not canonically replaced: DEPRECATED_MODEL_REPLACEMENTS has empty values and canonical_model_pair always returns None. Deprecated ids are excluded from provider_fallback_pair and defer to defaults, while unsupported non-deprecated ids may use same-provider and, where possible, same-Claude-family fallback.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/options.py#L105-L122",
-          "version": "repo-lines-v1:sha256:55e7516090daca90d1835f650dfb68538d5681e4f19b44b0d7e29d7b224d5ea5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkZWQ3Y2Y3Nzk0MTRjNjEwYTQxNzFkMGIyODVmZTczNGI5MjVmNDcwZDdjNTJjNmFmODVmZWQ4MGYwYTdmMTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM5Y2Y2NDkxYTcwMzQzYTk5MWYzNzAzMzkzNGE4OGU5Y2Y1NmJiMzY2NzhmMzBlODQzMGZmODA2Y2Y0NmY5YjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiMmRjYzAwMGIzMTcyZDgxM2E1OWEyMmJkMjc3NWMyMzU2NzQ3NzFlZjg3YzA2NGNiMTVkNjM2ODg3OTNkMjEifQ"
+          "resource": "repo://agent/dashboard/options.py#L105-L117",
+          "version": "repo-lines-v1:sha256:46e16e2515c6171dfa1dc9d1d5aca228113fff08622199a0b242b5ce66d8a9d5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkOTE2MGIyNjBmNTg3MWFmMWUzZWU5NTFkMWJmMmI4NDQ5MzhkYzgxN2YxZmI0YTU5NGU5MzBiZmRmNDRkMDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExNjgxMzNhNWVmYmUzNzI1ZTExN2VkMGNhZDZjM2EyYmY1ZjgxMDllNmYxNDFmN2FhOWY3MTYxZGEzNDY4MGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM5Y2Y2NDkxYTcwMzQzYTk5MWYzNzAzMzkzNGE4OGU5Y2Y1NmJiMzY2NzhmMzBlODQzMGZmODA2Y2Y0NmY5YjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiMmRjYzAwMGIzMTcyZDgxM2E1OWEyMmJkMjc3NWMyMzU2NzQ3NzFlZjg3YzA2NGNiMTVkNjM2ODg3OTNkMjEifQ"
         },
         {
-          "resource": "repo://agent/dashboard/options.py#L274-L332",
-          "version": "repo-lines-v1:sha256:d045d1a2cdbef0576625383c7dff4225f9855efb9f09f5378021d1a6067e5e9f:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwYjg1NGFkMDA5OTMyYTQzOWE5ZWQ1NjAyNjkxYzY2YzQ1N2RmZjk0YjcxM2I3YjMxMWRlMWQ4MzE3MzA4MzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI4OWYyNGY3YzU2NGE0NTBkMGU1ODFkOTk4ZTIyYWE5MjQ4NDIzYWViOWQ1NjNiZjVhNzZiOTNmYzM5ZGFlZTgifQ"
+          "resource": "repo://agent/dashboard/options.py#L270-L314",
+          "version": "repo-lines-v1:sha256:f2b348715ffa0358aabd836ebf31850d2594e3d055e3aee13bb54c5ca7799478:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxOWJjMGFmNjE2MzE5NDljZjA4ZjgyM2UzYmEwMTUxOGM1NGZjYTI1Nzk1MzMzYjdhZGIzYzVmYjExM2RhNjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI4OWYyNGY3YzU2NGE0NTBkMGU1ODFkOTk4ZTIyYWE5MjQ4NDIzYWViOWQ1NjNiZjVhNzZiOTNmYzM5ZGFlZTgifQ"
+        },
+        {
+          "resource": "repo://tests/models/test_model_fallback_resolution.py#L63-L80",
+          "version": "repo-lines-v1:sha256:dbd721a2742afb3eeb27071074f4c99d506603db720350903ee94b2a2b16392d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJmZTA0NjdiYTEzNTZjNWQ1NDJiYjM0ZThiNGVmNWU4YWNlMDRiYTZhZDcyODA5ZTJjYmY0NzJiYzRmMjFhMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhNTZhMTc5NGU3NmNkY2UzYWM5NDhmYzJiNDBkMzUwMzRjOTE1MTkyZGYzYzEyMmZkYjMyODYzN2Q2OGExZDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhODJlYmU5ZWQ0MDdjM2E2YmE0YjAwMzQyOTJiYWE1MmMxMWNlNWFlMjg2MTA3NDAyZGU0NzkyZWVlY2FjZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1ZGY0MmEzZTQwMzc4NWJkMTk0YTY4ZGNjM2Y5MzVlNzY2MzMyZDhiNWQxODJmZmYyMTk1NWZlYjc3MzkxZDIifQ"
         }
       ]
     },
@@ -45,36 +49,52 @@
       "statement": "The global hardcoded fallback pair is DEFAULT_MODEL_ID/DEFAULT_MODEL_EFFORT exposed through default_model_pair(), used when no valid team default or same-provider fallback exists.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/options.py#L227-L228",
+          "resource": "repo://agent/dashboard/options.py#L223-L224",
           "version": "repo-lines-v1:sha256:1d68017ba9c493f2c5034acbadb2440db542ad0fabf7f89eb8089947c1f9bfb8:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTlkODg2YTg1MjM5OTg2MDA3YWUxM2ZhYzllNTUyMzA3NjQ1MjQ3MzU4MGI0MzRmYjA2MWQ1ZDhhMzg4YWY2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDAwYWRlZTc5ZDQ1YmQ0NmEzNmRiODlkMzcwNzMwYjhhYzQ3OTNjZDZiZjM5ZGUwMzVmNTJmM2IzYjAxOGQ5NCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTM5YWE0YzYxZTI3NGY0ZGMyZTI2MGM3NWMzYTA2YTdmMGQyZWQ5ZDliMTcxMjBlYWRhNjkzMDUyZTNkYmZkNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzBmODZiMmZiYTdiNWZiMGQyNDNmZDc2YjFkNjA2Y2NiZmU5NGM2ZGVkZmUyZmRjMDE1NDNiZjVkNmNiZGIzNiJ9"
         },
         {
-          "resource": "repo://agent/dashboard/options.py#L335-L342",
+          "resource": "repo://agent/dashboard/options.py#L317-L324",
           "version": "repo-lines-v1:sha256:6ca37a39ff417a072404b9778fecf3d8604c252a5a18b9b221ec8592bbff2185:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTlhZWRhM2QyNWRkZGM1MTRlNzlkYzcwMWQ2MWVkYzA2MjRmYjZiNjhjZWUwYzU5NzRjNzE4Njg1YTE1N2RkMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTIyZWFlZDg4NzQxNGZmMGNiMzhiNzM0MTRhYmQzMGU4Y2FiMDM3ZTM3OWQ5YTE2NWNhNGYwMjJiNzI2MjM3ZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZDcwMTQ5ZTA2OWFkNjdlY2NmNDczNjQ2ZmYxYzc1MDA1MGQzMjlkMTEwMDE4ZGM1NzY2ODc4ZWFmYTFkNjA3ZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWU3Nzg1OGVlNmRkN2EzNmU4N2Q3NjFmNzZlNWUxNDlmY2U0NWY4YjFlMGFhMGJlNDliYTk5ZGM1ODUzZjg1MSJ9"
+        },
+        {
+          "resource": "repo://agent/dashboard/team_settings.py#L547-L559",
+          "version": "repo-lines-v1:sha256:c93927d31cb9af47f0dfc56748cde66e0322b6d15a5d2b9d85e2a71f1e50de3c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYxYjllNTc1NjFkZjUwZGYwZGJhNDVkYjE2NDExNDhhMDI5MmRhMzJlNjNlODNhZjBkMDRmYTVkN2RlOGIwYTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1MjMxN2ZlMjcwNTMxYzVmMThhZWRiZGI2ZDYwM2VlOTcyMTRjYWEyOWNmYmIxY2IwZDQ3ZTA1MWQwNjk1N2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVkNzFmZGViMjM3MmY2NGMzNzczMWUxZTUyY2E5MjRjOWQ4YTU1ZWYxYjhiYzBjMzg4YWJmNGY1N2ZhMzM1ZjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
     {
       "id": "claim_6542ad2cef5747e9b221dffc6d2cf2e0",
-      "statement": "The run factory in agent/server.py resolves the agent model/effort by starting from the team default and overriding upward in the order team default -> per-user profile override -> stored thread settings -> explicit per-thread run config, where an explicit per-thread agent_model_id is the only source allowed to move a thread off its stored settings and is then persisted back onto the thread.",
+      "statement": "For a hosted agent run, the factory seeds team main/subagent defaults, applies a profile only when no stored thread model exists, then uses stored thread settings when present; a valid explicit configurable agent_model_id/agent_effort is the mechanism that replaces that snapshot and the resolved settings are persisted back to the thread.",
       "evidence": [
         {
-          "resource": "repo://agent/server.py#L1452-L1512",
-          "version": "repo-lines-v1:sha256:cd4d77eeb6e2991c4252be78cf119704646bc515b6ec2ccca80b2a56e12e6c16:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlNjRjODc3ZDg0ZDE3NmFmYzgyOTE1OThjNzVmY2RjYzlhNGNkYzdhYTYyY2RhZjIxZmI5NWEwMTk4ZDFkMGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM2OWFhZWYxY2UxOGU4NDc4NDMzN2VlM2Y4OGVlNmIwN2RjYzEwZjI4YzU3YjA2ZDI4YjBkMDRjOThkYjkxN2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU2MDJlZmU2NWVlYTE3MmFkZTUxZjA3N2IyZTcxYjlkOTAzZGQ1ZWMwYjA2ZGFhNDhhYjk5YjFkZDczODNjM2IifQ"
+          "resource": "repo://agent/server.py#L1428-L1462",
+          "version": "repo-lines-v1:sha256:d97f867546dc54e634e354c8cd106110b498c1231895139b934235d6375ff150:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU0ODAzOThkNWYyMDcxMTJlNzFiZjA5ZWE4NTkzMzJlOWJiZjgwYjkwMTZmNzRjZDQyODdmMmRiODE2ZWNiODIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMyZDc3ZDBjNDRhNThmYjE5OGE0OTczZWJmYWI0OTFmMTIxNzBiN2E0ZWE0NzcwNzRhNDFlNTY1ZjY4Y2MwN2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU5YWVkYjFlODFkMTVmM2UwYTU0OWUzMGFiOWNkYTQ4Y2NlZWM2N2M1ZGJkZDM2NGExY2JiY2ZhOTM4OTZhMjMifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1468-L1553",
+          "version": "repo-lines-v1:sha256:26b23318ca17b8e5055211d4684d622b9e05ef9065b7659a54d9d2c9c60f8e1d:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlNjRjODc3ZDg0ZDE3NmFmYzgyOTE1OThjNzVmY2RjYzlhNGNkYzdhYTYyY2RhZjIxZmI5NWEwMTk4ZDFkMGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyYjI3OTI3ZWZhMzNmZDQ4YjZkODIzNjg1MDAzZTczYjg4ODViMDEyNjI0MzQ2NTU3ZWRjZGZiMDU2MzI2YTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM2OWFhZWYxY2UxOGU4NDc4NDMzN2VlM2Y4OGVlNmIwN2RjYzEwZjI4YzU3YjA2ZDI4YjBkMDRjOThkYjkxN2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVkNmM3NmY3ZjBjNzVlOTI3MzFlNGQ3ZWRmZDk3OTU2NTA4YWYwYjcwNmIzNWRiMWJiMmEzYmE2OTA3NDRiMzEifQ"
+        },
+        {
+          "resource": "repo://agent/utils/thread_settings.py#L1-L11",
+          "version": "repo-lines-v1:sha256:36d05ec83bfd863dab75646cf18c53051dee4fe988caa2dfe35ce74857de729c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyZmY1NDhkNGRlZDJmN2Q1MGEzNmJjZTNiYWJlNzJjYzI4Njk3NGUwNjE3ODMxMWZlODFiYmE1NWM3MWFjN2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1YWUwYzIwY2Y2N2I3ZWI2NWNkYWQ1MTIyZmI1YmU2OTA5Njk3MmJkYzYzMjYxZWI0MmY4OGViYzc5NWU2ODEifQ"
         }
       ]
     },
     {
       "id": "claim_e59a92170ddb46c3bb8ad6afdb3a6042",
-      "statement": "agent_overrides.resolve_agent_model_id and dashboard thread_api._resolve_agent_model_choice apply the same per-thread -> profile -> team-default precedence used by the run factory, for callers that resolve a model id outside the factory.",
+      "statement": "agent_overrides.resolve_agent_model_id resolves a supported per-thread id over a valid profile override over the team default, while dashboard thread_api._resolve_agent_model_choice resolves a valid request pair over profile over team default and leaves the team default for a deprecated request.",
       "evidence": [
         {
           "resource": "repo://agent/dashboard/agent_overrides.py#L141-L163",
           "version": "repo-lines-v1:sha256:281365faa1b38d59689c527e5c23817afab3a292787bb0245a05474266a58d99:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzMWQ5N2U4NDJkMDJlYmI4Y2ZiYmI1ZjQ4YjEwZTk1ZDM1M2YxNmJkYWM2ZDk1ODQ4Y2Y4ZTkwNTIxZmM0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4MjVmM2U0MmVkNzE2MDAyNTZlZTljOWVmN2I2MjhlMzYxYmY5OGNjMGM5NzA1ZTRhNDQ0Y2JkYWY3NmIzN2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://agent/dashboard/thread_api.py#L179-L196",
-          "version": "repo-lines-v1:sha256:fa7e35105232ba16acefa10521d7fa9f7f5309069cb198d079c49ef626a2a860:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxNTM4Mzc2Njg0NTdiMjlmNTU4MTUwYzJhMTI4NzJhYWY4OTUyMmM1Y2Y4OGZmNWQwNmJiYmU1YjJhN2E2YjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM4ODhiYjBhMGI3NmVhMTZlZTgzZDk3OTVkY2ZmNTBkZjNjNzZhZjVhODRiOGE5ZjE4ZTEwM2JlMzRkMWNiODYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE1YzZmN2ZjZGM2ZGYwZGZjZTFjYzlmNmI5ZjAwNjkxZDFjODlhYWVlNTAyMjkwMTI5NTJiYWYwZThkNTY2MDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3NjE3NWIwNWY3YjE2MjA3OGJhNTUwZGYzN2IwNDgxYzdlMzcwNTE2YTM5YzZiYzg5OGMwNDAxY2E3N2E4OTMifQ"
+          "resource": "repo://agent/dashboard/thread_api.py#L184-L202",
+          "version": "repo-lines-v1:sha256:8919bcb21c15f386da1110cc45dabfdd762ace74190c372907f3a8c470529672:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxNTM4Mzc2Njg0NTdiMjlmNTU4MTUwYzJhMTI4NzJhYWY4OTUyMmM1Y2Y4OGZmNWQwNmJiYmU1YjJhN2E2YjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM4ODhiYjBhMGI3NmVhMTZlZTgzZDk3OTVkY2ZmNTBkZjNjNzZhZjVhODRiOGE5ZjE4ZTEwM2JlMzRkMWNiODYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE1YzZmN2ZjZGM2ZGYwZGZjZTFjYzlmNmI5ZjAwNjkxZDFjODlhYWVlNTAyMjkwMTI5NTJiYWYwZThkNTY2MDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3NjE3NWIwNWY3YjE2MjA3OGJhNTUwZGYzN2IwNDgxYzdlMzcwNTE2YTM5YzZiYzg5OGMwNDAxY2E3N2E4OTMifQ"
+        },
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_thread_api.py#L67-L111",
+          "version": "repo-lines-v1:sha256:05103aa95ad70d7a8a5b9c9e8ee91a654413fe9d7109cda8197e79953fdd4311:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyNWEwN2NjNjM2MGRlNzYxYmUyZmJiMTM2YzgzY2RhYzgzNTZmN2MxZDBkNWU5MGUxN2M0ODNlNDZkYzE3NWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExODY4OGYwYzZkNWIxOTc2NDZmMzI2YjJlNmVkOGZmZWY2YjZlNTYyNTRiNGNmM2E4ZWE4N2RhYjc5NzRjZDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIzNzFkYTI1NWYxZjkzMzE0MjhmYzQ3ZjM0NjE3NzAzMzhiMmMxZWRkYzFlY2U0YWZlNDZiZTVhZmFjYWY3YmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUxODU5ZDk5Nzk1OTdlZTA5OGY2YzMzZWJlMDEzMDBmYTEwMmYxOGZlYjlkNDdhOWQ1ZDlkYzdkYzIzM2I3NGUifQ"
         }
       ]
     },
@@ -83,7 +103,7 @@
       "statement": "Every team-default resolution routes candidates through _resolve_default_pair, which returns the pair if supported, else the same-provider fallback, else the global default, guaranteeing the factory ends with a valid constructible pair even when the store is stale or a selection is unknown.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/team_settings.py#L546-L558",
+          "resource": "repo://agent/dashboard/team_settings.py#L547-L559",
           "version": "repo-lines-v1:sha256:c93927d31cb9af47f0dfc56748cde66e0322b6d15a5d2b9d85e2a71f1e50de3c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYxYjllNTc1NjFkZjUwZGYwZGJhNDVkYjE2NDExNDhhMDI5MmRhMzJlNjNlODNhZjBkMDRmYTVkN2RlOGIwYTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1MjMxN2ZlMjcwNTMxYzVmMThhZWRiZGI2ZDYwM2VlOTcyMTRjYWEyOWNmYmIxY2IwZDQ3ZTA1MWQwNjk1N2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVkNzFmZGViMjM3MmY2NGMzNzczMWUxZTUyY2E5MjRjOWQ4YTU1ZWYxYjhiYzBjMzg4YWJmNGY1N2ZhMzM1ZjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
@@ -93,12 +113,12 @@
       "statement": "Team defaults are stored as a single LangGraph Store record keyed 'default' in the ['team_settings'] namespace, and get_team_settings merges the stored record over hardcoded defaults fail-soft so an unreachable store degrades to defaults rather than failing every run.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/team_settings.py#L30-L31",
-          "version": "repo-lines-v1:sha256:87f62a70df2ca141d49b08927ec1bb17093188cd1704a7d3f4129ffc206929a3:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDAxYmE2MGFhYjVhMTFkODY2NjYxZTFiMjE1Yzc1NDAyYzQ5NzlmY2JmNDVkNTc2OWJhY2YxMDMxZDMxNTQ4YyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODU2NDdmMTU1Y2E2NTk4ZDlkNWE3Zjg1ZTM0YjY4NDI5Mzc4N2VkYzc0OTI0M2Q1Y2NiY2I0NzMwOTViNjI2MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjMWM0NjJlMmEzOWQ3NDc1OWY1ZTFiMTI2Zjc2ODNhMmI3MzAxMThlMThmNTEyMmIwOGNlZGVlYjY1MGUyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGE5ZGZkNWIwMjY5ODNhNDFkNjBkNjhkMmM4ZmExZGMyMmVjY2M1MWViNTdiZjRkMDI2NTMwZDI3YmU0NjQ5OSJ9"
+          "resource": "repo://agent/dashboard/team_settings.py#L304-L331",
+          "version": "repo-lines-v1:sha256:48b04b282c8756dd043318be135bdf8b43e4f754c19526508f450ee0b0e37428:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1Njk5OGVmMzFjOGQyMDAxODZmZWJlZDNmMzQyNmI1NTJkZjU5NGI4YjZmM2Y0MjlhMzkyMGE2NmFkZTJjNmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2NDZjMGUwNjI5NzJkNTQ3ZGVhNjEyM2NhM2JhOGY0OTZkNmFhNTE0NmUzNTJkZGUzZjhiYmE1ZWJjMTMzN2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5MGZhMzZjZjU4ZTI5Y2I2NzhkZmU1MDViNjViOWNkOWExMWYxOWY2MWQ1YTNmMzk3ODE2YmIzYmRhODJkOTEifQ"
         },
         {
-          "resource": "repo://agent/dashboard/team_settings.py#L303-L330",
-          "version": "repo-lines-v1:sha256:48b04b282c8756dd043318be135bdf8b43e4f754c19526508f450ee0b0e37428:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1Njk5OGVmMzFjOGQyMDAxODZmZWJlZDNmMzQyNmI1NTJkZjU5NGI4YjZmM2Y0MjlhMzkyMGE2NmFkZTJjNmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2NDZjMGUwNjI5NzJkNTQ3ZGVhNjEyM2NhM2JhOGY0OTZkNmFhNTE0NmUzNTJkZGUzZjhiYmE1ZWJjMTMzN2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5MGZhMzZjZjU4ZTI5Y2I2NzhkZmU1MDViNjViOWNkOWExMWYxOWY2MWQ1YTNmMzk3ODE2YmIzYmRhODJkOTEifQ"
+          "resource": "repo://agent/dashboard/team_settings.py#L31-L32",
+          "version": "repo-lines-v1:sha256:87f62a70df2ca141d49b08927ec1bb17093188cd1704a7d3f4129ffc206929a3:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDAxYmE2MGFhYjVhMTFkODY2NjYxZTFiMjE1Yzc1NDAyYzQ5NzlmY2JmNDVkNTc2OWJhY2YxMDMxZDMxNTQ4YyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODU2NDdmMTU1Y2E2NTk4ZDlkNWE3Zjg1ZTM0YjY4NDI5Mzc4N2VkYzc0OTI0M2Q1Y2NiY2I0NzMwOTViNjI2MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjMWM0NjJlMmEzOWQ3NDc1OWY1ZTFiMTI2Zjc2ODNhMmI3MzAxMThlMThmNTEyMmIwOGNlZGVlYjY1MGUyMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGE5ZGZkNWIwMjY5ODNhNDFkNjBkNjhkMmM4ZmExZGMyMmVjY2M1MWViNTdiZjRkMDI2NTMwZDI3YmU0NjQ5OSJ9"
         }
       ]
     },
@@ -107,22 +127,30 @@
       "statement": "get_team_default_model resolves distinct defaults per role (agent/reviewer/chat), where the chat role inherits the team agent default when no chat-specific model is configured, and separate resolvers exist for the diff-grouping pass (inheriting reviewer subagent) and the thread-title model.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/team_settings.py#L369-L468",
+          "resource": "repo://agent/dashboard/team_settings.py#L370-L469",
           "version": "repo-lines-v1:sha256:55a5643a94c04968f189aabeb286be6aaa24fa222d9ac8af5385a67a33fb9c04:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI1NzFjN2Y5YTE2N2Q3YWQzZDY2ZWU1MGFjMDQ1Yjk0ZmQ5MzZiMzRlYTk2NTYxNzY0MDcwYzY2YjEwNWNlN2NlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3NmQ1NWE0ODNlZjg4YzczMTdkZThjMzg2ZTI5MGFmNTU3ZTAyNTgxOGFjMzIyYWRlYTRmMTY1ZjQxNjMwMGJjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiZDgzNWVjYmFhYjc3MjVkNzg4MjljOGRlZTM2NjUyZGEyMDE0MjMwZTJmY2Q3ZDJlNDk5ODQ5YzFjOTM4NzI1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1YmVjODA4MDlmOWJhNzZkYjJjZDM1OWJlNjk4NjRkOGE0YTY0ZGNkZjQ3MTk0ZDM1YTQ2ZTg3NzQ0ODcyNjJkIn0"
         }
       ]
     },
     {
       "id": "claim_53f2e53105084a8183ad17e58849328e",
-      "statement": "Per-user profiles live in the ['profiles'] namespace holding default_model, reasoning_effort, an optional subagent pair, and non-model preferences (default_repo, draft_prs); profile-editable settings are deliberately split from the encrypted GitHub OAuth token stored in ['oauth_tokens'] so a profile save and a concurrent login/refresh cannot clobber each other's fields.",
+      "statement": "Per-user profiles live in the ['profiles'] namespace holding default_model, reasoning_effort, an optional subagent pair, repository/branch and PR preferences; profile-editable settings are deliberately split from the encrypted GitHub OAuth token stored in ['oauth_tokens'] so a profile save and a concurrent login/refresh cannot clobber each other's fields.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/profiles.py#L1-L47",
-          "version": "repo-lines-v1:sha256:7f279ecf530114ecec3f2b7de5d4cda9997fe82f9d00999d5f9e79098e48c0c4:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4NzYyNzIwNjQyY2EyMzk2ZTlmMzRjNWY0NTQ3MmM2MDE2MzY3NjUwMDJjMjUxYjZiNzlmMDZjOGNjNmI2YzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRhM2Y4ZjYzZjM1MTE1N2ZiOGEyMDk4OTVhMjUyNDY3NzRmZjQ0MjFhZGFhZDMyODQzNDAzZDQzODY1ZDAyNGUifQ"
+          "resource": "repo://agent/dashboard/profiles.py#L1-L10",
+          "version": "repo-lines-v1:sha256:30604ab5de6e12040aeaf8bf87a077d2705c819a8e88cd8582bd173bd4861bd4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4NzYyNzIwNjQyY2EyMzk2ZTlmMzRjNWY0NTQ3MmM2MDE2MzY3NjUwMDJjMjUxYjZiNzlmMDZjOGNjNmI2YzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1NzBjZTNmNTkxN2VlNjJhYjRjM2QxMmVjNzVkY2Q3MjNlYzE4ZTUxNDFjMDUzNTljMmJlNzVmNzZhNGYxZWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNjdmYjkyZjdmZjVhYzc5ZmU1MTc5YTYwMzk1ZDk4YjhkNjI4OGVkOGZiNmJlMGU3MzA4ZmIzNTk3YjYzYTAifQ"
         },
         {
-          "resource": "repo://agent/dashboard/profiles.py#L127-L163",
+          "resource": "repo://agent/dashboard/profiles.py#L129-L165",
           "version": "repo-lines-v1:sha256:67f7b0e97de17bd7efc89ff3103dd40848571f89fd1252f4287d6b631408b576:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5ZjIyZjM5NGIxNmRhYzBiODNmMDFlNGJjODM1ZDU1MWUyMmUzMDU0YzI4YWRhMmJiNWJiZGM2MDJiYTQxMGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5M2ExMzA2MmYxMGVlNGYxMjE4ZDkzZTM3YTZmODFkMzQ2ZmYxMWVjN2U1NWRkNTQyZTJkMmQyZWYwNzExZjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkwYzBiY2Y3Y2Q1MDUwNjUwY2NjY2I0NzVjZWE5YzczZDdiZDk3M2I3NDJiNWExMmQ1NzJkZDcwOTYzMjZkNGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY5ZmVhNDY1MjFiMGIwMWJjMDJiM2VjY2Q0ZmZkYmMwYjVhZGEyYTE1MGU5NWQ2NWJkZDViM2UxNjYwYTI1MzQifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/profiles.py#L191-L222",
+          "version": "repo-lines-v1:sha256:333338b9ff05f20a4d873b2ca2630b2ff525ac02c84d1944b554ec3ec03a30b8:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3ZDg4OTMyM2UzMTg1MzhhNzVjMjQ4OTQ0NTY4OTljMjdjMTgwZWQwY2Y2NmU2MTAyMmVkZDgyNDVhNzY0ZmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjNWQ2OThhZDdlNTczNzM3MDQwN2QzYzYwNGNhNzZmNjE4ODRhNWQxNzViZDQ0MDBjOWU4NzlhMjQ0NGM1OTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJjYTBjNTAwM2NiOWZhMDA4YzA1ZmJkYjFjOTg1NDQ5ZTM2MDE4MzM4M2ZmMWRlNTE3YmU4NTM0OWRlOTZkM2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIzMTJhNTliM2RmZjFmNjE4NTliODQ4MTNjOGEzODlmZjVjZDlhZDA4ZmJiMjRiOTc1MmViOTQzNDU4ZmMyZjIifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/profiles.py#L41-L50",
+          "version": "repo-lines-v1:sha256:84ad35cb532287dafd8bbf8d55e585e81b365c84371d11d048410f0e7e81e5f7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMzFlOTA5ZDRhYmRmNTM0NDQ3YTAyZGMxOWE3MDMyMTQyN2NkMWJiNTc0OGM0MmQ0NmFjOGE2NjczZjM4YTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUwOTQyZmNjYjVjZWRkYjBhZTc4ZjQxODg4YWJhYzRmYjUyYzY0Mzk4ZTFlMDNkZjMwNTRiZGZjOGFjOWU2ZWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNiYTZmYTkwYWYyODU2ODVlNzU5Yzg3ZjE1NTM3ZjAxOWRkZjIxNzZmZmI1OTMxZmVlNzAxODJiODljZWVjNDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc1MzQ4YTFkYzZhOTg4YzdlNjA4MjVhYzEwZDhlODhjOWZkY2FlZTVkYmNmZWE3MzgxZTEyYzc3ODdkMmNiZjUifQ"
         }
       ]
     },
@@ -135,7 +163,7 @@
           "version": "repo-lines-v1:sha256:b4b04f9c24afc52c8f91be8a0a713851c108e74a535e230a985ab3660ffe5529:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4MWFlZDU4NTU5MTE1N2VmNDJkODE1NzQ2ZTg0Mjk3Y2Y5NWQ5NjI1MjA3NTdjNmU2YjhkMTNlZWQ1ZDEyMzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlN2M5NTdiY2I0NGZiNjczYzk4YjAwNTBhNzVkMzgwODJkYjgxZDkxOGRlMzEzYTNmMDdjMTIzNTMwNmQ3ZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjllMjI3YzAzZjhmZTgxMmRiNTM1OWM5Y2M2YmY4MDAzMWVmYzY0MDU1MWMxZTRlZDY1OTllN2JhOWVlNmE4OWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcxZDc5MjU5Y2Y5M2E3NGNlNjUxNmU4NWVjYzU5YjJmNWE1Y2RmMjg2OThmYjZjYWViNzNkNjQzMzVmMGZjNzAifQ"
         },
         {
-          "resource": "repo://agent/dashboard/profiles.py#L118-L119",
+          "resource": "repo://agent/dashboard/profiles.py#L120-L121",
           "version": "repo-lines-v1:sha256:4b5394906459a5646fa78aca293cf7984d1482502ff0bd9a79d7c83a719490eb:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmE4Y2I1MTM1Zjc5NGFmZjA2OTZlYTNlZWJkN2FmN2Q0NDJhOWI0NDBiYzBmZmVmOTIzYTQ0YjNjNWRiM2I5MSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNzliNjQxODY2MWE0ZjkyYjEyZmExNjVlNWQ0YmFiOWI5MTgxMmEwMTAzNTEyYTU4N2VjZDg3MWNiN2Y4MDM3YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjllZTE5MzI4NGU4MmZiNzZhZjRmNGY1ODNlNDNmMDUwN2I1ZjEzMmIxNjRlNmQzNTIzYmFmYjk0YzBjN2IxZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTc2ZmQ5ZTRmMzRiYzAxYzA0OTA1ZmUyMTcyMDZlNWNhNDE4ZDFiN2RhMzViZTZhMzlmM2IzNDZiZmYyZGFjNCJ9"
         }
       ]
@@ -145,8 +173,8 @@
       "statement": "normalize_profile_overrides accepts a profile's (default_model, reasoning_effort) only when both are valid, otherwise falls back to the same-provider pair for an unsupported id, and returns (None, None) for an absent/unknown-provider selection so the team default applies.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/agent_overrides.py#L95-L138",
-          "version": "repo-lines-v1:sha256:4bf032dc91e44e26fb75c5ced8cba9331d480bde92460568e65914f1d2d8ed93:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzZGZmMWUxMjg3M2I2ODRlZjkzZGRkYjgyYzJiOWI5YjE0YzAyN2IxNGJmMmRmYTk5NDVlY2NlOGVjZDc5NWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJjYzQ4YzAyOTJiMTk0OThkNjJjZGRjNWQ3NDRjMzY2NDFkZTEzMGE3ZDJlODI4Yzk5M2QwNTFmYzk1YmFlNWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRkZGE4Njc2MzJkNjQ4ODc4ZjhmMDRlM2Q4NzhjMWE4YmU5OGQ3ZWJiMmE3YmIyOGE0MGFhYTU2MmJkMGY3MzcifQ"
+          "resource": "repo://agent/dashboard/agent_overrides.py#L95-L127",
+          "version": "repo-lines-v1:sha256:7cb7a3fc260f233d72f4555513fb648344a997820b2df6c30550d70e14cc5e58:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzZGZmMWUxMjg3M2I2ODRlZjkzZGRkYjgyYzJiOWI5YjE0YzAyN2IxNGJmMmRmYTk5NDVlY2NlOGVjZDc5NWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJjYzQ4YzAyOTJiMTk0OThkNjJjZGRjNWQ3NDRjMzY2NDFkZTEzMGE3ZDJlODI4Yzk5M2QwNTFmYzk1YmFlNWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5NzE3NDBkZWI3MDJmNzg4NTExNGViYzkzN2U5NTc1ZGVmNTQ4NjU0MzM3MmZjZjk2ZjNjZjFmNWEwNDA5M2IifQ"
         }
       ]
     },
@@ -155,12 +183,8 @@
       "statement": "provider_model_kwargs translates a resolved effort string into provider-specific kwargs by dispatching on the model id prefix: OpenAI gets a reasoning dict (summary auto for non-none efforts), Anthropic gets adaptive/summarized thinking plus an effort field, Gemini 3+ gets thinking_level, Fireworks gets model_kwargs.reasoning_effort, and Baseten gets reasoning_effort for low/high/max.",
       "evidence": [
         {
-          "resource": "repo://agent/utils/model.py#L232-L308",
-          "version": "repo-lines-v1:sha256:40ae72cbdb378a1b7bce02a7797ecaa4672ba1dd738dd9eb3f89c651b5d0b8bf:eyJzZWxlY3RlZExpbmVDb3VudCI6NzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkOTkxZDM4MzkzMTQ3MzBkNGU1MWIxYTgxNzMyMTMzYTczZjMzMjM1ODNmYTExODU2YTE5YWQ3NThhYzYzYTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIxZGM1ZmQ5MDEzMTVlYmExOGE2NzU1YmU0Mjc0ODI3YjYxYjdkNDc0MGFmMTc3MGU2OWM1ZWI1MTAxMjQ5MDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRlM2I4YTRhYjU0NDRkZGI5MGQ2ODY5NjQ3M2JjOTkzMWNkZGRmYmU1YzYwMzE3NWI3NGU3NTQwNWQ2M2RiYjgifQ"
-        },
-        {
-          "resource": "repo://agent/utils/model.py#L311-L343",
-          "version": "repo-lines-v1:sha256:232d72bdbc02c04f7c941e5dcda4eddb07edd0893b0badf49f68dc219ee8ddec:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYWUxNDJlZDliY2U0MmYyZTA1NDgzMTBkMzgzMGMxYTFjZGZlNGFkYTkxYjlhNWZjMDc4Y2NhNDA1ZDBkYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzYjg3NjYxYzU4NTMxYmFmYWVhODAxZjc5YmI1YWVjZTM2NThkYTYzODI5OWMzYmMwZjI0NjE1Yzc4YjYzOTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc2MzQ1YzcwZGU1YWUxNzdlYWRiODM3ZjE0NmJiNmM2MDUxYTc4YzI3N2M5YmU1NGRjZGY1MDc5NmQzOTQxM2EifQ"
+          "resource": "repo://agent/utils/model.py#L232-L343",
+          "version": "repo-lines-v1:sha256:22428e2c9f43dabf192f5a61502a478d5e34d8185469bbcad1cec521ece0de4d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI0ZDk5MWQzODM5MzE0NzMwZDRlNTFiMWE4MTczMjEzM2E3M2YzMzIzNTgzZmExMTg1NmExOWFkNzU4YWM2M2E3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJkM2I4NzY2MWM1ODUzMWJhZmFlYTgwMWY3OWJiNWFlY2UzNjU4ZGE2MzgyOTljM2JjMGYyNDYxNWM3OGI2Mzk3IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiMWRjNWZkOTAxMzE1ZWJhMThhNjc1NWJlNDI3NDgyN2I2MWI3ZDQ3NDBhZjE3NzBlNjljNWViNTEwMTI0OTA5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI3NjM0NWM3MGRlNWFlMTc3ZWFkYjgzN2YxNDZiYjZjNjA1MWE3OGMyNzdjOWJlNTRkY2RmNTA3OTZkMzk0MTNhIn0"
         }
       ]
     },
@@ -175,6 +199,10 @@
         {
           "resource": "repo://agent/utils/model.py#L14-L30",
           "version": "repo-lines-v1:sha256:6a73c24d1937dadfee9d444ff1cdcb9f76b03b0b0268d042a80f72c3369f5dec:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYxMGNmNTAyM2JhZDA3NWZmYmIwMTAyMmI3ZDQzMDg5OGQ5MjE3OWUwODY4OWYxMWJjZjIxZjQ0ODgyMzE2MmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJiMjM5M2NmM2M2YTE3YTlmODNmN2FmZjMxOGFkNjUwYWI5YWUyNjJjMjI4YWRmMjZlN2U4MGU0OWY2ZWFiNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ1NGU5ZTA4ZmUyNmM1MmEyNGY3Nzc1N2YxMWYzNzEwNTY5ZmFmM2MxZTI0ZTg3MWUzNzA0NmJlMDM3MDY3ZGEifQ"
+        },
+        {
+          "resource": "repo://agent/utils/model.py#L203-L210",
+          "version": "repo-lines-v1:sha256:4ebdeeae7fa4216862666bfe687615ec3dac909c482cd3f950b0938cd94727f5:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjc1NTZjMDEzZTgyODMzNjlhZDMzMzQ0ZGMyYTJjMWJkMTM2ZjE2MTE5YTM0NDhkM2FkMzFlMTgyZmQ5Y2NhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjc5ODkyNjYwYWQ3YmMyOTFhNjA5N2Q3ZDYyNTllNTdmYjQ2ODY2N2FiNzkyNzdjNzZhMmJmYjliZDQxM2Y5NiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTUwYjc0N2FiY2Y1ZWI1MTUyOGRlNWMzY2U5NDk4MTZmZWY0ODczODUxZWE0M2MyZDZmZjQ0OGM1MTM4YzhiMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYWMwNjcyMzFiYzdlZjI4NTA1M2VkZWM2MDc5YzE5NjEzM2NmY2M5OGQ1YWYzY2I0NjdiNzIxYmM0Y2UwNGVkMSJ9"
         }
       ]
     },
@@ -197,26 +225,30 @@
       "statement": "make_model routes Baseten as an OpenAI-compatible provider and, when the gateway is disabled, requires BASETEN_API_KEY and points at the Baseten base URL, raising if the key is missing.",
       "evidence": [
         {
-          "resource": "repo://agent/utils/model.py#L177-L185",
-          "version": "repo-lines-v1:sha256:481d0a9aa223361ec21bbf1326aeb5f5e9dd9f1aa0c9da9d8e2114b5eaf85f84:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTdmM2U1Zjk3ODM1ZDQ4Njk0NTYwZjIzMjUzMTAxOTA5OTg2OThjMjM5YWI3YTllNmE5NzA3OTMyNzczNTBiZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTk0YTZhYjA2MDg2ZTcxZDBmMGFmYmU4YWE0NDlkYjhjM2U5NzQ1ZWM1ZDZhYTI1Y2U0ZGQyYThjNDhkMWM5NSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2U0MjNlNGFjNjJiOTJiNjNkNWE4MDBhN2Q3MmVkYjQyNjMwYzdmMjhhZTdkNTczNGE3ZDhkMDEzZjNkZTQ4MiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWFmZjNjNzQ1ZjA3MDQ1OTdmY2NjMzUyYzliNDFmN2Y4NjkzOTY5YTNkY2MzMTljNzMxYWY2MjA4MjE0NWEwOCJ9"
+          "resource": "repo://agent/utils/model.py#L176-L185",
+          "version": "repo-lines-v1:sha256:62cb11e1287c8f063c621ebda36fb102b0b554f3a809b3c427a06a44a43fd600:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjNjNiYTZjMWU3YTBlMmZiNmEzYTkyNzMwMmJkMWQzMWFkYTgyYjUyM2Q4Y2FkNjM1OWE4MzFmYTliNzM1Y2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5NGE2YWIwNjA4NmU3MWQwZjBhZmJlOGFhNDQ5ZGI4YzNlOTc0NWVjNWQ2YWEyNWNlNGRkMmE4YzQ4ZDFjOTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMyNDA3NjIwNDYzMDA4ZTcyNzNlYWIzN2M0ZjE2ZjQ4M2FjMTE5NGJhYjZiOGNhMGUwNWJkYWVhMmZkNjZmN2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlhZmYzYzc0NWYwNzA0NTk3ZmNjYzM1MmM5YjQxZjdmODY5Mzk2OWEzZGNjMzE5YzczMWFmNjIwODIxNDVhMDgifQ"
         }
       ]
     },
     {
       "id": "claim_12a6219c8bee40b0be2d05470ad5a81e",
-      "statement": "make_model injects a context-window override profile via model_profile_with_context_override (e.g. 272k for GPT-5.6 variants) and caches constructed models keyed on (model_id, use_gateway, max_tokens, frozen kwargs, event-loop id), with close_cached_models tearing them down.",
+      "statement": "The dashboard /options response enriches copies of selectable ModelOption records with context-window values from Codex overrides, LangChain provider profiles, or fallbacks; make_model injects an override profile only for GPT-5.6 variants and caches constructed models keyed on model id, gateway argument, max tokens, frozen kwargs, and event-loop id, with close_cached_models tearing them down.",
       "evidence": [
         {
-          "resource": "repo://agent/dashboard/options.py#L134-L168",
-          "version": "repo-lines-v1:sha256:3b3b0fc7692c82eb60bf962cdbb03828923f2c7e7c988d1e0aa17d56447b51f5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmNmU4OGI4OTMxZTc2NWQxYjdhYzI4NjIyNDU2M2M4NGI2M2Q1NTI3YjNmMzY2ZDU0MDNiZmIyYTQ1NDM1NTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxYzE3ODg4OWFkZDVjYTQzNmE5ZmU0YmVhY2RhMTI1NzcwZDEzZDg5NDNlMDZhNWE4NWQxYWEzYjMyNzE3N2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYwYmI1NTE2MDExY2ZiZWFjN2QzN2IyMzE1ZDdhMWY3YWJhMDA4NDRlZjViNTI4NTgwMTliOGU0MjJkMGRmMmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM4MjAxZjFiMWMzM2E3ZjJhOTc2ZDI2MmFmOGRlYTIwYTQ4MjE5MWIwZTU3MTFmM2Q0MzViODc3MmIyMjkzYjQifQ"
+          "resource": "repo://agent/dashboard/options.py#L121-L198",
+          "version": "repo-lines-v1:sha256:9d11cafd86fb1f27af035612b75645b3db3df74dadea2d0831e343333adae3ef:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3ODBhZWM5M2Y0Y2M1MzJkNTQ1MWVhZjJiMGNlZDY4Yjc3Y2U2OTEzMzQzNjU1NzI0MTcwMWZiZWI4OTI2YzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY5ZTU2NmQxZDliMzA3Y2UwNWFmMWU3MjU2ZWE5NjBjMzYxNjFlMjY4ZGY5YjRkMmE5MmRhNmRlOGY1MDk2ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJiMmRjYzAwMGIzMTcyZDgxM2E1OWEyMmJkMjc3NWMyMzU2NzQ3NzFlZjg3YzA2NGNiMTVkNjM2ODg3OTNkMjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg1MTg1NzgwODA0OTEzNjk0YTBmZTM4ZjBkYzhjZjcyNDFjM2RmYzg3NWVmNWE2NDg4MjlhZjAyNDdhNDRiYTcifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/routes.py#L604-L629",
+          "version": "repo-lines-v1:sha256:587767ddba3546a60942c7bd085f465ea51844b52269886e3a0f1d86cee70ddb:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyYWQ3Mzc4MDcyMjlkNGNjMDhlZjA3ZTk4OWM5MGVlODgzZGZjOWRhNzg3NzY3N2U4ZWMwZmZmNzY2YjA5OTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBhZDY4ZDMyZTQwOTQxYTBjNWE1ZTAzYTExZTNhMGNiOWMyYmYwY2VlMmY1ZmQyN2NkNzU1YzdhMjJmYzY4ODQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFiZjJjZDczZDhiZDRkZTA2YjA4NGFmYTQ0MTNlNGUyNGI5MGE0MGZlNzMzZjQ3YTExNDM2NzNjZmNjN2VmZmIifQ"
         },
         {
           "resource": "repo://agent/utils/model.py#L187-L210",
           "version": "repo-lines-v1:sha256:0a59bea82e624befe9ba62144fc48ae53377895469695bd9422daf0eff1ca0d3:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI4MmE1N2UwOGJkMmUxMDZhZTQ4ZWY3MTc5MjYxMGQzN2RjY2ZmMTAyMDAxOWNlNTE4NWQ1YWEzZjgxNDc0YjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3OTg5MjY2MGFkN2JjMjkxYTYwOTdkN2Q2MjU5ZTU3ZmI0Njg2NjdhYjc5Mjc3Yzc2YTJiZmI5YmQ0MTNmOTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhmMDk3MTlmMDQ3ZTBlYzkxMjQ3YjNlMTc5OGNlNzM3MjhiZjhlOGY3ZTVhYWViNWUyZWVhNTUyZjliM2ZhYmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjMDY3MjMxYmM3ZWYyODUwNTNlZGVjNjA3OWMxOTYxMzNjZmNjOThkNWFmM2NiNDY3YjcyMWJjNGNlMDRlZDEifQ"
         },
         {
-          "resource": "repo://agent/utils/model.py#L48-L62",
-          "version": "repo-lines-v1:sha256:5896f67642bfed7589f4e6b691985b1511a90bb91aabd0d99ce14eeb01a9d133:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2ODg2YjRhOThhMzM0ZmEyYzVhZjk4Y2U5M2FiNzEwMTM4OTVhNGM3YmI4YmJhZjcyYTkyODAxMTcyZDU1NzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhYTkzOGRkODcxNWY5ZDI5YzRiNmRmMjFmYTUzODk0Y2ZmODk2Zjc2ZjAwOWZkMzMzOGQ0ZjBhOGNiOWI4ZDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3YWVhMTgzZWJhZDZmNTNiNzk2ZTE5MTU3NTBjZWQ0MzQ0MWZkMDhmZjc0M2UwY2MyNzI2NTUzMjlhNDdlZWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiM2FlNWIyZmMxMTQyNzFkYjRkOWU5MmJlOGZmN2QzZmY4MjY0MTBhZWU3NWRlZjdlYWI0ZjI0N2VmNWRmNDkifQ"
+          "resource": "repo://agent/utils/model.py#L32-L62",
+          "version": "repo-lines-v1:sha256:4a629eb6928afc96f0b22fc71daa11184efb04899524acc9df7eab99391abeea:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVhNjk3YmUxNzRiOGJlZDA4NzllOGM4ZTkzZWUxNTFmOTI5NzQxODk0MGE0ZDJhMDg3NDVkNDYxYzQ2YzczOGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhYTkzOGRkODcxNWY5ZDI5YzRiNmRmMjFmYTUzODk0Y2ZmODk2Zjc2ZjAwOWZkMzMzOGQ0ZjBhOGNiOWI4ZDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEyMmZmMTJiMWUzY2E0YmNlZjQ1MGE5ZmU4NDQwODQyYjY2ZTFhNDk4ODczY2ZmYjEwZjFiN2M5ZDViODdiMDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiM2FlNWIyZmMxMTQyNzFkYjRkOWU5MmJlOGZmN2QzZmY4MjY0MTBhZWU3NWRlZjdlYWI0ZjI0N2VmNWRmNDkifQ"
         }
       ]
     },
@@ -229,6 +261,10 @@
           "version": "repo-lines-v1:sha256:59df9b27fe18e4ec9cef097f3cc2225f1cf0c12279149af6923f73c6bf4addd6:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwNzM4OWE5MjJkMTRjZDFlOTY4YzVjNGZjNmMzZmIyNjVhY2VhZDVjZWQxODYzMWFjNTYwNzk4YWJkZjQ0ZGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzNDdmYzQyMTZjMGE3M2U5NzA0ZDg1MzY5YWMzY2U0NzdjZWQxZWE0M2EzZTQ1NWY4ZTc4MWRmYjliYTk3ZGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMzYjQ5ZmE0ZWY2ZDRmMTdiYzg2N2VjNjUyNzVhNDU1N2ZkMGE3ZTIxNGI1ZTU3ZmYxYzcyNjUwYTkwZDI3NzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJiNjlkYjEyMDY2MTE1YWI1M2UwNGE0OGExMWNkMDlhNjNmMjFiMWYyYTJkNDAxZGM4NDBkZTM2ODEyOWJjN2UifQ"
         },
         {
+          "resource": "repo://agent/utils/gateway.py#L93-L125",
+          "version": "repo-lines-v1:sha256:6c1f5ab785341add815299e5ec470df7afaaa0c9e2385377645246dbbb9f1271:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2NzU5ZjlmNzA5YWIyZWNmZmM5YzU3NjVmOGFlNjRmNzE0MjNhY2I0MDcwZjkyZTc0ZGQyNjg0ODYyOWRiZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3Y2RmZjAyZDQ3YTBkMDBhNjQ1MDhjZmEwNGQzZDRlNDNkZWQ4Mjc0NmMwMzZiNmYzYWE3NzA0YzAzMTgyY2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmYTUxYzkyN2Y2NmZiMzBhMDYyNzU2YjZjNzA0NjkxOGQ5N2U0OTQzZGQ3NDA2ODFmMjNkYzA0N2I2NTVjMmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
           "resource": "repo://agent/utils/model.py#L131-L159",
           "version": "repo-lines-v1:sha256:db9d9b04c0c8c4af8a351498d44bd72ffa1a44360dd251ccaaa85d57fc52c0ab:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyNzc3YjczYTlhN2M2ZDdhYzlkYzQ3ZTY2ODgwNDg5NGZhYTRmMDhkYmUzMzdmMDU5NmI0ZWI1NzI5ZjI2ZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkM2JiYWQwMjBkMzY2N2VhNmE1MDU4ZmNjYjg5NjYxYmQzMjg4NmFjZDVjMGUwYTQ5M2VhNGM2OGQ1NWZkMWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1MTU3ZDdmY2MzNTAwYjE5YzZkYTc2ZmU4ZTNiNDc5M2QxOTdiOTdhMThiNmRiNzEzZmFmNzE0ODEzZTYyZjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFkZTAwMTE4ZGQyN2YwZTNlNTMzZTMzYjM0MzVlZDhhNDA4MDI2NjVkMWNjNTlmNzc1MDUxMTgxYjBiMTYxOGEifQ"
         }
@@ -239,7 +275,7 @@
       "statement": "fallback_model_id_for returns a cross-provider fallback (Anthropic primaries -> OpenAI and vice versa) and None for Google/local/self-hosted providers that must not be silently re-routed; the run factory wires this into ModelFallbackMiddleware honoring an LLM_FALLBACK_MODEL_ID env override first.",
       "evidence": [
         {
-          "resource": "repo://agent/server.py#L1565-L1576",
+          "resource": "repo://agent/server.py#L1581-L1592",
           "version": "repo-lines-v1:sha256:db4103c1cc39f7e5d500cf3928c0d8d79b1a28d81ca779f64ca192eee4737e36:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3ZDRmYmMzOGUwMzIxZGVmZjg0NDAzZjZkMTBmYjYyYWM5ZGU1YTY3NjIwNGM1ZWZiNWY1YjNjOGQ3MTE2OGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmZmEwZjI5NTA4NjY2NzM4MjY5ODUwNjY1NzlhMDA1MjJhODJkOGRiYzJjNDE3ZTkwMGUyMDA3YzFmMzUxZjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwOWQyYTRiNDEzNTgzMjk1NDNjZjk3YTlmZDQyZDg3YjE4MjUzNWQxMjJlM2RjNzgyMTJlNjYyOTk2NDRjNTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg3YmQ4NWQwOGI1M2U3ZTI1YTU3MmY3ZmFhZjdmODU0YWY4YjhiMGExM2M2MTFjZWUzNzA5MWMzNTAwMzBhNTQifQ"
         },
         {
@@ -250,22 +286,26 @@
     },
     {
       "id": "claim_f898e5cc81434a0ab25e36df9c49b3aa",
-      "statement": "Fable (ZDR) models are gated workspace-wide: gate_fable_model swaps a resolved Fable id for a safe non-Fable Anthropic model whenever fable_enabled is false, and it is applied at every model-construction entrypoint (main, subagent, and title models in the factory, and the dashboard selection path) so a disabled Fable model can never reach make_model.",
+      "statement": "Fable (ZDR) models are gated workspace-wide: gate_fable_model swaps a resolved Fable id for a safe non-Fable Anthropic model whenever fable_enabled is false, and the factory gates main, subagent, and title models while the dashboard resolver and options response gate selections, preventing disabled Fable from being constructed or advertised.",
       "evidence": [
         {
           "resource": "repo://agent/dashboard/options.py#L101-L103",
-          "version": "repo-lines-v1:sha256:729564e5c717c57ee38aee2e470d00b9836a88a32461308fb5bef852f6752341:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWM0YWJjMzI3Njk0OTE0YzUwZTc5OTMwNzZkZjYyMmZhODgxMjhlOGE5Y2IxMTRhZDQ2YTVhMzc0OWIyNDI1NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmFmYmEwNTI3YzM5NTNjNGI2ZTBlNWI1NzM5YmE4MzYxMmY4MDUzYmNkYzk0NjY3MzAxOTNjZDFkNTkwYjQwOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjcyNWFlOGU5NWRkMjBjMDE5MzY3ZGEwOGZjMTNmMzFjMGZkZGQ0ZmY2MDkyYTczMTkxNTQwYmNjNjk1ZTRhYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNGEwMzI3YzhmYzA3NWVlZjU1MjliZDVlOTg2MmU5MTQxMDljYWQxYzgzNDBlZjZiNjUzYjM3NmMyZjA4MmZlOSJ9"
+          "version": "repo-lines-v1:sha256:729564e5c717c57ee38aee2e470d00b9836a88a32461308fb5bef852f6752341:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWM0YWJjMzI3Njk0OTE0YzUwZTc5OTMwNzZkZjYyMmZhODgxMjhlOGE5Y2IxMTRhZDQ2YTVhMzc0OWIyNDI1NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmFmYmEwNTI3YzM5NTNjNGI2ZTBlNWI1NzM5YmE4MzYxMmY4MDUzYmNkYzk0NjY3MzAxOTNjZDFkNTkwYjQwOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjcyNWFlOGU5NWRkMjBjMDE5MzY3ZGEwOGZjMTNmMzFjMGZkZGQ0ZmY2MDkyYTczMTkxNTQwYmNjNjk1ZTRhYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODM5YjExMTQ2YzZjNDk2MzE0ZTBkNDFmNDVjMGZmMDFmZjVkZjNmMDQzZWI0NzEyOWNmNGNiYTZkNzIwZGExOSJ9"
         },
         {
-          "resource": "repo://agent/dashboard/options.py#L205-L224",
+          "resource": "repo://agent/dashboard/options.py#L201-L220",
           "version": "repo-lines-v1:sha256:c37769a9fedd5fe3171fa7f76bf6503e6fde7b1573a516f6526a6361c495057b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkYTNkYzFlZTNjMzQ1OTVmZDkzMzY3MWU2MmM5ODk1MjI5MmI0N2IwNjQ1MzdhNzFjYzViNTRhZjljM2VmMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhMTQyODE1MmFiMTc1NWJjMTI0MzA5ODRkNDAwOTYzZWQ5NDFmODQxOGM3ZmIwMjY3ZjcyYmJlNTdmZTA2ODkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUwNzE0NmZlMzYzZmFhOTViNmNmNmM0YWIxZDJiODJjNGUzZWE4NThhN2ZkYTg4Y2ZjMjI3ZjhlYzIwMGM5ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZjZjNiYmEyOWVkMGExZThjNDc3NGI1NzkyOTQ2ZTc1OGI0YTY0MDA5NzhhMDI5ZGM1ODBmNzcyMjdlNmM4NDUifQ"
         },
         {
-          "resource": "repo://agent/dashboard/thread_api.py#L191-L193",
-          "version": "repo-lines-v1:sha256:505cb48f7db4a83486d831a4fbd8f055b8c35e6f7c9467c417b0fc9ff6f86050:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTY5Zjg0ZTVhMjA3MDBhNmQ4OGIzNTQ3ZDgxN2UwMzQ4NDk2NTljMDk3Njc4ZmRhMDQ3ZDIwOWEwMTY0YTcxZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzBjMWYxODhmMTQyZWQ3YTgyNDY4MGIyMDcxNzJjNTUxOWJjNjE0YTQ4ZmRhN2NmMTY3ZWRiOGRkZjc5OTU2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGJlMGI5ZDdiMjlmMzI4NGRhMTJmNDdkY2E0OWIwMWViM2I3YTdiMjgwNWEzNjEzNGRmNzliMTNlZDY5M2NmNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWVjMWE5MTAwN2YxYWNlNzA1Mzc5NTkyODA1OTM0NmE4ZmVhMzQ3NjRjZmY1NWRkOTE1M2MzOTNhMmI1NzRjNSJ9"
+          "resource": "repo://agent/dashboard/routes.py#L604-L622",
+          "version": "repo-lines-v1:sha256:4c9a5d3a0f28be259054ceafb0b2b4c8bdbeb52fc5010cab79dfd4ad51653eaa:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyYWQ3Mzc4MDcyMjlkNGNjMDhlZjA3ZTk4OWM5MGVlODgzZGZjOWRhNzg3NzY3N2U4ZWMwZmZmNzY2YjA5OTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBhZDY4ZDMyZTQwOTQxYTBjNWE1ZTAzYTExZTNhMGNiOWMyYmYwY2VlMmY1ZmQyN2NkNzU1YzdhMjJmYzY4ODQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY4MDI1NTUyZDVlNDg3ODczYzI2ZmQ1ZTY4MmM3M2E1MGExZjIwY2NlODk2Y2QwYWFmNGI1MTIxNWU0ZDQ5NWIifQ"
         },
         {
-          "resource": "repo://agent/server.py#L1539-L1547",
+          "resource": "repo://agent/dashboard/thread_api.py#L184-L202",
+          "version": "repo-lines-v1:sha256:8919bcb21c15f386da1110cc45dabfdd762ace74190c372907f3a8c470529672:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxNTM4Mzc2Njg0NTdiMjlmNTU4MTUwYzJhMTI4NzJhYWY4OTUyMmM1Y2Y4OGZmNWQwNmJiYmU1YjJhN2E2YjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM4ODhiYjBhMGI3NmVhMTZlZTgzZDk3OTVkY2ZmNTBkZjNjNzZhZjVhODRiOGE5ZjE4ZTEwM2JlMzRkMWNiODYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE1YzZmN2ZjZGM2ZGYwZGZjZTFjYzlmNmI5ZjAwNjkxZDFjODlhYWVlNTAyMjkwMTI5NTJiYWYwZThkNTY2MDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3NjE3NWIwNWY3YjE2MjA3OGJhNTUwZGYzN2IwNDgxYzdlMzcwNTE2YTM5YzZiYzg5OGMwNDAxY2E3N2E4OTMifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1555-L1563",
           "version": "repo-lines-v1:sha256:2444136dce14585053b151c67d18407cc536edf232b6067244394e33545ccb4c:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDA2MDBjMzc2Y2VhZmVhNzg4ZmNlZDZhYzI4ZDdhYTY2OWJlZGRlYzkxMWNjMzdiMmQwY2IyMjQ5NmVlNzdkYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzBjMWYxODhmMTQyZWQ3YTgyNDY4MGIyMDcxNzJjNTUxOWJjNjE0YTQ4ZmRhN2NmMTY3ZWRiOGRkZjc5OTU2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDUwM2M2NjZiNzAwZmY5YmZmZjY5MjJmZDBjZmIwYzVkYmRjMWY2ZjdmYzZmMjgyMzIyZjE5MzY1NTJiYjVlMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjQ2M2M2N2I4NTk0ZTY0YmUyYzZkNWQ4YWFhYzY5ZTJmOWVjYzlmODYyNDQ2ZTE2ZGFiM2ZhZjU4OGU3ZjJkNyJ9"
         }
       ]
@@ -287,8 +327,12 @@
           "version": "repo-lines-v1:sha256:c857fdf696e0fc807739d6117ab2da0bcb430ed5f967acf27a23553254668d7c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3M2JjMjQ4NjU5YTZkY2NjMDllYmFhNTRjYTg4YmRjNzgyOGZlNGI4MDg4ODcwZjQyNzBhODcyZjM2MjZmZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYwZmNiMGU3YWI1ZTkyNWZmYzc4MDQ3NDZlNjBlZWM1OTZkYTI5OTE0Y2U0ZDNmMDc3MjlkZThjNjE4ZDYwNWIifQ"
         },
         {
-          "resource": "repo://agent/server.py#L1517-L1523",
-          "version": "repo-lines-v1:sha256:a65dc0fa720731fac45b28468658881e20237608df0337d2d06c18d0d0883538:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDE5N2U0NTA1MDIwNjE1ZmY1YjUwMDRlM2YzZGU4ZWE4YWNjNDA3OGVjMTI4Y2MzMGZjNTE2ZDY0ZmEyYjg5YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTUwMzJlOTY0ZDA5MzIzNTFlNWQxODUyNjkyODFiMTcxYTNhMDliMDhiMjg2ZTY2MWVhNDcwMzIzYzgyZWI0ZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzRjYjI5MmEzYzQ3YTM4MmUwOTlmMzUxY2MzY2U0NTU4Y2E4MjYxZDM5OGQyMmZlN2RkZDUyNzE2ZmJlZTRhYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDUwMjcxNzMyM2U4N2ZhNmIyYmY5ZjFmYjRmYmQ1YjZkYmY0MDA2NWJiZGEzMTRmN2UxMzI5ZjA1NDg1ODQ5OCJ9"
+          "resource": "repo://agent/server.py#L1533-L1547",
+          "version": "repo-lines-v1:sha256:a0a0a389483c226d17660f769926e59c0d2bd270a8bda56d08608f5e2f128621:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxOTdlNDUwNTAyMDYxNWZmNWI1MDA0ZTNmM2RlOGVhOGFjYzQwNzhlYzEyOGNjMzBmYzUxNmQ2NGZhMmI4OWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzZGU0ZTNkNjY2NTA3NDcwNTNhYTUyNWMzZmE3ZjgwNTAwN2E0NzljNmYwMzcxYjdlNTZlOWIzZTZlMzU2Y2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0Y2IyOTJhM2M0N2EzODJlMDk5ZjM1MWNjM2NlNDU1OGNhODI2MWQzOThkMjJmZTdkZGQ1MjcxNmZiZWU0YWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ5MjU5ZDdlMGU2ZDdlMTdkYjZkMWJlMTU2ZWY5NGI2M2Q3ZjU1NmM0NGQyNjQ1ZTMwZTViYTgzY2UyNmE3ZDAifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L301-L313",
+          "version": "repo-lines-v1:sha256:b6195e1d043bf69ae4e771830d03d00ae9a340a9452b39dcc06be775e8ebff7a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU0MjI3NWRmOGI1NmVhODFiNzMzODA5MGQ1NDJlZTE0NWJmMzk4ZDUyMWExMTZkNmNiMmVkMDlhZTY4MThjZDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlN2M5NTdiY2I0NGZiNjczYzk4YjAwNTBhNzVkMzgwODJkYjgxZDkxOGRlMzEzYTNmMDdjMTIzNTMwNmQ3ZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjczM2U4NDg3Yzg1ZGZkY2Y5ZmE3YjkzYzc0NmM5NDYyNWFlNDdlMTIwYzc5N2U3OTFlNzM3ZjllZDdmZmM3M2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcxYWJmNzc5ZjJkYmI4NDQzYzE2N2FmMTJkNGJkYTVkOTAwZTc5ZGM5MzgxYzliYjhhOWUyMTRmNTRkNjJkODcifQ"
         }
       ]
     },
@@ -311,12 +355,16 @@
       "statement": "Per-user instructions are attached to the triggering user's message via construct_sender_context and rendered by _render_user_instructions_section as sender-level standing instructions scoped to only the current turn, distinct from the repo instructions embedded in the shared system prompt.",
       "evidence": [
         {
-          "resource": "repo://agent/prompt.py#L457-L467",
-          "version": "repo-lines-v1:sha256:5ec69722f1596154ec685397745fadf223d5b23a63f4250e8175f1e466ee4a90:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ3MmIzNzM0YzgyMjFmZmUyMDM2OWRkMzI1ZGZmYmQ1M2U3NTFiY2IzOTZhZDI5NjEwZjY4NzkyMmYyMzg4NTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwYzhjM2FjZTRiNzU4ZWM5MmQzYjdiZmE2MzljMTFhYjFkYzg1NGIwODMxYjViZWFlZDNiMjE2YTVlYWQzOTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE2NTRiNWIxNGUxMDAxZjVhNjcwMDY0ZGU5MmUzZGEwMzI2Njk3MTk5YTdkM2VlYmJiMWEzN2RlY2VhZDBjY2UifQ"
+          "resource": "repo://agent/prompt.py#L461-L470",
+          "version": "repo-lines-v1:sha256:6371b4dc93ef439eca6d5bcc3668b5584c3598acd27c4a8c7b1f88fd7c751e57:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ3MmIzNzM0YzgyMjFmZmUyMDM2OWRkMzI1ZGZmYmQ1M2U3NTFiY2IzOTZhZDI5NjEwZjY4NzkyMmYyMzg4NTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ZTk3NzZkZDRkZjNkMzBlNWEzZjQ5NTE4MjQ3NjdlMjkxMjBkYWMzZTBhN2JkODEzZWEyYmI5ZjBlNzE5OTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwYzhjM2FjZTRiNzU4ZWM5MmQzYjdiZmE2MzljMTFhYjFkYzg1NGIwODMxYjViZWFlZDNiMjE2YTVlYWQzOTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkifQ"
         },
         {
-          "resource": "repo://agent/server.py#L1319-L1332",
-          "version": "repo-lines-v1:sha256:29909957b7912652e93a0546df55062d3a76ea57fa1f6d2a9dec7b44ececa7c9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2MzdiYWI4NDIxMGNjZjMxOWU4NjJiNjU3NmVmZGQ0MWY3Zjc0ZjBhYzk2YWNlNzM1NzAwZmI1ZTRhNWQwMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmMDkxYWQ4ZTgwNjI2NDNjNmVhNzRiNTA3MzdmM2I3ZjEyZGQxYzFjOTRmMmZhNWNhODMzNWYzYzM5Y2RjODAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUwMjZlOWYwNWI4MzcwY2YyYTBkZjMxZGUwZjUxMWI0MjI4YTY2M2Q4NWYyZmQzOGE3NDc0YzNjMzhmNDFmMmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ4NTk3NjI0MmFiYmU3YjEyZjJjODU2NDg2OTE1NTczOWQ1NTk4ZGNhYjBlYWMzMTViMmMyN2I1NTRhOGM0ODYifQ"
+          "resource": "repo://agent/server.py#L1335-L1347",
+          "version": "repo-lines-v1:sha256:003044aecd7f757b94b5e963e1548fb31640bd007a5abcfe06a65eff42de2cf8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2MzdiYWI4NDIxMGNjZjMxOWU4NjJiNjU3NmVmZGQ0MWY3Zjc0ZjBhYzk2YWNlNzM1NzAwZmI1ZTRhNWQwMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUwMjZlOWYwNWI4MzcwY2YyYTBkZjMxZGUwZjUxMWI0MjI4YTY2M2Q4NWYyZmQzOGE3NDc0YzNjMzhmNDFmMmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg4NGUwMWYzMmJmYjI2ZmM3MTEzZjViMzQ5YmU5MTU4NzVjM2E5MDYwZGZkMzBiNzdjYWQzYTZmZDU3YTExZDAifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L327-L337",
+          "version": "repo-lines-v1:sha256:f4d04aee1533e3938ef3d35bf748cb0e23528e1d0d4c2b78ac1fe4b5474713de:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2OGU0M2RhZWJmNzI4MjFlMjNhNGI2MmViZWE3YjQ2NGQ3OWFlZmUzNmNiMTMxYjYwZWRiNzgwMDZlMjdlNGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlN2M5NTdiY2I0NGZiNjczYzk4YjAwNTBhNzVkMzgwODJkYjgxZDkxOGRlMzEzYTNmMDdjMTIzNTMwNmQ3ZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjljZmUwZTM4NDQ0MmNhZWE5MzRjMDM1MzVhZGJlMjljM2U1MzI2ODBjNGU1YmI1ODU1NjQ2NjQwMjQzZGIwMDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFhNDg4MTk1YjdmZDFiNGZkYjJlMDlkNDJkZjExZTNlNjczMGQ3YjBhNDBiZWQ3ZThhMGEyYjg2N2M5ODljNjYifQ"
         }
       ]
     },
@@ -325,22 +373,58 @@
       "statement": "Instruction conflicts resolve in a strict order AGENTS.md > repository custom instructions > user-level (sender) instructions: the prompt tells the agent AGENTS.md overrides defaults with prompt-level authority, repo instructions yield to AGENTS.md, and user-level instructions yield to both repo instructions and AGENTS.md.",
       "evidence": [
         {
-          "resource": "repo://agent/prompt.py#L288-L288",
-          "version": "repo-lines-v1:sha256:e1eb3bd6e3866d5728c23f9712a604f94760356563bdbce140afdc57c71b3d3a:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTFlYjNiZDZlMzg2NmQ1NzI4YzIzZjk3MTJhNjA0Zjk0NzYwMzU2NTYzYmRiY2UxNDBhZmRjNTdjNzFiM2QzYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZTFlYjNiZDZlMzg2NmQ1NzI4YzIzZjk3MTJhNjA0Zjk0NzYwMzU2NTYzYmRiY2UxNDBhZmRjNTdjNzFiM2QzYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzU3Yjg2MWEzMjJhYzA3NTIwNDUzNTdkYzIxNDJhMDFkMDI0ZWIzN2UwNmI5Mzg5M2NlNmJhMzBhY2MxM2Q4ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDI1ZGM0YjAwMjUxMjI1Y2M1OTZkYzg5MjY3OTkwNDQwYTExZGE5NzI2OGFkNTllNWNmNzRhYjRhZTdjZjNlNCJ9"
+          "resource": "repo://agent/prompt.py#L278-L292",
+          "version": "repo-lines-v1:sha256:2b7633f17d42b78a693ff5a184ac884f4e527839467f0347d8e7c5166cf6a916:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU3YjA1MmEwMzU0YzZmN2U1Zjk5NjcwNGEzNDQzYzY1ZTFkODQ5ODY5MjFiYmI1ZjU4N2Q0ZjQwMzlkOGQ0M2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhZjY4YWE1Y2IwNGEzMzhkMjg1NDJhMzczNzMyZWFjN2U0NjBiNTQyZGFhOTc1MmE3MWM0YTUwZTY0OTI3MDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0NDg1ZDczMjUwODdmOGM1NTQ3MGJkNGNkMjRmMDUwMmU1MGQ0YjQwN2U3MmJjMjhlZmM4YzdjYWY4OWI5MmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkYTJiYTk0YTY4NWExYzc1YzZkMzMwYzQwMjhiNGJjOTMyOGUxYzYxNmQxZTk2ODQ3MWRkMTZmM2RmYTg0NjQifQ"
         },
         {
-          "resource": "repo://agent/prompt.py#L408-L414",
-          "version": "repo-lines-v1:sha256:8f0ac75bc6244b5cc09d6038ef9aa425c32882c7aba7499750dd881eddd391e2:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzM3NmJjZmU3YzhkN2VlYzg1NWUwMTk3MmM5NTBjMjJlYmYwODhiNzQzMThkNDUxNDBjMTBlZGM4ZjQzMGNmNyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjBmZTcxYTY3MTI0M2EwMDE0YTU4ODc4NTFhMWRhNmU4ZTAxYjgyNjM1OTJkNzZkNWIxN2E0NjQxMWM0MjU3MyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGE0ZTZmOTU1ZTk4MDg4YTQ2YzcxOTVkYjY4NmJlZWFmODg2ZTk1MmM2Yjg0NDY4OWIzYmM3MTBkMjFjNzcyMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTc3ZWI4OTJjOThkODk3ZTg5YTZmYjYzNTA0YjMxZDQ2MmM5YTFlZjdlOTZjYjE4ODIyMGIxNWVmNmQwYzA2ZSJ9"
+          "resource": "repo://agent/prompt.py#L405-L416",
+          "version": "repo-lines-v1:sha256:c857fdf696e0fc807739d6117ab2da0bcb430ed5f967acf27a23553254668d7c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3M2JjMjQ4NjU5YTZkY2NjMDllYmFhNTRjYTg4YmRjNzgyOGZlNGI4MDg4ODcwZjQyNzBhODcyZjM2MjZmZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYwZmNiMGU3YWI1ZTkyNWZmYzc4MDQ3NDZlNjBlZWM1OTZkYTI5OTE0Y2U0ZDNmMDc3MjlkZThjNjE4ZDYwNWIifQ"
         },
         {
-          "resource": "repo://agent/prompt.py#L461-L465",
-          "version": "repo-lines-v1:sha256:29169c5030a0c8d630b66e16d3575554f85b69153bc52f334b8e63b409565799:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGE5MDU5OTMxMTIzY2FiMzFlZjU2NTk4NGJiMjFlOWQxMmE3ODg0MTdlMzI3YTdiZTUxMWFiYzcyOGYxODIyYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2FkN2Y3NThmMTVkMGU5OGU4M2E0YWZjNGFlMTc5NGNlYTBmNmRhODJlY2JkN2RhYmUyOGEzMWI5ZjM4MzcxMiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTJlODM1ZmIyMjc3MTZjMDUxMzc5YjFhZjIzY2YyZjNmZjBlYmQwNmJiNzVmNjQ4NzlkYWYyNWE5OTQ2N2ZkMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTc3ZWI4OTJjOThkODk3ZTg5YTZmYjYzNTA0YjMxZDQ2MmM5YTFlZjdlOTZjYjE4ODIyMGIxNWVmNmQwYzA2ZSJ9"
+          "resource": "repo://agent/prompt.py#L461-L470",
+          "version": "repo-lines-v1:sha256:6371b4dc93ef439eca6d5bcc3668b5584c3598acd27c4a8c7b1f88fd7c751e57:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ3MmIzNzM0YzgyMjFmZmUyMDM2OWRkMzI1ZGZmYmQ1M2U3NTFiY2IzOTZhZDI5NjEwZjY4NzkyMmYyMzg4NTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ZTk3NzZkZDRkZjNkMzBlNWEzZjQ5NTE4MjQ3NjdlMjkxMjBkYWMzZTBhN2JkODEzZWEyYmI5ZjBlNzE5OTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwYzhjM2FjZTRiNzU4ZWM5MmQzYjdiZmE2MzljMTFhYjFkYzg1NGIwODMxYjViZWFlZDNiMjE2YTVlYWQzOTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b49895a3684d47b28e7fad6716fa80a4",
+      "statement": "For dashboard image-bearing run creation, a text-only resolved model is replaced with default_vision_model_pair; direct image-content validation rejects a missing or text-only model with HTTP 422.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/thread_api.py#L205-L215",
+          "version": "repo-lines-v1:sha256:2d6c36769eb6901ac697efd49e7e294517da8a4b9440f3e29389b765a0103b86:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxYzc2OTAxYjVlNzAzZGY1OTJjZTVmOWJiNDE3NjQ5MzI2MTQ4NmNmNjg2OTNhMzk1MzkzNGZmNzM0NTMyMjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1NTlmNWRkMTYzM2RiOTliOGIzODgyMTczMjVlYzI4MGU3NzQ3ZjIzNjkyNTFiZmE3ZDBjMWRiMjA1YWFlNDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIyN2ZiMmI4MTcxMjQ4NWEwOTNkZWQ4MmJjYzg4MDhiYzMyMThkNDEzNjQzNTc5NjJiMmUxMGYwZjBiMjhiOGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg3NTgzNzFjYzc4ZTBhYzEzNmJhNTU2YWEyMmY2MmQyNGZhYWM5NDQwYjBhNTA5MWU4NTNlNjU4ZDFlNmRmYTMifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/thread_api.py#L246-L274",
+          "version": "repo-lines-v1:sha256:e6572c729428cb97acdeb0aefa9de0670e0f1edf893fbfdb68e8f567c903fc27:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkZjYwZWRiZDRjZjc4MWFhMjM4Mzk5MTYzYTg3NzM4Y2IzOTliN2M0OTRjNGU0ZTIwMDc5MGZjODkxNmE3MzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ3NTE1NzZhMjc3NDdlYWMxZWZlYWU4MzNmMTA5YzE4Y2M3NjRjYjNhNDZiMzc3NDE2OTAyNmQ3NjE1YmJiMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQwYzRmNGQ2YWE5NjZmNmUwOGVmZWUwNDIwOGJlZmMxYTNiMzY5ODRhZWRhMDRiZGNhNjRlMTM1N2Y4NzRiODcifQ"
+        },
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_thread_api.py#L262-L311",
+          "version": "repo-lines-v1:sha256:9bbfb5eda813cb328ae8f3c10f077a00f238392782c6dc738cd0d841216334b4:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzZWExZWExMzc2NWZhMGQ4NjcyYzBmYmJhYTVjYmE0MmUyYzgzNTc5OGZmMDdjZGI3N2M0YzQ4NTFkNTRiZTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3NDVlZjJhNWZjMmZkZDMwNjIyNzE1NGFkNzEyODRkZDlmYjI4YmUzYzQ3NjM2NzYxZmUwYTk2MjBlYmVlZTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxZTc0MTljMjU1NjczYjQ5M2Y2ZmU5Y2UwNzQwNmU1ZGM1MWVjZTFmYzg1ZWRiYjllNTIyYzQzNGU2ZjE1MWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI3Mzc1OGFmNTFkZWE4N2MxYjI2NDk5NDQwNGViNjI1NTkxMzk0NmM3MDRiZTRmMTkyODBiZGU3ZTYxNjVkNmEifQ"
+        },
+        {
+          "resource": "repo://tests/dashboard/test_dashboard_thread_api.py#L37-L55",
+          "version": "repo-lines-v1:sha256:ee8764f0b0d483e760ccf339a55002cd664eb02931db443340dd9a14db6886de:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyNmQ4N2RkNmE4MTE0MDY2ZDFlNDYyZTM2MzFmMWEzZGRmZjE2ZDBmN2NhOTc0NzdiM2Q0YWQzZTJiZTUwNzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1MDJmNTYwOGQxNjE3OTNmYmExZTk3N2NlYWEyMGMzYjY5Y2ZiNmU4ZDJhOTJkMjkwNWZlZWYxNWY2Y2Q2YzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyZmY3YmIzOTQ5MDRiNmExZjFhMmI3Y2U5NTFiMWNlMTFmZmJkZDdhMjc1ZTY3OTcyYzc5NzRjMGMzMTZlNGMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_94024b49c0374cbea1fe41261f3fcf38",
+      "statement": "Thread settings are a cached agent_settings metadata snapshot that strips legacy participant-specific fields; failed loads return an empty snapshot and failed writes are logged without aborting a run.",
+      "evidence": [
+        {
+          "resource": "repo://agent/utils/thread_settings.py#L21-L48",
+          "version": "repo-lines-v1:sha256:99029bf1f1a46821f6f8c14cbfbf9a41d0f63c99c211be8c2c37ce55f5cbe68a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE4Y2IyZjJiOTg3M2IzODEzM2JhMjI3YmUxZDNmMmJkOTJjZTgzMGIyZjEzOTdlOWZkM2QxODBkNTE4NzYyMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI5OWMxMmRhOWI0YjU1MDU5MTQwNDBiMTNkNDIyNzA3MDAyNGJiNjQ2YjJjNjRlMmU5YTFmOTdhZGNjMDI3MmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1NzNhNGVmMDY3ODQxZTAzMGJhYjlkODY4ODJkMmNmZTcwY2FjYTAzNDNhMTM4OTMwMDFlYzdmYTMwYmExOTYifQ"
+        },
+        {
+          "resource": "repo://agent/utils/thread_settings.py#L55-L80",
+          "version": "repo-lines-v1:sha256:43a248b93e05437561dd03bf10eef497626d5eb61fccfb3d9f03bba0a075ae7c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiZmQ3ZTRmYjY5N2FlMjU0ZTM2YWU2MDM5YmRiODA4MTMzYjE4ZWU0ZDJiZmNlNjc5YTc1ZmNhY2U4OWI1ODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNWM4MjYzMmZjODJkNGIyYzM0MGY0MjU1OGJhM2RmYTMxYzc2NTVkZjZmY2MxNjhiNGZkY2U1N2ZhYzYwNDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyYmU0ZTQ3MzU5ZTM1MTkyZjI0MDZiYTIxNjUyMzVjZGVlM2JlYjA4NDBjMTgwYjU5MTlhNzVhZDAzZWRkMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ0YjA3N2RlOWJjNDMxMjZkOTgzMzkwZTExOTU3OTRkODIzZWFkN2FkNjE1YWYxZjRjNzlhZjhlNzhkNjJjNzcifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-27T06:27:22.313Z"
+    "at": "2026-08-31T08:17:06.525Z"
   }
 }

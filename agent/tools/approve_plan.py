@@ -12,9 +12,7 @@ from langgraph.types import Command
 from langgraph_sdk import get_client
 from typing_extensions import TypedDict
 
-from agent.run_config import RunConfig
-
-from ..dashboard.plan_store import (
+from agent.dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_SHARED,
     format_plan_comments,
@@ -23,6 +21,7 @@ from ..dashboard.plan_store import (
     make_plan_approver,
     set_plan_status,
 )
+from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 

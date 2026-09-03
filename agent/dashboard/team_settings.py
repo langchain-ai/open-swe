@@ -2,7 +2,7 @@
 
 A single record keyed ``"default"`` keeps all instance-wide reviewer
 configuration in one place. Per-repo style prompts live in
-:mod:`agent.dashboard.review_styles`.
+:mod:`agent.review.styles`.
 """
 
 import logging
@@ -12,10 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from agent.store import get_value, now_iso, put_value
-
-from ..utils.gateway import resolve_gateway_enabled
-from .options import (
+from agent.dashboard.options import (
+    DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -24,6 +22,8 @@ from .options import (
     model_supports_effort,
     provider_fallback_pair,
 )
+from agent.store import get_value, now_iso, put_value
+from agent.utils.gateway import resolve_gateway_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -220,8 +220,8 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
 def _normalize_stale_model_pair(
     model: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
-    if model is None:
-        return model, effort
+    if model in DEPRECATED_MODEL_IDS:
+        return None, None
     canonical = canonical_model_pair(model, effort)
     if canonical is not None:
         return canonical

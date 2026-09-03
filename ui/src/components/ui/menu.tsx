@@ -143,13 +143,30 @@ function MenuRadioItem({
   return (
     <MenuPrimitive.RadioItem
       className={cn(
-        "flex min-h-7 cursor-default items-center rounded-md px-2 py-1 text-xs/relaxed text-foreground outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-checked:bg-foreground/[0.08] data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        // Selection is the checkmark, not a tint: the background is reserved
+        // for data-highlighted so hover stays distinguishable from checked.
+        "grid min-h-7 cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-md py-1 ps-2 pe-4 text-xs/relaxed text-foreground outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className
       )}
       data-slot="menu-radio-item"
       {...props}
     >
-      <span className="min-w-0 flex-1">{children}</span>
+      <MenuPrimitive.RadioItemIndicator className="col-start-1">
+        <svg
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path d="M5.252 12.7 10.2 18.63 18.748 5.37" />
+        </svg>
+      </MenuPrimitive.RadioItemIndicator>
+      <span className="col-start-2 min-w-0">{children}</span>
     </MenuPrimitive.RadioItem>
   )
 }

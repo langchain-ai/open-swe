@@ -5,10 +5,9 @@ from typing import Any, Literal
 from langgraph.config import get_config
 
 from agent.run_config import RunConfig
-
-from ..integrations.langsmith import get_async_sandbox_client
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
 async def _resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
@@ -21,7 +20,7 @@ async def _resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
         raise ValueError("no thread_id in run config")
 
     backend_proxy = await get_sandbox_backend(thread_id)
-    work_dir = posixpath.normpath(await aresolve_sandbox_work_dir(backend_proxy))
+    work_dir = posixpath.normpath(await resolve_sandbox_work_dir(backend_proxy))
     path = posixpath.normpath(
         file_path.strip()
         if file_path.strip().startswith("/")

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:0bbef12e718daa2f4e03035504e091867ca494f1e008f22d9e5bfe42b6c17895",
+  "pageVersion": "sha256:a5cda26fb6b4a253017e44b3ec6a9547913d581624e272e4af200564b23a8172",
   "claims": [
     {
       "id": "claim_1e087483ed7d4f6789eaef708ca65bca",
@@ -88,11 +88,11 @@
     },
     {
       "id": "claim_07dd7cd9be1542d8b60432b674f22e85",
-      "statement": "On success open_pull_request records PR telemetry: it fetches full PR details, calls record_agent_pr_usage, and upserts a normalized PR record (URL, number, state via derive_pr_state, head/base refs, author, diff stats) into the thread's pull_requests metadata, and for Slack code-channel sessions refreshes the channel context bar and diff view.",
+      "statement": "After a created or already-existing PR is returned, open_pull_request best-effort fetches full details, records agent PR usage, upserts normalized PR and legacy metadata on the thread, and, for a Slack code-channel session, refreshes context, agent resource, and the diff view when a nonempty diff is available; any exception in this telemetry sequence is non-fatal to PR creation.",
       "evidence": [
         {
-          "resource": "repo://agent/tools/open_pull_request.py#L529-L671",
-          "version": "repo-lines-v1:sha256:35465f6d3b2d26c3ddf20102ad050e06ffab735715ffcfe5310a58ebdd0b0a6e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQzLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4NzRjZmUwNTQ1NzA2MjFlYTYzN2IyMGZmMmU1MGJhZDNmZDA5ODI1MjYyNDJjOTFiMDk3ZTRmNjQzY2JjNjU0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1OTA5YTUzYTYxOGQwMjhlMWQzMDAwYzBhN2FiY2VlY2JlNWZiMzdmNGU1MTFlZmU0NjY0M2ZhZDZlNjY4NzJmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5YTgyZWJlOWVkNDA3YzNhNmJhNGIwMDM0MjkyYmFhNTJjMTFjZTVhZTI4NjEwNzQwMmRlNDc5MmVlZWNhY2ZjIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MjYxY2Y2MjFmZWJiYTFmMDgxMzEzMDUwZGQwYWJlMzIzMDQ2Y2ZiYzNlNjc2NzM3YTAyOWUyNTJhMmI0YzhlIn0"
+          "resource": "repo://agent/tools/open_pull_request.py#L530-L686",
+          "version": "repo-lines-v1:sha256:b66a657587a2288b1dad93fa0004aa35bccd89c1958ea2aa7890f2a2a043d516:eyJzZWxlY3RlZExpbmVDb3VudCI6MTU3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4NzRjZmUwNTQ1NzA2MjFlYTYzN2IyMGZmMmU1MGJhZDNmZDA5ODI1MjYyNDJjOTFiMDk3ZTRmNjQzY2JjNjU0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1OTA5YTUzYTYxOGQwMjhlMWQzMDAwYzBhN2FiY2VlY2JlNWZiMzdmNGU1MTFlZmU0NjY0M2ZhZDZlNjY4NzJmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5YTgyZWJlOWVkNDA3YzNhNmJhNGIwMDM0MjkyYmFhNTJjMTFjZTVhZTI4NjEwNzQwMmRlNDc5MmVlZWNhY2ZjIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MjYxY2Y2MjFmZWJiYTFmMDgxMzEzMDUwZGQwYWJlMzIzMDQ2Y2ZiYzNlNjc2NzM3YTAyOWUyNTJhMmI0YzhlIn0"
         },
         {
           "resource": "repo://agent/utils/github_comments.py#L107-L115",
@@ -259,10 +259,34 @@
           "version": "repo-lines-v1:sha256:abeffa04ec10368101c9b9012cf6a29a0e145e218b73ae5affdd2d199faed38a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI2ZjE4Y2IzN2M4ZmQwYWJlNGM3ZWY3YWVhY2FkMzJlMzhhZjZmZTA4YzdmNDMwMjI5MWRjNTRmMWI1YzU0NjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyMzU1NmYyMmM5MzM0M2ZiOTAyYWZkMmYzYjYzMzQ3MzAwMzUzNDQyOTY2MGQxNWUzYzdlMzVmNTY0YzY1OTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhODJlYmU5ZWQ0MDdjM2E2YmE0YjAwMzQyOTJiYWE1MmMxMWNlNWFlMjg2MTA3NDAyZGU0NzkyZWVlY2FjZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ2NDgxODRjOTA1Njk1ZDExOTBiODI2MDI3N2VjOWFmZDIzZThmOGMyNjAzMDg1Yjk1Y2Q3ODYxNmUzYmZkMjIifQ"
         }
       ]
+    },
+    {
+      "id": "claim_e96dc4db94f845ba8101801371c0fc1f",
+      "statement": "Workflow push approval records are stored under workflow_push_approvals with decision metadata and review fields, and persistence trims the per-thread history to the 20 most recent records.",
+      "evidence": [
+        {
+          "resource": "repo://agent/dashboard/workflow_approval.py#L155-L179",
+          "version": "repo-lines-v1:sha256:e2e27688aa82add5de0845428eef94db59f92750f5fbcc6bed16b87c6c112bcd:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlYjdjZDRjOTAwMzgzNWIzMTNiYzM4ZDdjN2E3YzA0YjdlYzQwMzUyNjA4ODJkNmM1ODFlYWY3NDMwMTA0NGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3YWIxOTI1OTA0NzI0MWRmNTg3ZTUyNGM4MjM3OTdmNWQ3NGRiNmE0YzFhNDE5NWE4ZTMxMDgzZmU0M2RkNTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVlZDMwNWEwYzFlOTk0ZjMyNTNlZjRhZGFjZmUwNzk3Y2FkYzJhMmFkNzFlMDgwZjJkZWRmZmUwZTg1YjU5N2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMifQ"
+        },
+        {
+          "resource": "repo://agent/dashboard/workflow_approval.py#L43-L89",
+          "version": "repo-lines-v1:sha256:7f0b577197760f6ff3d6d39cdfd1e2787915dcbdde010f0a79377da609c15c45:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmZWYzN2I3NzM4NTY3MWZkM2JlYjU0YjAzMzdmYWQ4ZTJkZjM1ZmE5YjA5MWQ0MzljNGFiNmQzNGE5YTcyZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwMWY4OTczNWExZGNkYmNiMThjZDQ3YmYzNGRiYTM4M2I1NzBkOWRiMjgyZDJhYzYxNzljYTk2MTE4YTQyNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmODc1YWE2OGI3MzkyNjBlOWY5OWRkMjNiMDM2ZWIwYjM1OTlkM2Y0ZDEwOTMwZjUxMjFmZmQyMDYzMWQ5MGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwYjBkZjk2YWYwMDdkZmRjYjdkZTAyM2RhMWNkZWZiOGVlMDM4ODBhYjk2OWU5ZGZjNjlkN2Y0ZGYxNjQ2N2IifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ce5999c37415410983c7f5d018e15bd5",
+      "statement": "The workflow push guard only posts a Slack approval notification after a pending record is not already marked notified, and marks it notified only after the Slack post returns a message timestamp without an error.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/workflow_push_guard.py#L463-L495",
+          "version": "repo-lines-v1:sha256:13bfcdfec16effd55b21c83f5283472f011c7de8ed7f5814cc7632af7078cfc5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzMDFmMDliZTNlZDA2YjRjMGVhZWVmOGU4YTg0NTkzMDNlMjkyMTRiMjA4OTc2Y2Y2Y2M5NGZmNmUwMTI3MWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUxMTFhMmQ1YjUyM2UzZjZmYmVjMjI2MWZhZGQ1Mzg1NWJjZjQ5NjNkZGQ3ZDA3ODZkNzUzY2UxYjRiNDQ5MTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5OTcyNzkyODc2MmE3YmUxMzNhYjBjMDM5MmZmMGEyM2MwNjljMGYzYTk4ZGE1M2I0MTExNjJmNTE3MjY2NDIifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-27T06:27:22.313Z"
+    "at": "2026-09-02T08:15:43.727Z"
   }
 }

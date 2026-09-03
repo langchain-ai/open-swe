@@ -6,9 +6,8 @@ metadata says "admin" cannot act on behalf of someone who is not one.
 
 from langgraph.config import get_config
 
+from agent.dashboard.admin import is_admin
 from agent.run_config import RunConfig
-
-from ..dashboard.admin import is_admin
 
 
 def configurable() -> RunConfig:

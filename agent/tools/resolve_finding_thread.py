@@ -2,9 +2,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.run_config import RunConfig
-
-from ..review.findings import (
+from agent.github.thread_token import get_github_token
+from agent.review.findings import (
     Finding,
     ReviewerThreadMissingError,
     comment_ids_for_finding,
@@ -16,16 +15,16 @@ from ..review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
-from ..review.publish import (
+from agent.review.publish import (
     fetch_pr_review_threads,
     fetch_review_thread_id_for_comment,
     render_resolution_comment,
     reply_to_review_comment,
     resolve_review_thread,
 )
-from ..review.reconcile import reconcile_findings_with_review_threads
-from ..utils.github_token import get_github_token
-from ..utils.reviewer_outcomes import emit_finding_status_outcome
+from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.run_config import RunConfig
+from agent.utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 def _normalize_note(note: str | None) -> str | None:

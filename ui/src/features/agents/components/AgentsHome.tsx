@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import type {
+  DesktopLocalThreadSummary,
+  DesktopProjectRef,
+  DesktopWorkspaceMode,
+} from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
-import { UserMessage } from "@/features/agents/components/messages/UserMessage"
-import { Logo } from "@/features/agents/components/chat/Logo"
+import { Messages } from "@/features/agents/components/messages"
+import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
+import { LocalProjectSelector } from "@/features/agents/components/composer/RunTargetSelector"
+import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
@@ -30,6 +37,12 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+import {
+  readStoredPanelCollapsed,
+  writeStoredPanelCollapsed,
+} from "@/features/agents/lib/gitPanelPreferences"
+import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -38,6 +51,11 @@ import {
 } from "@/lib/notifications"
 
 const LAST_LOCAL_PROJECT_KEY = "open-swe.desktop.last-project"
+const NEW_AGENT_PANEL_ID = "new-agent"
+const NEW_AGENT_PANEL_REF = {
+  scope: "cloud" as const,
+  threadId: NEW_AGENT_PANEL_ID,
+}
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -51,11 +69,7 @@ function promptContent(text: string, images: Array<ImageChunk>) {
 }
 
 export function AgentsHome() {
-  // Submit straight through the layout's persistent stream. The SDK mints the
-  // thread id (no client-minted id, no `getState` 404), fires the first
-  // `run.start` — which lazily creates + stamps + owns the thread server-side
-  // — and keeps streaming after we navigate to the minted thread below.
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadRuntime()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -84,9 +98,15 @@ export function AgentsHome() {
     (environments.some((env) => env.slug === defaultEnvironmentSlug)
       ? defaultEnvironmentSlug
       : null)
-  const [submitting, setSubmitting] = useState(false)
   const [submittedDraft, setSubmittedDraft] =
     useState<CreateAgentThreadVariables | null>(null)
+  const [panelCollapsed, setPanelCollapsed] = useState(() =>
+    readStoredPanelCollapsed(NEW_AGENT_PANEL_ID)
+  )
+  const newAgentTerminals = useTerminalGroups(
+    { kind: "cloud", threadId: NEW_AGENT_PANEL_ID },
+    ""
+  )
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
@@ -104,8 +124,10 @@ export function AgentsHome() {
     null
   )
   const [localProjectBranches, setLocalProjectBranches] = useState<
-    Array<string>
+    Array<DesktopProjectRef>
   >([])
+  const [localWorkspaceMode, setLocalWorkspaceMode] =
+    useState<DesktopWorkspaceMode>("local")
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
@@ -139,7 +161,13 @@ export function AgentsHome() {
   }, [stream.threadId, queryClient])
 
   useEffect(() => {
-    if (!isDesktop || localProjects.length === 0) return
+    if (stream.threadId) {
+      writeStoredPanelCollapsed(stream.threadId, panelCollapsed)
+    }
+  }, [panelCollapsed, stream.threadId])
+
+  useEffect(() => {
+    if (!isDesktop) return
     const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
@@ -154,10 +182,67 @@ export function AgentsHome() {
       ? await window.openSweDesktop?.getProjectBranches(cwd)
       : undefined
     if (localProjectPathRef.current === cwd) {
-      setLocalProjectBranch(result?.current ?? null)
-      setLocalProjectBranches(result?.branches ?? [])
+      const branches = result?.branches ?? []
+      setLocalProjectBranch((selected) =>
+        selected && branches.some((ref) => ref.name === selected)
+          ? selected
+          : (result?.current ?? null)
+      )
+      setLocalProjectBranches(branches)
     }
   }, [])
+
+  const selectedLocalRef = localProjectBranches.find(
+    (ref) => ref.name === localProjectBranch
+  )
+
+  /**
+   * A branch already checked out in a worktree can only be worked on there, so
+   * selecting it runs the thread in that worktree. Otherwise "Current checkout"
+   * has to switch the project to the branch, while a worktree only starts from
+   * it and is created when the thread starts.
+   */
+  const selectLocalProjectBranch = useCallback(
+    async (branch: string) => {
+      setLocalError(null)
+      const ref = localProjectBranches.find(
+        (candidate) => candidate.name === branch
+      )
+      if (ref?.worktreePath) {
+        setLocalWorkspaceMode("worktree")
+        setLocalProjectBranch(branch)
+        return
+      }
+      if (localWorkspaceMode === "worktree" || !localProjectPathRef.current) {
+        setLocalProjectBranch(branch)
+        return
+      }
+      try {
+        await window.openSweDesktop?.checkoutProjectBranch({
+          cwd: localProjectPathRef.current,
+          branch,
+        })
+        setLocalProjectBranch(branch)
+      } catch (error) {
+        setLocalError(
+          error instanceof Error ? error.message : "Could not checkout branch"
+        )
+      }
+    },
+    [localProjectBranches, localWorkspaceMode]
+  )
+
+  // A base branch chosen for a worktree was never checked out, so going back to
+  // the project's own checkout has to fall back to whatever it is really on.
+  const selectLocalWorkspaceMode = useCallback(
+    (next: DesktopWorkspaceMode) => {
+      setLocalWorkspaceMode(next)
+      setLocalError(null)
+      if (next === "local") setLocalProjectBranch(null)
+      void refreshLocalProjectBranch()
+    },
+    [refreshLocalProjectBranch]
+  )
 
   useEffect(() => {
     void refreshLocalProjectBranch()
@@ -180,23 +265,6 @@ export function AgentsHome() {
     setLocalError(null)
   }
 
-  const checkoutLocalProjectBranch = async (branch: string, create = false) => {
-    if (!localProjectPath) return
-    setLocalError(null)
-    try {
-      await window.openSweDesktop?.checkoutProjectBranch({
-        cwd: localProjectPath,
-        branch,
-        create,
-      })
-      await refreshLocalProjectBranch()
-    } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : "Could not checkout branch"
-      )
-    }
-  }
-
   const handleAddLocalProject = async () => {
     const project = await addProject()
     if (project) handleSelectLocalProject(project.cwd)
@@ -207,70 +275,88 @@ export function AgentsHome() {
     if (localProjectPath === cwd) setLocalProjectPath(null)
   }
 
-  const handleSubmit = async (prompt: string, images: Array<ImageChunk>) => {
+  const resetPendingSubmit = () => {
+    draftRef.current = null
+    setSubmittedDraft(null)
+  }
+
+  const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
     if (runTarget === "local") {
       const desktop = window.openSweDesktop
-      if (!desktop || !localProjectPath) {
+      const project = localProjects.find(
+        (candidate) => candidate.cwd === localProjectPath
+      )
+      if (!desktop || !project) {
         setLocalError("Choose or add a project from This Mac before sending.")
         return
       }
-      setSubmitting(true)
-      setLocalError(null)
-      window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
-      await refreshLocalProjectBranch()
-      try {
-        const credentialError = await ensureDesktopModelCredential(
-          activeSelection?.modelId
-        )
-        if (credentialError) {
-          setSubmitting(false)
-          setLocalError(credentialError)
-          return
-        }
-        const managedSkills = cloudEnabled
-          ? await skills.refetch()
-          : { personal: [], organization: [] }
-        const localSession = await desktop.startLocalThread({
-          cwd: localProjectPath,
-          prompt,
-          images,
-          skills: [
-            ...new Map(
-              [...managedSkills.personal, ...managedSkills.organization].map(
-                (skill) => [skill.name, skill]
-              )
-            ).values(),
-          ],
-          modelId: activeSelection?.modelId,
-          effort: activeSelection?.effort,
-        })
-        queryClient.setQueryData(
-          localThreadKeys.detail(localSession.id),
-          localSession
-        )
-        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-          localThreadKeys.all,
-          (current = []) => [
-            localSession,
-            ...current.filter((thread) => thread.id !== localSession.id),
-          ]
-        )
-        await navigate({
-          to: "/agents/local/$sessionId",
-          params: { sessionId: localSession.id },
-        })
-      } catch (error) {
-        setSubmitting(false)
-        setLocalError(
-          error instanceof Error
-            ? error.message
-            : "Could not start the local Open SWE agent"
-        )
-        throw error
+      const cwd = project.cwd
+      const draft = {
+        prompt,
+        images,
+        model_id: activeSelection?.modelId ?? null,
+        effort: activeSelection?.effort ?? null,
       }
+      setSubmittedDraft(draft)
+      setLocalError(null)
+      window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
+      void (async () => {
+        try {
+          await refreshLocalProjectBranch()
+          const credentialError = await ensureDesktopModelCredential(
+            activeSelection?.modelId
+          )
+          if (credentialError) {
+            resetPendingSubmit()
+            setLocalError(credentialError)
+            return
+          }
+          const managedSkills = cloudEnabled
+            ? await skills.refetch()
+            : { personal: [], organization: [] }
+          const localSession = await desktop.startLocalThread({
+            cwd,
+            workspaceMode: localWorkspaceMode,
+            baseBranch: localProjectBranch,
+            prompt,
+            images,
+            skills: [
+              ...new Map(
+                [...managedSkills.personal, ...managedSkills.organization].map(
+                  (skill) => [skill.name, skill]
+                )
+              ).values(),
+            ],
+            modelId: activeSelection?.modelId,
+            effort: activeSelection?.effort,
+          })
+          queryClient.setQueryData(
+            localThreadKeys.detail(localSession.id),
+            localSession
+          )
+          queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+            localThreadKeys.all,
+            (current = []) => [
+              localSession,
+              ...current.filter((thread) => thread.id !== localSession.id),
+            ]
+          )
+          await navigate({
+            to: "/agents/local/$sessionId",
+            params: { sessionId: localSession.id },
+          })
+        } catch (error) {
+          resetPendingSubmit()
+          setLocalError(
+            error instanceof Error
+              ? error.message
+              : "Could not start the local Open SWE agent"
+          )
+        }
+      })()
       return
     }
     const draft = {
@@ -283,7 +369,7 @@ export function AgentsHome() {
     }
     draftRef.current = draft
     setSubmittedDraft(draft)
-    setSubmitting(true)
+    setLocalError(null)
 
     const configurable: Record<string, unknown> = {}
     if (activeSelection?.modelId && activeSelection.effort) {
@@ -296,57 +382,137 @@ export function AgentsHome() {
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
 
-    await stream
+    const handleCloudSubmitError = (error: unknown) => {
+      resetPendingSubmit()
+      setLocalError(
+        error instanceof Error
+          ? error.message
+          : "Could not start the cloud Open SWE agent"
+      )
+    }
+    void stream
       .submit(
         {
           messages: [{ type: "human", content: promptContent(prompt, images) }],
         },
-        { config: { configurable } }
+        {
+          config: { configurable },
+          onError: handleCloudSubmitError,
+        }
       )
-      .catch((error) => {
-        // Submit failed before the SDK minted a thread id — re-enable the
-        // prompt instead of leaving it disabled until a reload.
-        draftRef.current = null
-        setSubmittedDraft(null)
-        setSubmitting(false)
-        throw error
-      })
+      .catch(handleCloudSubmitError)
   }
 
+  const hasProjects =
+    runTarget === "local"
+      ? localProjects.length > 0
+      : Boolean(repo || reposQuery.data?.repositories.length)
+  const optimisticDraftThread = submittedDraft
+    ? optimisticThread("pending", submittedDraft)
+    : null
+
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-      {session.data && !routePending && <OnboardingDialog />}
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
-        <div className="flex w-full flex-col items-center gap-6">
-          {submittedDraft ? (
-            <div className="w-full self-stretch">
-              <UserMessage
-                message={
-                  optimisticThread("pending", submittedDraft).messages[0]!
-                }
+    <>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {session.data && !routePending && <OnboardingDialog />}
+        {optimisticDraftThread && (
+          <AgentThreadHeader
+            project={
+              runTarget === "local"
+                ? localProjectPath
+                : optimisticDraftThread.repoFullName
+            }
+            target={runTarget === "local" ? "This Mac" : "Cloud"}
+            panelCollapsed={panelCollapsed}
+          />
+        )}
+        {optimisticDraftThread ? (
+          <Messages
+            messages={optimisticDraftThread.messages}
+            isStreaming
+            contentWidthClass="max-w-3xl"
+          />
+        ) : (
+          <div className="flex min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-6">
+              <img
+                src="/logo-mark.png"
+                alt=""
+                className="size-14 opacity-30 grayscale dark:opacity-20"
               />
+              <h1 className="flex flex-wrap items-baseline justify-center gap-x-1 text-center text-2xl tracking-tight sm:text-3xl">
+                {hasProjects ? (
+                  <>
+                    <span>What should we build in</span>
+                    {runTarget === "local" ? (
+                      <LocalProjectSelector
+                        onAddProject={() => void handleAddLocalProject()}
+                        onRemoveProject={(cwd) =>
+                          void handleRemoveLocalProject(cwd)
+                        }
+                        onSelectProject={handleSelectLocalProject}
+                        placeholder="a project"
+                        projects={localProjects}
+                        selectedProjectPath={localProjectPath}
+                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
+                      />
+                    ) : (
+                      <RepoSelector
+                        className="inline-flex"
+                        emptySelectionLabel="Don't work in a project"
+                        noMatchesLabel="No matching projects"
+                        onRepoChange={setRepoOverride}
+                        placeholder="a project"
+                        repos={reposQuery.data?.repositories}
+                        searchPlaceholder="Search projects…"
+                        selectedLabel={repo?.split("/").at(-1)}
+                        selectedRepo={repo}
+                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
+                      />
+                    )}
+                    <span>?</span>
+                  </>
+                ) : (
+                  <span>What should we build?</span>
+                )}
+              </h1>
             </div>
-          ) : (
-            <Logo />
-          )}
+          </div>
+        )}
+        <AgentComposerDock>
           {localError && (
-            <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {localError}
             </div>
           )}
           <AgentPromptBar
+            activeRun={
+              optimisticDraftThread && runTarget === "cloud"
+                ? { threadId: stream.threadId ?? "", running: true }
+                : undefined
+            }
             autoFocus
+            compact
+            placeholder="Do anything"
             onSubmit={handleSubmit}
-            disabled={submitting}
+            onStop={
+              optimisticDraftThread && runTarget === "cloud"
+                ? () => stream.stop().finally(resetPendingSubmit)
+                : undefined
+            }
+            disabled={Boolean(submittedDraft)}
+            busy={Boolean(optimisticDraftThread)}
             models={models}
             selection={activeSelection}
             onSelectionChange={handleSelectionChange}
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
-            onRepoChange={setRepoOverride}
+            onRepoChange={optimisticDraftThread ? undefined : setRepoOverride}
             runTarget={isDesktop ? runTarget : undefined}
             onRunTargetChange={
-              isDesktop && cloudEnabled ? handleRunTargetChange : undefined
+              !optimisticDraftThread && isDesktop && cloudEnabled
+                ? handleRunTargetChange
+                : undefined
             }
             localProjects={localProjects}
             selectedLocalProjectPath={localProjectPath}
@@ -357,17 +523,21 @@ export function AgentsHome() {
             onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
             onRefreshLocalProjectBranch={() => void refreshLocalProjectBranch()}
             onSelectLocalProjectBranch={(branch) =>
-              void checkoutLocalProjectBranch(branch)
+              void selectLocalProjectBranch(branch)
             }
-            onCreateLocalProjectBranch={(branch) =>
-              void checkoutLocalProjectBranch(branch, true)
+            localWorkspaceMode={localWorkspaceMode}
+            localWorktreeLabel={
+              selectedLocalRef?.worktreePath ? "Worktree" : undefined
             }
+            onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             environments={environments}
             selectedEnvironment={selectedEnvironment}
             onEnvironmentChange={
-              runTarget === "cloud" ? setEnvironmentOverride : undefined
+              !optimisticDraftThread && runTarget === "cloud"
+                ? setEnvironmentOverride
+                : undefined
             }
             adminThread={adminThread}
             onAdminThreadChange={
@@ -377,8 +547,22 @@ export function AgentsHome() {
             }
             skills={skills.data}
           />
-        </div>
+        </AgentComposerDock>
       </div>
-    </div>
+      <AgentRightPanel
+        threadRef={NEW_AGENT_PANEL_REF}
+        terminals={newAgentTerminals}
+        terminalTarget={{ kind: "cloud", threadId: NEW_AGENT_PANEL_ID }}
+        cwd=""
+        terminalAvailable={false}
+        diffAvailable={false}
+        collapsed={panelCollapsed}
+        onCollapsedChange={(next) => {
+          setPanelCollapsed(next)
+          writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
+        }}
+        renderDiff={() => null}
+      />
+    </>
   )
 }

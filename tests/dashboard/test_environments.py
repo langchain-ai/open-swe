@@ -297,7 +297,7 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
         patch(
-            "agent.integrations.langsmith.get_async_sandbox_client",
+            "agent.sandboxes.providers.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
         ),
     ):
@@ -333,7 +333,7 @@ async def test_capture_walks_the_name_suffix_past_a_conflict(fake_store: FakeSto
     with (
         patch.object(env_store, "_delete_snapshot", AsyncMock()),
         patch(
-            "agent.integrations.langsmith.get_async_sandbox_client",
+            "agent.sandboxes.providers.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
         ),
     ):
@@ -357,7 +357,7 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
         patch(
-            "agent.integrations.langsmith.get_async_sandbox_client",
+            "agent.sandboxes.providers.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
         ),
     ):
@@ -388,7 +388,7 @@ async def test_first_capture_failure_marks_the_environment_failed(fake_store: Fa
     capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
     with (
         patch(
-            "agent.integrations.langsmith.get_async_sandbox_client",
+            "agent.sandboxes.providers.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
         ),
     ):
@@ -413,7 +413,7 @@ async def test_capture_requires_the_langsmith_provider(
     capture = AsyncMock()
     with (
         patch(
-            "agent.integrations.langsmith.get_async_sandbox_client",
+            "agent.sandboxes.providers.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
         ),
     ):

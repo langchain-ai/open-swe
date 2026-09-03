@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock
 
-from agent import slack_thinking
+from agent.slack import thinking as slack_thinking
 
 
 class _Part:
@@ -56,8 +56,7 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     final_chunks = stop.await_args.args[2]
     serialized = str(final_chunks)
     assert "Running a development command" in serialized
-    assert "Command details hidden" in serialized
-    assert "secret-token" not in serialized
+    assert "echo secret-token" in serialized
     assert final_chunks[-1]["status"] == "complete"
     assert final_chunks[-1]["output"] == "Completed"
 

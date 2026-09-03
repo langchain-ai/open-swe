@@ -9,18 +9,17 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
 
 from agent.api.app import app
+from agent.github import webhook as github_webhooks
+from agent.slack import client as slack_utils
+from agent.slack import webhook as slack_webhooks
+from agent.slack.client import GitHubPrRef
+from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
-from agent.tools import request_pr_review as request_pr_review_tool
-from agent.utils import slack as slack_utils
-from agent.utils.slack import GitHubPrRef
 from agent.webhooks import common as webhook_common
-from agent.webhooks import github as github_webhooks
-from agent.webhooks import slack as slack_webhooks
 
-request_pr_review_module = importlib.import_module("agent.tools.request_pr_review")
+request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
@@ -48,9 +47,7 @@ def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(
-    client: TestClient, event_type: str, payload: dict[object, object]
-) -> Response:
+def _post_github_webhook(client: TestClient, event_type: str, payload: dict[object, object]):
     """Send a signed GitHub webhook POST request."""
     body = json.dumps(payload, separators=(",", ":")).encode()
     return client.post(
@@ -70,7 +67,7 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
-def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Response:
+def _post_slack_webhook(client: TestClient, payload: dict[object, object]):
     body = json.dumps(payload, separators=(",", ":")).encode()
     timestamp = "1700000000"
     return client.post(

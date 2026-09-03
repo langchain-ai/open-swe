@@ -7,9 +7,8 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.run_config import RunConfig
-
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_state import get_sandbox_backend
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.state import get_sandbox_backend
 
 OUTPUT_CHUNK_CHARS = 500
 
@@ -29,7 +28,7 @@ async def write_sandbox_output(tool_name: str, content: str, extension: str) -> 
         raise RuntimeError("no thread_id in run config")
 
     backend = await get_sandbox_backend(str(thread_id))
-    work_dir = await aresolve_sandbox_work_dir(backend)
+    work_dir = await resolve_sandbox_work_dir(backend)
     suffix = extension.removeprefix(".")
     path = posixpath.join(work_dir, f"{tool_name}-{uuid.uuid4().hex}.{suffix}")
     result = await backend.awrite(path, content)

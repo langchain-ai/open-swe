@@ -42,7 +42,7 @@ def _load_e2b_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "e2b", fake_e2b)
     monkeypatch.setitem(sys.modules, "langchain_e2b", fake_langchain_e2b)
 
-    module_path = ROOT / "agent" / "integrations" / "e2b.py"
+    module_path = ROOT / "agent" / "sandboxes" / "providers" / "e2b.py"
     spec = importlib.util.spec_from_file_location("e2b_under_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

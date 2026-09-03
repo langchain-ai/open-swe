@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-manage_tool = import_module("agent.tools.manage_code_channel")
+manage_tool = import_module("agent.slack.tools.manage_code_channel")
 
 
 @pytest.mark.parametrize(

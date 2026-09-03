@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import pull_request_context, thread_api
+from agent.dashboard import thread_api
+from agent.github import pull_request_context
 
 
 def test_actionable_checks_preserve_requiredness() -> None:

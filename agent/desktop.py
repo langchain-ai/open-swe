@@ -17,24 +17,46 @@ def is_desktop_run(cfg: RunConfig) -> bool:
     return cfg.source == "desktop"
 
 
-def resolve_desktop_project(cfg: RunConfig) -> str:
-    requested = cfg.local_project_path
+def _allowed_projects() -> set[str]:
     allowlist_path = os.environ.get("OPEN_SWE_LOCAL_PROJECTS_FILE")
-    if not requested or not allowlist_path:
-        raise ValueError("Desktop runs require an allowlisted local_project_path")
+    if not allowlist_path:
+        return set()
     with open(allowlist_path, encoding="utf-8") as file:
         entries = json.load(file)
     if not isinstance(entries, list):
         raise ValueError("OPEN_SWE_LOCAL_PROJECTS_FILE must contain a JSON array")
-    allowed = {
+    return {
         os.path.realpath(entry["cwd"] if isinstance(entry, dict) else entry)
         for entry in entries
         if isinstance(entry, str) or (isinstance(entry, dict) and isinstance(entry.get("cwd"), str))
     }
-    project = os.path.realpath(requested)
-    if project not in allowed or not Path(project).is_dir():
+
+
+def is_desktop_worktree(path: str) -> bool:
+    """Whether the path is a worktree the desktop app created for a thread."""
+    worktrees_dir = os.environ.get("OPEN_SWE_LOCAL_WORKTREES_DIR")
+    if not worktrees_dir:
+        return False
+    return Path(os.path.realpath(worktrees_dir)) in Path(os.path.realpath(path)).parents
+
+
+def resolve_desktop_project(cfg: RunConfig) -> str:
+    """The directory a desktop run may work in.
+
+    A thread runs either in a project the user registered in the desktop app or
+    in its own git worktree, which the app checks out under
+    `OPEN_SWE_LOCAL_WORKTREES_DIR`. Both are named by the same config value, so
+    a path is trustworthy when it is allowlisted or contained in that directory.
+    """
+    requested = cfg.local_project_path
+    if not requested:
+        raise ValueError("Desktop runs require a local project path")
+    project = Path(os.path.realpath(requested))
+    if not project.is_dir() or not (
+        is_desktop_worktree(requested) or str(project) in _allowed_projects()
+    ):
         raise ValueError("local_project_path is not an allowed project directory")
-    return project
+    return str(project)
 
 
 def create_desktop_backend(cfg: RunConfig) -> LocalShellBackend:

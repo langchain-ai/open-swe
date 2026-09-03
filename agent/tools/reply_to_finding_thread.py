@@ -2,9 +2,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.run_config import RunConfig
-
-from ..review.findings import (
+from agent.github.thread_token import get_github_token
+from agent.review.findings import (
     FindingInteraction,
     ReviewerThreadMissingError,
     append_finding_interaction,
@@ -14,8 +13,8 @@ from ..review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
-from ..review.publish import reply_to_review_comment
-from ..utils.github_token import get_github_token
+from agent.review.publish import reply_to_review_comment
+from agent.run_config import RunConfig
 
 
 async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:

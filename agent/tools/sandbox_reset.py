@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from .admin_gate import configurable, require_admin
+from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
         if value is not None
     }
     try:
-        from ..server import reset_sandbox_for_thread
+        from agent.sandboxes.lifecycle import reset_sandbox_for_thread
 
         old_sandbox_id, new_sandbox_id = await reset_sandbox_for_thread(thread_id, create_params)
     except Exception as exc:
