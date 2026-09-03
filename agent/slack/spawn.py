@@ -230,10 +230,9 @@ async def open_code_channel(
     warnings: list[str] = []
     # People before the work: the channel is where the conversation happens, and
     # nobody sees it start unless they are in it.
-    invited_count, invite_error = await invite_to_slack_channel(channel_id, invitees)
-    invited = invitees if invited_count else []
+    invited, invite_error = await invite_to_slack_channel(channel_id, invitees)
     if invite_error:
-        warnings.append(f"Could not invite {', '.join(invitees)}: {invite_error}")
+        warnings.append(f"Could not invite {invite_error}")
 
     # Chrome before the run, not after: the run's completion is what returns the
     # session to `active`, and a `processing` set after that would stick.

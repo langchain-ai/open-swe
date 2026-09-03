@@ -232,7 +232,7 @@ def opening(monkeypatch: pytest.MonkeyPatch, spawn_calls: dict[str, AsyncMock]) 
         "create_code_channel": AsyncMock(return_value=("C-code", None)),
         "resolve_slack_thread_id": AsyncMock(return_value="thread-code"),
         "archive_code_channel": AsyncMock(return_value=(True, None)),
-        "invite_to_slack_channel": AsyncMock(return_value=(1, "")),
+        "invite_to_slack_channel": AsyncMock(return_value=(["U1", "U2", "U3"], "")),
     }
     for name, mock in calls.items():
         monkeypatch.setattr(spawn, name, mock)
@@ -370,7 +370,7 @@ async def test_an_invite_slack_refuses_is_a_warning_not_a_failure(
 ) -> None:
     """The work still starts; a public channel is reachable by its link."""
     monkeypatch.setattr(
-        spawn, "invite_to_slack_channel", AsyncMock(return_value=(0, "missing_scope"))
+        spawn, "invite_to_slack_channel", AsyncMock(return_value=([], "U1: missing_scope"))
     )
 
     opened = await _open()
