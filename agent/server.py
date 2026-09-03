@@ -89,6 +89,7 @@ from agent.middleware import (
     ExcludeToolsMiddleware,
     IntegrationGroup,
     ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -380,7 +381,11 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """
     return cast(
         list[AgentMiddleware[Any, Any, Any]],
-        [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        [
+            SanitizeOpenAIResponsesMiddleware(),
+            ModelErrorMiddleware(),
+            ModelCallTimeoutMiddleware(),
+        ],
     )
 
 
@@ -1341,6 +1346,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelErrorMiddleware(),
                 # Innermost, so the deadline covers the provider call itself and a
                 # timeout escalates outward to the fallback model.
                 ModelCallTimeoutMiddleware(),

@@ -52,6 +52,7 @@ from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
     BasePrepareRunMiddleware,
     ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
@@ -363,7 +364,11 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         # middleware never wraps their model calls.
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
-            [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+            [
+                SanitizeOpenAIResponsesMiddleware(),
+                ModelErrorMiddleware(),
+                ModelCallTimeoutMiddleware(),
+            ],
         ),
     }
 
@@ -1433,6 +1438,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,
             ],
