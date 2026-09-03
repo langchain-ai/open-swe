@@ -184,6 +184,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
     artifacts = await backend.aread("/bundled-skills/html-artifacts/SKILL.md")
     assert artifacts.file_data and "name: html-artifacts" in artifacts.file_data["content"]
+    write_oep = await backend.aread("/bundled-skills/write-oep/SKILL.md")
+    assert write_oep.file_data and "name: write-oep" in write_oep.file_data["content"]
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
