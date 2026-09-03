@@ -3,7 +3,7 @@
 - **Authors:** Mukil Loganathan (`@langchain-infra`), Ramon Nogueira (`@ramon-langchain`)
 - **Status:** Draft
 - **Created:** 2026-09-03
-- **Discussion:** To be added when the proposal PR is opened
+- **Discussion:** https://github.com/langchain-ai/open-swe/pull/2430
 - **Supersedes:** None
 
 ## Summary
