@@ -72,6 +72,31 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("hides compaction summary messages", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({ id: "user-1", content: "Fix the bug" }),
+      new AIMessage({ id: "ai-1", content: "Working" }),
+      new HumanMessage({
+        id: "summary",
+        content:
+          "Here is a summary of the conversation to date: secret context",
+        additional_kwargs: { lc_source: "summarization" },
+      }),
+      new AIMessage({ id: "ai-2", content: "Done" }),
+    ])
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toMatchObject({
+      author: "user",
+      chunks: [{ kind: "text", text: "Fix the bug" }],
+    })
+    expect(messages[1]).toMatchObject({
+      author: "agent",
+      turnKey: "user-1",
+      chunks: [{ kind: "text", text: "Done" }],
+    })
+  })
+
   it("preserves structured message whitespace", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({

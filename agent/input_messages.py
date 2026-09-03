@@ -363,12 +363,12 @@ def build_input_messages(
         injected_dynamic_context_hashes if injected_dynamic_context_hashes is not None else set()
     )
     messages: list[RunMessage] = []
-    for identity, builder in (
-        *((person, person_introduction) for person in people or []),
-        *((channel, channel_introduction) for channel in channels or []),
-        *((system, system_introduction) for system in systems or []),
-    ):
-        message = builder(identity)  # type: ignore[arg-type]
+    introductions = [
+        *(person_introduction(person) for person in people or []),
+        *(channel_introduction(channel) for channel in channels or []),
+        *(system_introduction(system) for system in systems or []),
+    ]
+    for message in introductions:
         context_hash = dynamic_context_hash(message["content"])
         if context_hash is None or context_hash in injected:
             continue

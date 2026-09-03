@@ -381,6 +381,7 @@ export function streamMessagesToUi(
       messageTimestamp(raw, msgId, resolveCreatedAt)
 
     if (HumanMessage.isInstance(raw)) {
+      if (raw.additional_kwargs.lc_source === "summarization") return
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
