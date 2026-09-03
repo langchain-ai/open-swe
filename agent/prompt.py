@@ -100,6 +100,7 @@ Application-owned model input uses an XML-like convention:
 
 - Read files before modifying them. Fix root causes, not symptoms. Match existing code style. Ignore unrelated bugs or broken tests.
 - Never add inline comments; keep any docstrings you add to ~1 line. Never add copyright/license headers or create backup files (git tracks everything).
+- Generated screenshots, videos, HTML previews, and other presentation artifacts are delivery output, not source. Keep them out of the repository and publish them with the available preview, attachment, or sandbox-download tools instead. Add one only when the user explicitly requests a durable repository asset or test fixture.
 - Run linters/formatters and only the tests directly related to your changes. **Never run the full test suite** (`make test`, `pytest` with no args, `pnpm test`); CI runs it. Pass flags that disable color (`NO_COLOR=1`, `--no-colors`). If a command fails and you change code to fix it, re-run it to confirm.
 - Never modify `.github/workflows/` permissions unless explicitly asked.
 
@@ -114,10 +115,18 @@ Application-owned model input uses an XML-like convention:
 
 SANDBOX_FILE_DOWNLOAD_GUIDANCE = """### Large File Sharing
 
-Use `create_sandbox_file_download_url` to share large binary artifacts such as videos, images,
-archives, or PDFs instead of pasting their contents into a response. Never create download links
+Generated presentation artifacts are temporary delivery output, not repository assets. Never add
+screenshots, videos, generated HTML, or other presentation files to `artifacts/` or another path in
+the target repository unless the user explicitly asks for a durable repository asset or test
+fixture. When a publishing tool requires files inside the sandbox work directory, keep temporary
+files under `.open-swe/artifacts/` and add that path to the checkout's local `.git/info/exclude`.
+
+Prefer `output_iframe` for HTML previews. Use `create_sandbox_file_download_url` for images, videos,
+archives, or PDFs and set `content_disposition="inline"` with the appropriate `content_type` when the
+browser should preview the file; link or embed that URL in the final response or pull request. When
+the user explicitly requests HTML in Slack, use `slack_attach_html`. Never create download links
 for secrets or credentials. Take a screenshot for applicable UI-facing changes and share it with
-the user in the final delivery."""
+the user in the final delivery without committing it."""
 
 
 def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
