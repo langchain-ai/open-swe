@@ -52,6 +52,7 @@ function AgentsLayout() {
     pathname === "/agents" ||
     pathname === "/agents/" ||
     pathname.startsWith("/agents/local/")
+  const isPlanRoute = section === "agents" && nestedRoute === "plan"
 
   if (session.isLoading) {
     return (
@@ -62,6 +63,14 @@ function AgentsLayout() {
   }
 
   if (!session.data && (!localOnly || !isLocalRoute)) return <RequireLogin />
+
+  if (isPlanRoute) {
+    return (
+      <main className="agents-ui flex h-svh min-w-0 flex-col overflow-hidden bg-background">
+        <Outlet />
+      </main>
+    )
+  }
 
   return (
     <AgentsShell
