@@ -7,6 +7,7 @@ import pytest
 from blockbuster import BlockBuster
 
 from agent.desktop import (
+    _artifacts_root,
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
@@ -69,6 +70,14 @@ def test_desktop_backend_rejects_an_unregistered_directory(
 
     with pytest.raises(ValueError, match="not an allowed project directory"):
         resolve_desktop_project(RunConfig(local_project_path=str(project)))
+
+
+def test_artifacts_root_uses_username_without_posix_uid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPEN_SWE_LOCAL_ARTIFACTS_DIR", raising=False)
+    monkeypatch.delattr("agent.desktop.os.getuid", raising=False)
+    monkeypatch.setattr("agent.desktop.getpass.getuser", lambda: "desktop-user")
+
+    assert _artifacts_root().name == "open-swe-artifacts-desktop-user"
 
 
 async def test_artifact_routes_stay_out_of_the_project(

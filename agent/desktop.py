@@ -1,4 +1,5 @@
 import asyncio
+import getpass
 import json
 import os
 import re
@@ -71,7 +72,9 @@ def _artifacts_root() -> Path:
     configured = os.environ.get("OPEN_SWE_LOCAL_ARTIFACTS_DIR")
     if configured:
         return Path(configured)
-    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
+    uid = getattr(os, "getuid", None)
+    identity = str(uid()) if uid else getpass.getuser()
+    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{identity}"
 
 
 async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
