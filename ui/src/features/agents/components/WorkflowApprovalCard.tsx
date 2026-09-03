@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { ShieldCheck } from "lucide-react"
+import { GitMerge, ShieldCheck, TriangleAlert } from "lucide-react"
 
 import type { WorkflowPushApproval } from "@/features/agents/lib/types"
 import {
@@ -62,99 +62,143 @@ export function WorkflowApprovalCard({
     >
       {approvals.map((approval) => {
         const busy = decision.isPending
+        const inherited = approval.inheritedFrom
         return (
           <section
             key={approval.fingerprint}
             data-testid="workflow-approval-card"
             className="rounded-xl border border-border bg-card p-4 shadow-sm"
           >
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <ShieldCheck className="size-4 text-primary" />
-                  Workflow file approval required
-                </div>
-                <p className="text-xs text-muted-foreground/70">
-                  {approval.repo || "Repository"} on{" "}
-                  {approval.branch || "Current branch"} ·{" "}
-                  {shortSha(approval.baseSha)} → {shortSha(approval.headSha)}
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="mt-0.5 size-5 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <p className="text-[0.68rem] font-semibold tracking-wider text-primary uppercase">
+                  Push paused for review
                 </p>
-                <p className="font-mono text-[0.68rem] break-all text-muted-foreground/70">
-                  Fingerprint: {approval.fingerprint}
+                <h2 className="mt-1 text-base font-semibold text-foreground">
+                  {inherited
+                    ? `Confirm workflow changes inherited from ${inherited}`
+                    : "Confirm GitHub Actions workflow changes"}
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {inherited
+                    ? `This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Open SWE did not author these workflow changes.`
+                    : `Open SWE is ready to push ${fileLabel(approval.files.length)} in .github/workflows.`}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                {approval.approvalUrl && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      window.location.href = approval.approvalUrl ?? ""
-                    }}
-                  >
-                    Open in Web
-                  </Button>
-                )}
-                <Button
-                  disabled={busy}
-                  onClick={() => void decide(approval, "approve")}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="destructive"
-                  disabled={busy}
-                  onClick={() => void decide(approval, "reject")}
-                >
-                  Reject
-                </Button>
+            </div>
+
+            {inherited && (
+              <div className="mt-4 flex gap-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+                <GitMerge className="mt-0.5 size-4 shrink-0 text-primary" />
+                <div>
+                  <p className="text-xs font-medium text-foreground">
+                    Where these changes came from
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Merging {inherited} into{" "}
+                    {approval.branch || "the current branch"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-3 flex gap-3 border-l-2 border-warning-foreground bg-warning/10 p-3">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
+              <div>
+                <p className="text-xs font-medium text-foreground">
+                  Why you need to confirm
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Workflow files control CI jobs and may access repository
+                  secrets. Open SWE pauses before pushing any workflow change.
+                </p>
               </div>
             </div>
 
             {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
 
-            <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground">
-                  {fileLabel(approval.files.length)} changed
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                disabled={busy}
+                onClick={() => void decide(approval, "approve")}
+              >
+                Approve &amp; continue push
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void decide(approval, "reject")}
+              >
+                Cancel push
+              </Button>
+            </div>
+            <p className="mt-2 text-[0.7rem] text-muted-foreground">
+              Approval resumes this exact push only. If the workflow files
+              change, Open SWE will ask again.
+            </p>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <div className="rounded-md border border-border bg-background p-3">
+                <p className="text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+                  What happens next
                 </p>
-                <ul className="mt-1 space-y-1 text-xs text-muted-foreground/70">
-                  {approval.files.slice(0, 8).map((file) => (
+                <p className="mt-1 text-xs text-foreground">
+                  The paused push resumes; no other changes are approved.
+                </p>
+              </div>
+              <div className="rounded-md border border-border bg-background p-3">
+                <p className="text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+                  Branch update
+                </p>
+                <p className="mt-1 font-mono text-xs text-foreground">
+                  {shortSha(approval.baseSha)} → {shortSha(approval.headSha)}
+                </p>
+              </div>
+            </div>
+
+            <details className="mt-4 rounded-md border border-border">
+              <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 text-xs font-medium text-foreground">
+                <span>Review files and diff</span>
+                <span className="font-normal text-muted-foreground">
+                  {approval.diffStats.files} files
+                  <span className="ml-2 text-success-foreground">
+                    +{approval.diffStats.additions}
+                  </span>
+                  <span className="ml-2 text-destructive">
+                    -{approval.diffStats.deletions}
+                  </span>
+                </span>
+              </summary>
+              <div className="border-t border-border p-3">
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {approval.files.map((file) => (
                     <li key={file} className="truncate font-mono" title={file}>
                       {file}
                     </li>
                   ))}
-                  {approval.files.length > 8 && (
-                    <li>…and {approval.files.length - 8} more</li>
-                  )}
                 </ul>
+                {approval.diffPreview && (
+                  <pre
+                    className={cn(
+                      "mt-3 max-h-72 overflow-auto rounded-md border border-border",
+                      "bg-background p-3 text-[0.68rem] leading-relaxed text-foreground"
+                    )}
+                  >
+                    {approval.diffPreview}
+                  </pre>
+                )}
+                {approval.diffPreviewTruncated && (
+                  <p className="mt-2 text-[0.7rem] text-muted-foreground">
+                    Diff preview is truncated.
+                  </p>
+                )}
               </div>
-              <div className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground/70">
-                <span>{approval.diffStats.files} files</span>
-                <span className="mx-2 text-success-foreground">
-                  +{approval.diffStats.additions}
-                </span>
-                <span className="text-destructive">
-                  -{approval.diffStats.deletions}
-                </span>
-              </div>
-            </div>
+            </details>
 
-            {approval.diffPreview && (
-              <details className="mt-3">
-                <summary className="cursor-pointer text-xs font-medium text-foreground">
-                  Diff preview
-                  {approval.diffPreviewTruncated ? " (truncated)" : ""}
-                </summary>
-                <pre
-                  className={cn(
-                    "mt-2 max-h-72 overflow-auto rounded-md border border-border",
-                    "bg-background p-3 text-[0.68rem] leading-relaxed text-foreground"
-                  )}
-                >
-                  {approval.diffPreview}
-                </pre>
-              </details>
-            )}
+            <p className="mt-3 font-mono text-[0.65rem] break-all text-muted-foreground">
+              Approval ID: {approval.fingerprint}
+            </p>
           </section>
         )
       })}

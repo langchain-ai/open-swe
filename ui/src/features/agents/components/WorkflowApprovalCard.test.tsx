@@ -35,6 +35,7 @@ const approval: WorkflowPushApproval = {
   diffPreview:
     "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml",
   diffPreviewTruncated: false,
+  inheritedFrom: null,
   approvalUrl: null,
   requestedAt: null,
   decidedAt: null,
@@ -63,20 +64,37 @@ describe("WorkflowApprovalCard", () => {
 
     const group = screen.getByTestId("workflow-approval-group")
     expect(group.className).toContain("mt-4")
-    expect(screen.getByText("Workflow file approval required")).toBeTruthy()
-    expect(screen.getByText("1 file changed")).toBeTruthy()
-    expect(screen.getByText("Diff preview").closest("details")?.open).toBe(
-      false
-    )
+    expect(
+      screen.getByText("Confirm GitHub Actions workflow changes")
+    ).toBeTruthy()
+    expect(screen.getByText("Why you need to confirm")).toBeTruthy()
+    expect(
+      screen.getByText("Review files and diff").closest("details")?.open
+    ).toBe(false)
     expect(mocks.useWorkflowApprovals).toHaveBeenCalledWith("thread-1", {
       pollWhileActive: true,
     })
   })
 
+  it("describes workflow changes inherited from the base branch", () => {
+    mocks.useWorkflowApprovals.mockReturnValue({
+      data: { approvals: [{ ...approval, inheritedFrom: "main" }] },
+    })
+
+    render(<WorkflowApprovalCard threadId="thread-1" />)
+
+    expect(
+      screen.getByText("Confirm workflow changes inherited from main")
+    ).toBeTruthy()
+    expect(screen.getByText(/Open SWE did not author/)).toBeTruthy()
+  })
+
   it("submits the selected decision with the server fingerprint", async () => {
     render(<WorkflowApprovalCard threadId="thread-1" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve & continue push" })
+    )
 
     await waitFor(() =>
       expect(mocks.mutateAsync).toHaveBeenCalledWith({
