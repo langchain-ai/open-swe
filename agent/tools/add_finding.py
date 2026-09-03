@@ -26,8 +26,8 @@ from agent.run_config import RunConfig
 
 
 async def add_finding(
-    severity: str,
-    confidence: str,
+    severity: Severity,
+    confidence: Confidence,
     category: str,
     file: str,
     title: str,
@@ -35,7 +35,7 @@ async def add_finding(
     start_line: int | None = None,
     end_line: int | None = None,
     suggestion: str | None = None,
-    side: str = "RIGHT",
+    side: DiffSide = "RIGHT",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Record a review finding on the reviewer thread.
@@ -117,7 +117,7 @@ async def add_finding(
     diff_line_set, diff_text = await _resolve_diff_context(state, cfg)
 
     in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(
-        diff_line_set, file, start_line, end_line, side=_cast_side(side)
+        diff_line_set, file, start_line, end_line, side=side
     )
     if not in_diff:
         return {
@@ -145,8 +145,8 @@ async def add_finding(
         return thread_missing_tool_result(exc)
 
     finding: Finding = new_finding(
-        severity=_cast_severity(severity),
-        confidence=_cast_confidence(confidence),
+        severity=severity,
+        confidence=confidence,
         category=category,
         file=file,
         start_line=start_line,
@@ -154,7 +154,7 @@ async def add_finding(
         description=description,
         sha=head_sha,
         title=normalized_title,
-        side=_cast_side(side),
+        side=side,
         suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,
         in_diff=in_diff,
@@ -201,15 +201,3 @@ async def _resolve_diff_context(
         if diff_text is not None:
             return compute_diff_line_set(diff_text), diff_text
     return None, ""
-
-
-def _cast_severity(value: str) -> Severity:
-    return value  # type: ignore[return-value]
-
-
-def _cast_confidence(value: str) -> Confidence:
-    return value  # type: ignore[return-value]
-
-
-def _cast_side(value: str) -> DiffSide:
-    return value  # type: ignore[return-value]
