@@ -9,6 +9,7 @@ import {
   groupSidebarThreadsByProject,
   localSidebarThread,
   sidebarProjectOptions,
+  sortSidebarThreads,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -119,6 +120,35 @@ describe("sidebar thread adapters", () => {
     expect(applyProjectKeyAliases([local], aliases)[0]?.projectKey).toBe(
       local.projectKey
     )
+  })
+})
+
+describe("sortSidebarThreads", () => {
+  it("keeps the active attention thread in place after it is viewed", () => {
+    const newerUnread = cloudSidebarThread(
+      cloudThread({ id: "newer-unread", viewed: false, updatedAt: 30 })
+    )
+    const opened = cloudSidebarThread(
+      cloudThread({ id: "opened", viewed: false, updatedAt: 20 })
+    )
+    const viewed = cloudSidebarThread(
+      cloudThread({ id: "viewed", viewed: true, updatedAt: 40 })
+    )
+
+    expect(
+      sortSidebarThreads([viewed, opened, newerUnread], "priority").map(
+        (thread) => thread.id
+      )
+    ).toEqual(["newer-unread", "opened", "viewed"])
+
+    opened.viewed = true
+    expect(
+      sortSidebarThreads(
+        [viewed, opened, newerUnread],
+        "priority",
+        opened.key
+      ).map((thread) => thread.id)
+    ).toEqual(["newer-unread", "opened", "viewed"])
   })
 })
 

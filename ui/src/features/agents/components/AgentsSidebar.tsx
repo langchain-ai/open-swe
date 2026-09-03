@@ -214,6 +214,7 @@ export function AgentsSidebar({
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })
+  const [keptAttentionKey, setKeptAttentionKey] = useState<string>()
   useEffect(() => {
     const desktop = window.openSweDesktop
     if (!desktop) return
@@ -337,14 +338,23 @@ export function AgentsSidebar({
       ? []
       : alignedLocalItems.filter((item) => !localPinnedIds.has(item.id))),
   ]
+  const activeKey = activeLocalSessionId
+    ? `local:${activeLocalSessionId}`
+    : activeThreadId
+      ? `cloud:${activeThreadId}`
+      : undefined
   const allItems = [...pinnedItems, ...threadItems]
+  const activeAttentionKey =
+    keptAttentionKey === activeKey ? keptAttentionKey : undefined
   const filteredPinnedItems = sortSidebarThreads(
     filterThreads(pinnedItems, prefs.filters),
-    prefs.sortPinned
+    prefs.sortPinned,
+    activeAttentionKey
   )
   const recents = sortSidebarThreads(
     filterThreads(threadItems, prefs.filters),
-    prefs.sortChats
+    prefs.sortChats,
+    activeAttentionKey
   )
   const unpinnedLocalItems = alignedLocalItems.filter(
     (item) => !localPinnedIds.has(item.id)
@@ -434,12 +444,6 @@ export function AgentsSidebar({
     }
   }
 
-  const activeKey = activeLocalSessionId
-    ? `local:${activeLocalSessionId}`
-    : activeThreadId
-      ? `cloud:${activeThreadId}`
-      : undefined
-
   const rowProps = (
     item: SidebarThreadItem,
     live: PullRequestSnapshot | undefined = pullRequestFor(item)
@@ -451,6 +455,10 @@ export function AgentsSidebar({
     live,
     compact: prefs.compact,
     onNavigate: layout.closeOnMobile,
+    onMarkViewed:
+      item.status === "running"
+        ? undefined
+        : () => setKeptAttentionKey(item.key),
     onDeleteLocal: refreshLocalThreads,
     onTogglePin: () => togglePin(item),
     onToggleArchived: () => toggleArchived(item),
@@ -553,6 +561,7 @@ export function AgentsSidebar({
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       sort={prefs.sortChats}
+      activeAttentionKey={activeAttentionKey}
       activeThreadId={activeThreadId}
       openThread={openThread}
       hydrate={hydrateProjectThreads}
@@ -870,6 +879,7 @@ function ProjectGroup({
   includeResolved,
   includeAutomations,
   sort,
+  activeAttentionKey,
   activeThreadId,
   openThread,
   hydrate,
@@ -886,6 +896,7 @@ function ProjectGroup({
   includeResolved: boolean
   includeAutomations: boolean
   sort: ChatSort
+  activeAttentionKey?: string
   activeThreadId?: string
   openThread: (threadId: string) => void
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
@@ -912,7 +923,8 @@ function ProjectGroup({
   useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
   const threads = sortSidebarThreads(
     [...hydrate(cloudThreads), ...group.threads],
-    sort
+    sort,
+    activeAttentionKey
   )
   const pullRequestFor = useSidebarPullRequests(
     threads,

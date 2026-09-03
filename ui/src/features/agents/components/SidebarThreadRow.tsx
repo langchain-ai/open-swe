@@ -176,6 +176,7 @@ export function SidebarThreadRow({
   compact = false,
   indent = false,
   onNavigate,
+  onMarkViewed,
   onDeleteLocal,
   onTogglePin,
   onToggleArchived,
@@ -189,6 +190,7 @@ export function SidebarThreadRow({
   /** Nested under a project: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
+  onMarkViewed?: () => void
   onDeleteLocal: (threadId?: string) => void
   onTogglePin: () => void
   onToggleArchived: () => void
@@ -219,6 +221,8 @@ export function SidebarThreadRow({
       deleteThread.variables === item.id)
 
   const markViewed = () => {
+    if (item.viewed) return
+    onMarkViewed?.()
     if (item.location === "cloud") markAgentThreadViewed(queryClient, item.id)
     else markLocalViewed(item.id)
   }

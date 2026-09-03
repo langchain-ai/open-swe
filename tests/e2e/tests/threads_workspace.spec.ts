@@ -717,6 +717,40 @@ test.describe("threads workspace", () => {
     await expect(main).not.toContainText(TITLES.running);
   });
 
+  test("keeps the active attention thread in its priority position", async ({
+    page,
+    request,
+  }, testInfo) => {
+    const fixtures = workspaceThreads();
+    const attention = fixtures.find(
+      (thread) => thread.id === THREAD_IDS.attention,
+    )!;
+    const ready = fixtures.find((thread) => thread.id === THREAD_IDS.ready)!;
+    ready.metadata.repo_name = "alpha";
+    ready.metadata.updated_at_ms = Date.now();
+    await seedThreads(request, [attention, ready]);
+    await loginAs(page);
+    await page.goto("/agents/threads");
+
+    const sidebar = page.locator("[data-sidebar-frame]");
+    const titles = () =>
+      sidebar
+        .locator(`a[href^="/agents/"]:has-text("${WORKSPACE_QUERY}")`)
+        .allTextContents();
+    await expect.poll(titles).toEqual([TITLES.attention, TITLES.ready]);
+
+    await sidebar.getByRole("link", { name: TITLES.attention }).click();
+    await expect(page).toHaveURL(`/agents/${THREAD_IDS.attention}`);
+    await expect.poll(titles).toEqual([TITLES.attention, TITLES.ready]);
+
+    const screenshotPath = testInfo.outputPath("stable-attention-thread.png");
+    await sidebar.screenshot({ path: screenshotPath });
+    await testInfo.attach("stable-attention-thread", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  });
+
   test("shows a recency-sorted project list in the sidebar", async ({
     page,
     request,

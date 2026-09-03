@@ -228,9 +228,12 @@ export type SidebarSort = "priority" | "updated" | "manual"
  * anything unread, then everything else. Within a rank it falls back to
  * recency, so the ordering only ever reorders across those three bands.
  */
-function priorityRank(thread: SidebarThreadItem): number {
+function priorityRank(
+  thread: SidebarThreadItem,
+  keepAttentionKey?: string
+): number {
   if (thread.status === "running") return 0
-  return thread.viewed ? 2 : 1
+  return thread.key === keepAttentionKey || !thread.viewed ? 1 : 2
 }
 
 function byRecency(left: SidebarThreadItem, right: SidebarThreadItem): number {
@@ -243,7 +246,8 @@ function byRecency(left: SidebarThreadItem, right: SidebarThreadItem): number {
 
 export function sortSidebarThreads(
   threads: ReadonlyArray<SidebarThreadItem>,
-  mode: SidebarSort = "updated"
+  mode: SidebarSort = "updated",
+  keepAttentionKey?: string
 ): Array<SidebarThreadItem> {
   // "manual" keeps the order the caller supplied — for pins that is the stored
   // pin order, which is the only manual ordering the user can actually set.
@@ -251,7 +255,8 @@ export function sortSidebarThreads(
   if (mode === "updated") return [...threads].sort(byRecency)
   return [...threads].sort(
     (left, right) =>
-      priorityRank(left) - priorityRank(right) || byRecency(left, right)
+      priorityRank(left, keepAttentionKey) -
+        priorityRank(right, keepAttentionKey) || byRecency(left, right)
   )
 }
 
