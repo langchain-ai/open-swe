@@ -247,6 +247,7 @@ export interface WorkflowPushApproval {
   diffStats: WorkflowDiffStats
   diffPreview: string
   diffPreviewTruncated: boolean
+  inheritedFrom: string | null
   approvalUrl: string | null
   requestedAt: string | null
   decidedAt: string | null
@@ -410,6 +411,7 @@ export interface AgentThread {
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
+  attentionReason?: string | null
   createdAt: number
   updatedAt: number
   traceUrl?: string | null

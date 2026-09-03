@@ -21,7 +21,7 @@ from agent.server import DesktopAgentState, _registered_tool_name, get_agent
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
+    def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config
         return self
 

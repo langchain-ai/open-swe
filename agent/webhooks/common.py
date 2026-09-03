@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -142,6 +143,7 @@ from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
+from agent.utils.langsmith import create_langsmith_thread_feedback
 from agent.utils.multimodal import (
     dedupe_urls,  # noqa: F401
     extract_image_urls,  # noqa: F401
@@ -155,6 +157,7 @@ from agent.utils.thread_participants import (
     PARTICIPANT_LOGINS_KEY,
     merge_participants,
 )
+from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 
 __all__ = [
     "Any",
@@ -828,6 +831,18 @@ async def upsert_agent_thread_metadata(
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
+        elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
+            # A person is continuing the thread, so PR-driven resolution or the
+            # "PRs closed" mark no longer applies. Only the PR webhook sets those,
+            # and only on PR-linked threads, so take its lock for any such thread
+            # and derive the reset from a fresh read rather than the pre-lock one.
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                current_meta = (
+                    current["metadata"] if isinstance(current.get("metadata"), dict) else {}
+                )
+                metadata.update(_pr_state_reset_for_user_activity(current_meta))
+                await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:  # noqa: BLE001
@@ -1100,6 +1115,26 @@ _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 _GH_PR_AGENT_STATE_ACTIONS = frozenset(
     ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
+_TERMINAL_PR_STATES = frozenset(["closed", "merged"])
+_PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+
+
+def _pr_linked(metadata: Mapping[str, Any]) -> bool:
+    return any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
+
+
+def _pr_state_reset_for_user_activity(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Metadata that a new user message invalidates: PR-driven resolution and attention."""
+    reset: dict[str, Any] = {}
+    if metadata.get("attention_reason"):
+        reset["attention_reason"] = None
+    if metadata.get("auto_resolved_by_prs") is True:
+        reset["resolved"] = False
+        reset["resolved_at_ms"] = None
+        reset["auto_resolved_by_prs"] = False
+    return reset
+
+
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1399,11 +1434,33 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     )
 
 
+async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
+    try:
+        await create_langsmith_thread_feedback(
+            thread_id,
+            f"github_pr_merged:{pr_url}",
+            score=1.0,
+            comment=f"Agent-authored pull request merged: {pr_url}",
+            source_info={
+                "source": "github_pr_merged",
+                "thread_id": thread_id,
+                "pr_url": pr_url,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to record merged PR feedback for thread %s", thread_id, exc_info=True)
+
+
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
 
     The agent thread is located by the PR's html_url persisted in metadata when
     the PR was opened (``open_pull_request``). Reviewer threads are skipped.
+
+    A thread auto-resolves only when every tracked PR is merged or closed and the
+    agent opened at least one of them with ``resolves_thread=True``. Without that
+    flag the thread is instead marked ``attention_reason="prs_closed"`` so a
+    person decides whether to resolve it; any PR reopening clears the mark.
     """
     pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
     if not isinstance(pull_request, dict):
@@ -1445,24 +1502,74 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         metadata = thread.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
             continue
-        metadata_update: dict[str, Any] = {}
-        pull_requests = metadata.get("pull_requests")
-        if isinstance(pull_requests, list):
-            updated = [
-                {**record, "state": new_state} if record.get("url") == pr_url else record
-                for record in pull_requests
-                if isinstance(record, dict)
-            ]
-            if updated != pull_requests:
-                metadata_update["pull_requests"] = updated
-        if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
-            metadata_update["pr_state"] = new_state
-        if not metadata_update:
-            continue
         try:
-            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = await langgraph_client.threads.get(thread_id)
+                metadata = current.get("metadata") if isinstance(current, dict) else None
+                if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
+                    continue
+                metadata_update: dict[str, Any] = {}
+                pull_requests = metadata.get("pull_requests")
+                updated_pull_requests: list[dict[str, Any]] = []
+                previous_state: Any = None
+                if isinstance(pull_requests, list):
+                    previous_state = next(
+                        (
+                            record.get("state")
+                            for record in pull_requests
+                            if isinstance(record, dict) and record.get("url") == pr_url
+                        ),
+                        None,
+                    )
+                    updated_pull_requests = [
+                        {**record, "state": new_state} if record.get("url") == pr_url else record
+                        for record in pull_requests
+                        if isinstance(record, dict)
+                    ]
+                    if updated_pull_requests != pull_requests:
+                        metadata_update["pull_requests"] = updated_pull_requests
+                if not updated_pull_requests and metadata.get("pr_url") == pr_url:
+                    previous_state = metadata.get("pr_state")
+                state_changed = previous_state != new_state
+                if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
+                    metadata_update["pr_state"] = new_state
+
+                tracked_states = [record.get("state") for record in updated_pull_requests]
+                if not tracked_states and metadata.get("pr_url") == pr_url:
+                    tracked_states = [new_state]
+                all_terminal = bool(tracked_states) and all(
+                    state in _TERMINAL_PR_STATES for state in tracked_states
+                )
+                resolves_thread = any(
+                    record.get("resolves_thread") is True for record in updated_pull_requests
+                )
+                needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
+                if all_terminal:
+                    if state_changed and metadata.get("resolved") is not True:
+                        if resolves_thread:
+                            metadata_update["resolved"] = True
+                            metadata_update["resolved_at_ms"] = int(
+                                datetime.now(UTC).timestamp() * 1000
+                            )
+                            metadata_update["auto_resolved_by_prs"] = True
+                        elif not needs_attention:
+                            metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
+                else:
+                    if metadata.get("auto_resolved_by_prs") is True:
+                        metadata_update["resolved"] = False
+                        metadata_update["resolved_at_ms"] = None
+                        metadata_update["auto_resolved_by_prs"] = False
+                    if needs_attention:
+                        metadata_update["attention_reason"] = None
+                if metadata_update:
+                    await langgraph_client.threads.update(
+                        thread_id=thread_id, metadata=metadata_update
+                    )
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
+            continue
+        if new_state == "merged":
+            await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
 
 
 async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

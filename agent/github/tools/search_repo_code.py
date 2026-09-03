@@ -3,26 +3,16 @@
 from typing import Any
 
 import httpx
-from langgraph.config import get_config
 
 from agent.github.checks import github_headers
+from agent.run_config import RunConfig
 
 _GITHUB_API = "https://api.github.com"
 
 
 def _chat_repo_context() -> tuple[str, str, str | None]:
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    if not isinstance(configurable, dict):
-        configurable = {}
-    owner = configurable.get("chat_repo_owner")
-    repo = configurable.get("chat_repo_name")
-    token = configurable.get("chat_github_token")
-    return (
-        owner if isinstance(owner, str) else "",
-        repo if isinstance(repo, str) else "",
-        token if isinstance(token, str) and token else None,
-    )
+    cfg = RunConfig.from_runtime()
+    return (cfg.chat_repo_owner or "", cfg.chat_repo_name or "", cfg.chat_github_token or None)
 
 
 async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:

@@ -19,9 +19,10 @@ import weakref
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, TypedDict, cast
 
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
+
+from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 _FINDING_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, int], asyncio.Lock] = (
@@ -145,7 +146,7 @@ class Finding(TypedDict):
     resolution_note: str | None
     diff_hunk: str | None
     fingerprint: str
-    interactions: "list[FindingInteraction]"
+    interactions: list[FindingInteraction]
 
 
 class AppendFindingResult(TypedDict):
@@ -422,9 +423,7 @@ def coerce_findings(value: Any) -> list[Finding]:
 
 def get_thread_id_from_runtime() -> str:
     """Return the thread id from the current LangGraph runnable config."""
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         msg = "No thread_id available in runtime config"
         raise RuntimeError(msg)
@@ -458,7 +457,7 @@ async def _get_thread_metadata_strict(thread_id: str) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
-async def resolve_review_head_sha(thread_id: str, configurable: dict[str, Any]) -> str:
+async def resolve_review_head_sha(thread_id: str, cfg: RunConfig) -> str:
     """Return the current PR head SHA for a reviewer run.
 
     A push that lands while a reviewer run is in flight is delivered as a queued
@@ -467,8 +466,7 @@ async def resolve_review_head_sha(thread_id: str, configurable: dict[str, Any]) 
     thread metadata, so prefer that; fall back to the run's config when metadata
     carries no head (first review, eval, tests).
     """
-    config_head = configurable.get("head_sha") if isinstance(configurable, dict) else None
-    config_head = config_head if isinstance(config_head, str) else ""
+    config_head = cfg.head_sha or ""
     if not thread_id:
         return config_head
     metadata = await get_thread_metadata(thread_id)

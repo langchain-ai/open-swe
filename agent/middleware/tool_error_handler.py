@@ -29,6 +29,7 @@ from agent.middleware.sandbox_circuit_breaker import (
     extract_sandbox_id,
     post_sandbox_unreachable_notification,
 )
+from agent.run_config import RunConfig
 from agent.sandboxes.retry import is_transient_sandbox_error
 
 logger = logging.getLogger(__name__)
@@ -128,11 +129,7 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
     config = _get_run_config(request)
     if config is None:
         return None
-    configurable = config.get("configurable", {})
-    if not isinstance(configurable, Mapping):
-        return None
-    thread_id = configurable.get("thread_id")
-    return thread_id if isinstance(thread_id, str) and thread_id else None
+    return RunConfig.from_config(config).thread_id or None
 
 
 def _transient_sandbox_tool_message(

@@ -25,6 +25,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   showSelfReview?: boolean
   /** Reveal the Review surface; the card only points at it. */
   onOpenSelfReview?: () => void
+  emptyState?: React.ReactNode
+  pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */

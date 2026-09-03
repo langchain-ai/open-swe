@@ -18,6 +18,7 @@ import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { SelfReviewCard } from "@/features/agents/components/SelfReviewCard"
+import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
@@ -70,6 +71,8 @@ export const Messages = memo(function MessagesComponent({
   showPlanArtifact = false,
   showSelfReview = false,
   onOpenSelfReview,
+  emptyState,
+  pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   isStreaming,
   streamIsLoading,
@@ -277,6 +280,7 @@ export const Messages = memo(function MessagesComponent({
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
+            {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
               const isLastMessage = index === visibleMessages.length - 1
               const messageIsStreaming = isStreaming && isLastMessage
@@ -312,6 +316,12 @@ export const Messages = memo(function MessagesComponent({
                 threadId={threadId}
                 pollWhileActive={Boolean(isStreaming || streamIsLoading)}
                 {...(onOpenSelfReview ? { onOpen: onOpenSelfReview } : {})}
+              />
+            )}
+            {threadId && (
+              <WorkflowApprovalCard
+                threadId={threadId}
+                pollWhileActive={pollWorkflowApprovalsWhileActive}
               />
             )}
             <QueuedMessages queuedMessages={queuedMessages} />

@@ -11,17 +11,19 @@ allowBuilds:
   unrs-resolver: true
 
 overrides:
-  '@hono/node-server': 2.0.10
+  '@hono/node-server': 2.1.1
+  '@pierre/trees>@pierre/theming': 1.0.1
   brace-expansion@2.1.1: 2.1.4
+  crossws: 0.4.12
   'brace-expansion@>=5.0.0': 5.0.9
-  dompurify: 3.4.13
+  dompurify: 3.4.14
   fast-uri: 3.1.6
   '@xmldom/xmldom': 0.8.15
   qs: 6.16.0
-  hono: 4.12.34
-  ip-address: 10.3.1
+  hono: 4.13.3
+  ip-address: 10.5.0
   js-yaml: 4.3.1
-  mermaid: 11.16.1
+  mermaid: 11.17.0
   'nanoid@>=3.0.0 <4.0.0': 3.3.18
-  postcss: 8.5.23
+  postcss: 8.5.26
   undici: 7.29.0

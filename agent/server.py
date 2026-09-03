@@ -12,7 +12,7 @@ import hashlib
 import logging
 import os
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -89,6 +89,7 @@ from agent.middleware import (
     ExcludeToolsMiddleware,
     IntegrationGroup,
     ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -115,6 +116,7 @@ from agent.prompt import (
     render_open_swe_shared_base,
 )
 from agent.review.review_bar import REVIEW_BAR_SECTIONS, SEVERITY_RUBRIC_SECTION
+from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -276,15 +278,11 @@ def _tool_loader_timeout_seconds() -> float:
     return timeout
 
 
-async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
-    repo_config = configurable.get("repo")
-    if isinstance(repo_config, dict):
-        owner = repo_config.get("owner")
-        name = repo_config.get("name")
-        if isinstance(owner, str) and isinstance(name, str):
-            return {"owner": owner, "name": name}
+async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
+    if cfg.repo:
+        return {"owner": cfg.repo.owner, "name": cfg.repo.name}
 
-    if configurable.get("repo_explicitly_none") is True:
+    if cfg.repo_explicitly_none is True:
         return None
 
     try:
@@ -385,8 +383,23 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """
     return cast(
         list[AgentMiddleware[Any, Any, Any]],
-        [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        [
+            SanitizeOpenAIResponsesMiddleware(),
+            ModelErrorMiddleware(),
+            ModelCallTimeoutMiddleware(),
+        ],
     )
+
+
+def _subagent_middleware(
+    dynamic_tools: DynamicToolMiddleware | None,
+) -> list[AgentMiddleware[Any, Any, Any]]:
+    middleware: list[AgentMiddleware[Any, Any, Any]] = []
+    if dynamic_tools is not None:
+        middleware.append(dynamic_tools)
+    middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
+    middleware.extend(_subagent_model_middleware())
+    return middleware
 
 
 def _is_subagent_excluded_tool(tool: Any) -> bool:
@@ -424,11 +437,7 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": [
-            *([dynamic_tools] if dynamic_tools else []),
-            ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
-            *_subagent_model_middleware(),
-        ],
+        "middleware": _subagent_middleware(dynamic_tools),
     }
     if skills:
         subagent["skills"] = skills
@@ -491,13 +500,11 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     Gates on admin / explicitly-authorized emails so prompt-injected runs from
     untrusted contributors cannot reach the team's Datadog/LangSmith data.
     """
-    configurable = (config or {}).get("configurable") or {}
-    slack_thread = configurable.get("slack_thread") or {}
-    config_login = configurable.get("github_login")
-    candidate_login = profile_login or (config_login if isinstance(config_login, str) else None)
+    cfg = RunConfig.from_config(config)
+    candidate_login = profile_login or cfg.github_login
     candidate_emails = [
-        configurable.get("user_email"),
-        slack_thread.get("triggering_user_email"),
+        cfg.user_email,
+        cfg.slack_thread.triggering_user_email if cfg.slack_thread else None,
     ]
     if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
         return True
@@ -530,18 +537,15 @@ ADMIN_TOOLS = (
 )
 
 
-def _environment_slug(configurable: Mapping[str, Any] | None) -> str | None:
+def _environment_slug(cfg: RunConfig) -> str | None:
     """The environment this thread selected, if any."""
-    slug = (configurable or {}).get("environment")
-    return slug.strip() or None if isinstance(slug, str) else None
+    return (cfg.environment or "").strip() or None
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    configurable = (config or {}).get("configurable") or {}
-    config_login = configurable.get("github_login")
-    login = profile_login or (config_login if isinstance(config_login, str) else None)
-    email = configurable.get("user_email")
-    if is_admin(email if isinstance(email, str) else None, login=login):
+    cfg = RunConfig.from_config(config)
+    login = profile_login or cfg.github_login
+    if is_admin(cfg.user_email, login=login):
         return True
     return is_admin(await email_for_login(login), login=login)
 
@@ -553,8 +557,7 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
     capability to a non-admin who later messages it.
     """
-    configurable = (config or {}).get("configurable") or {}
-    return configurable.get("admin_thread") is True and await _workspace_admin(
+    return RunConfig.from_config(config).admin_thread is True and await _workspace_admin(
         config, profile_login
     )
 
@@ -571,9 +574,7 @@ async def _cached_allowed_org_member(config: RunnableConfig, profile_login: str 
 
 
 def _org_member_login(config: RunnableConfig, profile_login: str | None) -> str | None:
-    configurable = (config or {}).get("configurable") or {}
-    config_login = configurable.get("github_login")
-    return profile_login or (config_login if isinstance(config_login, str) else None)
+    return profile_login or RunConfig.from_config(config).github_login
 
 
 async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -706,27 +707,20 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) -> bool:
+def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
     """Return whether signed sandbox file downloads are available for this run."""
-    resolved = configurable or {}
     return (
         os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
-        and resolved.get("stop_summary") is not True
-        and not is_desktop_run(resolved)
+        and cfg.stop_summary is not True
+        and not is_desktop_run(cfg)
     )
 
 
-def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
+def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
-    if configurable.get("source") not in {"slack", "schedule"}:
+    if cfg.source not in {"slack", "schedule"} or cfg.slack_thread is None:
         return False
-    slack_thread = configurable.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return False
-    return all(
-        isinstance(slack_thread.get(key), str) and bool(slack_thread[key].strip())
-        for key in ("channel_id", "thread_ts")
-    )
+    return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
 
 
 def _make_model_or_defer(
@@ -779,12 +773,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
-        configurable = (self._config or {}).get("configurable") or {}
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id"),
+            "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
             "source": self._source,
-            "repo": configurable.get("repo"),
+            "repo": cfg.repo.model_dump() if cfg.repo else None,
             "plan_mode": self._plan_mode,
             "draft_prs": self._draft_prs,
             "model": self._model_id,
@@ -846,11 +840,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
-        if is_desktop_run(configurable):
-            local_path = configurable.get("local_project_path")
-            if isinstance(local_path, str) and local_path:
+        cfg = RunConfig.parse(configurable)
+        if is_desktop_run(cfg):
+            if cfg.local_project_path:
                 schedule_worktree_branch_rename(
-                    worktree_path=local_path,
+                    worktree_path=cfg.local_project_path,
                     messages=state.get("messages") or [],
                     model=self._title_model,
                 )
@@ -868,7 +862,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.github_token"):
             github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         async with aphase(self._thread_id, "prepare.default_repo"):
-            prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+            prompt_default_repo = await _resolve_prompt_default_repo(cfg)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
                 resolve_triggering_user_identity, as_json_object(self._config), github_token
@@ -894,7 +888,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.environment"):
-            environment = await resolve_environment(_environment_slug(configurable))
+            environment = await resolve_environment(_environment_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):
             sender_instructions, participant_identities = await asyncio.gather(
                 _resolve_user_custom_instructions(self._profile_login),
@@ -921,10 +915,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "plan_mode": self._plan_mode,
                     },
                 )
-                prepare_run_id = configurable.get("prepare_run_id")
-                if isinstance(prepare_run_id, str):
+                if cfg.prepare_run_id:
                     await record_agent_run_usage(
-                        run_id=prepare_run_id,
+                        run_id=cfg.prepare_run_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
                         user_email=self._user_email,
@@ -954,8 +947,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
                 source=self._source,
-                slack_context=_slack_tools_enabled(configurable),
-                sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
+                slack_context=_slack_tools_enabled(cfg),
+                sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
             ),
         }
 
@@ -967,7 +960,8 @@ class DesktopAgentState(FilesystemState, DeepAgentState):
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.parse(configurable)
+    thread_id = cfg.thread_id
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -980,13 +974,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
-        _configurable: dict[str, Any] = configurable,
+        _cfg: RunConfig = cfg,
     ) -> SandboxBackendProtocol:
-        if is_desktop_run(_configurable):
-            return create_desktop_backend(_configurable)
+        if is_desktop_run(_cfg):
+            return create_desktop_backend(_cfg)
         return await ensure_sandbox_for_thread(
             _thread_id,
-            environment_slug=_environment_slug(_configurable),
+            environment_slug=_environment_slug(_cfg),
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -996,7 +990,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # authorization and credentialed integrations, which stay personal to them.
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
-    local_run = is_desktop_run(configurable)
+    local_run = is_desktop_run(cfg)
     profile_login = resolve_github_login(as_json_object(config))
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
@@ -1028,7 +1022,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_fable_enabled(),
             )
 
-    linear_issue = as_json_object(configurable.get("linear_issue"))
+    linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
@@ -1072,8 +1066,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     # An explicit per-run model choice is the one thing allowed to move a thread
     # off its stored settings; the new choice is then stored in turn.
-    per_thread_model = configurable.get("agent_model_id")
-    per_thread_effort = configurable.get("agent_effort")
+    per_thread_model = cfg.agent_model_id
+    per_thread_effort = cfg.agent_effort
     canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
     if canonical_per_thread is not None:
         per_thread_model, per_thread_effort = canonical_per_thread
@@ -1097,12 +1091,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
+    cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
     else:
         async with aphase(thread_id, "factory.repo_instructions"):
             repo_instructions = await _resolve_repo_custom_instructions(
-                await _resolve_prompt_default_repo(configurable)
+                await _resolve_prompt_default_repo(cfg)
             )
     # Stored before the Fable gate so a deployment-wide toggle still applies on
     # every run rather than being frozen into the thread.
@@ -1158,10 +1153,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
-    source_value = configurable.get("source")
-    source = source_value if isinstance(source_value, str) else "dashboard"
-    user_email = configurable.get("user_email")
-    user_email = user_email if isinstance(user_email, str) else ""
+    source = cfg.source or "dashboard"
+    user_email = cfg.user_email or ""
 
     # Plan mode is entered only when the model decides to (the `enter_plan_mode`
     # tool sets it in run state). The configurable value just carries that
@@ -1169,7 +1162,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # fresh run with nothing set starts out of plan mode. Installed
     # unconditionally and state-aware: it also restricts tools after a mid-run
     # `enter_plan_mode` call, not just when plan mode is set up front.
-    plan_mode = configurable.get("plan_mode") is True
+    plan_mode = cfg.plan_mode is True
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
     plan_mode_middleware: list[Any] = [
@@ -1181,8 +1174,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
-    stop_summary_mode = configurable.get("stop_summary") is True
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
+    stop_summary_mode = cfg.stop_summary is True
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     observability_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -1261,7 +1254,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     elif stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
-    if not _slack_tools_enabled(configurable):
+    if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
@@ -1295,7 +1288,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
         ),
     }
-    if is_desktop_run(configurable):
+    if is_desktop_run(cfg):
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
         skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         # The default backend is the user's project, so offloads would land in
@@ -1399,6 +1392,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelErrorMiddleware(),
                 # Innermost, so the deadline covers the provider call itself and a
                 # timeout escalates outward to the fallback model.
                 ModelCallTimeoutMiddleware(),

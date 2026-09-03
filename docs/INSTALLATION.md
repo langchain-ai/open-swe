@@ -12,11 +12,11 @@ Open SWE has two runnable pieces:
 
 ## Prerequisites
 
-- **Python 3.11 – 3.13** (3.14 is not yet supported due to dependency constraints)
+- **Python 3.14+**
 - [uv](https://docs.astral.sh/uv/) package manager
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
-- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/pnpm-lock.yaml` is the canonical lockfile.
+- Node 22.22.2+ and [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). The root `pnpm-lock.yaml` is the canonical lockfile.
 
 ## 1. Clone and install
 

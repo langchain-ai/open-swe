@@ -13,6 +13,7 @@ from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.review.inline_review import REVIEWS
+from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -62,11 +63,11 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     metadata: Slack thread ids are shared across a conversation, so a cached
     token could belong to a prior triggering user.
     """
-    configurable = get_config().get("configurable", {})
-    source = configurable.get("source")
-    github_login = configurable.get("github_login")
+    cfg = RunConfig.from_runtime()
+    source = cfg.source
+    github_login = cfg.github_login
 
-    if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
+    if source in _USER_TOKEN_SOURCES and github_login and github_login.strip():
         from agent.dashboard.profiles import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
@@ -120,18 +121,15 @@ def _github_response_summary(resp: httpx.Response | None) -> str:
 
 
 def _effective_draft(draft: bool) -> bool:
-    configurable = _configurable()
-    preference = configurable.get("draft_prs")
-    return preference if isinstance(preference, bool) else draft
+    preference = _configurable().draft_prs
+    return preference if preference is not None else draft
 
 
-def _configurable() -> dict[str, Any]:
+def _configurable() -> RunConfig:
     try:
-        config = get_config()
+        return RunConfig.from_runtime()
     except Exception:
-        return {}
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    return dict(configurable) if isinstance(configurable, dict) else {}
+        return RunConfig()
 
 
 def _head_branch_for_repo(owner: str, head: str) -> str | None:
@@ -193,7 +191,7 @@ def _record_open_pr_failure_telemetry(
     branch_pushed: bool | None,
     failed_step: str,
 ) -> None:
-    configurable = _configurable()
+    cfg = _configurable()
     logger.warning(
         "open_pull_request_failed code=%s owner=%s repo=%s head=%s base=%s "
         "http_status=%s token_kind=%s branch_pushed=%s thread_id=%s source=%s",
@@ -205,8 +203,8 @@ def _record_open_pr_failure_telemetry(
         http_status,
         token_kind,
         branch_pushed,
-        configurable.get("thread_id"),
-        configurable.get("source"),
+        cfg.thread_id,
+        cfg.source,
         extra={
             "open_pull_request_failure": {
                 "code": code,
@@ -219,8 +217,8 @@ def _record_open_pr_failure_telemetry(
                 "branch_pushed": branch_pushed,
                 "pr_created": False,
                 "failed_step": failed_step,
-                "thread_id": configurable.get("thread_id"),
-                "source": configurable.get("source"),
+                "thread_id": cfg.thread_id,
+                "source": cfg.source,
             }
         },
     )
@@ -551,7 +549,10 @@ async def _claim_inline_review(*, owner: str, repo: str, pr: dict[str, Any]) -> 
     pr_number = pr.get("number")
     if not isinstance(pr_number, int) or isinstance(pr_number, bool):
         return
-    configurable = get_config().get("configurable", {})
+    try:
+        configurable = get_config().get("configurable", {})
+    except Exception:
+        return
     thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
     if not isinstance(thread_id, str) or not thread_id:
         return
@@ -567,7 +568,9 @@ async def _claim_inline_review(*, owner: str, repo: str, pr: dict[str, Any]) -> 
         )
     except Exception:
         logger.warning(
-            "Failed to claim inline review for %s/%s#%s", owner, repo, pr_number, exc_info=True
+            "Failed to claim inline review",
+            extra={"github_owner": owner, "github_repo": repo, "github_pr_number": pr_number},
+            exc_info=True,
         )
 
 
@@ -580,23 +583,20 @@ async def _record_pr_telemetry(
     head: str,
     base: str,
     pr: dict[str, Any],
+    resolves_thread: bool = False,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
         return
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
-        config = get_config()
-        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-        thread_id = configurable.get("thread_id")
-        github_login = configurable.get("github_login")
-        user_email = configurable.get("user_email")
-        if not isinstance(github_login, str) or not github_login.strip():
+        cfg = RunConfig.from_runtime()
+        thread_id = cfg.thread_id
+        github_login = cfg.github_login
+        if not (github_login or "").strip():
             from agent.dashboard.user_mappings import login_for_email
 
-            github_login = (
-                await login_for_email(user_email if isinstance(user_email, str) else None) or ""
-            )
+            github_login = await login_for_email(cfg.user_email) or ""
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
@@ -608,9 +608,9 @@ async def _record_pr_telemetry(
         changed_files_value = details.get("changed_files")
         changed_files = changed_files_value if isinstance(changed_files_value, int) else 0
         await record_agent_pr_usage(
-            thread_id=thread_id if isinstance(thread_id, str) else None,
+            thread_id=thread_id,
             github_login=github_login,
-            user_email=user_email if isinstance(user_email, str) else None,
+            user_email=cfg.user_email,
             owner=owner,
             repo=repo,
             pr_number=pr_number,
@@ -660,6 +660,7 @@ async def _record_pr_telemetry(
                     else ""
                 ),
                 "diff_stats": diff_stats,
+                "resolves_thread": resolves_thread,
             }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
@@ -681,11 +682,10 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
-            slack_thread = configurable.get("slack_thread")
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,
-                slack_thread if isinstance(slack_thread, dict) else None,
+                cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
             if active and is_code_channel_session(str(active.get("thread_ts") or "")):
                 channel_id = str(active.get("channel_id") or "")
@@ -730,9 +730,9 @@ async def _record_pr_telemetry(
         )
 
 
-async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str):
+async def _plan_reference_line(cfg: RunConfig) -> str | None:
+    thread_id = cfg.thread_id
+    if thread_id is None:
         return None
     try:
         plan = await get_plan_content(thread_id)
@@ -747,18 +747,15 @@ async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
     return f"- Plan: {plan_url}"
 
 
-async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[str]:
+async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
     """Build source reference lines for the run."""
-    source = configurable.get("source")
     lines: list[str] = []
 
-    if source == "slack":
-        slack_thread = configurable.get("slack_thread") or {}
-        thread_id = configurable.get("thread_id")
+    if cfg.source == "slack":
         active = await get_active_slack_thread(
             get_client(),
-            thread_id if isinstance(thread_id, str) else None,
-            slack_thread if isinstance(slack_thread, dict) else None,
+            cfg.thread_id,
+            cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
         slack_thread = active or {}
         channel_id = slack_thread.get("channel_id")
@@ -770,18 +767,14 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
                 permalink = await get_slack_permalink(channel_id, thread_ts)
         if isinstance(permalink, str) and permalink.strip():
             lines.append(f"- Slack thread: {permalink.strip()}")
-    elif source == "linear":
-        linear_issue = configurable.get("linear_issue") or {}
-        url = linear_issue.get("url")
-        identifier = linear_issue.get("identifier")
+    elif cfg.source == "linear" and cfg.linear_issue:
+        url, identifier = cfg.linear_issue.url, cfg.linear_issue.identifier
         if url:
             lines.append(f"- Linear ticket: [{identifier or url}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
-    elif source in ("github", "github_issue"):
-        github_issue = configurable.get("github_issue") or {}
-        url = github_issue.get("url")
-        number = github_issue.get("number")
+    elif cfg.source in ("github", "github_issue") and cfg.github_issue:
+        url, number = cfg.github_issue.url, cfg.github_issue.number
         if url:
             label = f"#{number}" if number else url
             lines.append(f"- GitHub issue: [{label}]({url})")
@@ -807,15 +800,13 @@ async def _maybe_append_references(
     try:
         if _REFERENCES_HEADING in body:
             return body
-        configurable = get_config().get("configurable", {})
-        if not isinstance(configurable, dict):
-            configurable = {}
+        cfg = RunConfig.from_runtime()
         lines: list[str] = []
-        plan_line = await _plan_reference_line(configurable)
+        plan_line = await _plan_reference_line(cfg)
         if plan_line:
             lines.append(plan_line)
         try:
-            source_lines = await _build_source_reference_lines(configurable)
+            source_lines = await _build_source_reference_lines(cfg)
             if source_lines and await _is_private_repo(client, token, owner, repo):
                 lines.extend(source_lines)
         except Exception:
@@ -837,6 +828,7 @@ async def _open_pull_request(
     title: str,
     body: str,
     draft: bool,
+    resolves_thread: bool = False,
 ) -> dict[str, Any]:
     token, kind = await _resolve_pr_author_token()
     if not token:
@@ -892,6 +884,7 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=pr,
+                    resolves_thread=resolves_thread,
                 )
             return {
                 "success": True,
@@ -916,6 +909,7 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=existing,
+                    resolves_thread=resolves_thread,
                 )
                 return {
                     "success": True,
@@ -964,6 +958,7 @@ async def open_pull_request(
     title: str,
     body: str,
     draft: bool = True,
+    resolves_thread: bool = False,
 ) -> dict[str, Any]:
     """Open a draft GitHub pull request attributed to the triggering user.
 
@@ -985,6 +980,12 @@ async def open_pull_request(
         body: PR description (Markdown).
         draft: Requested draft status. The authenticated user's dashboard preference
           overrides this value for newly created PRs; existing PRs are returned unchanged.
+        resolves_thread: Set True when merging or closing this PR finishes the
+          thread's work, so the thread auto-resolves once every PR it opened is
+          merged or closed. Prefer True. Use False only when you know more PRs
+          are coming for this thread (a stacked PR, a follow-up you still plan
+          to open) and set True on the last one instead. Threads whose PRs never
+          set this stay open until someone resolves them by hand.
 
     Returns:
         On success: {"success": True, "created": bool, "url": str, "number": int,
@@ -1001,4 +1002,5 @@ async def open_pull_request(
         title=title,
         body=body,
         draft=draft,
+        resolves_thread=resolves_thread,
     )

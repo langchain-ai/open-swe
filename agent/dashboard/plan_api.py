@@ -57,7 +57,7 @@ class TextAnchor(BaseModel):
     end: int = Field(gt=0, le=2_000_000)
 
     @model_validator(mode="after")
-    def validate_range(self) -> "TextAnchor":
+    def validate_range(self) -> TextAnchor:
         if self.end <= self.start or self.end - self.start != len(self.exact):
             raise ValueError("anchor range must match the selected text")
         return self
