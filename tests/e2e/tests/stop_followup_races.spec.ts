@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { SAME_USER, loginAs, waitForThreadNotBusy } from "./helpers/dashboard";
 
 const HELD_RUN = "<@U0BOT> E2E_BUSY_HOLD:30 reproduce stop and follow-up races";
+const PHASE_HELD_RUN =
+  "<@U0BOT> E2E_PHASE_HOLD:after-tool:2:30 reproduce queue persistence races";
 
 type HeldRequest = {
   release: () => void;
@@ -14,12 +16,12 @@ type HeldCancellation = {
   serverResponded: Promise<void>;
 };
 
-async function openHeldRun(page: Page): Promise<string> {
+async function openHeldRun(page: Page, message = HELD_RUN): Promise<string> {
   await loginAs(page, SAME_USER);
   const reset = await page.request.post("/control/reset");
   expect(reset.ok()).toBeTruthy();
   const send = await page.request.post("/mock/slack/send", {
-    data: { text: HELD_RUN },
+    data: { text: message },
   });
   expect(send.ok()).toBeTruthy();
   const { thread_id: threadId } = (await send.json()) as {
@@ -154,5 +156,23 @@ test.describe("stop followed by new input", () => {
     await raceQueuedSendAgainstStop(page, threadId, followUp, "escape");
 
     await expect(page.getByTestId("composer-editor")).toContainText(followUp);
+  });
+
+  test("keeps a queued follow-up visible after reloading a busy thread", async ({
+    page,
+  }) => {
+    await openHeldRun(page, PHASE_HELD_RUN);
+    const followUp = "Keep this queued instruction visible across reload.";
+    await typeDraft(page, followUp);
+    await page.getByTestId("composer-editor").press("Enter");
+    await expect(
+      page.getByTestId("queued-message").filter({ hasText: followUp }),
+    ).toBeVisible();
+
+    await page.reload();
+
+    await expect(
+      page.getByTestId("queued-message").filter({ hasText: followUp }),
+    ).toBeVisible();
   });
 });
