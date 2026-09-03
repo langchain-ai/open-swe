@@ -293,6 +293,7 @@ async def test_update_agent_thread_pr_state_noop_when_state_unchanged() -> None:
     )
     fake_client.threads.get = AsyncMock(return_value=fake_client.threads.search.return_value[0])
     fake_client.threads.update = AsyncMock()
+    fake_client.runs.list = AsyncMock(return_value=[])
 
     with (
         patch("agent.webhooks.common.get_client", return_value=fake_client),
@@ -301,6 +302,72 @@ async def test_update_agent_thread_pr_state_noop_when_state_unchanged() -> None:
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
     fake_client.threads.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_merged_pr_records_feedback_on_every_thread_run() -> None:
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": "https://github.com/lc/repo/pull/7",
+            "pr_state": "open",
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(return_value=[thread])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
+    fake_client.runs.list = AsyncMock(return_value=[{"run_id": "run-1"}, {"id": "run-2"}])
+    create_feedback = AsyncMock(return_value=True)
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("agent.webhooks.common.create_langsmith_feedback", create_feedback),
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
+
+    fake_client.runs.list.assert_awaited_once_with("t1", limit=100, offset=0)
+    assert [call.args[0] for call in create_feedback.await_args_list] == ["run-1", "run-2"]
+    assert all(call.kwargs["score"] == 1.0 for call in create_feedback.await_args_list)
+    assert all(
+        call.kwargs["source_info"]
+        == {
+            "source": "github_pr_merged",
+            "thread_id": "t1",
+            "pr_url": "https://github.com/lc/repo/pull/7",
+        }
+        for call in create_feedback.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_closed_unmerged_pr_does_not_record_feedback() -> None:
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": "https://github.com/lc/repo/pull/7",
+            "pr_state": "open",
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(return_value=[thread])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
+    fake_client.runs.list = AsyncMock()
+    create_feedback = AsyncMock()
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("agent.webhooks.common.create_langsmith_feedback", create_feedback),
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
+
+    fake_client.runs.list.assert_not_called()
+    create_feedback.assert_not_called()
 
 
 @pytest.mark.asyncio
