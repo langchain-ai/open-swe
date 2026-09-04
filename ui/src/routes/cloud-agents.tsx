@@ -150,8 +150,18 @@ function CloudAgentsPage() {
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">
           <SettingsRow
+            label="Adaptive model routing"
+            description="Route routine work to Luna, standard implementation to Terra, and complex planning or large-scale work to Sol."
+            control={
+              <Switch
+                checked={profile.data?.adaptive_model_routing ?? false}
+                onCheckedChange={(v) => persist({ adaptive_model_routing: v })}
+              />
+            }
+          />
+          <SettingsRow
             label="Default Model"
-            description="Used when no model is specified"
+            description="Used when adaptive model routing is off"
             control={
               <Select value={modelId} onValueChange={(v) => v && setModelId(v)}>
                 <SelectTrigger className="w-40">

@@ -21,6 +21,7 @@ def test_normalize_thread_settings_preserves_valid_values() -> None:
         "effort": None,
         "subagent_model_id": "subagent",
         "subagent_effort": "high",
+        "adaptive_model_routing": True,
         "repo_instructions": None,
     }
 

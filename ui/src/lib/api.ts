@@ -150,6 +150,7 @@ export interface Profile {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  adaptive_model_routing?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -164,6 +165,7 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  adaptive_model_routing?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
