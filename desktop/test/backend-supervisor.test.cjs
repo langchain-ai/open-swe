@@ -173,6 +173,29 @@ test("derives thread activity from the backend without starting it", async () =>
   assert.equal(await supervisor.threadActivity(), null);
 });
 
+test("serializes concurrent restarts so backends never overlap", async () => {
+  const supervisor = new BackendSupervisor({});
+  const events = [];
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+  supervisor.child = {};
+  supervisor.closeOnce = async () => {
+    events.push("close");
+    supervisor.child = null;
+    await settle();
+  };
+  supervisor.startOnce = async () => {
+    events.push("start");
+    await settle();
+    supervisor.child = {};
+    return supervisor.publicConfig();
+  };
+
+  await Promise.all([supervisor.restart(), supervisor.restart()]);
+
+  assert.deepEqual(events, ["close", "start", "close", "start"]);
+  assert.ok(supervisor.child);
+});
+
 test("packaged target runs the bundled backend", () => {
   const resourcesPath = path.resolve(
     "/Applications/Open SWE.app/Contents/Resources",

@@ -46,6 +46,7 @@ const {
 } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
+const { ProviderKeyStore } = require("./provider-key-store.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
   APP_ORIGIN,
@@ -106,6 +107,7 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
+let providerKeyStore = null;
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
   version?: string;
@@ -496,6 +498,22 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:local-model-credential-status", (event, modelId) => {
     requireTrustedDesktopIpc(event);
     return backendSupervisor.credentialStatus(modelId);
+  });
+  ipcMain.handle("desktop:provider-keys", (event) => {
+    requireTrustedDesktopIpc(event);
+    return providerKeyStore.status();
+  });
+  ipcMain.handle("desktop:set-provider-key", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const status = providerKeyStore.set(input?.variable, input?.value);
+    await backendSupervisor.restart();
+    return status;
+  });
+  ipcMain.handle("desktop:clear-provider-key", async (event, variable) => {
+    requireTrustedDesktopIpc(event);
+    const status = providerKeyStore.clear(variable);
+    await backendSupervisor.restart();
+    return status;
   });
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
@@ -1344,6 +1362,16 @@ if (!hasSingleInstanceLock) {
       },
       decryptString: (value) => safeStorage.decryptString(value),
     });
+    providerKeyStore = new ProviderKeyStore({
+      storagePath: path.join(app.getPath("userData"), "provider-keys.bin"),
+      encryptString: (value) => {
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error("Secure credential storage is unavailable");
+        }
+        return safeStorage.encryptString(value);
+      },
+      decryptString: (value) => safeStorage.decryptString(value),
+    });
     await openAiOAuth.startBroker().catch((error) => {
       console.warn("Could not start the local OpenAI credential broker", error);
     });
@@ -1354,7 +1382,10 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
-      providerEnv: () => openAiOAuth?.backendEnv() || {},
+      providerEnv: () => ({
+        ...providerKeyStore?.env(),
+        ...openAiOAuth?.backendEnv(),
+      }),
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),

@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   localModelCredentialStatus: (modelId) =>
     ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
+  listProviderKeys: () => ipcRenderer.invoke("desktop:provider-keys"),
+  setProviderKey: (input) =>
+    ipcRenderer.invoke("desktop:set-provider-key", { ...input }),
+  clearProviderKey: (variable) =>
+    ipcRenderer.invoke("desktop:clear-provider-key", variable),
   signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
   startLocalThread: (input) =>
     ipcRenderer.invoke("desktop:start-local-thread", input),

@@ -151,6 +151,11 @@ export interface DesktopTerminalBridge {
   ) => () => void
 }
 
+export interface DesktopProviderKey {
+  variable: string
+  configured: boolean
+}
+
 declare global {
   interface Window {
     openSweDesktop?: {
@@ -191,6 +196,12 @@ declare global {
         variable: string | null
         canSignIn?: boolean
       }>
+      listProviderKeys: () => Promise<Array<DesktopProviderKey>>
+      setProviderKey: (input: {
+        variable: string
+        value: string
+      }) => Promise<Array<DesktopProviderKey>>
+      clearProviderKey: (variable: string) => Promise<Array<DesktopProviderKey>>
       signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {

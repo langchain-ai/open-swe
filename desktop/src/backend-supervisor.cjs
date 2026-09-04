@@ -168,6 +168,8 @@ class BackendSupervisor {
     this.ready = null;
     this.failure = null;
     this.gatewayEnv = null;
+    this.closed = null;
+    this.restarting = null;
   }
 
   gatewayEnvironment() {
@@ -191,6 +193,7 @@ class BackendSupervisor {
 
   async startOnce() {
     this.closing = false;
+    this.closed = null;
     this.failure = null;
     this.logs = "";
     this.port = await this.reservePort(HOST);
@@ -280,6 +283,17 @@ class BackendSupervisor {
     );
   }
 
+  restart() {
+    this.restarting = Promise.resolve(this.restarting)
+      .catch(() => {})
+      .then(async () => {
+        if (!this.child) return;
+        await this.close();
+        await this.start();
+      });
+    return this.restarting;
+  }
+
   credentialStatus(modelId) {
     return modelCredentialStatus(
       modelId,
@@ -287,6 +301,7 @@ class BackendSupervisor {
         ...process.env,
         ...this.options.env,
         ...this.gatewayEnvironment(),
+        ...this.options.providerEnv?.(),
       },
       { openAiOAuth: this.options.openAiOAuthAvailable?.() === true },
     );
@@ -394,8 +409,13 @@ class BackendSupervisor {
     );
   }
 
-  async close() {
-    if (this.closing) return;
+  close() {
+    if (this.closing) return this.closed || Promise.resolve();
+    this.closed = this.closeOnce();
+    return this.closed;
+  }
+
+  async closeOnce() {
     this.closing = true;
     const child = this.child;
     this.child = null;
