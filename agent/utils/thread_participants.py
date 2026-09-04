@@ -212,7 +212,9 @@ async def resolve_participant(on_behalf_of: str) -> str:
     config = get_config()
     caller = resolve_github_login(as_json_object(config))
     if not caller or login.lower() != caller.lower():
-        raise ValueError("on_behalf_of must match the user who triggered this run.")
+        raise ValueError(
+            f"on_behalf_of must match the user who triggered this run: {caller or 'unknown'}."
+        )
     participants, _, error = await resolve_thread_participant_logins(config)
     if participants is None:
         raise ValueError(error or "Could not verify thread participants")

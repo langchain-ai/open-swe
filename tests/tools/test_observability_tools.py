@@ -4,11 +4,13 @@ from unittest.mock import AsyncMock, call, patch
 import pytest
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
+from langsmith.utils import LangSmithNotFoundError
 
 from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
 from agent.tool_loaders import datadog_mcp, notion_mcp
 from agent.tool_loaders import langsmith as langsmith_tools
+from agent.utils import thread_participants
 
 
 @pytest.fixture(autouse=True)
@@ -213,6 +215,46 @@ async def test_langsmith_get_trace_serializes() -> None:
     assert result["success"] is True
     assert result["run"]["name"] == "my-run"
     assert result["run"]["trace_id"] == "trace-1"
+
+
+@pytest.mark.asyncio
+async def test_langsmith_get_trace_reports_workspace_scope_failure() -> None:
+    creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def read_run(self, run_id: str):
+            raise LangSmithNotFoundError("not found")
+
+    tools = langsmith_tools._make_tools(allow_team=True)
+    get_trace = next(t for t in tools if t.name == "langsmith_get_trace")
+    with (
+        patch.object(langsmith_tools, "_deployment_creds", return_value=None),
+        patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
+        patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()),
+    ):
+        result = await get_trace.ainvoke({"on_behalf_of": "octo", "run_id": "run-1"})
+
+    assert result == {
+        "success": False,
+        "error": (
+            "run run-1 is not visible with octo's LangSmith credentials; "
+            "it may belong to another workspace"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_participant_names_expected_caller() -> None:
+    config = {"configurable": {"github_login": "attacker"}}
+    with patch.object(thread_participants, "get_config", return_value=config):
+        with pytest.raises(ValueError, match="must match the user.*attacker"):
+            await thread_participants.resolve_participant("victim")
 
 
 @pytest.mark.asyncio

@@ -8,11 +8,13 @@ runs in a project.
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
+from langsmith.utils import LangSmithNotFoundError
 
 from agent.dashboard.team_credentials import (
     LangSmithCredentials,
@@ -24,6 +26,7 @@ from agent.dashboard.user_credentials import (
     get_langsmith_credentials as get_user_langsmith_credentials,
 )
 from agent.utils.thread_participants import resolve_participant
+from agent.utils.tracing import AGENT_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
 
@@ -71,28 +74,57 @@ async def _creds_for(on_behalf_of: str, *, allow_team: bool) -> LangSmithCredent
     return creds
 
 
+def _deployment_creds() -> LangSmithCredentials | None:
+    api_key = (
+        os.environ.get("LANGSMITH_API_KEY_PROD")
+        or os.environ.get("LANGSMITH_API_KEY")
+        or os.environ.get("LANGCHAIN_API_KEY")
+    )
+    if not api_key:
+        return None
+    endpoint = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
+        "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
+    )
+    return LangSmithCredentials(api_key=api_key, endpoint=endpoint)
+
+
 def _make_tools(*, allow_team: bool) -> list[BaseTool]:
     async def langsmith_get_trace(
         on_behalf_of: str, run_id: str, load_child_runs: bool = False
     ) -> dict[str, Any]:
-        """Fetch a single LangSmith run (trace) by its run ID.
-
-        Args:
-            on_behalf_of: GitHub login of the thread participant to act for.
-            run_id: The LangSmith run UUID.
-            load_child_runs: Include nested child runs when True.
-
-        Returns:
-            Dictionary with the run details, or an error message.
-        """
+        """Fetch a LangSmith run by ID; schedule-origin runs have no triggering human participant."""
         try:
+            deployment_creds = _deployment_creds()
+            if deployment_creds is not None:
+                try:
+                    if load_child_runs:
+                        run = await asyncio.to_thread(
+                            _read_run_with_children, deployment_creds, run_id
+                        )
+                    else:
+                        async with _client(deployment_creds) as client:
+                            run = await client.read_run(run_id)
+                except LangSmithNotFoundError:
+                    pass
+                else:
+                    return {"success": True, "run": _serialize_run(run)}
+
             creds = await _creds_for(on_behalf_of, allow_team=allow_team)
-            if load_child_runs:
-                # AsyncClient.read_run has no load_child_runs; the sync one runs off-loop.
-                run = await asyncio.to_thread(_read_run_with_children, creds, run_id)
-            else:
-                async with _client(creds) as client:
-                    run = await client.read_run(run_id)
+            try:
+                if load_child_runs:
+                    # AsyncClient.read_run has no load_child_runs; the sync one runs off-loop.
+                    run = await asyncio.to_thread(_read_run_with_children, creds, run_id)
+                else:
+                    async with _client(creds) as client:
+                        run = await client.read_run(run_id)
+            except LangSmithNotFoundError:
+                return {
+                    "success": False,
+                    "error": (
+                        f"run {run_id} is not visible with {on_behalf_of}'s LangSmith "
+                        "credentials; it may belong to another workspace"
+                    ),
+                }
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_get_trace failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
@@ -118,7 +150,12 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
         capped = max(1, min(limit, _MAX_LIST_RUNS))
 
         try:
-            creds = await _creds_for(on_behalf_of, allow_team=allow_team)
+            if project_name == AGENT_TRACING_PROJECT:
+                creds = _deployment_creds()
+                if creds is None:
+                    creds = await _creds_for(on_behalf_of, allow_team=allow_team)
+            else:
+                creds = await _creds_for(on_behalf_of, allow_team=allow_team)
             async with _client(creds) as client:
                 runs = [
                     run
