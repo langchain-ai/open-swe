@@ -7,11 +7,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 @dataclass(frozen=True)
 class RunUsageSummary:
     models: tuple[str, ...]
-    main_agent_tokens: int | None
+    total_tokens: int | None
     session_cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
-    total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -55,19 +54,29 @@ def _message_model(message: AIMessage) -> str | None:
     return None
 
 
-def summarize_run_usage(state: dict[str, Any] | None) -> RunUsageSummary | None:
-    """Summarize main-agent usage since the latest human message."""
+def summarize_run_usage(
+    state: dict[str, Any] | None, *, run_id: str | None = None
+) -> RunUsageSummary | None:
+    """Summarize main-agent usage for one run or the latest human turn."""
     if not isinstance(state, dict):
         return None
     messages = state.get("messages")
     if not isinstance(messages, list):
         return None
-    start = 0
-    for index in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[index], HumanMessage):
-            start = index + 1
-            break
-    ai_messages = [message for message in messages[start:] if isinstance(message, AIMessage)]
+    if run_id is not None:
+        ai_messages = [
+            message
+            for message in messages
+            if isinstance(message, AIMessage)
+            and message.response_metadata.get("open_swe_run_id") == run_id
+        ]
+    else:
+        start = 0
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], HumanMessage):
+                start = index + 1
+                break
+        ai_messages = [message for message in messages[start:] if isinstance(message, AIMessage)]
     if not ai_messages:
         return None
 
@@ -84,8 +93,7 @@ def summarize_run_usage(state: dict[str, Any] | None) -> RunUsageSummary | None:
         return None
     return RunUsageSummary(
         models=tuple(sorted(models)),
-        main_agent_tokens=total_tokens,
+        total_tokens=total_tokens,
         input_tokens=sum(input_values) if input_values else None,
         output_tokens=sum(output_values) if output_values else None,
-        total_tokens=total_tokens,
     )

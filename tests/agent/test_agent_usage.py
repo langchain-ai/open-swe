@@ -77,6 +77,17 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_updates_for_unknown_runs_write_nothing(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+
+    await agent_usage.record_agent_run_cost(run_id="missing", cost_usd=1.25)
+    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="missing")
+
+    assert store.values == {}
+
+
+@pytest.mark.asyncio
 async def test_run_completion_is_idempotent(monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
@@ -92,10 +103,9 @@ async def test_run_completion_is_idempotent(monkeypatch):
     )
     usage = RunUsageSummary(
         models=("claude",),
-        main_agent_tokens=150,
+        total_tokens=150,
         input_tokens=100,
         output_tokens=50,
-        total_tokens=150,
     )
 
     await agent_usage.record_agent_run_completion(run_id="run-1", usage=usage)
@@ -107,6 +117,33 @@ async def test_run_completion_is_idempotent(monkeypatch):
     assert record["output_tokens"] == 50
     assert record["total_tokens"] == 150
     assert record["finished_at_ms"] == 1_800_000_010_000
+
+
+@pytest.mark.asyncio
+async def test_cost_refresh_scheduling_state_is_idempotent(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_010_000)
+    await agent_usage.record_agent_run_usage(
+        run_id="run-1",
+        thread_id="thread-1",
+        github_login="octo",
+        user_email=None,
+        model_id="claude",
+        effort=None,
+        source="dashboard",
+    )
+    await agent_usage.record_agent_run_completion(run_id="run-1", usage=None)
+
+    assert await agent_usage.agent_run_needs_cost_refresh(run_id="run-1") is True
+
+    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="run-1")
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_020_000)
+    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="run-1")
+
+    assert await agent_usage.agent_run_needs_cost_refresh(run_id="run-1") is False
+    record = (await agent_usage._all(agent_usage.AGENT_RUN_NAMESPACE))[0]
+    assert record["cost_refresh_scheduled_at_ms"] == 1_800_000_010_000
 
 
 @pytest.mark.asyncio

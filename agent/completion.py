@@ -16,8 +16,10 @@ import logging
 import os
 from typing import Any
 
+from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
+from agent.agent_cost import finalize_agent_run_usage
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.linear.client import comment_on_linear_issue
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 # follow-up halts the prior run (status "interrupted") while its replacement
 # carries on — that's healthy, not a failure worth a "couldn't finish" reply.
 _TERMINAL_FAILURE_STATUSES = frozenset({"error", "timeout"})
+_TERMINAL_RUN_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 _FAILURE_REPLY_FLAG = "failure_reply_posted"
 _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
@@ -254,6 +257,29 @@ def _prepare_run_id(payload: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+async def _finalize_agent_usage_telemetry(
+    thread_id: str, status: object, payload: dict[str, Any]
+) -> None:
+    """Finalize Agent telemetry from the platform's terminal webhook payload."""
+    if status not in _TERMINAL_RUN_STATUSES:
+        return
+    prepare_run_id = _prepare_run_id(payload)
+    if prepare_run_id is None:
+        return
+    values = payload.get("values")
+    state = dict(values) if isinstance(values, dict) else None
+    if state is not None and isinstance(state.get("messages"), list):
+        try:
+            state["messages"] = convert_to_messages(state["messages"])
+        except NotImplementedError, TypeError, ValueError:
+            state = None
+    await finalize_agent_run_usage(
+        run_id=prepare_run_id,
+        thread_id=thread_id,
+        state=state,
+    )
+
+
 async def _settle_code_channel_session(
     client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
 ) -> None:
@@ -338,6 +364,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    await _finalize_agent_usage_telemetry(thread_id, status, payload)
     if status == "success":
         return await _schedule_success_cost_refresh(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
