@@ -93,6 +93,9 @@ async def github_webhook(
     if event_type == "push":
         if not await common._is_repo_auto_review_enabled(webhook_repo_config):
             return {"status": "ignored", "reason": "Automatic review disabled for repository"}
+        gate_rejection = await common._enforce_public_repo_org_gate(payload, "push")
+        if gate_rejection is not None:
+            return gate_rejection
         common.logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
         background_tasks.add_task(service.process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
