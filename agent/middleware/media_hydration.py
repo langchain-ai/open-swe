@@ -52,23 +52,27 @@ class MediaHydrationMiddleware(AgentMiddleware):
                 hydrated.append(message)
                 continue
             changed = True
-            blocks = [await self._block_for(ref) for ref in refs]
+            blocks = [block for ref in refs for block in await self._blocks_for(ref)]
             content = message.content
             existing = content if isinstance(content, list) else [{"type": "text", "text": content}]
             hydrated.append(message.model_copy(update={"content": [*existing, *blocks]}))
         return hydrated if changed else None
 
-    async def _block_for(self, ref: MediaRef) -> dict[str, Any]:
+    async def _blocks_for(self, ref: MediaRef) -> list[dict[str, Any]]:
+        """A caption naming the file, then its pixels, so the pairing survives several attachments."""
         if not self._supports_images:
-            return _note(f"Attachment `{ref.name}` was withheld: {self._model_id} is text-only.")
+            return [_note(f"Attachment `{ref.path}` was withheld: {self._model_id} is text-only.")]
         data = await download_media(self._backend, ref.path)
         if data is None:
-            return _note(f"Attachment `{ref.name}` is no longer available in the sandbox.")
-        return {
-            "type": "image",
-            "base64": base64.b64encode(data).decode("ascii"),
-            "mime_type": ref.mime_type,
-        }
+            return [_note(f"Attachment `{ref.path}` is no longer available in the sandbox.")]
+        return [
+            _note(f"Attachment `{ref.path}`:"),
+            {
+                "type": "image",
+                "base64": base64.b64encode(data).decode("ascii"),
+                "mime_type": ref.mime_type,
+            },
+        ]
 
 
 def _note(text: str) -> dict[str, Any]:

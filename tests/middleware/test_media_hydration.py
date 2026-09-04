@@ -79,9 +79,25 @@ async def test_hydration_attaches_image_blocks_only_to_the_provider_copy() -> No
     assert hydrated.id == "m1"
     assert hydrated.content == [
         {"type": "text", "text": original.content},
+        {"type": "text", "text": f"Attachment `{_REF.path}`:"},
         {"type": "image", "base64": base64.b64encode(b"png").decode(), "mime_type": "image/png"},
     ]
     assert isinstance(original.content, str)
+
+
+async def test_hydration_captions_each_image_with_its_path() -> None:
+    second = _REF.model_copy(update={"path": "/uploads/" + "d" * 64 + "-other.png"})
+    middleware = MediaHydrationMiddleware(_backend(), model_id=_VISION_MODEL)
+
+    messages = await _hydrated(middleware, [HumanMessage(content=_envelope([_REF, second]))])
+
+    kinds = [(block["type"], block.get("text")) for block in messages[0].content[1:]]
+    assert kinds == [
+        ("text", f"Attachment `{_REF.path}`:"),
+        ("image", None),
+        ("text", f"Attachment `{second.path}`:"),
+        ("image", None),
+    ]
 
 
 async def test_hydration_leaves_requests_without_media_untouched() -> None:
