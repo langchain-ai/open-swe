@@ -217,6 +217,32 @@ async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
     assert "unavailable right now" in message.content
 
 
+async def test_a_group_that_fails_to_build_is_retried() -> None:
+    attempts = 0
+
+    async def load() -> list[BaseTool]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("mcp temporarily unreachable")
+        return [_tool("analyzePlan")]
+
+    middleware = DynamicToolMiddleware(
+        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    first = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
+    second = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-2")
+
+    first_message = cast(dict[str, Any], first.update)["messages"][0]
+    assert first_message.status == "error"
+    second_update = cast(dict[str, Any], second.update)
+    assert second_update["loaded_integration_tools"] == ["analyzePlan"]
+    assert second_update["messages"][0].status == "success"
+    assert attempts == 2
+
+
 async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
     async def load() -> list[BaseTool]:
         return []
