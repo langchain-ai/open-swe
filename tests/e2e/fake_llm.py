@@ -178,6 +178,8 @@ _THREAD_TOOLS_RE = re.compile(
 _THREAD_TOOLS_TARGET_TITLE = "E2E Thread Tools Target"
 DELEGATE_MARKER = "E2E_DELEGATE"
 SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
+SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
+SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -743,6 +745,41 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_desktop_reply_step),
     ),
+    "slack_reply_order": (
+        _tool_step(
+            "Acknowledging the Slack request before starting work.",
+            "slack_thread_reply",
+            {"message": "On it!"},
+            "call-order-ack",
+        ),
+        _tool_step(
+            "Running a long task while another Slack message arrives.",
+            "execute",
+            {"command": "sleep 20"},
+            "call-order-sleep",
+        ),
+        StepSpec(content="Finished the long task."),
+    ),
+    "slack_reply_grouped_order": (
+        _tool_step(
+            "Acknowledging the Slack request before delegating work.",
+            "slack_thread_reply",
+            {"message": "On it!"},
+            "call-grouped-order-ack",
+        ),
+        _tool_step(
+            "Delegating a long-running investigation.",
+            "task",
+            {
+                "description": (
+                    f"{SUBAGENT_TASK_MARKER} E2E_BUSY_HOLD:10 inspect the grouped ordering"
+                ),
+                "subagent_type": "general-purpose",
+            },
+            "call-grouped-order-task",
+        ),
+        StepSpec(content="Finished the delegated investigation."),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -978,6 +1015,14 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and SUBAGENT_TASK_MARKER in ctx.first_text,
     ),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
+    ScriptRule(
+        "slack_reply_grouped_order",
+        lambda ctx: SLACK_REPLY_GROUPED_ORDER_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
+        "slack_reply_order",
+        lambda ctx: SLACK_REPLY_ORDER_MARKER in ctx.first_text,
+    ),
     ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
