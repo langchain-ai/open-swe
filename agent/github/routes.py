@@ -2,10 +2,18 @@
 
 from fastapi import APIRouter
 
+from agent.dashboard import schedules
 from agent.github import webhook as service
 from agent.webhooks import common
 
 router = APIRouter()
+
+
+async def _launch_issue_automations(payload: dict[str, object]) -> None:
+    try:
+        await schedules.launch_github_issue_automations(payload)
+    except Exception:
+        common.logger.exception("Failed to launch GitHub issue automations")
 
 
 @router.post("/webhooks/github")
@@ -124,6 +132,11 @@ async def github_webhook(
             if not any(field in changes for field in ("body", "title")):
                 common.logger.info("Ignoring GitHub issue edit without title/body changes")
                 return {"status": "ignored", "reason": "Issue edit did not change title or body"}
+        if action == "opened":
+            gate_rejection = await common._enforce_public_repo_org_gate(payload, event_type)
+            if gate_rejection is not None:
+                return gate_rejection
+            background_tasks.add_task(_launch_issue_automations, payload)
 
         issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
         if not common.mentions_open_swe(issue_text):

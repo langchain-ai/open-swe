@@ -6,6 +6,7 @@ import type {
   ImageChunk,
   Message,
   SlackNotificationMode,
+  AutomationTrigger,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { dashboardApiBase } from "@/lib/api-base"
@@ -36,7 +37,8 @@ export interface ThreadMessageRequest {
 
 export interface ScheduleCreateRequest {
   prompt: string
-  schedule: string
+  schedule?: string | null
+  trigger?: AutomationTrigger
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
@@ -49,6 +51,7 @@ export interface ScheduleCreateRequest {
 export interface ScheduleUpdateRequest {
   prompt?: string | null
   schedule?: string | null
+  trigger?: AutomationTrigger
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
