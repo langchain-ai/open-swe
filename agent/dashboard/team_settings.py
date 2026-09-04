@@ -25,6 +25,7 @@ from agent.dashboard.options import (
 )
 from agent.store import get_value, now_iso, put_value
 from agent.utils.gateway import resolve_gateway_enabled
+from agent.utils.openai_oauth import desktop_openai_oauth_available
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ ORG_GUIDELINES_MAX_CHARS = 10_000
 REVIEW_TRACING_PROJECT_MAX_CHARS = 256
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
+ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-5"
+# Titles are a one-shot classification; no extended thinking needed.
+ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
 TRANSCRIPTION_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
@@ -461,6 +465,24 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
     )
 
 
+def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
+    """Swap an OpenAI title model for Haiku on Anthropic-only deployments.
+
+    Title generation is the one model choice users rarely revisit, so an
+    Anthropic-only install would otherwise fail every title with a missing
+    OPENAI_API_KEY.
+    """
+    if (
+        pair[0].startswith("openai:")
+        and not gateway_enabled
+        and not os.environ.get("OPENAI_API_KEY")
+        and not desktop_openai_oauth_available()
+        and os.environ.get("ANTHROPIC_API_KEY")
+    ):
+        return ANTHROPIC_THREAD_TITLE_MODEL, ANTHROPIC_THREAD_TITLE_REASONING_EFFORT
+    return pair
+
+
 async def get_team_default_thread_title_model() -> tuple[str, str]:
     settings = await get_team_settings()
     model = settings.get("default_thread_title_model")
@@ -472,8 +494,12 @@ async def get_team_default_thread_title_model() -> tuple[str, str]:
         and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
-        return _resolve_default_pair(model, effort)
-    return DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
+        pair = _resolve_default_pair(model, effort)
+    else:
+        pair = DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
+    return _gate_openai_title_model(
+        pair, gateway_enabled=resolve_gateway_enabled(settings.get("gateway_enabled"))
+    )
 
 
 async def get_team_review_trace_links_enabled() -> bool:
