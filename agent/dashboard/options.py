@@ -49,6 +49,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "openai:gpt-6-astra",
+        "label": "GPT-6 Astra",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "xhigh",
+        "supports_images": True,
+    },
+    {
         "id": "openai:gpt-5.6-sol",
         "label": "GPT-5.6 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
@@ -143,6 +150,7 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
     "openai": "langchain_openai.chat_models.base",
 }
 CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
+    "openai:gpt-6-astra": 1_050_000,
     "openai:gpt-5.6-sol": 272_000,
     "openai:gpt-5.6-terra": 272_000,
     "openai:gpt-5.6-luna": 272_000,
