@@ -1,24 +1,30 @@
 import logging
-import re
 from collections.abc import Awaitable, Callable, Mapping
+from typing import Literal
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-_SMALL_TASK_PATTERN = re.compile(
-    r"\b(explain|summari[sz]e|status|find|locate|rename|typo|format|lint|docs?|comment)\b",
-    re.IGNORECASE,
-)
-_COMPLEX_TASK_PATTERN = re.compile(
-    r"\b(plan|architect|design|migrat|security|auth|database|schema|distributed|"
-    r"multi[- ]?(?:repo|package|service)|large[- ]scale|codebase[- ]wide|cross[- ]cutting|"
-    r"refactor|investigat|root cause|performance|concurren|race condition)\w*\b",
-    re.IGNORECASE,
-)
+_CLASSIFIER_PROMPT = """Classify the software-engineering task for model routing.
+
+small: bounded, mechanical, read-only, formatting, documentation, or trivial edits
+medium: normal implementation, debugging, tests, or a contained multi-file change
+complex: ambiguous planning, architecture, broad migrations, security-sensitive work, difficult root-cause analysis, or large cross-cutting changes
+
+Choose the least capable tier likely to complete the full task successfully. Return only the structured result.
+
+Task:
+{task}
+"""
+
+
+class RouteDecision(BaseModel):
+    complexity: Literal["small", "medium", "complex"]
 
 
 def _message_text(message: HumanMessage) -> str:
@@ -31,11 +37,8 @@ def _message_text(message: HumanMessage) -> str:
     )
 
 
-def task_complexity(request: ModelRequest) -> str:
-    state = request.state if isinstance(request.state, Mapping) else {}
-    if state.get("plan_mode") is True:
-        return "complex"
-    prompt = next(
+def _latest_task(request: ModelRequest) -> str:
+    return next(
         (
             _message_text(message)
             for message in reversed(request.messages)
@@ -43,23 +46,46 @@ def task_complexity(request: ModelRequest) -> str:
         ),
         "",
     )
-    if len(prompt) >= 4_000 or _COMPLEX_TASK_PATTERN.search(prompt):
-        return "complex"
-    if len(prompt) <= 500 and _SMALL_TASK_PATTERN.search(prompt):
-        return "small"
-    return "medium"
 
 
 class ModelSelectionMiddleware(AgentMiddleware):
-    def __init__(self, models: Mapping[str, BaseChatModel]) -> None:
+    def __init__(
+        self,
+        models: Mapping[str, BaseChatModel],
+        classifier: BaseChatModel,
+        *,
+        initial_plan_mode: bool = False,
+    ) -> None:
         self._models = dict(models)
+        self._classifier = classifier.with_structured_output(RouteDecision)
+        self._initial_plan_mode = initial_plan_mode
+        self._task: str | None = None
+        self._complexity: Literal["small", "medium", "complex"] | None = None
+
+    async def _classify(self, task: str) -> Literal["small", "medium", "complex"]:
+        if self._initial_plan_mode:
+            return "complex"
+        try:
+            decision = await self._classifier.ainvoke(_CLASSIFIER_PROMPT.format(task=task[-8_000:]))
+        except Exception:  # noqa: BLE001
+            logger.exception("Model routing classifier failed")
+            return "medium"
+        if not isinstance(decision, RouteDecision):
+            logger.warning("Model routing classifier returned an unexpected result")
+            return "medium"
+        return decision.complexity
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        complexity = task_complexity(request)
-        model = self._models[complexity]
-        logger.info("Selected model for task complexity", extra={"task_complexity": complexity})
-        return await handler(request.override(model=model))
+        task = _latest_task(request)
+        if task != self._task or self._complexity is None:
+            self._task = task
+            self._complexity = await self._classify(task)
+        logger.info(
+            "Selected model for task complexity",
+            extra={"task_complexity": self._complexity},
+        )
+        return await handler(request.override(model=self._models[self._complexity]))

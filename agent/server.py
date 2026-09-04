@@ -1287,7 +1287,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ("complex", "openai:gpt-5.6-sol", "xhigh"),
             )
         }
-        model_selection_middleware.append(ModelSelectionMiddleware(routing_models))
+        model_selection_middleware.append(
+            ModelSelectionMiddleware(
+                routing_models,
+                routing_models["small"],
+                initial_plan_mode=plan_mode,
+            )
+        )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
