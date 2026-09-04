@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -94,6 +95,7 @@ from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
     _parse_ts,  # noqa: F401
+    fetch_slack_bot_identity,
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_channel_context,
@@ -179,6 +181,7 @@ __all__ = [
     "SlackThreadMappingError",
     "_AGENT_VERSION_METADATA",
     "describe_open_swe_tags",
+    "ensure_slack_bot_identity",
     "mentions_open_swe",
     "_GH_PR_AGENT_STATE_ACTIONS",
     "_GH_PR_FIRST_REVIEW_ACTIONS",
@@ -334,6 +337,39 @@ DEFAULT_REPO_OWNER = ENV.DEFAULT_REPO_OWNER.get()
 DEFAULT_REPO_NAME = ENV.DEFAULT_REPO_NAME.get()
 SLACK_REPO_OWNER = ENV.SLACK_REPO_OWNER.get() or DEFAULT_REPO_OWNER
 SLACK_REPO_NAME = ENV.SLACK_REPO_NAME.get() or DEFAULT_REPO_NAME
+_SLACK_IDENTITY_RETRY_SECONDS = 60.0
+_SLACK_IDENTITY_ATTEMPTED_AT: float | None = None
+
+
+async def ensure_slack_bot_identity() -> None:
+    """Fill ``SLACK_BOT_USER_ID`` / ``SLACK_BOT_USERNAME`` from the bot token when unset.
+
+    An explicit ``SLACK_BOT_USER_ID`` disables discovery entirely (the username
+    is only a best-effort plain-text mention hint). Discovery is attempted at
+    most once a minute so a Slack outage cannot stall webhook handling.
+    """
+    global SLACK_BOT_USER_ID, SLACK_BOT_USERNAME, _SLACK_IDENTITY_ATTEMPTED_AT
+    if SLACK_BOT_USER_ID:
+        return
+    now = time.monotonic()
+    if (
+        _SLACK_IDENTITY_ATTEMPTED_AT is not None
+        and now - _SLACK_IDENTITY_ATTEMPTED_AT < _SLACK_IDENTITY_RETRY_SECONDS
+    ):
+        return
+    _SLACK_IDENTITY_ATTEMPTED_AT = now
+    identity = await fetch_slack_bot_identity()
+    if identity is None:
+        return
+    SLACK_BOT_USER_ID = SLACK_BOT_USER_ID or identity.user_id
+    SLACK_BOT_USERNAME = SLACK_BOT_USERNAME or identity.username
+    logger.info(
+        "Resolved Slack bot identity: user_id=%s username=%s",
+        SLACK_BOT_USER_ID,
+        SLACK_BOT_USERNAME,
+    )
+
+
 DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
 DOCS_PLZ_SLACK_GATE_REPLY = (
     "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
@@ -1210,13 +1246,18 @@ async def _reviewer_token_for_repo(
     repo_private: bool | None,
     repo_id: int | None = None,
 ) -> tuple[str | None, str | None]:
+    owner = repo_config.get("owner")
+    repo_name = repo_config.get("name")
     if repo_private is False:
         if repo_id is not None:
-            return await get_github_app_installation_token_with_expiry(repository_ids=[repo_id])
-        repo_name = repo_config.get("name")
+            return await get_github_app_installation_token_with_expiry(
+                repository_ids=[repo_id], owner=owner, repo=repo_name
+            )
         if repo_name:
-            return await get_github_app_installation_token_with_expiry(repositories=[repo_name])
-    return await get_github_app_installation_token_with_expiry()
+            return await get_github_app_installation_token_with_expiry(
+                repositories=[repo_name], owner=owner, repo=repo_name
+            )
+    return await get_github_app_installation_token_with_expiry(owner=owner, repo=repo_name)
 
 
 async def _store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
