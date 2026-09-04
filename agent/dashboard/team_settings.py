@@ -25,7 +25,6 @@ from agent.dashboard.options import (
 )
 from agent.store import get_value, now_iso, put_value
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
-from agent.utils.openai_oauth import desktop_openai_oauth_available
 
 logger = logging.getLogger(__name__)
 
@@ -478,6 +477,8 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
     # bypassed and the call still needs a real OpenAI credential.
     if gateway_enabled and gateway_overrides(pair[0]) is not None:
         return pair
+    from agent.utils.openai_oauth import desktop_openai_oauth_available
+
     if os.environ.get("OPENAI_API_KEY") or desktop_openai_oauth_available():
         return pair
     if not os.environ.get("ANTHROPIC_API_KEY"):
