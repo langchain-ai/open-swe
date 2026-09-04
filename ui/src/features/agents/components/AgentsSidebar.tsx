@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   CircleNotchIcon,
+  DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
@@ -16,6 +17,7 @@ import {
 import { Kanban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
 import type {
   PullRequestSnapshot,
@@ -113,7 +115,12 @@ interface HydratedProjectGroup extends SidebarProjectGroup {
 }
 
 const NAV = [
-  { to: "/agents/threads", label: "Kanban", icon: Kanban },
+  {
+    to: "/agents/threads",
+    label: "Kanban",
+    icon: Kanban,
+    badge: "Experimental",
+  },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
@@ -208,6 +215,15 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
+    status: "idle",
+  })
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    if (!desktop) return
+    void desktop.getUpdateState().then(setUpdateState)
+    return desktop.onUpdateState(setUpdateState)
+  }, [])
   const projectMode = prefs.organize === "project"
   const includeAutomations =
     prefs.filters.includeAutomations ||
@@ -235,6 +251,24 @@ export function AgentsSidebar({
     addProject: addLocalProject,
     removeProject: removeLocalProject,
   } = useDesktopProjects()
+  const projectCommands = useMemo(
+    () =>
+      isDesktop
+        ? [
+            {
+              id: "add-project",
+              label: "Add project",
+              aliases: ["open folder", "add folder", "repository", "repo"],
+              group: "Workspace",
+              run: async () => {
+                await addLocalProject()
+              },
+            },
+          ]
+        : [],
+    [addLocalProject, isDesktop]
+  )
+  useRegisterAppCommands(projectCommands)
 
   const pinnedThreads = pinnedQuery.data ?? []
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
@@ -663,6 +697,11 @@ export function AgentsSidebar({
                     >
                       <Icon className="size-4" />
                       {item.label}
+                      {"badge" in item && (
+                        <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] leading-none font-medium text-muted-foreground">
+                          {item.badge}
+                        </span>
+                      )}
                     </Link>
                   )
                 })}
@@ -808,8 +847,8 @@ export function AgentsSidebar({
         </div>
       </TooltipProvider>
 
-      <div className="p-2">
-        <div className="min-w-0">
+      <div className="flex items-center gap-2 p-2">
+        <div className="min-w-0 flex-1">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
           ) : (
@@ -821,6 +860,29 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
+        {updateState.status !== "idle" && (
+          <button
+            type="button"
+            title={
+              updateState.status === "ready" ? "Update" : "Downloading update…"
+            }
+            aria-label={
+              updateState.status === "ready" ? "Update" : "Downloading update"
+            }
+            disabled={updateState.status !== "ready"}
+            onClick={() => void window.openSweDesktop?.installUpdate()}
+            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60"
+          >
+            {updateState.status === "downloading" ? (
+              <CircleNotchIcon className="size-4 animate-spin group-hover:hidden" />
+            ) : (
+              <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+            )}
+            <span className="hidden group-hover:inline">
+              {updateState.status === "ready" ? "Update" : "Downloading…"}
+            </span>
+          </button>
+        )}
       </div>
     </SidebarFrame>
   )
@@ -1088,8 +1150,19 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const sidebarCommands = useMemo(
-    () => [
+  const pinThread = usePinAgentThread()
+  const resolveThread = useResolveAgentThread()
+  const pinnedThreads = useSidebarPinnedThreads({
+    enabled: Boolean(activeThreadId),
+  })
+  const activeThread = useSidebarActiveThread({
+    activeThreadId,
+    loadedThreads: [],
+    includeResolved: true,
+    enabled: Boolean(activeThreadId),
+  })
+  const sidebarCommands = useMemo(() => {
+    const commands = [
       {
         id: "toggle-sidebar",
         label: "Toggle sidebar",
@@ -1100,9 +1173,61 @@ export function AgentsShell({
         desktopId: "toggle-sidebar" as const,
         desktopShortcuts: ["mod+b"],
       },
-    ],
-    [layout.toggle]
-  )
+    ]
+    if (!activeThread) return commands
+    const reference =
+      activeThread.pullRequests?.at(-1)?.url ??
+      activeThread.pr?.url ??
+      activeThread.id
+    return [
+      ...commands,
+      {
+        id: "copy-thread-reference",
+        label:
+          reference === activeThread.id ? "Copy thread ID" : "Copy PR link",
+        aliases: ["copy reference", "pull request", "pr link"],
+        shortcuts: ["mod+shift+c"],
+        group: "Thread",
+        run: () => navigator.clipboard.writeText(reference),
+      },
+      {
+        id: "pin-thread",
+        label: pinnedThreads.data?.some(
+          (thread) => thread.id === activeThread.id
+        )
+          ? "Unpin thread"
+          : "Pin thread",
+        aliases: ["pin thread", "unpin thread"],
+        shortcuts: ["mod+shift+p"],
+        group: "Thread",
+        run: () =>
+          pinThread.mutate({
+            threadId: activeThread.id,
+            pinned: !pinnedThreads.data?.some(
+              (thread) => thread.id === activeThread.id
+            ),
+          }),
+      },
+      {
+        id: "archive-thread",
+        label: activeThread.resolved ? "Unarchive thread" : "Archive thread",
+        aliases: ["resolve thread", "settle thread", "restore thread"],
+        shortcuts: ["mod+shift+s"],
+        group: "Thread",
+        run: () =>
+          resolveThread.mutate({
+            threadId: activeThread.id,
+            resolved: !activeThread.resolved,
+          }),
+      },
+    ]
+  }, [
+    activeThread,
+    layout.toggle,
+    pinThread,
+    pinnedThreads.data,
+    resolveThread,
+  ])
   useRegisterAppCommands(sidebarCommands)
 
   return (

@@ -25,7 +25,7 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
-from agent.utils.sandbox_retry import is_transient_sandbox_error
+from agent.sandboxes.retry import is_transient_sandbox_error
 
 from .sandbox_circuit_breaker import (
     extract_sandbox_id,

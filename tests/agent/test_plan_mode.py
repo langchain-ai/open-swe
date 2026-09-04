@@ -63,6 +63,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     assert "write_file" not in excluded
     assert "edit_file" not in excluded
     assert "execute" not in excluded
+    assert "browser_close" not in excluded
 
 
 class _FakeThreadsClient:

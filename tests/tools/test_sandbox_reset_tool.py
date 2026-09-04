@@ -14,7 +14,7 @@ async def test_sandbox_reset_forwards_public_and_hidden_create_options(
     with (
         patch("agent.tools.admin_gate.get_config", return_value=config),
         patch(
-            "agent.server.reset_sandbox_for_thread",
+            "agent.sandboxes.lifecycle.reset_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=("sandbox-old", "sandbox-new"),
         ) as reset,

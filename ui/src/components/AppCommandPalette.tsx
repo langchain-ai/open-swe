@@ -60,12 +60,16 @@ export function buildPaletteResults(
   query: string
 ): Array<PaletteResult> {
   const normalizedQuery = query.trim().toLowerCase()
+  const actionsOnly = normalizedQuery.startsWith(">")
+  const searchQuery = actionsOnly
+    ? normalizedQuery.slice(1).trim()
+    : normalizedQuery
   const commandResults: Array<CommandResult> = commands
     .filter(
       (command) =>
         command.run &&
         command.showInPalette !== false &&
-        (!normalizedQuery || commandMatches(command, normalizedQuery))
+        (!searchQuery || commandMatches(command, searchQuery))
     )
     .map((command) => ({
       id: `command:${command.id}`,
@@ -76,7 +80,19 @@ export function buildPaletteResults(
   const cloudResults: Array<CloudThreadResult> = cloudThreads
     .filter(
       (thread) =>
-        !normalizedQuery || thread.title.toLowerCase().includes(normalizedQuery)
+        !actionsOnly &&
+        (!searchQuery ||
+          [
+            thread.title,
+            thread.repo,
+            thread.repoFullName,
+            thread.branch,
+            thread.pr?.url ?? "",
+            `${thread.repoFullName}#${thread.pr?.number ?? ""}`,
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(searchQuery))
     )
     .map((thread) => ({
       id: `cloud:${thread.id}`,
@@ -87,7 +103,12 @@ export function buildPaletteResults(
   const localResults: Array<LocalThreadResult> = localThreads
     .filter(
       (thread) =>
-        !normalizedQuery || thread.title.toLowerCase().includes(normalizedQuery)
+        !actionsOnly &&
+        (!searchQuery ||
+          [thread.title, thread.cwd]
+            .join(" ")
+            .toLowerCase()
+            .includes(searchQuery))
     )
     .map((thread) => ({
       id: `local:${thread.id}`,
@@ -238,7 +259,7 @@ export function AppCommandPalette({
               className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={onInputKeyDown}
-              placeholder="Search commands and threads"
+              placeholder="Search commands, projects, and threads…"
               role="combobox"
               value={query}
             />

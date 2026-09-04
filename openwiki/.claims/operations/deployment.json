@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:72635dfb407dc0dd7c1b5625f2eac62efb1ea4076b1dea1e6f3528ebb7ef333c",
+  "pageVersion": "sha256:0093ec650bbac097f7c9803677f435a6707b9be092ebb0d54b24b628d56924b4",
   "claims": [
     {
       "id": "claim_0e227b88b5d94fd5924bb5c89a53831e",
@@ -56,11 +56,15 @@
     },
     {
       "id": "claim_7c0acef30b314001ba9760696f5b0434",
-      "statement": "The local dev server's langgraph-api version is pinned via constraint-dependencies (langgraph-api>=0.12.6,<0.13) in pyproject.toml so that tests and local runs use the same runtime version that langgraph.json declares for production, rather than uv resolving to an end-of-life release.",
+      "statement": "The local dev server's langgraph-api version is constrained to >=0.12.6,<0.13 in pyproject.toml to match langgraph.json's 0.12.6 manifest and avoid uv resolving the end-of-life 0.10.3 runtime; this local/cloud-manifest runtime differs from the standalone Docker image's 0.13.2 base.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L4-L4",
-          "version": "repo-lines-v1:sha256:64149bc0af48e3bda2ef7f8b84778f1698b5af106f2f5db2505715a348e8aa8a:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjQxNDliYzBhZjQ4ZTNiZGEyZWY3ZjhiODQ3NzhmMTY5OGI1YWYxMDZmMmY1ZGIyNTA1NzE1YTM0OGU4YWE4YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjQxNDliYzBhZjQ4ZTNiZGEyZWY3ZjhiODQ3NzhmMTY5OGI1YWYxMDZmMmY1ZGIyNTA1NzE1YTM0OGU4YWE4YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZDlmZGQzNTI2ZDhjOGM5MzFlNDFmNTdhZjZhZDY5ZThlYzAxMGI5MzExMjRkNjFmZmYxOWVkMjg4MDYzYmYyMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTNiMTVlMDgyMTRkMmEwZmI0NjRmMmI3NDJjYzdlY2VjZjgzNGYxZjc4MGFmOTY0MGE1YzIyODU0YmUzMDBhMCJ9"
+          "resource": "repo://Dockerfile#L1-L1",
+          "version": "repo-lines-v1:sha256:1de460ceaf5d958b7d50f4a429072b07997aae0466a6a1815056f0b6c8446df8:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWRlNDYwY2VhZjVkOTU4YjdkNTBmNGE0MjkwNzJiMDc5OTdhYWUwNDY2YTZhMTgxNTA1NmYwYjZjODQ0NmRmOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWRlNDYwY2VhZjVkOTU4YjdkNTBmNGE0MjkwNzJiMDc5OTdhYWUwNDY2YTZhMTgxNTA1NmYwYjZjODQ0NmRmOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMmMyYjY4MjIzZWQwZmJlN2I0MTQyNDYwMGZmZmI2ZTFkYmFlYjFhODNjNGU5M2E1MmNmNTZmOWQ5NDM5MzhhNyJ9"
+        },
+        {
+          "resource": "repo://langgraph.json#L3-L4",
+          "version": "repo-lines-v1:sha256:7960a0135ed74271392fb911e818d30bff180627636baa8179994fd92853f9b7:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTkwOGVjZWY5YzMxOTEwZjgwOWVkZTY4MzA0NGMxNjBmOTAzNzMwNDI2NDAxY2M3ZDQ4MDYzMGQ0ODcxNjQxZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjQxNDliYzBhZjQ4ZTNiZGEyZWY3ZjhiODQ3NzhmMTY5OGI1YWYxMDZmMmY1ZGIyNTA1NzE1YTM0OGU4YWE4YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjIsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGFkMDhhYmQ1MWI4ZjIwMTQ0OGI0NzA3YmRiYzYyNWMyMjQ0NzJlODUyYmViMDM4ZWI2Y2FhMDY0Y2MyMTQ5NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTNiMTVlMDgyMTRkMmEwZmI0NjRmMmI3NDJjYzdlY2VjZjgzNGYxZjc4MGFmOTY0MGE1YzIyODU0YmUzMDBhMCJ9"
         },
         {
           "resource": "repo://pyproject.toml#L52-L57",
@@ -222,15 +226,11 @@
     },
     {
       "id": "claim_eadc4b3dcf5e4752bf245ed137ea5a67",
-      "statement": "The root Dockerfile builds the production LangGraph API server image (not the sandbox image) from langchain/langgraph-api, installing the repo with uv and baking the same graph list and HTTP app (agent.webapp:app) into LANGSERVE_GRAPHS/LANGGRAPH_HTTP plus the checkpointer TTL, and it exposes port 8000.",
+      "statement": "The root Dockerfile builds the standalone production LangGraph API server image (not the sandbox image) from langchain/langgraph-api:0.13.2-py3.12, installing the repository with uv and baking the five graph registrations, HTTP app (agent.webapp:app), and checkpointer TTL into LANGSERVE_GRAPHS, LANGGRAPH_HTTP, and LANGGRAPH_CHECKPOINTER; it exposes port 8000.",
       "evidence": [
         {
           "resource": "repo://Dockerfile#L1-L24",
-          "version": "repo-lines-v1:sha256:12c54724e2bda7afa373cbd98fcae0e2b8db0c1601046cea4ea60a068521c07a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyYzUzMjE4Nzc0NDg3Mjg0N2I4ZWQ3OWExYjJiMDFlMGRiMzhkZjVhMGU5ZDZlOTk4MmJmNjFhOGVkNWRmMTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1YWJjYjgyM2E1ZmU2NWFjZTM3NWNjYTBmMzI5NThjMjIxMGNkYTEzODcxODM2MWEyNTk1ZTM4NWIyOTc0NTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        },
-        {
-          "resource": "repo://docs/INSTALLATION.md#L705-L747",
-          "version": "repo-lines-v1:sha256:044749db4e6c95e07578fd2cc3a6944432901c34267ca63b2ec20ab8f6076ee9:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3MThiZjJmOGE1ODcyOTA3MDlmYWUwOTBhYWQwMWE5OTA5MzViYzE2MzgxMTRjZTE1YjBlMjhlZDFkNWIwYWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YzA2YzU2MWQ1YzMyNzM0MzY4NTI2OGE0NmIzMzkxZjM5OThlZWU4OTBkMmJlNTFmMGQyMWNjNGE1M2FlNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY3YTkwMWM0Y2JiMDFkMTE0ZWUyNTUwM2E5MTk3NTE1M2NhNmIxNDJlZDM1ZmExZTQ5ZjQ1MjM5ZmY4NDk0M2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYwNzIwYjI1YTVjY2MyMDA0MWE0NWQ3Yjg1NWFmNWFiZThhYWNjZDE1ZDU1YWIxY2RjYjNhZjJkOWVjNjYzYWEifQ"
+          "version": "repo-lines-v1:sha256:16dfac7164c7e543688992fc8a1588df16c2f0a475c18e554590a0e725b524d8:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkZTQ2MGNlYWY1ZDk1OGI3ZDUwZjRhNDI5MDcyYjA3OTk3YWFlMDQ2NmE2YTE4MTUwNTZmMGI2Yzg0NDZkZjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1YWJjYjgyM2E1ZmU2NWFjZTM3NWNjYTBmMzI5NThjMjIxMGNkYTEzODcxODM2MWEyNTk1ZTM4NWIyOTc0NTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
@@ -277,10 +277,30 @@
           "version": "repo-lines-v1:sha256:387187cebcf5ebf24c309c16bad48aa5b438d5b6659f1011ccc086aab7da4c0c:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzg3MTg3Y2ViY2Y1ZWJmMjRjMzA5YzE2YmFkNDhhYTViNDM4ZDViNjY1OWYxMDExY2NjMDg2YWFiN2RhNGMwYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzg3MTg3Y2ViY2Y1ZWJmMjRjMzA5YzE2YmFkNDhhYTViNDM4ZDViNjY1OWYxMDExY2NjMDg2YWFiN2RhNGMwYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODgwOTE4YWM2NDMwNzA0MDMwMDQzMjc4YWJiMTY3MDAxYzY4MzQzZmM1YTNhZGY3ZjgyYjYxNjk1MjliODRhZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGVhOTU1NzRiNGRhZmVjOGQwODM2ZDQwYzdhZjg4YmFlOWUyYmRjYjcyOGE1ODJlNjhhNmQyN2U2YmNiYjRjNiJ9"
         }
       ]
+    },
+    {
+      "id": "claim_6bf22ade933c4db4920369eca786a486",
+      "statement": "The production Nitro proxy requires DASHBOARD_API_URL at request time and throws if it is unset, rather than falling back to a backend; it proxies the original path and query while preserving OAuth redirects manually.",
+      "evidence": [
+        {
+          "resource": "repo://ui/server/backend-proxy.ts#L3-L25",
+          "version": "repo-lines-v1:sha256:15feaa9d419a7f4aac9962fa5db95751d2e7eac511184255c9d74eec04aef2c6:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmOWQ0NTkyYWY0NDgyNGJhNGI1NmNjNDNmNjZmMTg1NWExNGMyODgzM2ZjYmI0NTIzYjdlNDE3ZjExMDk0MTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyMzUyNTg5YzM0ZDNjNjA2ODU5MzFiNmVjYzRkNTA5OTFhN2M1NmM4ZmJhMjg5NDExNDY1NzY5MDI3MmNhYzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjNGQ5YzkwNzFiNTJhYzc0MWYxOGQyMjVhOTdmZGQ5MDkxNWY4NDU4ZDIxODYzZjk3ZWFmOWJiNmFjOTA5MWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bb9d3a53ae9a4aa4905268d354202787",
+      "statement": "The FastAPI app rejects a wildcard DASHBOARD_ALLOWED_ORIGINS configuration because credentials are enabled, and applies the configured origins to credentialed CORS with dashboard, plan, workflow, webhook, and health routers installed.",
+      "evidence": [
+        {
+          "resource": "repo://agent/api/app.py#L38-L64",
+          "version": "repo-lines-v1:sha256:5c89840205d5e1ad6f74e52d173ea3eada05b30a1c76cf3151a9924efa558f36:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1ODFiMGMyZjIwNzZlMGFiMzQ2N2M2ZDMyNDQ3ZTU4NDRkZGY4NmUxNmZlZjE4YzliNGQ3YTE5YmU0MWZhZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-27T06:27:22.313Z"
+    "at": "2026-09-02T08:15:43.727Z"
   }
 }

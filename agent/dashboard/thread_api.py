@@ -113,7 +113,7 @@ _SANDBOX_CREATING_SENTINEL = "__creating__"
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
-    from ..utils.sandbox import create_sandbox as _create_sandbox
+    from agent.sandboxes.providers import create_sandbox as _create_sandbox
 
     return await _create_sandbox(*args, **kwargs)
 
@@ -751,6 +751,11 @@ def _thread_updated_ms(thread: ThreadLike) -> int:
     return _thread_timestamp_ms(thread, "updated_at")
 
 
+def _search_matches(values: Sequence[object], query: str) -> bool:
+    needle = query.lower()
+    return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
+
+
 def _metadata_matches_filters(
     metadata: Mapping[str, Any],
     *,
@@ -780,9 +785,25 @@ def _metadata_matches_filters(
     if source and _thread_source(metadata) != source:
         return False
     if query:
-        title = metadata.get("title")
-        title = title if isinstance(title, str) else "Untitled agent"
-        if query.lower() not in title.lower():
+        pull_requests = metadata.get("pull_requests")
+        pull_requests = pull_requests if isinstance(pull_requests, list) else []
+        if not _search_matches(
+            [
+                metadata.get("title", "Untitled agent"),
+                *_metadata_repo(metadata),
+                metadata.get("branch_name"),
+                metadata.get("base_branch"),
+                metadata.get("pr_url"),
+                metadata.get("pr_number"),
+                *(
+                    value
+                    for record in pull_requests
+                    if isinstance(record, dict)
+                    for value in record.values()
+                ),
+            ],
+            query,
+        ):
             return False
     return True
 
@@ -805,8 +826,25 @@ def _summary_matches_filters(
     if status and summary.get("status") != status:
         return False
     if query:
-        title = summary.get("title")
-        if not isinstance(title, str) or query.lower() not in title.lower():
+        pull_requests = summary.get("pullRequests")
+        pull_requests = pull_requests if isinstance(pull_requests, list) else []
+        pr = summary.get("pr")
+        if not _search_matches(
+            [
+                summary.get("title"),
+                summary.get("repo"),
+                summary.get("repoFullName"),
+                summary.get("branch"),
+                *(pr.values() if isinstance(pr, dict) else ()),
+                *(
+                    value
+                    for record in pull_requests
+                    if isinstance(record, dict)
+                    for value in record.values()
+                ),
+            ],
+            query,
+        ):
             return False
     return True
 
@@ -2304,7 +2342,8 @@ async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
-    from ..utils.sandbox_paths import aresolve_sandbox_work_dir
+    from agent.sandboxes.paths import resolve_sandbox_work_dir
+
     from ..utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
@@ -2318,7 +2357,7 @@ async def get_dashboard_thread_working_tree_diff(
             "Could not connect to sandbox %s for working tree diff", sandbox_id, exc_info=True
         )
         return _missing_diff()
-    work_dir = await aresolve_sandbox_work_dir(sandbox)
+    work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)
     repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)
