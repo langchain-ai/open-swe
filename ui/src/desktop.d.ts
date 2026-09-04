@@ -113,6 +113,8 @@ export type DesktopTerminalMetadataEvent =
   | { type: "upsert"; terminal: DesktopTerminalSummary }
   | (DesktopTerminalTarget & { type: "remove" })
 
+export type DesktopUpdateChannel = "stable" | "nightly"
+
 export type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing"
   version?: string
@@ -174,6 +176,10 @@ declare global {
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       getVersion: () => Promise<string>
+      getUpdateChannel: () => Promise<DesktopUpdateChannel>
+      setUpdateChannel: (
+        channel: DesktopUpdateChannel
+      ) => Promise<DesktopUpdateChannel>
       getUpdateState: () => Promise<DesktopUpdateState>
       installUpdate: () => Promise<boolean>
       onUpdateState: (
