@@ -11,6 +11,7 @@ import hashlib
 import logging
 import posixpath
 import re
+import time
 from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Any
@@ -180,11 +181,14 @@ def media_refs_from_content(content: object) -> list[MediaRef]:
     return refs
 
 
-# Content-addressed, so an entry never goes stale; bounded so a busy process
-# cannot pin every attachment it has ever seen. Keyed per sandbox so one
-# thread's attachment is never served as another thread's.
-_CACHE: OrderedDict[str, bytes] = OrderedDict()
+# Content-addressed, so an entry never goes stale; bounded by size and by idle
+# time so a busy process cannot pin every attachment it has ever seen. Keyed per
+# sandbox so one thread's attachment is never served as another thread's.
+# Ordered by last use, so the front is always the next to expire or evict.
+_CACHE: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
 _CACHE_BYTES = 0
+_CACHE_IDLE_SECONDS = 30 * 60
+_monotonic = time.monotonic
 
 
 def _cache_key(backend: SandboxBackendProtocol, path: str) -> str:
@@ -192,21 +196,41 @@ def _cache_key(backend: SandboxBackendProtocol, path: str) -> str:
     return f"{getattr(sandbox, 'id', None) or id(sandbox)}:{path}"
 
 
-def _cache_get(path: str) -> bytes | None:
-    data = _CACHE.get(path)
-    if data is not None:
-        _CACHE.move_to_end(path)
+def _cache_get(key: str) -> bytes | None:
+    now = _monotonic()
+    _expire_idle(now)
+    entry = _CACHE.get(key)
+    if entry is None:
+        return None
+    data, _ = entry
+    _CACHE[key] = (data, now)
+    _CACHE.move_to_end(key)
     return data
 
 
-def _cache_put(path: str, data: bytes) -> None:
+def _cache_put(key: str, data: bytes) -> None:
     global _CACHE_BYTES
+    now = _monotonic()
+    _expire_idle(now)
     if len(data) > _CACHE_LIMIT_BYTES:
         return
-    if path in _CACHE:
-        _CACHE_BYTES -= len(_CACHE.pop(path))
-    _CACHE[path] = data
+    _cache_drop(key)
+    _CACHE[key] = (data, now)
     _CACHE_BYTES += len(data)
     while _CACHE_BYTES > _CACHE_LIMIT_BYTES:
-        _, evicted = _CACHE.popitem(last=False)
-        _CACHE_BYTES -= len(evicted)
+        _cache_drop(next(iter(_CACHE)))
+
+
+def _expire_idle(now: float) -> None:
+    while _CACHE:
+        key, (_, last_used) = next(iter(_CACHE.items()))
+        if now - last_used <= _CACHE_IDLE_SECONDS:
+            return
+        _cache_drop(key)
+
+
+def _cache_drop(key: str) -> None:
+    global _CACHE_BYTES
+    entry = _CACHE.pop(key, None)
+    if entry is not None:
+        _CACHE_BYTES -= len(entry[0])

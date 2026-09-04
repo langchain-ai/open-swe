@@ -92,6 +92,27 @@ async def test_download_media_caches_by_path() -> None:
     assert backend.adownload_files.await_count == 1
 
 
+async def test_cached_media_expires_after_thirty_idle_minutes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(media, "_monotonic", lambda: clock["now"])
+    backend = _backend()
+    path = f"/uploads/{_PNG_SHA}.png"
+
+    await download_media(backend, path)
+    clock["now"] += 29 * 60
+    await download_media(backend, path)  # use refreshes the idle clock
+    clock["now"] += 29 * 60
+    await download_media(backend, path)
+    assert backend.adownload_files.await_count == 1
+
+    clock["now"] += 31 * 60
+    await download_media(backend, path)
+    assert backend.adownload_files.await_count == 2
+    assert media._CACHE_BYTES == len(b"png bytes")
+
+
 async def test_download_media_returns_none_for_a_missing_file() -> None:
     backend = _backend(download_error="file_not_found")
 
