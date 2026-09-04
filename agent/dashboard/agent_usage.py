@@ -111,7 +111,12 @@ async def _mutate(
     namespace: list[str], key: str, update: Callable[[dict[str, Any] | None], dict[str, Any]]
 ) -> None:
     async with _write_lock(namespace, key):
-        await _client().store.put_item(namespace, key, update(await _get(namespace, key)))
+        # An empty result means the callback found nothing to update; writing it
+        # would insert a record with no identity that every reader must skip.
+        value = update(await _get(namespace, key))
+        if not value:
+            return
+        await _client().store.put_item(namespace, key, value)
 
 
 async def _all(namespace: list[str]) -> list[dict[str, Any]]:

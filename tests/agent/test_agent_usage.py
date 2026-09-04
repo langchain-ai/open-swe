@@ -77,6 +77,17 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_updates_for_unknown_runs_write_nothing(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+
+    await agent_usage.record_agent_run_cost(run_id="missing", cost_usd=1.25)
+    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="missing")
+
+    assert store.values == {}
+
+
+@pytest.mark.asyncio
 async def test_run_completion_is_idempotent(monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
