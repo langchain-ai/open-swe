@@ -1,11 +1,14 @@
+import hashlib
+import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Literal
+from typing import Any, Literal, NotRequired
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -27,6 +30,11 @@ class RouteDecision(BaseModel):
     complexity: Literal["small", "medium", "complex"]
 
 
+class ModelSelectionState(AgentState):
+    model_route: NotRequired[Literal["small", "medium", "complex"]]
+    model_route_for: NotRequired[str]
+
+
 def _message_text(message: HumanMessage) -> str:
     if isinstance(message.content, str):
         return message.content
@@ -37,18 +45,25 @@ def _message_text(message: HumanMessage) -> str:
     )
 
 
-def _latest_task(request: ModelRequest) -> str:
-    return next(
-        (
-            _message_text(message)
-            for message in reversed(request.messages)
-            if isinstance(message, HumanMessage)
-        ),
-        "",
-    )
+def _latest_task(state: Mapping[str, Any]) -> tuple[str, str]:
+    messages = state.get("messages")
+    if not isinstance(messages, list):
+        return "", ""
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, HumanMessage):
+            task = _message_text(message)
+            payload = {"index": index, "id": message.id, "task": task}
+            fingerprint = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, default=str).encode()
+            ).hexdigest()
+            return task, fingerprint
+    return "", ""
 
 
-class ModelSelectionMiddleware(AgentMiddleware):
+class ModelSelectionMiddleware(AgentMiddleware[ModelSelectionState]):
+    state_schema = ModelSelectionState
+
     def __init__(
         self,
         models: Mapping[str, BaseChatModel],
@@ -59,8 +74,6 @@ class ModelSelectionMiddleware(AgentMiddleware):
         self._models = dict(models)
         self._classifier = classifier.with_structured_output(RouteDecision)
         self._initial_plan_mode = initial_plan_mode
-        self._task: str | None = None
-        self._complexity: Literal["small", "medium", "complex"] | None = None
 
     async def _classify(self, task: str) -> Literal["small", "medium", "complex"]:
         if self._initial_plan_mode:
@@ -75,17 +88,26 @@ class ModelSelectionMiddleware(AgentMiddleware):
             return "medium"
         return decision.complexity
 
+    async def abefore_agent(
+        self,
+        state: ModelSelectionState,
+        runtime: Runtime,
+    ) -> dict[str, Any] | None:
+        task, fingerprint = _latest_task(state)
+        if state.get("model_route_for") == fingerprint and state.get("model_route") in self._models:
+            return None
+        return {
+            "model_route": await self._classify(task),
+            "model_route_for": fingerprint,
+        }
+
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        task = _latest_task(request)
-        if task != self._task or self._complexity is None:
-            self._task = task
-            self._complexity = await self._classify(task)
-        logger.info(
-            "Selected model for task complexity",
-            extra={"task_complexity": self._complexity},
-        )
-        return await handler(request.override(model=self._models[self._complexity]))
+        route = request.state.get("model_route")
+        if route not in self._models:
+            route = "medium"
+        logger.info("Selected model for task complexity", extra={"task_complexity": route})
+        return await handler(request.override(model=self._models[route]))

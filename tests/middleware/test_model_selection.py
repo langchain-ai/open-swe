@@ -8,14 +8,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDecision
 
 
-def _request(prompt: str, *messages: Any) -> ModelRequest[None]:
-    return ModelRequest(
-        model=MagicMock(),
-        messages=[HumanMessage(content=prompt), *messages],
-        state=cast(Any, {}),
-    )
-
-
 def _middleware(
     complexity: str = "small", *, initial_plan_mode: bool = False
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
@@ -34,7 +26,19 @@ def _middleware(
     )
 
 
-async def _invoke(middleware: ModelSelectionMiddleware, request: ModelRequest) -> ModelRequest:
+async def _route(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> dict[str, Any]:
+    update = await middleware.abefore_agent(cast(Any, state), MagicMock())
+    if update:
+        state.update(update)
+    return state
+
+
+async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> ModelRequest:
+    request = ModelRequest(
+        model=MagicMock(),
+        messages=state["messages"],
+        state=cast(Any, state),
+    )
     seen: list[ModelRequest] = []
 
     async def handler(routed: ModelRequest) -> ModelResponse:
@@ -46,29 +50,44 @@ async def _invoke(middleware: ModelSelectionMiddleware, request: ModelRequest) -
 
 
 @pytest.mark.asyncio
-async def test_middleware_uses_classifier_route_for_entire_turn() -> None:
+async def test_before_agent_stores_route_in_state() -> None:
     middleware, models, classifier = _middleware("small")
-    first = _request("Update the README")
-    followup = _request("Update the README", AIMessage(content="Working"))
+    state = {"messages": [HumanMessage(content="Update the README", id="human-1")]}
 
-    assert (await _invoke(middleware, first)).model is models["small"]
-    assert (await _invoke(middleware, followup)).model is models["small"]
+    await _route(middleware, state)
+
+    assert state["model_route"] == "small"
+    assert state["model_route_for"]
+    assert (await _invoke(middleware, state)).model is models["small"]
+    classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_same_human_turn_reuses_state_route() -> None:
+    middleware, _, classifier = _middleware("small")
+    state = {"messages": [HumanMessage(content="Update the README", id="human-1")]}
+    await _route(middleware, state)
+    state["messages"].append(AIMessage(content="Working"))
+
+    update = await middleware.abefore_agent(cast(Any, state), MagicMock())
+
+    assert update is None
     classifier.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_new_human_turn_is_reclassified() -> None:
     middleware, _, classifier = _middleware("medium")
-
-    await _invoke(middleware, _request("Add an endpoint"))
-    await _invoke(
-        middleware,
-        _request(
-            "Add an endpoint",
+    state = {"messages": [HumanMessage(content="Add an endpoint", id="human-1")]}
+    await _route(middleware, state)
+    state["messages"].extend(
+        [
             AIMessage(content="Done"),
-            HumanMessage(content="Now redesign the database schema"),
-        ),
+            HumanMessage(content="Now redesign the database schema", id="human-2"),
+        ]
     )
+
+    await _route(middleware, state)
 
     assert classifier.await_count == 2
 
@@ -76,10 +95,12 @@ async def test_new_human_turn_is_reclassified() -> None:
 @pytest.mark.asyncio
 async def test_plan_mode_uses_complex_route_without_classifier() -> None:
     middleware, models, classifier = _middleware(initial_plan_mode=True)
+    state = {"messages": [HumanMessage(content="Update the docs")]}
 
-    routed = await _invoke(middleware, _request("Update the docs"))
+    await _route(middleware, state)
 
-    assert routed.model is models["complex"]
+    assert state["model_route"] == "complex"
+    assert (await _invoke(middleware, state)).model is models["complex"]
     classifier.assert_not_awaited()
 
 
@@ -87,7 +108,9 @@ async def test_plan_mode_uses_complex_route_without_classifier() -> None:
 async def test_classifier_failure_falls_back_to_medium() -> None:
     middleware, models, classifier = _middleware()
     classifier.side_effect = RuntimeError("unavailable")
+    state = {"messages": [HumanMessage(content="Do the task")]}
 
-    routed = await _invoke(middleware, _request("Do the task"))
+    await _route(middleware, state)
 
-    assert routed.model is models["medium"]
+    assert state["model_route"] == "medium"
+    assert (await _invoke(middleware, state)).model is models["medium"]
