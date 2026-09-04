@@ -166,17 +166,20 @@ jobs:
           echo "mac_zip=${mac_zips[0]}" >> "$GITHUB_OUTPUT"
           echo "mac_dmg=${mac_dmgs[0]}" >> "$GITHUB_OUTPUT"
           echo "app_zip=$app_zip" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.release.outputs.prerelease }}" = "false" ]; then
-            test -f desktop/dist/latest-mac.yml
-            test -f "${mac_zips[0]}.blockmap"
-            zip_name=$(basename "${mac_zips[0]}")
-            dmg_name=$(basename "${mac_dmgs[0]}")
-            grep -Fqx "path: ${zip_name}" desktop/dist/latest-mac.yml
-            grep -Fq "url: ${zip_name}" desktop/dist/latest-mac.yml
-            grep -Fq "url: ${dmg_name}" desktop/dist/latest-mac.yml
-            echo "update_metadata=desktop/dist/latest-mac.yml" >> "$GITHUB_OUTPUT"
-            echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
+          test -f desktop/dist/latest-mac.yml
+          test -f "${mac_zips[0]}.blockmap"
+          zip_name=$(basename "${mac_zips[0]}")
+          dmg_name=$(basename "${mac_dmgs[0]}")
+          metadata_name=latest-mac.yml
+          if [ "${{ steps.release.outputs.prerelease }}" = "true" ]; then
+            metadata_name=nightly-mac.yml
+            mv desktop/dist/latest-mac.yml "desktop/dist/${metadata_name}"
           fi
+          grep -Fqx "path: ${zip_name}" "desktop/dist/${metadata_name}"
+          grep -Fq "url: ${zip_name}" "desktop/dist/${metadata_name}"
+          grep -Fq "url: ${dmg_name}" "desktop/dist/${metadata_name}"
+          echo "update_metadata=desktop/dist/${metadata_name}" >> "$GITHUB_OUTPUT"
+          echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
 
       - name: Tag desktop version
         env:

@@ -49,6 +49,11 @@ const { beginLogin } = require("./login-server.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
+  isUpdateChannel,
+  readUpdateChannel,
+  writeUpdateChannel,
+} = require("./update-channel.cjs");
+const {
   APP_ORIGIN,
   APP_URL,
   SESSION_COOKIE_NAME,
@@ -111,7 +116,79 @@ type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
   version?: string;
 };
+type DesktopUpdateChannel = "stable" | "nightly";
 let updateState: DesktopUpdateState = { status: "idle" };
+let updateChannel: DesktopUpdateChannel = "stable";
+let autoUpdaterConfigured = false;
+let updateCheckGeneration = 0;
+let updateCheckPromise: Promise<void> | undefined;
+let updateCancellationToken: { cancel: () => void } | undefined;
+const DESKTOP_RELEASES_API =
+  "https://api.github.com/repos/langchain-ai/open-swe/releases?per_page=100";
+const DESKTOP_RELEASES_DOWNLOAD =
+  "https://github.com/langchain-ai/open-swe/releases";
+
+function updateChannelPath() {
+  return path.join(app.getPath("userData"), "desktop-update-channel.json");
+}
+
+async function configureUpdateFeed(channel: DesktopUpdateChannel) {
+  autoUpdater.allowPrerelease = channel === "nightly";
+  autoUpdater.channel = channel === "nightly" ? "nightly" : "latest";
+  autoUpdater.allowDowngrade = true;
+  let url = `${DESKTOP_RELEASES_DOWNLOAD}/latest/download`;
+  if (channel === "nightly") {
+    const response = await net.fetch(DESKTOP_RELEASES_API, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error("Could not resolve the nightly release");
+    const releases = await response.json();
+    const release = Array.isArray(releases)
+      ? releases.find(
+          (item) =>
+            item?.prerelease === true &&
+            item?.draft === false &&
+            /^desktop-v\d+\.\d+\.\d+-nightly\.\d{14}$/.test(item?.tag_name) &&
+            item?.assets?.some((asset) => asset?.name === "nightly-mac.yml"),
+        )
+      : undefined;
+    if (!release) throw new Error("No nightly update feed is available");
+    url = `${DESKTOP_RELEASES_DOWNLOAD}/download/${encodeURIComponent(release.tag_name)}`;
+  }
+  autoUpdater.setFeedURL({ provider: "generic", url });
+}
+
+function checkForDesktopUpdates() {
+  const generation = updateCheckGeneration;
+  setUpdateState("idle", undefined);
+  const promise = autoUpdater
+    .checkForUpdates()
+    .then((result) => {
+      if (generation !== updateCheckGeneration) {
+        result?.cancellationToken?.cancel();
+        return result?.downloadPromise?.catch(() => undefined);
+      }
+      updateCancellationToken = result?.cancellationToken;
+      return result?.downloadPromise?.then(() => undefined);
+    })
+    .catch((error) => {
+      if (generation === updateCheckGeneration) {
+        console.warn("Could not check for desktop updates", error);
+      }
+    })
+    .finally(() => {
+      if (updateCheckPromise === promise) updateCheckPromise = undefined;
+    });
+  updateCheckPromise = promise;
+}
+
+async function cancelDesktopUpdateCheck() {
+  updateCheckGeneration += 1;
+  updateCancellationToken?.cancel();
+  updateCancellationToken = undefined;
+  await updateCheckPromise;
+}
 
 function setUpdateState(
   status: DesktopUpdateState["status"],
@@ -123,26 +200,25 @@ function setUpdateState(
   }
 }
 
-function configureAutoUpdater() {
+async function configureAutoUpdater() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = false;
-  autoUpdater.on("update-available", (info) =>
-    setUpdateState("downloading", info.version),
-  );
-  autoUpdater.on("update-downloaded", (info) =>
-    setUpdateState("ready", info.version),
-  );
-  autoUpdater.on("error", (error) => {
-    console.warn("Desktop update failed", error);
-    setUpdateState("idle", undefined);
-  });
-  void autoUpdater
-    .checkForUpdates()
-    .catch((error) =>
-      console.warn("Could not check for desktop updates", error),
+  autoUpdater.autoInstallOnAppQuit = false;
+  if (!autoUpdaterConfigured) {
+    autoUpdaterConfigured = true;
+    autoUpdater.on("update-available", (info) =>
+      setUpdateState("downloading", info.version),
     );
+    autoUpdater.on("update-downloaded", (info) =>
+      setUpdateState("ready", info.version),
+    );
+    autoUpdater.on("error", (error) => {
+      console.warn("Desktop update failed", error);
+      setUpdateState("idle", undefined);
+    });
+  }
+  await configureUpdateFeed(updateChannel);
+  checkForDesktopUpdates();
 }
 
 function sendDesktopCommand(commandId) {
@@ -385,6 +461,31 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
+  });
+  ipcMain.handle("desktop:update-channel", (event) => {
+    requireTrustedDesktopIpc(event);
+    return updateChannel;
+  });
+  ipcMain.handle("desktop:set-update-channel", async (event, channel) => {
+    requireTrustedDesktopIpc(event);
+    if (!isUpdateChannel(channel)) throw new Error("Invalid update channel");
+    if (channel === updateChannel) return updateChannel;
+    if (updateState.status === "ready" || updateState.status === "installing") {
+      throw new Error(
+        "Install the pending desktop update before switching channels",
+      );
+    }
+    await cancelDesktopUpdateCheck();
+    if ((updateState as DesktopUpdateState).status === "ready") {
+      throw new Error(
+        "Install the pending desktop update before switching channels",
+      );
+    }
+    await configureUpdateFeed(channel);
+    writeUpdateChannel(updateChannelPath(), channel);
+    updateChannel = channel;
+    checkForDesktopUpdates();
+    return updateChannel;
   });
   ipcMain.handle("desktop:update-state", (event) => {
     requireTrustedDesktopIpc(event);
@@ -1394,12 +1495,15 @@ if (!hasSingleInstanceLock) {
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
     });
+    updateChannel = readUpdateChannel(updateChannelPath(), app.getVersion());
     protocol.handle("open-swe", serveBundledUi);
     configurePermissions();
     configureDesktopIpc();
     createMenu();
     createWindow();
-    configureAutoUpdater();
+    void configureAutoUpdater().catch((error) =>
+      console.warn("Could not configure desktop updates", error),
+    );
     configureTerminalIpc({
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,

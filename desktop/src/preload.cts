@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   getVersion: () => ipcRenderer.invoke("desktop:version"),
+  getUpdateChannel: () => ipcRenderer.invoke("desktop:update-channel"),
+  setUpdateChannel: (channel) =>
+    ipcRenderer.invoke("desktop:set-update-channel", channel),
   getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
   onUpdateState: (callback) => {
