@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
@@ -25,6 +25,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
@@ -115,12 +116,14 @@ export function AgentThreadView({
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const [planFeedbackPending, setPlanFeedbackPending] =
     useState(autoFocusComposer)
+  const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
+      scrollControlRef.current?.scrollToBottom()
       if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
@@ -324,6 +327,7 @@ export function AgentThreadView({
               queuedMessages={queuedMessages}
               isStreaming={isStreaming}
               streamIsLoading={stream.isLoading}
+              scrollControlRef={scrollControlRef}
               isThinking={isThinking}
               settingUpSandbox={settingUpSandbox}
               pollWorkflowApprovalsWhileActive={isStreaming}
