@@ -25,6 +25,11 @@ from agent.input_messages import (
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
+from agent.utils.thread_ops import (
+    MAX_QUEUED_MESSAGES,
+    PENDING_MESSAGES_KEY,
+    QUEUE_MESSAGE_KEY_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,21 +222,26 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         namespace = ("queue", thread_id)
 
         try:
-            queued_item = await store.aget(namespace, "pending_messages")
+            legacy_item = await store.aget(namespace, PENDING_MESSAGES_KEY)
+            queued_items = await store.asearch(namespace, limit=MAX_QUEUED_MESSAGES)
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to get queued item: %s", e)
+            logger.warning("Failed to get queued messages: %s", e)
             _flush_blocks(queued_updates, content_blocks, injected)
             return _message_update(queued_updates, thread_id)
 
-        if queued_item is None:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
+        queued_messages = legacy_item.value.get("messages", []) if legacy_item is not None else []
+        if legacy_item is not None:
+            await store.adelete(namespace, PENDING_MESSAGES_KEY)
 
-        queued_value = queued_item.value
-        queued_messages = queued_value.get("messages", [])
-
-        # Delete early to prevent duplicate processing if middleware runs again
-        await store.adelete(namespace, "pending_messages")
+        message_items = [
+            item
+            for item in queued_items
+            if item.key.startswith(QUEUE_MESSAGE_KEY_PREFIX) and isinstance(item.value, dict)
+        ]
+        message_items.sort(key=lambda item: (item.value.get("created_at_ns", 0), item.key))
+        queued_messages.extend(item.value for item in message_items)
+        for item in message_items:
+            await store.adelete(namespace, item.key)
 
         if not queued_messages:
             _flush_blocks(queued_updates, content_blocks, injected)

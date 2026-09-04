@@ -9,13 +9,18 @@ run that's already in flight" path (``thread_api.send_dashboard_message``).
 
 import logging
 import os
+import time
+from collections.abc import Mapping
 from typing import Any
+from uuid import uuid4
 
 from langgraph_sdk import get_client
 
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
+PENDING_MESSAGES_KEY = "pending_messages"
+QUEUE_MESSAGE_KEY_PREFIX = "message:"
 
 
 def langgraph_url() -> str:
@@ -51,32 +56,56 @@ async def queue_message_for_thread(
     client = langgraph_client()
     try:
         namespace = ("queue", thread_id)
-        key = "pending_messages"
-        new_message = {"content": message_content}
-
-        existing_messages: list[dict[str, Any]] = []
-        try:
-            existing_item = await client.store.get_item(namespace, key)
-            if existing_item and existing_item.get("value"):
-                existing_messages = existing_item["value"].get("messages", [])
-        except Exception:  # noqa: BLE001
-            logger.debug("No existing queued messages for thread %s", thread_id)
-
-        existing_messages.append(new_message)
-        if len(existing_messages) > MAX_QUEUED_MESSAGES:
-            existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]
-            logger.warning(
-                "Thread %s queue capped at %d messages (dropped oldest)",
-                thread_id,
-                MAX_QUEUED_MESSAGES,
-            )
-        await client.store.put_item(namespace, key, {"messages": existing_messages})
-        logger.info(
-            "Queued message for thread %s (total queued: %d)",
-            thread_id,
-            len(existing_messages),
+        key = f"{QUEUE_MESSAGE_KEY_PREFIX}{time.time_ns():020d}-{uuid4().hex}"
+        await client.store.put_item(
+            namespace,
+            key,
+            {"content": message_content, "created_at_ns": time.time_ns()},
         )
+        logger.info("Queued message for thread %s", thread_id)
         return True
     except Exception:
         logger.exception("Failed to queue message for thread %s", thread_id)
         return False
+
+
+async def queued_message_keys(client: Any, thread_id: str) -> list[str]:
+    """Return append-only queue record keys for a thread."""
+    result = await client.store.search_items(
+        ("queue", thread_id), limit=MAX_QUEUED_MESSAGES, offset=0
+    )
+    items = result.get("items", []) if isinstance(result, Mapping) else []
+    return [
+        key
+        for item in items
+        if isinstance(item, Mapping)
+        and isinstance((key := item.get("key")), str)
+        and key.startswith(QUEUE_MESSAGE_KEY_PREFIX)
+    ]
+
+
+async def has_queued_messages(client: Any, thread_id: str) -> bool:
+    """Return whether a thread has legacy or append-only queued messages."""
+    try:
+        legacy = await client.store.get_item(("queue", thread_id), PENDING_MESSAGES_KEY)
+    except Exception:  # noqa: BLE001
+        legacy = None
+    if isinstance(legacy, Mapping):
+        value = legacy.get("value")
+        if isinstance(value, Mapping) and value.get("messages"):
+            return True
+    return bool(await queued_message_keys(client, thread_id))
+
+
+async def queued_message_count(client: Any, thread_id: str) -> int:
+    """Return the number of legacy and append-only queued messages."""
+    legacy_count = 0
+    try:
+        legacy = await client.store.get_item(("queue", thread_id), PENDING_MESSAGES_KEY)
+    except Exception:  # noqa: BLE001
+        legacy = None
+    if isinstance(legacy, Mapping):
+        value = legacy.get("value")
+        messages = value.get("messages") if isinstance(value, Mapping) else None
+        legacy_count = len(messages) if isinstance(messages, list) else 0
+    return legacy_count + len(await queued_message_keys(client, thread_id))
