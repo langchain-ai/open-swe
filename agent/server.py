@@ -92,6 +92,7 @@ from agent.middleware import (
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
+    ModelSelectionMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -1011,6 +1012,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
+    stored_adaptive_routing = thread_settings.get("adaptive_model_routing")
+    adaptive_model_routing = (
+        stored_adaptive_routing
+        if isinstance(stored_adaptive_routing, bool)
+        else profile is not None and profile.get("adaptive_model_routing") is True
+    )
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
@@ -1061,6 +1068,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "effort": profile_effort,
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
+        "adaptive_model_routing": adaptive_model_routing,
         "repo_instructions": repo_instructions,
     }
     if not local_run and (
@@ -1261,6 +1269,31 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    model_selection_middleware: list[Any] = []
+    if adaptive_model_routing:
+        routing_models = {
+            complexity: _make_model_or_defer(
+                routed_model_id,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    routed_model_id,
+                    effort,
+                    max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                ),
+            )
+            for complexity, routed_model_id, effort in (
+                ("small", "openai:gpt-5.6-luna", "low"),
+                ("medium", "openai:gpt-5.6-terra", "medium"),
+                ("complex", "openai:gpt-5.6-sol", "xhigh"),
+            )
+        }
+        model_selection_middleware.append(
+            ModelSelectionMiddleware(
+                routing_models,
+                routing_models["small"],
+                initial_plan_mode=plan_mode,
+            )
+        )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
@@ -1340,6 +1373,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 notify_step_limit_reached,
                 record_run_usage,
                 *fallback_middleware,
+                *model_selection_middleware,
                 *plan_mode_middleware,
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
