@@ -311,16 +311,17 @@ The sandbox snapshot must include Chromium and Stagehand, install `agent/resourc
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
+Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented in a service router (`agent/linear/routes.py`, `agent/slack/routes.py`, or `agent/github/routes.py`) and mounted by `agent/api/app.py`. You can add, remove, or modify triggers independently. `agent/webapp.py` is only a compatibility import for the application object.
 
 ### Removing a trigger
 
 If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
 
-To fully remove a trigger's code, delete the corresponding endpoint from `agent/webapp.py`:
+To disable a trigger, remove its `app.include_router(...)` registration from `agent/api/app.py`. To fully remove a trigger's code, delete its endpoint from the service router and its processing functions from the matching service module:
 
-- **Linear**: `linear_webhook()` and `process_linear_issue()`
-- **Slack**: `slack_webhook()` and `process_slack_mention()`
+- **Linear**: `agent/linear/routes.py:linear_webhook()` and `agent/linear/webhook.py:process_linear_issue()`
+- **Slack**: `agent/slack/routes.py:slack_webhook()` and `agent/slack/webhook.py:process_slack_mention()`
+- **GitHub**: `agent/github/routes.py:github_webhook()` and the processing functions in `agent/github/webhook.py`
 
 ### Default repository
 
@@ -365,7 +366,7 @@ Users can also override the team/project mapping on a per-comment basis by inclu
 
 ### Customizing Slack routing
 
-Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in order:
+Slack repo resolution (`get_slack_repo_config` in `agent/webhooks/common.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
@@ -381,10 +382,14 @@ Reading the channel topic/purpose requires the bot's Slack token to have the `ch
 
 To add a new invocation surface (e.g. Jira, Discord, a custom API):
 
-1. **Add a webhook endpoint** in `agent/webapp.py`:
+1. **Add a webhook endpoint** in a service router such as `agent/my_trigger/routes.py`:
 
 ```python
-@app.post("/webhooks/my-trigger")
+from fastapi import APIRouter, BackgroundTasks, Request
+
+router = APIRouter()
+
+@router.post("/webhooks/my-trigger")
 async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks):
     # Parse the incoming event
     payload = await request.json()
@@ -398,7 +403,15 @@ async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks
     return {"status": "accepted"}
 ```
 
-2. **Create a processing function** that builds the prompt and starts an agent run:
+Register the router in `agent/api/app.py` (alongside the existing service routers):
+
+```python
+from agent.my_trigger.routes import router as my_trigger_router
+
+app.include_router(my_trigger_router)
+```
+
+2. **Create a processing function** in `agent/my_trigger/webhook.py` that builds the prompt and starts an agent run:
 
 ```python
 async def process_my_trigger(task_description: str, repo_config: dict):
