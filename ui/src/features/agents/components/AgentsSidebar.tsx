@@ -524,7 +524,6 @@ export function AgentsSidebar({
           value={prefs.sortChats}
           onValueChange={(value) => setView({ sortChats: value as ChatSort })}
         >
-          <MenuRadioItem value="priority">Priority</MenuRadioItem>
           <MenuRadioItem value="updated">Last updated</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
@@ -728,9 +727,6 @@ export function AgentsSidebar({
                             setView({ sortPinned: value as PinnedSort })
                           }
                         >
-                          <MenuRadioItem value="priority">
-                            Priority
-                          </MenuRadioItem>
                           <MenuRadioItem value="updated">
                             Last updated
                           </MenuRadioItem>
