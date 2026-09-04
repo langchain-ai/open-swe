@@ -72,7 +72,7 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	uv run basedpyright agent tests
+	uv run ty check agent tests
 
 ######################
 # HELP
@@ -90,7 +90,7 @@ help:
 	@echo 'setup                        - guided .env setup for the GitHub + Slack install'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
-	@echo 'typecheck                    - run basedpyright on agent/ and tests/'
+	@echo 'typecheck                    - run ty on agent/ and tests/'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
 	@echo '----'

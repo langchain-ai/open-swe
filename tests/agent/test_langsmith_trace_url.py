@@ -65,7 +65,7 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
         id = "pid-123"
 
     class _FakeClient:
-        async def __aenter__(self) -> "_FakeClient":
+        async def __aenter__(self) -> _FakeClient:
             return self
 
         async def __aexit__(self, *exc: object) -> None:
@@ -91,7 +91,7 @@ async def test_resolve_project_id_retries_transient_failure(
     calls: list[str] = []
 
     class _FakeClient:
-        async def __aenter__(self) -> "_FakeClient":
+        async def __aenter__(self) -> _FakeClient:
             return self
 
         async def __aexit__(self, *exc: object) -> None:
@@ -106,6 +106,60 @@ async def test_resolve_project_id_retries_transient_failure(
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
     assert calls == [AGENT_TRACING_PROJECT, AGENT_TRACING_PROJECT]
+
+
+async def test_create_thread_feedback_posts_thread_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[tuple[str, str, dict[str, object]]] = []
+
+    class _FakeClient:
+        async def _arequest_with_retries(
+            self, method: str, endpoint: str, **kwargs: object
+        ) -> None:
+            requests.append((method, endpoint, kwargs))
+
+    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(
+        ls_utils,
+        "_resolve_project_id_by_name",
+        _resolver({AGENT_TRACING_PROJECT: "project-id"}),
+    )
+
+    result = await ls_utils.create_langsmith_thread_feedback(
+        "thread-1",
+        "github_pr_merged:https://github.com/lc/repo/pull/7",
+        score=1.0,
+        comment="merged",
+        source_info={"source": "github_pr_merged"},
+    )
+
+    assert result is True
+    assert requests == [
+        (
+            "POST",
+            "/feedback",
+            {
+                "json": {
+                    "id": str(
+                        ls_utils._feedback_id(
+                            "thread-1",
+                            "github_pr_merged:https://github.com/lc/repo/pull/7",
+                        )
+                    ),
+                    "key": "github_pr_merged:https://github.com/lc/repo/pull/7",
+                    "score": 1.0,
+                    "comment": "merged",
+                    "session_id": "project-id",
+                    "feedback_thread_id": "thread-1",
+                    "feedback_source": {
+                        "type": "api",
+                        "metadata": {"source": "github_pr_merged"},
+                    },
+                }
+            },
+        )
+    ]
 
 
 async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch) -> None:

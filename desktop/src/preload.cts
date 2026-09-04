@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:update-state", listener);
     return () => ipcRenderer.removeListener("desktop:update-state", listener);
   },
+  connectService: (provider) =>
+    ipcRenderer.invoke("desktop:connect-service", provider),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),

@@ -1,6 +1,5 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
-import logging
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
-from agent.integrations.langsmith import (
+from agent.sandboxes.providers.langsmith import (
     DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
     DEFAULT_SANDBOX_IDLE_TTL_SECONDS,
     DEFAULT_SANDBOX_MEM_BYTES,
@@ -25,7 +24,7 @@ from agent.integrations.langsmith import (
     create_langsmith_sandbox,
     create_langsmith_sandbox_from_params,
 )
-from agent.sandboxes.providers import SandboxGoneError
+from agent.sandboxes.providers.registry import SandboxGoneError
 
 
 def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:
@@ -96,10 +95,10 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
     provider.get_or_create = AsyncMock(return_value=MagicMock())
     with (
         patch(
-            "agent.integrations.langsmith._get_sandbox_snapshot_config",
+            "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
             return_value=("default-snap", 100, 2, 200, 300, 400),
         ),
-        patch("agent.integrations.langsmith.LangSmithProvider", return_value=provider),
+        patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
         await create_langsmith_sandbox(
             snapshot_id="env-snap",
@@ -122,6 +121,23 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_langsmith_sandbox_uses_root_snapshot_when_unset() -> None:
+    provider = MagicMock()
+    provider.get_or_create = AsyncMock(return_value=MagicMock())
+    with (
+        patch(
+            "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
+            return_value=(None, 100, 2, 200, 300, 400),
+        ),
+        patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
+    ):
+        await create_langsmith_sandbox()
+
+    assert provider.get_or_create.await_args is not None
+    assert provider.get_or_create.await_args.kwargs["snapshot_id"] == ""
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("overrides", "expected_vcpus", "expected_mem_bytes"),
     [
@@ -138,10 +154,10 @@ async def test_create_langsmith_sandbox_derives_partial_cpu_memory_overrides(
     provider.get_or_create = AsyncMock(return_value=MagicMock())
     with (
         patch(
-            "agent.integrations.langsmith._get_sandbox_snapshot_config",
+            "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
             return_value=("default-snap", 100, 2, 200, 300, 400),
         ),
-        patch("agent.integrations.langsmith.LangSmithProvider", return_value=provider),
+        patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
         await create_langsmith_sandbox(
             mem_bytes=overrides.get("mem_bytes"),
@@ -225,9 +241,26 @@ class _FakeSandboxClient:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_id", [None, ""])
+async def test_provider_passes_empty_snapshot_id_to_api(snapshot_id: str | None) -> None:
+    client = AsyncSandboxClient(api_key="key", api_endpoint="https://example.com/v2/sandboxes")
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"name": "sandbox-new", "status": "ready"}
+    post = AsyncMock(return_value=response)
+    client._http.post = post
+
+    with patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client):
+        await LangSmithProvider(api_key="key").get_or_create(snapshot_id=snapshot_id)
+
+    assert post.await_args is not None
+    assert post.await_args.kwargs["json"]["snapshot_id"] == ""
+
+
+@pytest.mark.asyncio
 async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -> None:  # noqa: ANN001
     client = _FakeSandboxClient(failures=2)
-    monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("agent.sandboxes.providers.langsmith.asyncio.sleep", AsyncMock())
 
     result = await _create_sandbox_with_retry(
         cast(AsyncSandboxClient, client),
@@ -257,10 +290,10 @@ async def test_create_from_params_forwards_public_and_hidden_options() -> None:
     client.wait_for_sandbox = AsyncMock(return_value=sandbox)
 
     with (
-        patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client),
-        patch("agent.integrations.langsmith._install_create_extra_fields") as install,
+        patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client),
+        patch("agent.sandboxes.providers.langsmith._install_create_extra_fields") as install,
         patch(
-            "agent.integrations.langsmith._get_sandbox_create_extra_fields",
+            "agent.sandboxes.providers.langsmith._get_sandbox_create_extra_fields",
             return_value={},
         ),
     ):
@@ -392,54 +425,3 @@ async def test_reuse_keeps_other_failures_untyped() -> None:
     with pytest.raises(RuntimeError) as excinfo:
         await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
     assert not isinstance(excinfo.value, SandboxGoneError)
-
-
-def test_validate_startup_without_snapshot_is_informational(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with patch.dict("os.environ", {}, clear=True), caplog.at_level(logging.INFO):
-        LangSmithProvider.validate_startup_config()
-
-    assert any("LangSmith default snapshot" in record.message for record in caplog.records)
-    assert not any(record.levelno >= logging.WARNING for record in caplog.records)
-
-
-@pytest.mark.asyncio
-async def test_get_or_create_without_snapshot_uses_platform_default(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    sandbox = MagicMock()
-    sandbox.to_sync.return_value = MagicMock(id="sandbox-default")
-    client = MagicMock()
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=None)
-    client.create_sandbox = AsyncMock(return_value=sandbox)
-
-    with (
-        patch("agent.integrations.langsmith.AsyncSandboxClient", return_value=client),
-        patch("agent.integrations.langsmith._get_sandbox_create_extra_fields", return_value={}),
-        caplog.at_level(logging.INFO),
-    ):
-        await LangSmithProvider(api_key="k").get_or_create(snapshot_id=None)
-
-    assert client.create_sandbox.await_args is not None
-    assert client.create_sandbox.await_args.kwargs["snapshot_id"] is None
-    assert any("LangSmith default snapshot" in record.message for record in caplog.records)
-
-
-@pytest.mark.asyncio
-async def test_create_sandbox_with_retry_accepts_no_snapshot(monkeypatch) -> None:  # noqa: ANN001
-    client = _FakeSandboxClient(failures=0)
-
-    await _create_sandbox_with_retry(
-        cast(AsyncSandboxClient, client),
-        snapshot_id=None,
-        fs_capacity_bytes=None,
-        vcpus=None,
-        mem_bytes=None,
-        idle_ttl_seconds=None,
-        delete_after_stop_seconds=None,
-        timeout=180,
-    )
-
-    assert client.last_kwargs["snapshot_id"] is None

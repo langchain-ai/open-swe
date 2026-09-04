@@ -8,17 +8,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ..dashboard import router as dashboard_router
-from ..dashboard.oauth import allowed_dashboard_origins
-from ..dashboard.plan_api import plan_router
-from ..dashboard.workflow_approval_api import workflow_approval_router
-from ..utils.event_loop import pin_single_event_loop
-from ..utils.startup_config import log_startup_configuration
-from ..webhooks.common import ensure_slack_bot_identity
-from ..webhooks.github_routes import router as github_webhook_router
-from ..webhooks.linear_routes import router as linear_webhook_router
-from ..webhooks.slack_routes import router as slack_webhook_router
-from .health import router as health_router
+from agent.api.health import router as health_router
+from agent.dashboard import router as dashboard_router
+from agent.dashboard.oauth import allowed_dashboard_origins
+from agent.dashboard.plan_api import plan_router
+from agent.dashboard.workflow_approval_api import workflow_approval_router
+from agent.github.routes import router as github_webhook_router
+from agent.linear.routes import router as linear_webhook_router
+from agent.slack.routes import router as slack_webhook_router
+from agent.utils.event_loop import pin_single_event_loop
+from agent.utils.startup_config import log_startup_configuration
+from agent.webhooks.common import ensure_slack_bot_identity
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +29,8 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from agent.sandboxes.providers import validate_sandbox_startup_config
-
-    from ..utils.model import close_cached_models, validate_local_dev_llm_config
+    from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.utils.model import close_cached_models, validate_local_dev_llm_config
 
     pin_single_event_loop()
     validate_sandbox_startup_config()

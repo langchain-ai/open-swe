@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from agent.auth import github_app
+from agent.github import app as github_app
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +40,7 @@ def _client_factory(routes: dict[str, Any]) -> type:
         def __init__(self, **kwargs: Any) -> None:
             pass
 
-        async def __aenter__(self) -> "Client":
+        async def __aenter__(self) -> Client:
             return self
 
         async def __aexit__(self, *exc: object) -> None:
@@ -148,10 +148,20 @@ async def test_failed_discovery_is_throttled(monkeypatch: pytest.MonkeyPatch) ->
 
 async def test_installations_paginate(monkeypatch: pytest.MonkeyPatch) -> None:
     first_page = [{"id": i, "account": {"login": f"o{i}"}} for i in range(1, 101)]
+    gets: list[str] = []
 
-    class Client(_client_factory({})):
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "Client":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
         async def get(self, url: str, **kwargs: Any) -> _Response:
-            type(self).gets.append(url)
+            gets.append(url)
             if url.endswith("page=1"):
                 return _Response(first_page)
             return _Response([{"id": 101, "account": {"login": "o101"}}])
@@ -161,7 +171,7 @@ async def test_installations_paginate(monkeypatch: pytest.MonkeyPatch) -> None:
     installations = await github_app.list_app_installations()
 
     assert len(installations) == 101
-    assert len(Client.gets) == 2
+    assert len(gets) == 2
 
 
 async def test_repo_context_wins_over_single_installation(

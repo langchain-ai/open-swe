@@ -25,10 +25,10 @@ Everything Open SWE used to ask for beyond that is now discovered at runtime: th
 
 ## Prerequisites
 
-- **Python 3.11 – 3.13** (3.14 is not yet supported due to dependency constraints)
+- **Python 3.14+**
 - [uv](https://docs.astral.sh/uv/) package manager
 - [ngrok](https://ngrok.com/) (for local development — exposes the webhook endpoints to the internet)
-- [pnpm](https://pnpm.io/) — only for the optional dashboard (see [Dashboard](#dashboard-web-ui))
+- Node 22.22.2+ and [pnpm](https://pnpm.io/) — only for the optional dashboard (see [Dashboard](#dashboard-web-ui)). The root `pnpm-lock.yaml` is the canonical lockfile.
 
 ## 1. Clone and install
 
@@ -64,8 +64,8 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
 2. Fill in:
    - **App name**: `Open SWE` (or your preferred name)
    - **Homepage URL**: any valid URL — it is only shown on the GitHub Marketplace page. Use something like `https://github.com/langchain-ai/open-swe`
-   - **Callback URL**: leave empty. Callback URLs are only needed for the [dashboard](#dashboard-web-ui) and [per-user GitHub identity](#per-user-github-identity-langsmith-oauth-provider) add-ons.
-   - **Request user authorization (OAuth) during installation**: leave unchecked (same add-ons)
+   - **Callback URL**: leave empty for a bot-only install. You add it when you enable the [Dashboard](#dashboard-web-ui) add-on, which is also what lets runs act as the person who triggered them instead of the App bot.
+   - **Request user authorization (OAuth) during installation**: leave unchecked
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github`
    - **Webhook secret**: generate one and paste it here (`openssl rand -hex 32`), then enter the same value as `GITHUB_WEBHOOK_SECRET` in step 6. Or leave it empty for now, let `make setup` generate one in step 6, and come back to paste it from `.env`.
 3. Set permissions:
@@ -123,7 +123,7 @@ That is the whole LangSmith setup:
 ## 5. Create the Slack app
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
-2. Copy the manifest below, replacing `<your-ngrok-url>` with the backend URL from step 2 (or your deployed LangGraph/FastAPI URL in production). The `redirect_urls` are only used by the optional add-ons; leaving them in is harmless.
+2. Copy the manifest below, replacing `<your-ngrok-url>` with the backend URL from step 2 (or your deployed LangGraph/FastAPI URL in production). The `redirect_urls` entry is only used by the optional ["Sign in with Slack"](#sign-in-with-slack) add-on; leaving it in is harmless.
 
 <details>
 <summary>Slack App Manifest</summary>
@@ -148,7 +148,6 @@ That is the whole LangSmith setup:
     },
     "oauth_config": {
         "redirect_urls": [
-            "https://smith.langchain.com/host-oauth-callback/<your-provider-id>",
             "http://localhost:2024/dashboard/api/slack/callback"
         ],
         "scopes": {
@@ -288,9 +287,9 @@ make dev          # uv run langgraph dev --no-browser --port 2024
 Open each section only when you want that feature. Everything in the quick start keeps working without them.
 
 <details id="dashboard-web-ui">
-<summary><strong>Dashboard (web UI)</strong></summary>
+<summary><strong>Dashboard (web UI) and per-user GitHub identity</strong></summary>
 
-The dashboard in `ui/` adds GitHub login, per-user model/profile settings, team defaults (including the default repository), enabled-repo and review-style management, user mappings, and the Agents chat UI. Requires [pnpm](https://pnpm.io/) (Node 20+ also works, but `ui/pnpm-lock.yaml` is the canonical lockfile).
+The dashboard in `ui/` adds GitHub login, per-user model/profile settings, team defaults (including the default repository), enabled-repo and review-style management, user mappings, and the Agents chat UI. Its GitHub OAuth login is also how Open SWE obtains and stores each user's GitHub token: `resolve_github_token` reads that store on every run, so Slack-, Linear-, and dashboard-triggered runs act as the person who triggered them. Without this add-on the deployment can only act as the GitHub App bot. Requires Node 22.22.2+ and [pnpm](https://pnpm.io/); the root `pnpm-lock.yaml` is the canonical lockfile.
 
 **GitHub App changes.** On the app's settings page add the callback URL `http://localhost:2024/dashboard/api/auth/callback` (for production also `https://<your-dashboard-api-url>/dashboard/api/auth/callback`; for the desktop app also `https://<your-backend-url>/dashboard/api/auth/callback`), then under **Client secrets** click **Generate a new client secret**. This is a direct GitHub OAuth flow between the browser, your backend, and GitHub; it does not go through LangSmith.
 
@@ -368,27 +367,6 @@ ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this
 **Admin personal access token.** The token only needs to identify its owner (`GET /user`), and that login (or email) must appear in `CONFIGURED_ADMINS`. Matching by login needs no token permissions; matching by email needs a token that can read email addresses (classic `user:email`, or the fine-grained "Email addresses" read permission) when the account's email isn't public. Prefer a machine user over a human's token.
 
 `secrets.GITHUB_TOKEN` works for neither: installation tokens have no user identity, and they are not OIDC tokens. `examples/github-actions/set-base-snapshot.yml` is a copy-ready workflow using the OIDC path.
-
-</details>
-
-<details id="per-user-github-identity-langsmith-oauth-provider">
-<summary><strong>Per-user GitHub identity (LangSmith OAuth provider)</strong></summary>
-
-By default every agent operation uses the GitHub App's installation token: PRs and commits appear as the app's bot identity, and the app's installation-level permissions apply. This add-on lets each run authenticate as the triggering user instead, brokered by LangSmith, so PRs show the user's identity and their own GitHub permissions are respected.
-
-1. Pick an **OAuth provider ID** — a short string used in both GitHub and LangSmith, e.g. `your-org-github-oauth`.
-2. On the GitHub App, add the callback URL `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` and enable **Request user authorization (OAuth) during installation**. Generate a client secret if you have not already.
-3. In LangSmith, go to **Settings → OAuth Providers → Add Provider**, set the **Provider ID** to the string from step 1, enter the GitHub App's **Client ID** and **Client Secret**, set the **Authorization URL** to `https://github.com/login/oauth/authorize` and the **Token URL** to `https://github.com/login/oauth/access_token`, leave "Enable PKCE" unchecked, and save.
-4. Add to `.env`:
-
-```bash
-GITHUB_OAUTH_PROVIDER_ID=""            # the provider ID from step 1
-# Secret used to mint short-lived service JWTs that ask LangSmith to resolve a
-# specific user's GitHub token. Needed for per-user token resolution in deployed mode.
-X_SERVICE_AUTH_JWT_SECRET=""
-```
-
-The Slack manifest's `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` redirect URL belongs to this flow; replace the placeholder with your provider ID.
 
 </details>
 

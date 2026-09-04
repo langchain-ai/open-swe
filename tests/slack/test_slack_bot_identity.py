@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from agent.utils import slack as slack_utils
+from agent.slack import client as slack_utils
 from agent.webhooks import common
 
 
@@ -28,7 +28,7 @@ def _client(routes: dict[str, dict[str, Any]]) -> type:
         def __init__(self, **kwargs: Any) -> None:
             pass
 
-        async def __aenter__(self) -> "Client":
+        async def __aenter__(self) -> Client:
             return self
 
         async def __aexit__(self, *exc: object) -> None:
@@ -110,7 +110,7 @@ async def test_fetch_identity_returns_none_on_transport_error(
         def __init__(self, **kwargs: Any) -> None:
             pass
 
-        async def __aenter__(self) -> "Client":
+        async def __aenter__(self) -> Client:
             return self
 
         async def __aexit__(self, *exc: object) -> None:

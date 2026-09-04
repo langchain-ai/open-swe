@@ -34,7 +34,7 @@ def _compute_backoff(attempt: int) -> float:
     return min(base + jitter, _MAX_BACKOFF)
 
 
-async def retry_transient_sandbox_errors(
+async def retry_transient_sandbox_errors[T](
     operation: Callable[[], Awaitable[T]],
     *,
     description: str,

@@ -1,54 +1,61 @@
 """LangGraph entrypoint that fans cron ticks into fresh agent threads."""
 
 import logging
-from typing import Any, TypedDict
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
+from pydantic import BaseModel, ConfigDict
 
-from .baby_sit import evaluate_watch
-from .background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
-from .background_tasks import monitor_background_tasks
-from .dashboard.schedules import launch_scheduled_agent_run
-from .reconcile import reconcile_stale_runs
-from .session_cost import run_session_cost_refresh
+from agent.agent_cost import run_agent_cost_refresh
+from agent.baby_sit import evaluate_watch
+from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
+from agent.background_tasks import monitor_background_tasks
+from agent.dashboard.schedules import launch_scheduled_agent_run
+from agent.reconcile import reconcile_stale_runs
+from agent.run_config import RunConfig
+from agent.session_cost import run_session_cost_refresh
 
 logger = logging.getLogger(__name__)
 
 
-class SchedulerState(TypedDict, total=False):
-    schedule_id: str
-    task: str
-    watch_key: str
-    thread_id: str
-    agent_thread_id: str
-    run_id: str
-    prepare_run_id: str
-    channel_id: str
-    thread_ts: str
-    attempt: int
-    result: dict[str, Any]
+class SchedulerState(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    schedule_id: str | None = None
+    task: str | None = None
+    watch_key: str | None = None
+    thread_id: str | None = None
+    agent_thread_id: str | None = None
+    run_id: str | None = None
+    prepare_run_id: str | None = None
+    channel_id: str | None = None
+    thread_ts: str | None = None
+    attempt: int | None = None
+    result: dict[str, Any] | None = None
 
 
 async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, Any]:
-    configurable = config.get("configurable") or {}
-    task = state.get("task") or configurable.get("task")
+    cfg = RunConfig.from_config(config)
+    task = state.task or cfg.task
     if task == "reconcile":
         return {"result": await reconcile_stale_runs()}
     if task == "baby_sit":
-        key = state.get("watch_key") or configurable.get("watch_key")
-        if not isinstance(key, str) or not key:
+        key = state.watch_key or cfg.watch_key
+        if not key:
             return {"result": {"status": "missing_watch_key"}}
         return {"result": {"status": await evaluate_watch(key)}}
     if task == BACKGROUND_TASK_CRON_KIND:
-        thread_id = state.get("thread_id") or configurable.get("thread_id")
-        if not isinstance(thread_id, str) or not thread_id:
+        thread_id = state.thread_id or cfg.thread_id
+        if not thread_id:
             return {"result": {"status": "missing_thread_id"}}
         return {"result": await monitor_background_tasks(thread_id)}
     if task == "session_cost":
-        return {"result": await run_session_cost_refresh(state)}
-    schedule_id = state.get("schedule_id") or configurable.get("schedule_id")
-    if not isinstance(schedule_id, str) or not schedule_id:
+        return {"result": await run_session_cost_refresh(state.model_dump())}
+    if task == "agent_cost":
+        return {"result": await run_agent_cost_refresh(state.model_dump())}
+    schedule_id = state.schedule_id or cfg.schedule_id
+    if not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")
         return {"result": {"status": "missing_schedule_id"}}
     return {"result": await launch_scheduled_agent_run(schedule_id)}

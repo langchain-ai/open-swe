@@ -7,13 +7,17 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
-from agent.auth.github_app import get_github_app_installation_token
-from agent.auth.thread_token import get_github_token
-
-from ..utils.github_comments import post_github_comment
-from ..utils.linear import comment_on_linear_issue
-from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
-from ..utils.user_messages import warning
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import post_github_comment
+from agent.github.thread_token import get_github_token
+from agent.linear.client import comment_on_linear_issue
+from agent.run_config import RunConfig
+from agent.slack.client import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply,
+)
+from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +68,11 @@ def extract_sandbox_id(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-async def _get_slack_target(configurable: Mapping[str, Any]) -> tuple[str, str] | None:
-    slack_thread = configurable.get("slack_thread")
-    thread_id = configurable.get("thread_id")
+async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
-        thread_id if isinstance(thread_id, str) else None,
-        slack_thread if isinstance(slack_thread, Mapping) else None,
+        cfg.thread_id,
+        cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     if not active:
         return None
@@ -83,53 +85,27 @@ async def _get_slack_target(configurable: Mapping[str, Any]) -> tuple[str, str] 
     return channel_id, thread_ts
 
 
-def _get_linear_issue_id(configurable: Mapping[str, Any]) -> str | None:
-    linear_issue = configurable.get("linear_issue")
-    if not isinstance(linear_issue, Mapping):
+def _get_linear_issue_id(cfg: RunConfig) -> str | None:
+    return cfg.linear_issue.id or None if cfg.linear_issue else None
+
+
+def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
+    if not cfg.repo:
         return None
-    issue_id = linear_issue.get("id")
-    return issue_id if isinstance(issue_id, str) and issue_id else None
+    repo = {"owner": cfg.repo.owner, "name": cfg.repo.name}
 
+    target = cfg.github_pr_or_issue
+    if target is not None:
+        if target.repo and target.repo.owner and target.repo.name:
+            repo = {"owner": target.repo.owner, "name": target.repo.name}
+        if target.number is not None:
+            return repo, target.number
 
-def _coerce_issue_number(value: object) -> int | None:
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
-    return None
+    if cfg.github_issue is not None and cfg.github_issue.number is not None:
+        return repo, cfg.github_issue.number
 
-
-def _get_github_target(configurable: Mapping[str, Any]) -> tuple[dict[str, str], int] | None:
-    repo_config = configurable.get("repo")
-    if not isinstance(repo_config, Mapping):
-        return None
-    owner = repo_config.get("owner")
-    name = repo_config.get("name")
-    if not isinstance(owner, str) or not isinstance(name, str) or not owner or not name:
-        return None
-    repo = {"owner": owner, "name": name}
-
-    github_pr_or_issue = configurable.get("github_pr_or_issue")
-    if isinstance(github_pr_or_issue, Mapping):
-        number = _coerce_issue_number(github_pr_or_issue.get("number"))
-        target_repo = github_pr_or_issue.get("repo")
-        if isinstance(target_repo, Mapping):
-            target_owner = target_repo.get("owner")
-            target_name = target_repo.get("name")
-            if isinstance(target_owner, str) and isinstance(target_name, str):
-                repo = {"owner": target_owner, "name": target_name}
-        if number is not None:
-            return repo, number
-
-    github_issue = configurable.get("github_issue")
-    if isinstance(github_issue, Mapping):
-        number = _coerce_issue_number(github_issue.get("number"))
-        if number is not None:
-            return repo, number
-
-    pr_number = _coerce_issue_number(configurable.get("pr_number"))
-    if pr_number is not None:
-        return repo, pr_number
+    if cfg.pr_number is not None:
+        return repo, cfg.pr_number
     return None
 
 
@@ -140,10 +116,7 @@ async def post_sandbox_unreachable_notification(
     sandbox_name: str | None = None,
     replacement_attempted: bool = False,
 ) -> None:
-    configurable = config.get("configurable", {})
-    if not isinstance(configurable, Mapping):
-        logger.info("No runtime configurable found for sandbox unreachable notification")
-        return
+    cfg = RunConfig.from_config(config)
 
     message = sandbox_unreachable_message(
         sandbox_id=sandbox_id,
@@ -151,24 +124,25 @@ async def post_sandbox_unreachable_notification(
         replacement_attempted=replacement_attempted,
     )
 
-    slack_target = await _get_slack_target(configurable)
+    slack_target = await _get_slack_target(cfg)
     if slack_target is not None:
         channel_id, thread_ts = slack_target
-        thread_id = configurable.get("thread_id")
-        if isinstance(thread_id, str) and thread_id:
-            await post_slack_thread_reply(channel_id, thread_ts, message, agent_thread_id=thread_id)
+        if cfg.thread_id:
+            await post_slack_thread_reply(
+                channel_id, thread_ts, message, agent_thread_id=cfg.thread_id
+            )
         else:
             await post_slack_thread_reply(channel_id, thread_ts, message)
         logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
         return
 
-    linear_issue_id = _get_linear_issue_id(configurable)
+    linear_issue_id = _get_linear_issue_id(cfg)
     if linear_issue_id is not None:
         await comment_on_linear_issue(linear_issue_id, message)
         logger.info("Sent sandbox unreachable notification to Linear issue %s", linear_issue_id)
         return
 
-    github_target = _get_github_target(configurable)
+    github_target = _get_github_target(cfg)
     if github_target is not None:
         token = get_github_token(config) or await get_github_app_installation_token()
         if not token:

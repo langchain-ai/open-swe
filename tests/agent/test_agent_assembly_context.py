@@ -17,11 +17,11 @@ from langgraph.graph.state import RunnableConfig
 
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
-from agent.server import _registered_tool_name, get_agent
+from agent.server import DesktopAgentState, _registered_tool_name, get_agent
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
+    def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config
         return self
 
@@ -135,6 +135,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
+        patch(
+            "agent.server.get_sandbox_langsmith_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
@@ -166,6 +171,7 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
     assert isinstance(backend, CompositeBackend)
     assert isinstance(backend.default, SandboxBackendProxy)
     assert not callable(backend.default)
+    assert captured["state_schema"] is None
 
 
 @pytest.mark.asyncio
@@ -203,6 +209,8 @@ async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     assert isinstance(backend, CompositeBackend)
     assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
     assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
+    assert captured["state_schema"] is DesktopAgentState
+    assert "files" in DesktopAgentState.__annotations__
 
 
 @pytest.mark.asyncio

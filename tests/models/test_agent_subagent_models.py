@@ -7,7 +7,7 @@ from agent.server import get_agent
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
+    def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config
         return self
 
@@ -195,7 +195,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             "agent.server.load_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "anthropic:claude-fable-5",
+                "default_model": "anthropic:claude-fable-5-1",
                 "reasoning_effort": "high",
             },
         ),

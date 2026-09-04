@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 
+from agent.run_config import RunConfig
 from agent.tools import automations
 
 
@@ -11,7 +12,7 @@ def admin(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         automations,
         "configurable",
-        lambda: {"github_login": "alice", "user_email": "alice@example.com"},
+        lambda: RunConfig(github_login="alice", user_email="alice@example.com"),
     )
 
 

@@ -11,6 +11,7 @@ from agent.desktop import (
     desktop_artifact_routes,
     resolve_desktop_project,
 )
+from agent.run_config import RunConfig
 
 
 @contextmanager
@@ -36,8 +37,8 @@ def test_desktop_backend_allows_a_thread_worktree_without_provider_secrets(
     monkeypatch.setenv("PATH", "/bin")
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
 
-    assert resolve_desktop_project({"local_project_path": str(project)}) == str(project)
-    backend = create_desktop_backend({"local_project_path": str(project)})
+    assert resolve_desktop_project(RunConfig(local_project_path=str(project))) == str(project)
+    backend = create_desktop_backend(RunConfig(local_project_path=str(project)))
     assert backend._env.get("PATH") == "/bin"
     assert "OPENAI_API_KEY" not in backend._env
     assert backend.read(str(marker)).file_data == {"content": "marker", "encoding": "utf-8"}
@@ -53,7 +54,7 @@ def test_desktop_backend_allows_an_allowlisted_project_checkout(
     monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
     monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
 
-    assert resolve_desktop_project({"local_project_path": str(project)}) == str(project)
+    assert resolve_desktop_project(RunConfig(local_project_path=str(project))) == str(project)
 
 
 def test_desktop_backend_rejects_an_unregistered_directory(
@@ -67,7 +68,7 @@ def test_desktop_backend_rejects_an_unregistered_directory(
     monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
 
     with pytest.raises(ValueError, match="not an allowed project directory"):
-        resolve_desktop_project({"local_project_path": str(project)})
+        resolve_desktop_project(RunConfig(local_project_path=str(project)))
 
 
 async def test_artifact_routes_stay_out_of_the_project(

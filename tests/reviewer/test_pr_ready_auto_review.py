@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
-from agent.webhooks import github as github_webhooks
 
 
 def _pr_payload(

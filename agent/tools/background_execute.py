@@ -8,8 +8,7 @@ import textwrap
 import uuid
 from typing import Any, Literal
 
-from langgraph.config import get_config
-
+from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
@@ -272,9 +271,7 @@ async def _execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
 
 
 def _current_backend() -> tuple[str, Any]:
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id")
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("No thread_id in current run config")
     backend = SANDBOX_BACKENDS.get(thread_id)
@@ -305,7 +302,7 @@ async def background_execute(
         active = sum(task.get("status") == "running" for task in current.get("tasks", []))
         if active >= MAX_ACTIVE_TASKS:
             return {"success": False, "error": "active task limit reached"}
-        from ..background_tasks import MONITOR_LOCK, ensure_background_task_cron
+        from agent.background_tasks import MONITOR_LOCK, ensure_background_task_cron
 
         wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
         wait = await backend.aexecute(wait_for_monitor, timeout=15)

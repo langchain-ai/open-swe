@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from agent.auth import github_app as github_app
+from agent.github import app as github_app
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +27,7 @@ class _FakeAsyncClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -85,7 +85,7 @@ class _CountingClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> "_CountingClient":
+    async def __aenter__(self) -> _CountingClient:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
