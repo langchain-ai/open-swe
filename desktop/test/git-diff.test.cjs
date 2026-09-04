@@ -17,11 +17,51 @@ const {
   removeWorktree,
   repoRoot,
   restoreWorktree,
+  watchProjectHead,
 } = require("../build/git-diff.cjs");
 
 function git(cwd, args) {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
+
+test("HEAD watcher follows atomic checkouts in repos and linked worktrees and cleans up", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-head-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const repo = path.join(dir, "repo");
+  const worktree = path.join(dir, "worktree");
+  fs.mkdirSync(repo);
+  git(repo, ["init", "-q", "-b", "main"]);
+  git(repo, [
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "--allow-empty",
+    "-qm",
+    "init",
+  ]);
+  git(repo, ["worktree", "add", "-b", "worktree", worktree]);
+  for (const cwd of [repo, worktree]) {
+    let notifications = 0;
+    const close = await watchProjectHead(cwd, () => notifications++);
+    t.after(close);
+    for (const branch of ["alice", "bob"]) {
+      const expected = notifications + 1;
+      git(cwd, ["switch", "-c", `${branch}-${path.basename(cwd)}`]);
+      const deadline = Date.now() + 5_000;
+      while (notifications < expected && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(notifications, expected);
+      assert.equal(await currentBranch(cwd), `${branch}-${path.basename(cwd)}`);
+    }
+    git(cwd, ["switch", "--detach"]);
+    close();
+    const count = notifications;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notifications, count);
+  }
+});
 
 test("normalizes validated pull request metadata", () => {
   const pr = parsePullRequest(
