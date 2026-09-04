@@ -17,6 +17,7 @@ async def test_manage_baby_sit_starts_watch_from_current_thread(
         "github_login": "octocat",
         "repo": {"owner": "acme", "name": "repo"},
         "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"},
+        "langgraph_auth_user": object(),
     }
     monkeypatch.setattr(manage_tool, "get_config", lambda: {"configurable": configurable})
     monkeypatch.setattr(

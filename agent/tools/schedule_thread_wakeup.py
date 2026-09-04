@@ -295,7 +295,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         "user_email",
         "schedule_id",
     )
-    dumped = cfg.dump()
+    dumped = cfg.dump(include=set(passthrough_keys))
     wakeup_configurable: dict[str, Any] = {"thread_id": thread_id}
     for key in passthrough_keys:
         value = dumped.get(key)
