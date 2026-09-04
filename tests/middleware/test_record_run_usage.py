@@ -6,7 +6,7 @@ from langchain.agents.middleware import AgentState, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.middleware.record_run_usage import record_run_usage
+from agent.middleware.record_run_usage import finalize_agent_run_usage, record_run_usage
 
 
 def _message(input_tokens: int, output_tokens: int) -> AIMessage:
@@ -49,7 +49,12 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
         patch(
             "agent.middleware.record_run_usage.schedule_agent_cost_refresh",
             new_callable=AsyncMock,
+            return_value=True,
         ) as schedule,
+        patch(
+            "agent.middleware.record_run_usage.mark_agent_cost_refresh_scheduled",
+            new_callable=AsyncMock,
+        ) as mark_scheduled,
     ):
         await record_run_usage.aafter_agent(state, cast(Runtime[Any], MagicMock()))
 
@@ -58,6 +63,37 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
     assert usage.output_tokens == 30
     assert usage.total_tokens == 330
     schedule.assert_awaited_once_with({"thread_id": "thread-1", "run_id": "run-1"})
+    mark_scheduled.assert_awaited_once_with(run_id="run-1")
+
+
+@pytest.mark.asyncio
+async def test_retries_cost_scheduling_after_completion_was_recorded() -> None:
+    with (
+        patch(
+            "agent.middleware.record_run_usage.record_agent_run_completion",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "agent.middleware.record_run_usage.agent_run_needs_cost_refresh",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "agent.middleware.record_run_usage.schedule_agent_cost_refresh",
+            new_callable=AsyncMock,
+            side_effect=[False, True],
+        ) as schedule,
+        patch(
+            "agent.middleware.record_run_usage.mark_agent_cost_refresh_scheduled",
+            new_callable=AsyncMock,
+        ) as mark_scheduled,
+    ):
+        await finalize_agent_run_usage(run_id="run-1", thread_id="thread-1", state=None)
+        await finalize_agent_run_usage(run_id="run-1", thread_id="thread-1", state=None)
+
+    assert schedule.await_count == 2
+    mark_scheduled.assert_awaited_once_with(run_id="run-1")
 
 
 @pytest.mark.asyncio

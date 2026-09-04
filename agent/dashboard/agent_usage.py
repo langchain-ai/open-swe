@@ -334,6 +334,7 @@ async def record_agent_run_usage(
             "output_tokens": 0,
             "total_tokens": 0,
             "cost_usd": None,
+            "cost_refresh_scheduled_at_ms": 0,
             "finished_at_ms": 0,
         }
 
@@ -357,6 +358,33 @@ async def record_agent_run_completion(*, run_id: str, usage: RunUsageSummary | N
                     value[field] = amount
         await _client().store.put_item(AGENT_RUN_NAMESPACE, key, value)
     return True
+
+
+async def agent_run_needs_cost_refresh(*, run_id: str) -> bool:
+    """Return whether a completed run still needs cost enrichment scheduled."""
+    if not run_id:
+        return False
+    existing = await _get(AGENT_RUN_NAMESPACE, _store_key("run", run_id))
+    return bool(
+        existing
+        and existing.get("finished_at_ms")
+        and existing.get("cost_usd") is None
+        and not existing.get("cost_refresh_scheduled_at_ms")
+    )
+
+
+async def mark_agent_cost_refresh_scheduled(*, run_id: str) -> None:
+    """Persist that deferred cost enrichment was successfully scheduled."""
+    if not run_id:
+        return
+    key = _store_key("run", run_id)
+
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        if not existing or existing.get("cost_refresh_scheduled_at_ms"):
+            return existing or {}
+        return {**existing, "cost_refresh_scheduled_at_ms": _now_ms()}
+
+    await _mutate(AGENT_RUN_NAMESPACE, key, update)
 
 
 async def record_agent_run_cost(*, run_id: str, cost_usd: float) -> None:

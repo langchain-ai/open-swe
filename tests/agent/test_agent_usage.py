@@ -110,6 +110,33 @@ async def test_run_completion_is_idempotent(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cost_refresh_scheduling_state_is_idempotent(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_010_000)
+    await agent_usage.record_agent_run_usage(
+        run_id="run-1",
+        thread_id="thread-1",
+        github_login="octo",
+        user_email=None,
+        model_id="claude",
+        effort=None,
+        source="dashboard",
+    )
+    await agent_usage.record_agent_run_completion(run_id="run-1", usage=None)
+
+    assert await agent_usage.agent_run_needs_cost_refresh(run_id="run-1") is True
+
+    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="run-1")
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_020_000)
+    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="run-1")
+
+    assert await agent_usage.agent_run_needs_cost_refresh(run_id="run-1") is False
+    record = (await agent_usage._all(agent_usage.AGENT_RUN_NAMESPACE))[0]
+    assert record["cost_refresh_scheduled_at_ms"] == 1_800_000_010_000
+
+
+@pytest.mark.asyncio
 async def test_leaderboard_aggregates_run_usage_with_partial_data(monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
