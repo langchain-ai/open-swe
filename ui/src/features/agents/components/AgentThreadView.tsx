@@ -20,7 +20,6 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -289,28 +288,8 @@ export function AgentThreadView({
             </Alert>
           </div>
         )}
-        <WorkflowApprovalCard
-          threadId={thread.id}
-          pollWhileActive={isStreaming}
-        />
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {hasConversation ? (
-            <Messages
-              messages={baseMessages}
-              threadId={thread.id}
-              showPlanArtifact={
-                thread.planStatus === "ready" || thread.planStatus === "shared"
-              }
-              onOpenFile={handleOpenFile}
-              queuedMessages={queuedMessages}
-              isStreaming={isStreaming}
-              streamIsLoading={stream.isLoading}
-              scrollControlRef={scrollControlRef}
-              isThinking={isThinking}
-              settingUpSandbox={settingUpSandbox}
-              contentWidthClass="max-w-3xl"
-            />
-          ) : isHydrating ? (
+          {isHydrating ? (
             <div className="flex flex-1 items-center justify-center px-6">
               <img
                 src="/logo-mark.png"
@@ -319,23 +298,41 @@ export function AgentThreadView({
               />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-              {hydrationFailed ? (
-                <Alert variant="error" className="max-w-3xl">
-                  <CircleAlertIcon />
-                  <AlertDescription>
-                    <span>
-                      This thread&apos;s messages could not be loaded. Reload to
-                      try again.
-                    </span>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <p className="text-xs text-muted-foreground/70">
-                  This thread has no messages yet.
-                </p>
-              )}
-            </div>
+            <Messages
+              messages={baseMessages}
+              threadId={thread.id}
+              showPlanArtifact={
+                thread.planStatus === "ready" || thread.planStatus === "shared"
+              }
+              emptyState={
+                <div className="flex min-h-60 items-center justify-center">
+                  {hydrationFailed ? (
+                    <Alert variant="error" className="max-w-3xl">
+                      <CircleAlertIcon />
+                      <AlertDescription>
+                        <span>
+                          This thread&apos;s messages could not be loaded.
+                          Reload to try again.
+                        </span>
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <p className="text-xs text-muted-foreground/70">
+                      This thread has no messages yet.
+                    </p>
+                  )}
+                </div>
+              }
+              onOpenFile={handleOpenFile}
+              queuedMessages={queuedMessages}
+              isStreaming={isStreaming}
+              streamIsLoading={stream.isLoading}
+              scrollControlRef={scrollControlRef}
+              isThinking={isThinking}
+              settingUpSandbox={settingUpSandbox}
+              pollWorkflowApprovalsWhileActive={isStreaming}
+              contentWidthClass="max-w-3xl"
+            />
           )}
           {!isHydrating && (
             <AgentComposerDock>

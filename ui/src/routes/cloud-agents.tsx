@@ -51,7 +51,10 @@ function CloudAgentsPage() {
   const [error, setError] = useState<string | null>(null)
   const initialized = useRef(false)
 
-  const firstModel: ModelOption | undefined = options.data?.models[0]
+  const defaultModels = options.data?.models.filter(
+    (model) => model.can_be_default !== false
+  )
+  const firstModel: ModelOption | undefined = defaultModels?.[0]
   const defaultAgentModel =
     options.data?.default_agent_model ?? firstModel?.id ?? ""
   const defaultAgentEffort =
@@ -63,9 +66,9 @@ function CloudAgentsPage() {
   const defaultSubagentEffort =
     options.data?.default_agent_subagent_reasoning_effort ?? defaultAgentEffort
   const currentModel: ModelOption | undefined =
-    options.data?.models.find((m) => m.id === modelId) ?? firstModel
+    defaultModels?.find((m) => m.id === modelId) ?? firstModel
   const currentSubagentModel: ModelOption | undefined =
-    options.data?.models.find((m) => m.id === subagentModelId) ?? firstModel
+    defaultModels?.find((m) => m.id === subagentModelId) ?? firstModel
   const effort =
     currentModel && !currentModel.efforts.includes(effortChoice)
       ? currentModel.default_effort
@@ -155,7 +158,7 @@ function CloudAgentsPage() {
                   <SelectValue placeholder="Pick a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {options.data?.models.map((m) => (
+                  {defaultModels?.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.label}
                     </SelectItem>
@@ -194,7 +197,7 @@ function CloudAgentsPage() {
                   <SelectValue placeholder="Pick a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {options.data?.models.map((m) => (
+                  {defaultModels?.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.label}
                     </SelectItem>

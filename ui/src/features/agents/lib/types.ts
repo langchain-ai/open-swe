@@ -247,6 +247,7 @@ export interface WorkflowPushApproval {
   diffStats: WorkflowDiffStats
   diffPreview: string
   diffPreviewTruncated: boolean
+  inheritedFrom: string | null
   approvalUrl: string | null
   requestedAt: string | null
   decidedAt: string | null

@@ -7,6 +7,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from deepagents.backends import LangSmithSandbox
@@ -19,6 +20,7 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
+from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
 
@@ -48,6 +50,8 @@ PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 PROXY_MODEL_KEY_PLACEHOLDER = "proxy-injected"
+PROXY_LANGSMITH_KEY_PLACEHOLDER = "sandbox-proxy-injected"
+_MANAGED_PROXY_RULE_NAMES = frozenset({"open-swe-langsmith"})
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -169,12 +173,7 @@ def _get_sandbox_proxy_config(
 
 
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
-    """Merge ``extra`` into the JSON body of the sandbox-create request.
-
-    The SDK's ``create_sandbox`` builds a fixed payload with no passthrough, so
-    wrap the HTTP client's ``post`` to inject the fields on the ``POST /boxes``
-    request only (other endpoints post to ``/boxes/{name}/...``).
-    """
+    """Merge extra fields until the SDK exposes create-payload passthrough."""
     if not extra:
         return
     original_post = client._http.post
@@ -185,7 +184,39 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
             kwargs["json"] = {**payload, **extra}
         return await original_post(url, *args, **kwargs)
 
-    client._http.post = post_with_extra
+    # RFC moving this into the SDK if it adds a public arbitrary create-fields API.
+    client._http.post = post_with_extra  # ty: ignore[invalid-assignment]
+
+
+def _langsmith_proxy_rule(credentials: LangSmithCredentials) -> dict[str, Any]:
+    endpoint = urlsplit(credentials.endpoint)
+    if (
+        endpoint.scheme != "https"
+        or not endpoint.hostname
+        or endpoint.username is not None
+        or endpoint.password is not None
+        or endpoint.query
+        or endpoint.fragment
+    ):
+        raise ValueError(
+            "LangSmith endpoint must be an absolute HTTPS URL without credentials, query, or fragment"
+        )
+    try:
+        port = endpoint.port
+    except ValueError as exc:
+        raise ValueError("LangSmith endpoint has an invalid port") from exc
+    host = endpoint.hostname.lower()
+    match_host = f"{host}:{port}" if port and port != 443 else host
+    normalized_endpoint = urlunsplit(("https", match_host, endpoint.path.rstrip("/"), "", ""))
+    return {
+        "name": "open-swe-langsmith",
+        "match_hosts": [match_host],
+        "headers": [{"name": "x-api-key", "type": "opaque", "value": credentials.api_key}],
+        "env_vars": {
+            "LANGSMITH_API_KEY": PROXY_LANGSMITH_KEY_PLACEHOLDER,
+            "LANGSMITH_ENDPOINT": normalized_endpoint,
+        },
+    }
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
@@ -412,8 +443,9 @@ async def _configure_github_proxy(
     github_token: str,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> None:
-    """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
+    """Configure sandbox proxy to inject managed credentials for outbound traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
     git operations (clone, pull, push) authenticate via the proxy rather than
@@ -423,6 +455,7 @@ async def _configure_github_proxy(
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
         base_proxy_config: Additional persisted proxy settings to preserve.
+        langsmith_credentials: Triggering user's LangSmith credentials, if connected.
     """
     api_key = _get_sandbox_api_key()
     if not api_key:
@@ -432,8 +465,14 @@ async def _configure_github_proxy(
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
+    preserved_rules = [
+        rule
+        for rule in (custom_rules if isinstance(custom_rules, list) else [])
+        if not isinstance(rule, dict) or rule.get("name") not in _MANAGED_PROXY_RULE_NAMES
+    ]
     proxy_config["rules"] = [
-        *(custom_rules if isinstance(custom_rules, list) else []),
+        *preserved_rules,
+        *([_langsmith_proxy_rule(langsmith_credentials)] if langsmith_credentials else []),
         *_github_proxy_rules(github_token),
         *_stagehand_proxy_rules(),
     ]

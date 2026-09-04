@@ -21,6 +21,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
   showPlanArtifact?: boolean
+  emptyState?: React.ReactNode
+  pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */

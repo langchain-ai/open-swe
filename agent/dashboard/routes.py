@@ -60,15 +60,18 @@ from agent.dashboard.oauth import (
     decode_state,
     decode_terminal_ticket,
     desktop_callback_url,
+    desktop_handoff_from_state,
     enforce_org_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
+    issue_connect_handoff,
     issue_desktop_handoff,
     issue_session,
     issue_state,
     issue_terminal_ticket,
     new_state_nonce,
+    redeem_connect_handoff,
     redeem_desktop_handoff,
     require_same_origin_for_mutations,
     require_session,
@@ -494,10 +497,8 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
-    is_desktop = isinstance(state_payload.get("handoff_challenge"), str) and isinstance(
-        state_payload.get("handoff_port"), int
-    )
-    if not is_desktop and (
+    handoff = desktop_handoff_from_state(state_payload)
+    if handoff is None and (
         not isinstance(state_nonce_hash, str)
         or not cookie_nonce
         or not hmac.compare_digest(hash_state_nonce(cookie_nonce), state_nonce_hash)
@@ -521,19 +522,18 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
-    challenge = state_payload.get("handoff_challenge")
-    port = state_payload.get("handoff_port")
-    if isinstance(challenge, str) and isinstance(port, int):
+    if handoff is not None:
         # Desktop login runs in the user's own browser, so the session belongs to
         # the app rather than to this browser: hand back a PKCE-bound code the
         # app redeems for one, and leave no session cookie behind here.
-        handoff = issue_desktop_handoff(
+        challenge, port = handoff
+        handoff_code = issue_desktop_handoff(
             login=login,
             email=email,
             avatar_url=user.get("avatar_url"),
             challenge=challenge,
         )
-        response = RedirectResponse(desktop_callback_url(port, handoff), status_code=302)
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         _clear_state_cookie(response)
         return response
 
@@ -646,12 +646,6 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     update.validate_pairing()
-    if not await get_team_fable_enabled():
-        if (
-            update.default_model in FABLE_MODEL_IDS
-            or update.default_subagent_model in FABLE_MODEL_IDS
-        ):
-            raise HTTPException(400, "Fable is disabled for this workspace")
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 
@@ -730,8 +724,17 @@ async def disconnect_my_notion(
     return status.get("notion", {"connected": False})
 
 
+class DesktopConnectExchange(BaseModel):
+    """Body of a desktop connect handoff redemption."""
+
+    code: str
+    verifier: str
+
+
 @router.get("/notion/login")
 async def notion_login(
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     redirect_uri = f"{_api_base_url()}/dashboard/api/notion/callback"
@@ -740,6 +743,8 @@ async def notion_login(
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
         nonce_hash=nonce_hash,
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     try:
         url = await store_notion_oauth_flow(
@@ -762,34 +767,38 @@ async def notion_callback(
     code: str | None = None,
     error: str | None = None,
     error_description: str | None = None,
-    session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     state_payload = decode_state(state)
     nonce_hash = state_payload.get("nonce_hash")
-    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
-    if (
-        not isinstance(nonce_hash, str)
-        or not cookie_nonce
-        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash)
-    ):
+    handoff = desktop_handoff_from_state(state_payload)
+    if not isinstance(nonce_hash, str):
         raise HTTPException(400, "oauth state mismatch — please retry")
-
-    flow = await pop_notion_oauth_flow(session["sub"], nonce_hash)
-    if flow is None:
-        raise HTTPException(400, "oauth flow expired — please retry")
     if error:
         detail = error_description or error
         raise HTTPException(400, f"Notion OAuth failed: {detail}")
     if not code:
         raise HTTPException(400, "Notion OAuth callback missing code")
 
-    try:
-        token_data = await exchange_notion_code(code, flow)
-        await connect_notion(session["sub"], token_data, flow)
-    except NotionOAuthError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    if handoff is not None:
+        # This browser can't prove it is the login the pending flow is stored
+        # under, so carry the code back over the loopback port and exchange it
+        # under the session the desktop app already holds.
+        challenge, port = handoff
+        handoff_code = issue_connect_handoff(
+            provider="notion",
+            challenge=challenge,
+            claims={"nonce_hash": nonce_hash, "code": code},
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        _clear_notion_state_cookie(response)
+        return response
+
+    session = require_session(request)
+    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
+    if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
+        raise HTTPException(400, "oauth state mismatch — please retry")
+
+    await _complete_notion_connection(session["sub"], nonce_hash, code)
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
@@ -797,8 +806,39 @@ async def notion_callback(
     return response
 
 
+async def _complete_notion_connection(login: str, nonce_hash: str, code: str) -> None:
+    flow = await pop_notion_oauth_flow(login, nonce_hash)
+    if flow is None:
+        raise HTTPException(400, "oauth flow expired — please retry")
+    try:
+        token_data = await exchange_notion_code(code, flow)
+        await connect_notion(login, token_data, flow)
+    except NotionOAuthError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/notion/desktop/exchange")
+async def notion_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop Notion connection with the app's own session."""
+    claims = redeem_connect_handoff(provider="notion", code=body.code, verifier=body.verifier)
+    nonce_hash = claims.get("nonce_hash")
+    notion_code = claims.get("code")
+    if not isinstance(nonce_hash, str) or not isinstance(notion_code, str):
+        raise HTTPException(400, "malformed handoff code")
+
+    await _complete_notion_connection(session["sub"], nonce_hash, notion_code)
+    return {"connected": True}
+
+
 @router.get("/slack/login")
 async def slack_login(
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     _session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     """Start the Sign in with Slack flow to link the current GitHub account."""
@@ -809,6 +849,8 @@ async def slack_login(
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
         nonce_hash=hash_state_nonce(nonce),
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     response = RedirectResponse(
         build_authorize_url(redirect_uri=redirect_uri, state=state), status_code=302
@@ -822,7 +864,6 @@ async def slack_callback(
     request: Request,
     code: str,
     state: str,
-    session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     """Link the verified Slack identity to the logged-in GitHub user.
 
@@ -830,6 +871,23 @@ async def slack_callback(
     user can only ever link their own Slack account — no self-asserted values.
     """
     state_payload = decode_state(state)
+    handoff = desktop_handoff_from_state(state_payload)
+
+    if handoff is not None:
+        # Same as the Notion flow: hand the verified identity back over the
+        # loopback port, for the app to redeem under the session it holds.
+        challenge, port = handoff
+        slack_user_id, work_email = await _verified_slack_identity(code)
+        handoff_code = issue_connect_handoff(
+            provider="slack",
+            challenge=challenge,
+            claims={"slack_user_id": slack_user_id, "email": work_email},
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        _clear_slack_state_cookie(response)
+        return response
+
+    session = require_session(request)
     nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
     if (
@@ -839,26 +897,51 @@ async def slack_callback(
     ):
         raise HTTPException(400, "oauth state mismatch — please retry")
 
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
-
-    access_token = await exchange_slack_code(code, redirect_uri)
-    identity = await fetch_slack_identity(access_token)
-    verify_team(identity)
-    if not identity.email or not identity.email_verified:
-        raise HTTPException(400, "your Slack account has no verified email to link")
-
+    slack_user_id, work_email = await _verified_slack_identity(code)
     await upsert_mapping(
         github_login=session["sub"],
-        work_email=identity.email,
-        slack_user_id=identity.user_id,
+        work_email=work_email,
+        slack_user_id=slack_user_id,
         source="slack_oauth",
         status="active",
     )
 
+    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
     _clear_slack_state_cookie(response)
     return response
+
+
+async def _verified_slack_identity(code: str) -> tuple[str, str]:
+    """Resolve an authorization code to a Slack member id and verified email."""
+    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
+    verify_team(identity)
+    if not identity.email or not identity.email_verified:
+        raise HTTPException(400, "your Slack account has no verified email to link")
+    return identity.user_id, identity.email
+
+
+@router.post("/slack/desktop/exchange")
+async def slack_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop Slack link with the app's own session."""
+    claims = redeem_connect_handoff(provider="slack", code=body.code, verifier=body.verifier)
+    slack_user_id = claims.get("slack_user_id")
+    email = claims.get("email")
+    if not isinstance(slack_user_id, str) or not isinstance(email, str):
+        raise HTTPException(400, "malformed handoff code")
+
+    await upsert_mapping(
+        github_login=session["sub"],
+        work_email=email,
+        slack_user_id=slack_user_id,
+        source="slack_oauth",
+        status="active",
+    )
+    return {"connected": True}
 
 
 @router.get("/team-settings")

@@ -76,7 +76,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
 
 
 async def publish_review(
-    severity_threshold: str = "medium",
+    severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Post all current findings to the PR as a GitHub Review.
@@ -133,14 +133,14 @@ async def publish_review(
 
     if cfg.is_eval:
         if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
-            severity_threshold = cfg.reviewer_eval_severity_threshold or severity_threshold
+            severity_threshold = cfg.reviewer_eval_severity_threshold
         eval_cap = cfg.reviewer_eval_cap
         if eval_cap is None or eval_cap < 0:
             eval_cap = REVIEW_FINDING_CAP
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
-                severity_threshold=_cast_severity(severity_threshold),
+                severity_threshold=severity_threshold,
                 cap=eval_cap,
             )
         except ReviewerThreadMissingError as exc:
@@ -157,7 +157,7 @@ async def publish_review(
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
-            severity_threshold=_cast_severity(severity_threshold),
+            severity_threshold=severity_threshold,
             cap=REVIEW_FINDING_CAP,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
@@ -178,10 +178,6 @@ async def publish_review(
             ),
             "auth_error": str(exc),
         }
-
-
-def _cast_severity(value: str) -> Severity:
-    return value  # type: ignore[return-value]
 
 
 async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:

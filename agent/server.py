@@ -70,6 +70,7 @@ from agent.dashboard.team_settings import (
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
+from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
@@ -104,6 +105,7 @@ from agent.middleware import (
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
+    record_run_usage,
     refresh_github_proxy_before_model,
     task_on_failure,
     task_retry_on,
@@ -386,6 +388,17 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     )
 
 
+def _subagent_middleware(
+    dynamic_tools: DynamicToolMiddleware | None,
+) -> list[AgentMiddleware[Any, Any, Any]]:
+    middleware: list[AgentMiddleware[Any, Any, Any]] = []
+    if dynamic_tools is not None:
+        middleware.append(dynamic_tools)
+    middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
+    middleware.extend(_subagent_model_middleware())
+    return middleware
+
+
 def _is_subagent_excluded_tool(tool: Any) -> bool:
     """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
@@ -421,11 +434,7 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": [
-            *([dynamic_tools] if dynamic_tools else []),
-            ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
-            *_subagent_model_middleware(),
-        ],
+        "middleware": _subagent_middleware(dynamic_tools),
     }
     if skills:
         subagent["skills"] = skills
@@ -910,15 +919,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
+    profile_login = resolve_github_login(as_json_object(config))
+
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
+        _profile_login: str | None = profile_login,
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_cfg):
             return create_desktop_backend(_cfg)
+        credentials = (
+            await get_sandbox_langsmith_credentials(_profile_login)
+            if _profile_login and os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+            else None
+        )
         return await ensure_sandbox_for_thread(
             _thread_id,
             environment_slug=_environment_slug(_cfg),
+            langsmith_credentials=credentials,
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -929,7 +947,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
     local_run = is_desktop_run(cfg)
-    profile_login = resolve_github_login(as_json_object(config))
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
@@ -1321,6 +1338,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
+                record_run_usage,
                 *fallback_middleware,
                 *plan_mode_middleware,
                 SanitizeFireworksMessagesMiddleware(),

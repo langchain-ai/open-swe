@@ -133,6 +133,7 @@ Open SWE includes a LangGraph backend, a web dashboard, and an experimental desk
 
 - **[Installation Guide](docs/INSTALLATION.md)** — Set up local development, the GitHub App, LangSmith, integrations, and production deployment
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
+- **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
 
 Complete the required `.env`, GitHub App, and sandbox setup in the [Installation Guide](docs/INSTALLATION.md), then install the backend and dashboard dependencies:
 

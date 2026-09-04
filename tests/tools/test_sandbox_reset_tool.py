@@ -14,6 +14,11 @@ async def test_sandbox_reset_forwards_public_and_hidden_create_options(
     with (
         patch("agent.run_config.get_config", return_value=config),
         patch(
+            "agent.tools.sandbox_reset.get_sandbox_langsmith_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
             "agent.sandboxes.lifecycle.reset_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=("sandbox-old", "sandbox-new"),

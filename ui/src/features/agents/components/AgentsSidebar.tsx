@@ -618,7 +618,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <NotePencilIcon className="size-4" />
           New Thread
@@ -635,8 +635,8 @@ export function AgentsSidebar({
           )}
           {scrollEdges.bottom && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-px bg-border" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-px z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
             </>
           )}
           <div
@@ -658,10 +658,9 @@ export function AgentsSidebar({
                       key={item.to}
                       to={item.to}
                       onClick={layout.closeOnMobile}
-                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
                       activeProps={{
-                        className:
-                          "bg-sidebar-row-hover !text-foreground font-medium",
+                        className: "bg-sidebar-row-hover font-medium",
                       }}
                     >
                       <Icon className="size-4" />
@@ -934,7 +933,7 @@ function ProjectGroup({
 
   return (
     <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground">
+      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -1213,7 +1212,7 @@ export function AgentsShell({
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
-        <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">
+        <main className="relative flex min-w-0 flex-1 overflow-hidden bg-background">
           {children}
         </main>
       </div>
