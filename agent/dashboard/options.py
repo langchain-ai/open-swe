@@ -40,6 +40,15 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "can_be_default": False,
     },
     {
+        "id": "anthropic:claude-haiku-4-5",
+        "label": "Haiku 4.5",
+        # Haiku 4.5 predates the adaptive-thinking/effort params the other
+        # Claude entries rely on, so it is offered without reasoning.
+        "efforts": ["none"],
+        "default_effort": "none",
+        "supports_images": True,
+    },
+    {
         "id": "openai:gpt-5.6-sol",
         "label": "GPT-5.6 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
