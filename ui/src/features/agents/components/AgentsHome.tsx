@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import type {
+  DesktopLocalThreadSummary,
+  DesktopProjectRef,
+  DesktopWorkspaceMode,
+} from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -121,8 +125,10 @@ export function AgentsHome() {
     null
   )
   const [localProjectBranches, setLocalProjectBranches] = useState<
-    Array<string>
+    Array<DesktopProjectRef>
   >([])
+  const [localWorkspaceMode, setLocalWorkspaceMode] =
+    useState<DesktopWorkspaceMode>("local")
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
@@ -177,10 +183,67 @@ export function AgentsHome() {
       ? await window.openSweDesktop?.getProjectBranches(cwd)
       : undefined
     if (localProjectPathRef.current === cwd) {
-      setLocalProjectBranch(result?.current ?? null)
-      setLocalProjectBranches(result?.branches ?? [])
+      const branches = result?.branches ?? []
+      setLocalProjectBranch((selected) =>
+        selected && branches.some((ref) => ref.name === selected)
+          ? selected
+          : (result?.current ?? null)
+      )
+      setLocalProjectBranches(branches)
     }
   }, [])
+
+  const selectedLocalRef = localProjectBranches.find(
+    (ref) => ref.name === localProjectBranch
+  )
+
+  /**
+   * A branch already checked out in a worktree can only be worked on there, so
+   * selecting it runs the thread in that worktree. Otherwise "Current checkout"
+   * has to switch the project to the branch, while a worktree only starts from
+   * it and is created when the thread starts.
+   */
+  const selectLocalProjectBranch = useCallback(
+    async (branch: string) => {
+      setLocalError(null)
+      const ref = localProjectBranches.find(
+        (candidate) => candidate.name === branch
+      )
+      if (ref?.worktreePath) {
+        setLocalWorkspaceMode("worktree")
+        setLocalProjectBranch(branch)
+        return
+      }
+      if (localWorkspaceMode === "worktree" || !localProjectPathRef.current) {
+        setLocalProjectBranch(branch)
+        return
+      }
+      try {
+        await window.openSweDesktop?.checkoutProjectBranch({
+          cwd: localProjectPathRef.current,
+          branch,
+        })
+        setLocalProjectBranch(branch)
+      } catch (error) {
+        setLocalError(
+          error instanceof Error ? error.message : "Could not checkout branch"
+        )
+      }
+    },
+    [localProjectBranches, localWorkspaceMode]
+  )
+
+  // A base branch chosen for a worktree was never checked out, so going back to
+  // the project's own checkout has to fall back to whatever it is really on.
+  const selectLocalWorkspaceMode = useCallback(
+    (next: DesktopWorkspaceMode) => {
+      setLocalWorkspaceMode(next)
+      setLocalError(null)
+      if (next === "local") setLocalProjectBranch(null)
+      void refreshLocalProjectBranch()
+    },
+    [refreshLocalProjectBranch]
+  )
 
   useEffect(() => {
     void refreshLocalProjectBranch()
@@ -201,23 +264,6 @@ export function AgentsHome() {
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setDesktopThreadSource("local")
     setLocalError(null)
-  }
-
-  const checkoutLocalProjectBranch = async (branch: string, create = false) => {
-    if (!localProjectPath) return
-    setLocalError(null)
-    try {
-      await window.openSweDesktop?.checkoutProjectBranch({
-        cwd: localProjectPath,
-        branch,
-        create,
-      })
-      await refreshLocalProjectBranch()
-    } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : "Could not checkout branch"
-      )
-    }
   }
 
   const handleAddLocalProject = async () => {
@@ -295,6 +341,8 @@ export function AgentsHome() {
             : { personal: [], organization: [] }
           const localSession = await desktop.startLocalThread({
             cwd,
+            workspaceMode: localWorkspaceMode,
+            baseBranch: localProjectBranch,
             prompt,
             images,
             skills: [
@@ -506,11 +554,13 @@ export function AgentsHome() {
             onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
             onRefreshLocalProjectBranch={() => void refreshLocalProjectBranch()}
             onSelectLocalProjectBranch={(branch) =>
-              void checkoutLocalProjectBranch(branch)
+              void selectLocalProjectBranch(branch)
             }
-            onCreateLocalProjectBranch={(branch) =>
-              void checkoutLocalProjectBranch(branch, true)
+            localWorkspaceMode={localWorkspaceMode}
+            localWorktreeLabel={
+              selectedLocalRef?.worktreePath ? "Worktree" : undefined
             }
+            onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             environments={environments}

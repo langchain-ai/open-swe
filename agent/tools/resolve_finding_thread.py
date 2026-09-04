@@ -2,6 +2,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.auth.thread_token import get_github_token
+
 from ..review.findings import (
     Finding,
     ReviewerThreadMissingError,
@@ -22,7 +24,6 @@ from ..review.publish import (
     resolve_review_thread,
 )
 from ..review.reconcile import reconcile_findings_with_review_threads
-from ..utils.github_token import get_github_token
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 

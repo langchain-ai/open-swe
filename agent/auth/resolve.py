@@ -13,16 +13,16 @@ from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
-from .github_app import get_github_app_installation_token_with_expiry
-from .github_token import (
+from agent.auth.github_app import get_github_app_installation_token_with_expiry
+from agent.auth.thread_token import (
     cache_github_token_for_thread,
     get_github_token_from_thread,
     github_token_principal,
 )
-from .http import DEFAULT_HTTP_TIMEOUT
-from .linear import comment_on_linear_issue
-from .slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
-from .user_messages import WARNING_ICON, warning
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.utils.linear import comment_on_linear_issue
+from agent.utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
+from agent.utils.user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
 _legacy_auth_impact_tasks: set[asyncio.Task[None]] = set()
@@ -271,7 +271,7 @@ async def leave_failure_comment(
             # which must not be posted in a shared thread (anyone could complete
             # it and bind the wrong account). Post a generic, token-free notice and
             # let the user finish sign-in from their own authenticated dashboard.
-            from ..dashboard.oauth import build_settings_url
+            from agent.dashboard.oauth import build_settings_url
 
             settings_url = build_settings_url()
             link = (
@@ -321,7 +321,7 @@ def _cache_resolved_github_token(
 
 
 async def _log_legacy_auth_migration_impact(source: str, github_login: str) -> None:
-    from ..dashboard.profiles import get_valid_access_token
+    from agent.dashboard.profiles import get_valid_access_token
 
     try:
         open_swe_token = await get_valid_access_token(github_login)
@@ -438,7 +438,7 @@ async def _resolve_dashboard_user_token(
     if not login:
         raise ValueError("missing github_login")
 
-    from ..dashboard.profiles import get_oauth_token_record, get_valid_access_token
+    from agent.dashboard.profiles import get_oauth_token_record, get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:
@@ -528,7 +528,7 @@ async def resolve_github_token(
             )
             if cached_token:
                 return cached_token, cached_expires_at
-            from ..dashboard.user_mappings import email_for_login
+            from agent.dashboard.user_mappings import email_for_login
 
             email = await email_for_login(github_login)
             if not email:

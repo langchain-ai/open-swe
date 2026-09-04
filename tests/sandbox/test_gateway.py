@@ -250,7 +250,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
 
 def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("google_genai:gemini-3.7-flash")
+    overrides = gateway.gateway_overrides("google_genai:gemini-3.8-flash")
     assert overrides == {
         "base_url": "https://gateway.smith.langchain.com/gemini",
         "api_key": "ls-key",
@@ -461,7 +461,7 @@ def test_make_model_gateway_google_genai(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("google_genai:gemini-3.7-flash", use_gateway=True)
+        model.make_model("google_genai:gemini-3.8-flash", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/gemini"
     assert captured["api_key"] == "ls-key"
 

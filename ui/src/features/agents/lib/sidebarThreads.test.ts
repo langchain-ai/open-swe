@@ -34,6 +34,7 @@ function localThread(
   return {
     id: "same-id",
     cwd: "/Users/example/open-swe",
+    worktreePath: null,
     title: "Local thread",
     viewed: true,
     createdAt: 10,
