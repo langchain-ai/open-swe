@@ -154,7 +154,7 @@ async def test_installations_paginate(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, **kwargs: Any) -> None:
             pass
 
-        async def __aenter__(self) -> "Client":
+        async def __aenter__(self) -> Client:
             return self
 
         async def __aexit__(self, *exc: object) -> None:

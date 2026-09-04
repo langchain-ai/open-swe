@@ -58,9 +58,7 @@ def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
 
 
 def _prod_api_key() -> str | None:
-    return (
-        os.environ.get("LANGSMITH_API_KEY_PROD") or os.environ.get("LANGSMITH_API_KEY")
-    )
+    return os.environ.get("LANGSMITH_API_KEY_PROD") or os.environ.get("LANGSMITH_API_KEY")
 
 
 def _prod_api_url() -> str:

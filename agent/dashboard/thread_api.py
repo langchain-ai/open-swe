@@ -135,9 +135,7 @@ def _langgraph_proxy_headers(
     headers = {"Content-Type": content_type}
     if accept:
         headers["Accept"] = accept
-    api_key = (
-        os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
-    )
+    api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
     if api_key:
         headers["X-API-Key"] = api_key
     return headers
