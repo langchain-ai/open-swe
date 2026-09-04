@@ -243,7 +243,7 @@ def test_main_second_run_keeps_generated_secrets(
     assert third["DASHBOARD_JWT_SECRET"] != first["DASHBOARD_JWT_SECRET"]
 
 
-def test_main_non_interactive_generates_webhook_secret_and_prints_it(
+def test_main_non_interactive_generates_webhook_secret_without_printing_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     for key in (*setup_env.MINIMUM_KEYS, *setup_env.GENERATED_KEYS):
@@ -257,8 +257,11 @@ def test_main_non_interactive_generates_webhook_secret_and_prints_it(
     assert setup_env.main(["--output", str(output), "--non-interactive"]) == 0
 
     written = setup_env.parse_env(output.read_text())
+    out = capsys.readouterr().out
     assert len(written["GITHUB_WEBHOOK_SECRET"]) == 64
-    assert written["GITHUB_WEBHOOK_SECRET"] in capsys.readouterr().out
+    assert written["GITHUB_WEBHOOK_SECRET"] not in out
+    assert "GITHUB_WEBHOOK_SECRET was generated" in out
+    assert "grep '^GITHUB_WEBHOOK_SECRET='" in out
 
 
 def test_main_non_interactive_fails_when_minimum_missing(

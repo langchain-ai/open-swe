@@ -326,8 +326,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  kept: " + ", ".join(kept))
     if generated_webhook:
         print(
-            "\nGITHUB_WEBHOOK_SECRET was generated for you. Paste this value into the GitHub App's "
-            "Webhook secret field:\n  " + answers["GITHUB_WEBHOOK_SECRET"]
+            f"\nGITHUB_WEBHOOK_SECRET was generated and saved to {output}. Copy it into the "
+            "GitHub App's Webhook secret field; the value is not shown here:\n"
+            f"  grep '^GITHUB_WEBHOOK_SECRET=' {output}"
         )
     print("\nNext: `make dev`, then mention the bot in Slack or a GitHub issue.")
     return 0

@@ -67,10 +67,7 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
    - **Callback URL**: leave empty. Callback URLs are only needed for the [dashboard](#dashboard-web-ui) and [per-user GitHub identity](#per-user-github-identity-langsmith-oauth-provider) add-ons.
    - **Request user authorization (OAuth) during installation**: leave unchecked (same add-ons)
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github`
-   - **Webhook secret**: generate one and paste it here. You will enter the same value as `GITHUB_WEBHOOK_SECRET` in step 6.
-     ```bash
-     openssl rand -hex 32
-     ```
+   - **Webhook secret**: generate one and paste it here (`openssl rand -hex 32`), then enter the same value as `GITHUB_WEBHOOK_SECRET` in step 6. Or leave it empty for now, let `make setup` generate one in step 6, and come back to paste it from `.env`.
 3. Set permissions:
    - **Repository permissions**:
      - Contents: Read & write
@@ -220,7 +217,7 @@ make setup
 The guided setup asks for the values from steps 3–5 (secrets are read without echo), lets you point it at the downloaded `.pem`, and writes `.env` with owner-only permissions. It also:
 
 - generates `DASHBOARD_JWT_SECRET` and `TOKEN_ENCRYPTION_KEY` — two independent random keys, so the dashboard add-on works later without another step;
-- generates `GITHUB_WEBHOOK_SECRET` if you leave that prompt empty, and prints it once so you can paste it into the GitHub App.
+- generates `GITHUB_WEBHOOK_SECRET` if you leave that prompt empty, and tells you how to copy it from `.env` into the GitHub App (the value itself is never printed).
 
 Re-running `make setup` keeps values that are already set; add `--force` to rotate the generated secrets, or `--dashboard` to collect the dashboard settings too.
 
