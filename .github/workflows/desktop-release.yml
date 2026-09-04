@@ -197,6 +197,23 @@ jobs:
             ${{ steps.assets.outputs.update_metadata }}
             ${{ steps.assets.outputs.update_blockmap }}
 
+      - name: Generate tap token
+        if: steps.release.outputs.prerelease == 'false'
+        id: tap-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: "Iv23liMFOFBcPTKFWi3S"
+          private-key: ${{ secrets.LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY }}
+          owner: langchain-ai
+          repositories: homebrew-tap
+
+      - name: Update Homebrew cask
+        if: steps.release.outputs.prerelease == 'false'
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh api repos/langchain-ai/homebrew-tap/dispatches --method POST -f event_type=open-swe-desktop-release -f "client_payload[tag]=$TAG"
+
       - name: Remove signing credentials
         if: always()
         run: |
