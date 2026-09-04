@@ -220,6 +220,17 @@ export function AgentsSidebar({
     void desktop.getUpdateState().then(setUpdateState)
     return desktop.onUpdateState(setUpdateState)
   }, [])
+  const installUpdate = useCallback(async () => {
+    const desktop = window.openSweDesktop
+    if (!desktop || updateState.status !== "ready") return
+    const readyState = updateState
+    setUpdateState({ ...readyState, status: "installing" })
+    if (await desktop.installUpdate().catch(() => false)) return
+    setUpdateState((current) =>
+      current.status === "installing" ? readyState : current
+    )
+  }, [updateState])
+  const updateInstalling = updateState.status === "installing"
   const projectMode = prefs.organize === "project"
   const includeAutomations =
     prefs.filters.includeAutomations ||
@@ -832,27 +843,29 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
-        {updateState.status !== "idle" && (
+        {(updateState.status === "ready" || updateInstalling) && (
           <button
             type="button"
-            title={
-              updateState.status === "ready" ? "Update" : "Downloading update…"
-            }
-            aria-label={
-              updateState.status === "ready" ? "Update" : "Downloading update"
-            }
-            disabled={updateState.status !== "ready"}
-            onClick={() => void window.openSweDesktop?.installUpdate()}
-            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60"
-          >
-            {updateState.status === "downloading" ? (
-              <CircleNotchIcon className="size-4 animate-spin group-hover:hidden" />
-            ) : (
-              <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+            title={updateInstalling ? "Installing update…" : "Update"}
+            aria-label={updateInstalling ? "Installing update" : "Update"}
+            disabled={updateInstalling}
+            onClick={() => void installUpdate()}
+            className={cn(
+              "group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60",
+              updateInstalling && "w-auto gap-2 px-3"
             )}
-            <span className="hidden group-hover:inline">
-              {updateState.status === "ready" ? "Update" : "Downloading…"}
-            </span>
+          >
+            {updateInstalling ? (
+              <>
+                <CircleNotchIcon className="size-4 animate-spin" />
+                <span>Installing…</span>
+              </>
+            ) : (
+              <>
+                <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+                <span className="hidden group-hover:inline">Update</span>
+              </>
+            )}
           </button>
         )}
       </div>

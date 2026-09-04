@@ -52,11 +52,11 @@ jobs:
             if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
               if gh release view "$tag" --json assets | jq -e --arg v "$version" '
                 [.assets[].name] as $names |
-                ($names | index("Open SWE-\($v).app.zip")) != null and
+                ($names | index("Open-SWE-\($v).app.zip")) != null and
                 ($names | index("latest-mac.yml")) != null and
-                any($names[]; test("^Open SWE-\($v)-.*-mac\\.zip$")) and
-                any($names[]; test("^Open SWE-\($v)-.*\\.dmg$")) and
-                any($names[]; test("^Open SWE-\($v)-.*-mac\\.zip\\.blockmap$"))
+                any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip$")) and
+                any($names[]; test("^Open-SWE-\($v)-.*\\.dmg$")) and
+                any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip\\.blockmap$"))
               ' >/dev/null; then
                 echo "$tag already has a complete release"
                 exit 1
@@ -134,8 +134,8 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           shopt -s nullglob
-          mac_zips=(desktop/dist/"Open SWE-${VERSION}"-*-mac.zip)
-          mac_dmgs=(desktop/dist/"Open SWE-${VERSION}"-*.dmg)
+          mac_zips=(desktop/dist/"Open-SWE-${VERSION}"-*-mac.zip)
+          mac_dmgs=(desktop/dist/"Open-SWE-${VERSION}"-*-mac.dmg)
 
           if [ "${#mac_zips[@]}" -ne 1 ] || [ "${#mac_dmgs[@]}" -ne 1 ]; then
             echo "Expected one macOS zip and one DMG for version ${VERSION}"
@@ -160,7 +160,7 @@ jobs:
           spctl --assess --type execute --verbose=2 "${apps[0]}"
           hdiutil verify "${mac_dmgs[0]}"
 
-          app_zip="desktop/dist/Open SWE-${VERSION}.app.zip"
+          app_zip="desktop/dist/Open-SWE-${VERSION}.app.zip"
           ditto -c -k --sequesterRsrc --keepParent "${apps[0]}" "$app_zip"
 
           echo "mac_zip=${mac_zips[0]}" >> "$GITHUB_OUTPUT"
@@ -169,6 +169,11 @@ jobs:
           if [ "${{ steps.release.outputs.prerelease }}" = "false" ]; then
             test -f desktop/dist/latest-mac.yml
             test -f "${mac_zips[0]}.blockmap"
+            zip_name=$(basename "${mac_zips[0]}")
+            dmg_name=$(basename "${mac_dmgs[0]}")
+            grep -Fqx "path: ${zip_name}" desktop/dist/latest-mac.yml
+            grep -Fq "url: ${zip_name}" desktop/dist/latest-mac.yml
+            grep -Fq "url: ${dmg_name}" desktop/dist/latest-mac.yml
             echo "update_metadata=desktop/dist/latest-mac.yml" >> "$GITHUB_OUTPUT"
             echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
           fi
