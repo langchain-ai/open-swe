@@ -14,6 +14,7 @@ interface ControllerOptions {
   threadId: string | null
   onThreadId: (threadId: string) => void
   onCreated: () => void
+  onCompleted?: () => void
 }
 
 class TestStore<T> {
@@ -199,6 +200,27 @@ describe("AgentThreadStreamProvider", () => {
     mocks.controllers[0]?.options.onCreated()
 
     expect(onThreadCreated).toHaveBeenCalledWith("created")
+  })
+
+  it("invalidates thread detail and usage when a cloud run completes", () => {
+    const client = new QueryClient()
+    const invalidateQueries = vi.spyOn(client, "invalidateQueries")
+    render(
+      <QueryClientProvider client={client}>
+        <AgentThreadStreamProvider threadId="completed">
+          <div />
+        </AgentThreadStreamProvider>
+      </QueryClientProvider>
+    )
+
+    mocks.controllers[0]?.options.onCompleted?.()
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["agent-threads", "completed"],
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["agent-threads", "completed", "usage"],
+    })
   })
 
   it("cancels idle disposal when an inactive thread starts running", () => {

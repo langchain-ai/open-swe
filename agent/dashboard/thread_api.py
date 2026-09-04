@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
+from agent.dashboard.agent_usage import list_agent_thread_usage
 from agent.dashboard.environments import ENVIRONMENTS, slugify
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
@@ -1634,6 +1635,11 @@ async def _enrich_run_start_command(
     client_message_id = _command_message_id(params)
     if client_message_id and client_message_id not in persisted_message_ids:
         structured[-1]["id"] = client_message_id
+    turn_key = structured[-1].get("id")
+    if not isinstance(turn_key, str) or not turn_key:
+        turn_key = str(uuid.uuid4())
+        structured[-1]["id"] = turn_key
+    overrides["turn_key"] = turn_key
     run_input = params.get("input")
     if isinstance(run_input, dict):
         run_input["messages"] = structured
@@ -2079,6 +2085,13 @@ async def _readable_thread_metadata(
     thread = await _readable_thread(thread_id, login=login, email=email)
     metadata = thread_metadata(thread)
     return metadata
+
+
+async def get_dashboard_thread_usage(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    await _readable_thread(thread_id, login=login, email=email)
+    return await list_agent_thread_usage(thread_id)
 
 
 async def get_dashboard_thread_state(

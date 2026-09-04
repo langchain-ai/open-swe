@@ -181,6 +181,7 @@ from agent.dashboard.thread_api import (
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
+    get_dashboard_thread_usage,
     get_dashboard_thread_working_tree_diff,
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
@@ -2059,6 +2060,14 @@ async def api_get_thread_pull_request_context(
         number=number,
         email=session.get("email"),
     )
+
+
+@router.get("/threads/{thread_id}/usage")
+async def api_get_thread_usage(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_usage(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.get("/threads/{thread_id}")

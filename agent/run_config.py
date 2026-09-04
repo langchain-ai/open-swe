@@ -97,6 +97,7 @@ class RunConfig(BaseModel):
     thread_id: str | None = None
     run_id: str | None = None
     prepare_run_id: str | None = None
+    turn_key: str | None = None
     source: str | None = None
     task: str | None = None
     environment: str | None = None

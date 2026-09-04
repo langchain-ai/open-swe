@@ -66,6 +66,7 @@ function QueuedMessages({
 
 export const Messages = memo(function MessagesComponent({
   messages,
+  topContent,
   threadId,
   showPlanArtifact = false,
   emptyState,
@@ -277,6 +278,7 @@ export const Messages = memo(function MessagesComponent({
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
+            {topContent}
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
               const isLastMessage = index === visibleMessages.length - 1

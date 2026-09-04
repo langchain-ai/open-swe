@@ -145,6 +145,9 @@ function createRuntime(
         void queryClient.invalidateQueries({
           queryKey: agentThreadKeys.detail(id),
         })
+        void queryClient.invalidateQueries({
+          queryKey: agentThreadKeys.usage(id),
+        })
       }
       invalidateAgentThreadLists(queryClient)
     },

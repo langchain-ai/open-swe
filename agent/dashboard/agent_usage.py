@@ -114,11 +114,15 @@ async def _mutate(
         await _client().store.put_item(namespace, key, update(await _get(namespace, key)))
 
 
-async def _all(namespace: list[str]) -> list[dict[str, Any]]:
+async def _all(
+    namespace: list[str], *, filter: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     values: list[dict[str, Any]] = []
     offset = 0
     while True:
-        result = await _client().store.search_items(namespace, limit=_PAGE_SIZE, offset=offset)
+        result = await _client().store.search_items(
+            namespace, filter=filter, limit=_PAGE_SIZE, offset=offset
+        )
         items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
         page = list(items or [])
         values.extend(value for item in page if (value := _record(item)) is not None)
@@ -313,6 +317,7 @@ async def record_agent_run_usage(
     model_id: str,
     effort: str | None,
     source: str | None,
+    turn_key: str | None = None,
 ) -> None:
     """Record one actual Agent run, idempotently."""
     if not run_id or not thread_id:
@@ -324,6 +329,7 @@ async def record_agent_run_usage(
         return existing or {
             "run_id": run_id,
             "thread_id": thread_id,
+            "turn_key": turn_key or "",
             "github_login": _login(github_login),
             "user_email": _email(user_email),
             "model_id": model_id,
@@ -369,6 +375,37 @@ async def record_agent_run_cost(*, run_id: str, cost_usd: float) -> None:
         return {**existing, "cost_usd": cost_usd} if existing else {}
 
     await _mutate(AGENT_RUN_NAMESPACE, key, update)
+
+
+async def list_agent_thread_usage(thread_id: str) -> dict[str, Any]:
+    """List usage for a thread in run order."""
+    records = await _all(AGENT_RUN_NAMESPACE, filter={"thread_id": thread_id})
+    records.sort(key=lambda record: (_int(record.get("created_at_ms")), str(record.get("run_id"))))
+    return {
+        "runs": [
+            {
+                "run_id": str(record.get("run_id") or ""),
+                "model_id": str(record.get("model_id") or ""),
+                "turn_key": str(record.get("turn_key") or ""),
+                "created_at_ms": _int(record.get("created_at_ms")),
+                "finished_at_ms": _int(record.get("finished_at_ms")),
+                "input_tokens": _int(record.get("input_tokens"))
+                if record.get("finished_at_ms")
+                else None,
+                "output_tokens": _int(record.get("output_tokens"))
+                if record.get("finished_at_ms")
+                else None,
+                "total_tokens": _int(record.get("total_tokens"))
+                if record.get("finished_at_ms")
+                else None,
+                "cost_usd": record.get("cost_usd")
+                if isinstance(record.get("cost_usd"), int | float)
+                and not isinstance(record.get("cost_usd"), bool)
+                else None,
+            }
+            for record in records
+        ]
+    }
 
 
 async def record_agent_pr_usage(

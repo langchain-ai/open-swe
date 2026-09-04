@@ -18,6 +18,7 @@ export type MessagesScrollControl = {
 
 export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>
+  topContent?: React.ReactNode
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
   showPlanArtifact?: boolean

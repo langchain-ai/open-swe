@@ -34,6 +34,7 @@ export const agentThreadKeys = {
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
+  usage: (threadId: string) => ["agent-threads", threadId, "usage"] as const,
   pullRequestStatus: (threadId: string) =>
     ["agent-threads", threadId, "pull-request-status"] as const,
   branchDiff: (threadId: string) =>
@@ -596,6 +597,26 @@ export function useAgentThread(threadId: string) {
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and bounce the route back to /agents.
     staleTime: 30_000,
+  })
+}
+
+export function useAgentThreadUsage(threadId: string, running: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.usage(threadId),
+    queryFn: () => agentsApi.getThreadUsage(threadId),
+    enabled: Boolean(threadId),
+    staleTime: running ? 0 : 30_000,
+    refetchInterval: (query) =>
+      running ||
+      query.state.data?.runs.some(
+        (run) =>
+          run.finished_at_ms > 0 &&
+          run.cost_usd === null &&
+          Date.now() - run.finished_at_ms < 10 * 60_000
+      )
+        ? 3000
+        : false,
+    retry: false,
   })
 }
 

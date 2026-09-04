@@ -7,7 +7,7 @@ from agent.utils.run_usage import RunUsageSummary
 class FakeStore:
     def __init__(self):
         self.values: dict[tuple[tuple[str, ...], str], dict] = {}
-        self.search_calls: list[tuple[tuple[str, ...], int]] = []
+        self.search_calls: list[tuple[tuple[str, ...], dict | None, int]] = []
 
     async def get_item(self, namespace: list[str], key: str) -> dict | None:
         value = self.values.get((tuple(namespace), key))
@@ -16,12 +16,18 @@ class FakeStore:
     async def put_item(self, namespace: list[str], key: str, value: dict) -> None:
         self.values[(tuple(namespace), key)] = value
 
-    async def search_items(self, namespace: list[str], *, limit: int, offset: int) -> dict:
-        self.search_calls.append((tuple(namespace), offset))
+    async def search_items(
+        self, namespace: list[str], *, filter: dict | None = None, limit: int, offset: int
+    ) -> dict:
+        self.search_calls.append((tuple(namespace), filter, offset))
         values = [
             {"value": value}
             for (item_namespace, _), value in self.values.items()
             if item_namespace == tuple(namespace)
+            and (
+                filter is None
+                or all(value.get(key) == expected for key, expected in filter.items())
+            )
         ]
         return {"items": values[offset : offset + limit]}
 
@@ -73,7 +79,54 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
     )
 
     assert payload["rows"][0]["agent_runs"] == 2
-    assert (tuple(agent_usage.AGENT_RUN_NAMESPACE), 1) in store.search_calls
+    assert (tuple(agent_usage.AGENT_RUN_NAMESPACE), None, 1) in store.search_calls
+
+
+@pytest.mark.asyncio
+async def test_thread_usage_is_filtered_sorted_and_redacted(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    namespace = tuple(agent_usage.AGENT_RUN_NAMESPACE)
+    store.values[(namespace, "later")] = {
+        "run_id": "run-2",
+        "thread_id": "thread-1",
+        "github_login": "octo",
+        "user_email": "octo@example.com",
+        "model_id": "claude",
+        "turn_key": "message-2",
+        "created_at_ms": 200,
+        "finished_at_ms": 250,
+        "input_tokens": 20,
+        "output_tokens": 5,
+        "total_tokens": 25,
+        "cost_usd": 0.25,
+    }
+    store.values[(namespace, "other")] = {
+        "run_id": "other",
+        "thread_id": "thread-2",
+        "created_at_ms": 50,
+    }
+    store.values[(namespace, "earlier")] = {
+        "run_id": "run-1",
+        "thread_id": "thread-1",
+        "model_id": "claude",
+        "created_at_ms": 100,
+        "finished_at_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": None,
+    }
+
+    payload = await agent_usage.list_agent_thread_usage("thread-1")
+
+    assert [run["run_id"] for run in payload["runs"]] == ["run-1", "run-2"]
+    assert payload["runs"][0]["total_tokens"] is None
+    assert payload["runs"][1]["turn_key"] == "message-2"
+    assert payload["runs"][1]["cost_usd"] == 0.25
+    assert "github_login" not in payload["runs"][1]
+    assert "user_email" not in payload["runs"][1]
+    assert (namespace, {"thread_id": "thread-1"}, 0) in store.search_calls
 
 
 @pytest.mark.asyncio

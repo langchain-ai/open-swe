@@ -349,6 +349,22 @@ export interface AgentPullRequestContextResponse {
   prompt: string
 }
 
+export interface AgentRunUsage {
+  run_id: string
+  model_id: string
+  turn_key: string
+  created_at_ms: number
+  finished_at_ms: number
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  cost_usd: number | null
+}
+
+export interface AgentThreadUsage {
+  runs: Array<AgentRunUsage>
+}
+
 export interface AgentThread {
   id: string
   title: string

@@ -3,6 +3,7 @@ import type {
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
+  AgentThreadUsage,
   ImageChunk,
   Message,
   SlackNotificationMode,
@@ -315,6 +316,10 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}${
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
+    ),
+  getThreadUsage: (threadId: string) =>
+    agentsRequest<AgentThreadUsage>(
+      `/threads/${encodeURIComponent(threadId)}/usage`
     ),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>

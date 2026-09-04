@@ -723,6 +723,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         cfg = RunConfig.from_config(self._config)
         return {
             "prepare_run_id": cfg.prepare_run_id,
+            "turn_key": cfg.turn_key,
             "thread_id": self._thread_id,
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
@@ -871,6 +872,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         model_id=self._model_id,
                         effort=self._effort,
                         source=self._source,
+                        turn_key=cfg.turn_key
+                        or next(
+                            (
+                                str(message.id)
+                                for message in reversed(state.get("messages") or [])
+                                if isinstance(message, HumanMessage) and message.id
+                            ),
+                            None,
+                        ),
                     )
         except Exception:
             logger.debug(

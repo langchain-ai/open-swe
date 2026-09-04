@@ -25,6 +25,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import { ThreadAnalytics } from "@/features/agents/components/messages/ThreadAnalytics"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
@@ -35,6 +36,7 @@ import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   useAgentSkills,
   useAgentThreadPullRequestStatus,
+  useAgentThreadUsage,
 } from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
@@ -98,6 +100,7 @@ export function AgentThreadView({
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
   )
+  const usage = useAgentThreadUsage(thread.id, thread.status === "running")
   const pullRequestHealth = pullRequestStatus.isError
     ? undefined
     : pullRequestStatus.data?.pullRequests
@@ -300,6 +303,12 @@ export function AgentThreadView({
           ) : (
             <Messages
               messages={baseMessages}
+              topContent={
+                <ThreadAnalytics
+                  messages={baseMessages}
+                  runs={usage.data?.runs ?? []}
+                />
+              }
               threadId={thread.id}
               showPlanArtifact={
                 thread.planStatus === "ready" || thread.planStatus === "shared"

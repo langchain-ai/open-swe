@@ -255,6 +255,7 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["agent_effort"] == "medium"
     assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
     assert configurable["prepare_run_id"]
+    assert configurable["turn_key"] == enriched["params"]["input"]["messages"][-1]["id"]
     messages = enriched["params"]["input"]["messages"]
     assert messages[-1]["content"].startswith(
         '<input-message sender="github:octocat" surface="web" kind="human">'
@@ -825,7 +826,8 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     assert "conversation has moved to Web" in (handoff.findtext("content") or "")
     assert user_message.attrib["sender"] == "github:teammate"
     assert user_message.findtext("content") == "continue here"
-    assert "id" not in messages[-1]
+    assert messages[-1]["id"] != "existing-message"
+    assert enriched["params"]["config"]["configurable"]["turn_key"] == messages[-1]["id"]
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 
@@ -1437,6 +1439,48 @@ async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.get_dashboard_thread_state("tid", "owner")
     assert exc_info.value.status_code == 404
+
+
+async def test_thread_usage_requires_a_readable_thread(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "unknown-source", "github_login": "owner"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    usage = AsyncMock(return_value={"runs": []})
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "list_agent_thread_usage", usage)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_thread_usage("tid", "owner")
+
+    assert exc_info.value.status_code == 404
+    usage.assert_not_awaited()
+
+
+async def test_thread_usage_returns_authorized_records(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    payload = {"runs": [{"run_id": "run-1"}]}
+    usage = AsyncMock(return_value=payload)
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "list_agent_thread_usage", usage)
+
+    assert await thread_api.get_dashboard_thread_usage("tid", "owner") == payload
+    usage.assert_awaited_once_with("tid")
 
 
 async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypatch) -> None:
