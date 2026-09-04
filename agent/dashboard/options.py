@@ -1,5 +1,6 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
+import os
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
@@ -246,7 +247,11 @@ def gate_fable_model(
     return model_id, effort
 
 
-DEFAULT_MODEL_ID: str = "openai:gpt-5.6-sol"
+DEFAULT_MODEL_ID: str = (
+    "anthropic:claude-opus-5"
+    if os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("OPENAI_API_KEY")
+    else "openai:gpt-5.6-sol"
+)
 DEFAULT_MODEL_EFFORT: str = "medium"
 
 
