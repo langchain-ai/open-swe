@@ -14,14 +14,14 @@ import re
 import time
 from collections import OrderedDict
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent.input_messages import input_message_data_items
-from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
-from agent.sandboxes.state import get_sandbox_backend
+
+if TYPE_CHECKING:
+    from deepagents.backends.protocol import SandboxBackendProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,9 @@ async def attach_thread_media(
     """Store ``uploads`` in the thread's sandbox, creating the sandbox when the thread is new."""
     if not uploads:
         return []
+    # Lazy: the dashboard app imports this module and must stay clear of the sandbox stack.
+    from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
+
     backend = await ensure_sandbox_for_thread(thread_id, environment_slug=environment_slug)
     return await store_media(backend, uploads)
 
@@ -147,6 +150,8 @@ async def read_thread_media(thread_id: str, file_name: str) -> tuple[bytes, str]
     mime_type = media_mime_type(file_name)
     if mime_type is None:
         return None
+    from agent.sandboxes.state import get_sandbox_backend
+
     backend = await get_sandbox_backend(thread_id)
     path = posixpath.join(MEDIA_DIR, file_name)
     data = await download_media(backend, path)

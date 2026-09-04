@@ -14,6 +14,7 @@ from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 from agent.dashboard.ttft import AssistantTextObservation
 from agent.media import MediaRef, media_refs_from_content
+from agent.utils.thread_ops import QueuedMessage
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -908,7 +909,8 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
     handoff = ElementTree.fromstring(messages[-2]["content"])
     content = messages[-1]["content"]
     assert "conversation has moved to Web" in (handoff.findtext("content") or "")
-    user_message = ElementTree.fromstring(content[0]["text"])
+    assert isinstance(content, str)
+    user_message = ElementTree.fromstring(content)
     assert user_message.attrib["sender"] == "github:teammate"
     assert user_message.findtext("content") == "continue here"
 
@@ -1572,7 +1574,7 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
     async def active(thread_id: str) -> bool:
         return True
 
-    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
+    async def fake_queue(thread_id: str, payload: QueuedMessage) -> bool:
         captured["payload"] = payload
         return True
 
@@ -1586,9 +1588,10 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
         thread_api.ThreadMessageBody(content="ship it"),
     )
 
-    payload = cast(dict[str, object], captured["payload"])
-    assert payload["text"] == "ship it"
-    assert cast(dict[str, object], payload["sender"])["id"] == "github:teammate"
+    payload = cast(QueuedMessage, captured["payload"])
+    assert payload.text == "ship it"
+    assert payload.sender is not None
+    assert payload.sender.id == "github:teammate"
 
 
 async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> None:
@@ -1610,7 +1613,7 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
     async def active(thread_id: str) -> bool:
         return True
 
-    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
+    async def fake_queue(thread_id: str, payload: QueuedMessage) -> bool:
         captured["payload"] = payload
         return True
 
@@ -1624,8 +1627,8 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
         thread_api.ThreadMessageBody(content="ship it"),
     )
 
-    payload = cast(dict[str, object], captured["payload"])
-    assert payload["text"] == "ship it"
+    payload = cast(QueuedMessage, captured["payload"])
+    assert payload.text == "ship it"
 
 
 async def test_thread_summary_exposes_resolved_state() -> None:

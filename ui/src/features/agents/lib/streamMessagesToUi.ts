@@ -401,7 +401,7 @@ export function streamMessagesToUi(
       if (entity?.senderType === "self") return
       if (parsed.type === "message") {
         chunks.push(
-          ...parsed.attachments.map((attachment): Chunk => ({
+          ...(parsed.attachments ?? []).map((attachment): Chunk => ({
             kind: "attachment",
             ...attachment,
           }))

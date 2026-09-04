@@ -16,7 +16,7 @@ export type ParsedStructuredInput =
       sender: string
       senderKind: StructuredSenderKind
       surface?: string
-      attachments: Array<StructuredAttachment>
+      attachments?: Array<StructuredAttachment>
     }
   | { type: "legacy"; content: string }
 
@@ -210,13 +210,14 @@ export function parseStructuredInput(
     const attributes = parseAttributes(messageMatch[1] ?? "")
     const split = splitContent(messageMatch[2] ?? "")
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
+      const attachments = parseAttachments(split.remainder)
       return {
         type: "message",
         content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,
-        attachments: parseAttachments(split.remainder),
+        ...(attachments.length ? { attachments } : {}),
       }
     }
   }

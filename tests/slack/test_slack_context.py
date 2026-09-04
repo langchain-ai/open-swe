@@ -18,6 +18,7 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
+from agent.utils.thread_ops import QueuedMessage
 from agent.webhooks import common as webhook_common
 
 
@@ -1001,8 +1002,9 @@ def test_process_slack_mention_preserves_forwarded_attachment_from_event(
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
-    prompt_block = kwargs["input"]["messages"][-1]["content"][0]
-    prompt = ElementTree.fromstring(prompt_block["text"]).findtext("content") or ""
+    prompt = (
+        ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"]).findtext("content") or ""
+    )
     assert "[Forwarded Slack message from Teammate]" in prompt
     assert "Forwarded requirements" in prompt
 
@@ -1064,8 +1066,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     ]
     person = next(entity for entity in entities if entity.attrib["id"] == "slack:U123")
     channel = next(entity for entity in entities if entity.attrib["id"] == "slack:C123")
-    request_block = messages[-1]["content"][0]
-    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    request = ElementTree.fromstring(messages[-1]["content"]).findtext("content") or ""
     prompt_message = next(
         message
         for message in messages
@@ -1145,8 +1146,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
         and 'sender="system:slack-context"' in message["content"]
     )
     prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
-    request_block = messages[-1]["content"][0]
-    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    request = ElementTree.fromstring(messages[-1]["content"]).findtext("content") or ""
     assert "Context starts at: the previous direct message" in prompt
     assert request == "continue on the branch"
     context_messages = captured["context_messages"]
@@ -1769,10 +1769,7 @@ def test_process_slack_mention_queues_a_message_edit_instead_of_running(
     queued = captured["queued"]
     assert isinstance(queued, dict)
     assert queued["thread_id"] == "mapped-thread"
-    blocks = cast(list, queued["content"])
-    text = "\n".join(
-        block["text"] for block in blocks if isinstance(block, dict) and block.get("text")
-    )
+    text = cast(QueuedMessage, queued["content"]).text
     assert "actually use PR 5889" in text
     assert "edited" in text
 

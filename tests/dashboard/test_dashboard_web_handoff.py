@@ -4,6 +4,8 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import thread_api
+from agent.media import MediaRef, MediaUpload
+from agent.utils.thread_ops import QueuedMessage, QueuedSender
 
 
 class _FakeThreads:
@@ -119,11 +121,6 @@ async def test_dashboard_followup_sends_image_content_blocks(
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
     monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
-    monkeypatch.setattr(
-        thread_api,
-        "create_image_block",
-        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
-    )
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -173,17 +170,16 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
 
     assert client.threads.updates[0]["source"] == "dashboard"
     assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-                "email": "octocat@example.com",
-            },
-        }
+        QueuedMessage(
+            text="continue in web",
+            source="dashboard",
+            sender=QueuedSender(
+                id="github:octocat",
+                platform="github",
+                github_login="octocat",
+                email="octocat@example.com",
+            ),
+        )
     ]
 
 
@@ -232,17 +228,16 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
     )
 
     assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-                "email": "octocat@example.com",
-            },
-        }
+        QueuedMessage(
+            text="continue in web",
+            source="dashboard",
+            sender=QueuedSender(
+                id="github:octocat",
+                platform="github",
+                github_login="octocat",
+                email="octocat@example.com",
+            ),
+        )
     ]
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
@@ -316,11 +311,16 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
     monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
-    monkeypatch.setattr(
-        thread_api,
-        "create_image_block",
-        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
-    )
+    attached: list[MediaUpload] = []
+    ref = MediaRef(path=f"/uploads/{'e' * 64}.png", mime_type="image/png", sha256="e" * 64, size=5)
+
+    async def fake_attach(
+        thread_id: str, uploads: list[MediaUpload], **_: object
+    ) -> list[MediaRef]:
+        attached.extend(uploads)
+        return [ref for _ in uploads]
+
+    monkeypatch.setattr(thread_api, "attach_thread_media", fake_attach)
 
     await thread_api.send_dashboard_message(
         "thread-1",
@@ -331,18 +331,15 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         ),
     )
 
+    # Bytes go to the sandbox at ingestion; the queue carries only the reference.
+    assert [upload.data for upload in attached] == [b"image"]
     assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-            },
-            "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
-        }
+        QueuedMessage(
+            text="continue in web",
+            source="dashboard",
+            sender=QueuedSender(id="github:octocat", platform="github", github_login="octocat"),
+            media=[ref],
+        )
     ]
 
 
