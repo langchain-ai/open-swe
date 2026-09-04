@@ -30,7 +30,7 @@ By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.
 
 ### Using a custom sandbox snapshot
 
-Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
+Without any configuration, sandboxes boot from the LangSmith default snapshot (git, gh, Python, uv and Node preinstalled). To pre-install more, build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
 DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Optional; defaults to LangSmith's root snapshot
@@ -328,17 +328,12 @@ To fully remove a trigger's code, delete the corresponding endpoint from `agent/
 
 ### Default repository
 
-Set the default GitHub org and repo used across all triggers (Slack, Linear, GitHub) when no repo is specified:
-
-```bash
-DEFAULT_REPO_OWNER="my-org"      # Default GitHub org (used everywhere)
-DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
-```
-
-These are used as the fallback when:
-- A Slack message doesn't specify a repo (and no thread metadata exists)
+The team-wide default repository is a team setting: **Admin → Team settings → Default Repository** in the dashboard, or `PUT /dashboard/api/team-settings` with `{"default_repo": "owner/name"}`. It is used as the fallback when:
+- A Slack message doesn't specify a repo (and neither the thread, the channel topic, nor the user's profile does)
 - A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
-- A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
+- A user writes `repo:name` without an org prefix — the org defaults to the team default repository's owner
+
+`DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` (and the Slack-only `SLACK_REPO_OWNER` / `SLACK_REPO_NAME`) are deprecated. They still seed the default while no team setting has been saved and are used as the last fallback, but they log a warning at startup and will be removed after the transition period.
 
 ### Repository extraction from messages
 
@@ -346,7 +341,7 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 - `repo:owner/name` — explicit org and repo
 - `repo owner/name` — space syntax (same result)
-- `repo:name` — repo name only; the org defaults to `DEFAULT_REPO_OWNER`
+- `repo:name` — repo name only; the org defaults to the team default repository's owner (ignored when no default repository is configured)
 - `https://github.com/owner/name` — GitHub URL
 
 ### Customizing Linear routing
@@ -365,19 +360,19 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
-Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, the team default repository is used.
 
 ### Customizing Slack routing
 
-Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in order:
+Slack repo resolution (`get_slack_repo_config` in `agent/webhooks/common.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
 3. The triggering user's dashboard `default_repo`.
 4. The team default repo.
-5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
+5. The deprecated `SLACK_REPO_OWNER`/`SLACK_REPO_NAME` or `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` env vars, if still set.
 
-Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
+Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to the team default repository's owner.
 
 Reading the channel topic/purpose requires the bot's Slack token to have the `channels:read` (and `groups:read` for private channels) scope so `conversations.info` succeeds.
 
