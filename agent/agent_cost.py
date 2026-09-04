@@ -87,7 +87,13 @@ async def run_agent_cost_refresh(
             payload["thread_id"], payload["run_id"], run_only=True
         )
     except LangSmithCostUnavailable as exc:
-        return {"status": "unavailable", "reason": str(exc)}
+        if exc.permanent:
+            logger.warning(
+                "Agent cost refresh unavailable",
+                extra={"usage_run_id": payload["run_id"], "usage_attempt": attempt},
+            )
+            return {"status": "unavailable", "reason": str(exc)}
+        snapshot = None
     except Exception:  # noqa: BLE001
         logger.warning(
             "Agent cost refresh attempt failed",
@@ -110,8 +116,17 @@ async def run_agent_cost_refresh(
 
     next_attempt = attempt + 1
     if next_attempt >= len(_RETRY_DELAYS_SECONDS):
+        logger.warning(
+            "Agent cost refresh exhausted",
+            extra={"usage_run_id": payload["run_id"], "usage_attempt": attempt},
+        )
         return {"status": "exhausted", "reason": "LangSmith cost unavailable"}
     scheduled = await schedule_agent_cost_refresh(state, attempt=next_attempt, client=client)
+    if not scheduled:
+        logger.warning(
+            "Agent cost refresh unavailable",
+            extra={"usage_run_id": payload["run_id"], "usage_attempt": attempt},
+        )
     return {
         "status": "retry_scheduled" if scheduled else "unavailable",
         "reason": "LangSmith cost unavailable",

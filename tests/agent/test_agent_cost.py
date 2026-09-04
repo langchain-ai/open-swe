@@ -50,7 +50,7 @@ async def test_refresh_noops_when_cost_is_unavailable(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         agent_cost,
         "get_langsmith_thread_cost",
-        AsyncMock(side_effect=LangSmithCostUnavailable("not configured")),
+        AsyncMock(side_effect=LangSmithCostUnavailable("not configured", permanent=True)),
     )
     record = AsyncMock()
     monkeypatch.setattr(agent_cost, "record_agent_run_cost", record)
@@ -59,6 +59,25 @@ async def test_refresh_noops_when_cost_is_unavailable(monkeypatch: pytest.Monkey
 
     assert result == {"status": "unavailable", "reason": "not configured"}
     record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_retries_non_permanent_cost_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        agent_cost,
+        "get_langsmith_thread_cost",
+        AsyncMock(side_effect=LangSmithCostUnavailable("stats unavailable")),
+    )
+    client = _Client()
+
+    result = await agent_cost.run_agent_cost_refresh(_state(0), client=client)
+
+    assert result == {
+        "status": "retry_scheduled",
+        "reason": "LangSmith cost unavailable",
+        "attempt": 1,
+    }
+    assert client.runs.created[0]["input"]["attempt"] == 1
 
 
 @pytest.mark.asyncio

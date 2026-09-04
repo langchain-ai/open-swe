@@ -118,7 +118,9 @@ async def _refresh_once(
             payload["agent_thread_id"], payload["prepare_run_id"]
         )
     except LangSmithCostUnavailable as exc:
-        return "unavailable", str(exc)
+        if exc.permanent:
+            return "unavailable", str(exc)
+        return "pending", str(exc)
     if snapshot is None:
         return "pending", "LangSmith trace or fresh aggregate unavailable"
 

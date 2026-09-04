@@ -61,13 +61,13 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
     ]
 
 
-async def test_langsmith_run_cost_filters_thread_stats(
+async def test_langsmith_run_cost_uses_root_cost_when_thread_stats_filter_is_unsupported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
     client = _LangSmithClient(
-        [SimpleNamespace(end_time=root_end)],
-        SimpleNamespace(total_cost=0.25, last_end_time=root_end),
+        [SimpleNamespace(end_time=root_end, total_cost=0.25)],
+        RuntimeError("filter is unsupported"),
     )
     monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
     monkeypatch.setattr(
@@ -78,7 +78,8 @@ async def test_langsmith_run_cost_filters_thread_stats(
 
     assert result is not None
     assert result.total_cost == 0.25
-    assert "prepare_run_id" in client.threads.calls[0]["filter"]
+    assert client.list_kwargs["select"] == ["end_time", "total_cost"]
+    assert client.threads.calls == []
 
 
 async def test_langsmith_cost_waits_for_thread_stats_freshness(

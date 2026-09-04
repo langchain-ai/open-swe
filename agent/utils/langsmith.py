@@ -30,7 +30,9 @@ class LangSmithThreadCost:
 
 
 class LangSmithCostUnavailable(RuntimeError):
-    pass
+    def __init__(self, message: str, *, permanent: bool = False) -> None:
+        super().__init__(message)
+        self.permanent = permanent
 
 
 def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
@@ -148,40 +150,53 @@ async def get_langsmith_thread_cost(
     """Return a fresh thread or run cost correlated to a completed agent run."""
     client = _build_prod_langsmith_client()
     if client is None:
-        raise LangSmithCostUnavailable("LangSmith credentials are not configured")
+        raise LangSmithCostUnavailable("LangSmith credentials are not configured", permanent=True)
     project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
         "LANGSMITH_TRACING_PROJECT_ID_PROD"
     )
     if not project_id:
-        raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
+        raise LangSmithCostUnavailable("LangSmith tracing project is unavailable", permanent=True)
     try:
         roots = client.list_runs(
             project_id=project_id,
             is_root=True,
             filter=_langsmith_metadata_filter("prepare_run_id", prepare_run_id),
-            select=["end_time"],
+            select=["end_time", "total_cost"] if run_only else ["end_time"],
             limit=20,
         )
+        root_rows = [run async for run in roots]
         target_times = [
             parsed
-            async for run in roots
+            for run in root_rows
             if (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
         ]
         if not target_times:
             return None
+        target_end_time = max(target_times)
+        if run_only:
+            costs: list[float] = []
+            for run in root_rows:
+                raw_cost = _langsmith_value(run, "total_cost")
+                if isinstance(raw_cost, bool):
+                    return None
+                try:
+                    total_cost = float(raw_cost)
+                except TypeError, ValueError:
+                    return None
+                if not math.isfinite(total_cost) or total_cost < 0:
+                    return None
+                costs.append(total_cost)
+            return LangSmithThreadCost(
+                total_cost=sum(costs),
+                last_end_time=target_end_time,
+                target_end_time=target_end_time,
+            )
         stats_kwargs: dict[str, Any] = {
             "session_id": project_id,
             "selects": ["TOTAL_COST", "LAST_END_TIME"],
         }
-        if run_only:
-            stats_kwargs["filter"] = _langsmith_metadata_filter("prepare_run_id", prepare_run_id)
         stats = await client.threads.stats(thread_id, **stats_kwargs)
-    except LangSmithNotFoundError as exc:
-        raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
-    except Exception as exc:  # noqa: BLE001
-        status_code = getattr(exc, "status_code", None)
-        if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
-            raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
+    except Exception:  # noqa: BLE001
         logger.debug("Could not load LangSmith cost for thread %s", thread_id, exc_info=True)
         return None
 
@@ -193,7 +208,6 @@ async def get_langsmith_thread_cost(
     except TypeError, ValueError:
         return None
     last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
-    target_end_time = max(target_times)
     if (
         not math.isfinite(total_cost)
         or total_cost < 0
