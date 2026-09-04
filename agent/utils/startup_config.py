@@ -25,7 +25,15 @@ _DEPRECATIONS: tuple[tuple[str, str], ...] = (
     ),
     (
         "LANGCHAIN_PROJECT",
-        "graphs pin their own tracing projects; this variable has no effect on Open SWE.",
+        "graphs pin their own tracing projects; this legacy alias has no effect on Open SWE.",
+    ),
+    (
+        "LANGCHAIN_API_KEY",
+        "Open SWE reads LANGSMITH_API_KEY_PROD (or LANGSMITH_API_KEY); this legacy alias is ignored.",
+    ),
+    (
+        "LANGCHAIN_TRACING_V2",
+        "set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
     ),
 )
 

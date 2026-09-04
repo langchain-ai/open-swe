@@ -66,6 +66,8 @@ def test_summary_never_contains_secret_values() -> None:
         ("DEFAULT_REPO_NAME", "Team settings"),
         ("LANGSMITH_TRACING_PROJECT_ID_PROD", "by name"),
         ("LANGCHAIN_PROJECT", "no effect"),
+        ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY_PROD"),
+        ("LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING"),
     ],
 )
 def test_deprecated_variable_warns(name: str, fragment: str) -> None:

@@ -71,7 +71,7 @@ def _outcomes_credentials() -> tuple[str, str] | None:
             "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
         )
         return prod_key, api_url
-    api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
+    api_key = os.environ.get("LANGSMITH_API_KEY")
     if not api_key:
         return None
     return api_key, os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")

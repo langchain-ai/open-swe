@@ -627,7 +627,7 @@ None of these are needed for a normal installation. Overrides pin a value Open S
 | `DEFAULT_REPO_OWNER`, `DEFAULT_REPO_NAME` | Deprecated | Seed the team default repository when no team setting has been saved. Use **Admin → Team settings → Default Repository**. |
 | `SLACK_REPO_OWNER`, `SLACK_REPO_NAME` | Deprecated | Slack-only fallback repository; the team default repository replaces it. |
 | `LANGSMITH_TRACING_PROJECT_ID_PROD` | Deprecated | Trace links resolve the `open-swe-agent` / `open-swe-review` projects by name. |
-| `LANGCHAIN_PROJECT` | Deprecated | No effect: each graph pins its own tracing project. |
+| `LANGCHAIN_API_KEY`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_PROJECT` | Deprecated | Legacy SDK aliases, ignored by Open SWE. Use `LANGSMITH_API_KEY_PROD`, `LANGSMITH_TRACING`, and per-graph projects. |
 
 ## Troubleshooting
 

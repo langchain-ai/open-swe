@@ -59,9 +59,7 @@ def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
 
 def _prod_api_key() -> str | None:
     return (
-        os.environ.get("LANGSMITH_API_KEY_PROD")
-        or os.environ.get("LANGSMITH_API_KEY")
-        or os.environ.get("LANGCHAIN_API_KEY")
+        os.environ.get("LANGSMITH_API_KEY_PROD") or os.environ.get("LANGSMITH_API_KEY")
     )
 
 
@@ -268,7 +266,7 @@ def _build_langsmith_feedback_clients() -> tuple[tuple[str, str], ...]:
     api_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     client_configs = (
         (
-            os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY"),
+            os.environ.get("LANGSMITH_API_KEY"),
             api_endpoint,
         ),
         (

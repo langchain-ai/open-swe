@@ -218,7 +218,6 @@ async def test_tenant_id_none_without_credentials(monkeypatch: pytest.MonkeyPatc
         "LANGSMITH_TENANT_ID_PROD",
         "LANGSMITH_API_KEY_PROD",
         "LANGSMITH_API_KEY",
-        "LANGCHAIN_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", _REAL_DISCOVER_TENANT_ID)

@@ -88,7 +88,6 @@ jobs:
         # as data, not shell syntax.
         env:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-          LANGCHAIN_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LANGGRAPH_URL: ${{ secrets.LANGGRAPH_URL || vars.LANGGRAPH_URL }}
           REVIEWER_EVAL_REPORT_STORE: "1"
