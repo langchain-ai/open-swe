@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 threads_tool = importlib.import_module("agent.tools.threads")
+workflow_approval_api = importlib.import_module("agent.dashboard.workflow_approval_api")
 
 
 def _actor(*, login: str = "octocat", admin: bool = False) -> object:
@@ -299,7 +300,8 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     assert result["links"]["web"].endswith("/agents/thread-1")
     assert result["links"]["trace"] == "https://smith.example/t/thread-1"
     assert "approve_plan" in result["available_actions"]
-    assert "approve_workflow_push" in result["available_actions"]
+    assert "approve_workflow_push" not in result["available_actions"]
+    assert "reject_workflow_push" not in result["available_actions"]
 
 
 def test_admin_thread_actions_require_admin() -> None:
@@ -317,6 +319,21 @@ def test_admin_thread_actions_require_admin() -> None:
 
     assert "send_message" not in member_actions
     assert "send_message" in admin_actions
+
+
+def test_workflow_approval_actions_are_not_available() -> None:
+    actions = threads_tool._available_actions(
+        admin=False,
+        admin_thread=False,
+        running=False,
+        resolved=False,
+        can_delete_plan_comment=False,
+        plan={},
+        approvals={"fp": {"status": "pending"}},
+    )
+
+    assert "approve_workflow_push" not in actions
+    assert "reject_workflow_push" not in actions
 
 
 async def test_get_thread_reports_unavailable_cost_without_prepare_run(
@@ -537,25 +554,39 @@ async def test_manage_thread_rejects_plan_format_conversion(
     update.assert_not_awaited()
 
 
-async def test_manage_thread_delegates_plan_and_workflow_actions(
+async def test_manage_thread_delegates_plan_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     approve_plan = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
-    approve_workflow = AsyncMock(return_value={"status": "approved", "fingerprint": "fp"})
     monkeypatch.setattr(threads_tool.plan_api, "approve_plan", approve_plan)
+
+    plan_result = await threads_tool.manage_thread("thread-1", "approve_plan")
+
+    assert plan_result == {"success": True, "status": "approved", "run_id": "run-1"}
+    approve_plan.assert_awaited_once()
+
+
+@pytest.mark.parametrize("action", ["approve_workflow_push", "reject_workflow_push"])
+async def test_manage_thread_rejects_workflow_approval_actions(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    approve_workflow = AsyncMock()
+    reject_workflow = AsyncMock()
     monkeypatch.setattr(
-        threads_tool.workflow_approval_api,
+        workflow_approval_api,
         "approve_workflow_push",
         approve_workflow,
     )
-
-    plan_result = await threads_tool.manage_thread("thread-1", "approve_plan")
-    workflow_result = await threads_tool.manage_thread(
-        "thread-1", "approve_workflow_push", fingerprint="fp"
+    monkeypatch.setattr(
+        workflow_approval_api,
+        "reject_workflow_push",
+        reject_workflow,
     )
 
-    assert plan_result == {"success": True, "status": "approved", "run_id": "run-1"}
-    assert workflow_result == {"success": True, "status": "approved", "fingerprint": "fp"}
-    approve_plan.assert_awaited_once()
-    approve_workflow.assert_awaited_once()
+    result = await threads_tool.manage_thread("thread-1", action)
+
+    assert result == {"success": False, "error": f"unsupported action: {action}"}
+    approve_workflow.assert_not_awaited()
+    reject_workflow.assert_not_awaited()

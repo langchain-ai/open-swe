@@ -12,7 +12,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from agent.dashboard import plan_api, workflow_approval_api
+from agent.dashboard import plan_api
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_org_login_gate
@@ -30,7 +30,6 @@ from agent.dashboard.thread_api import (
     send_dashboard_message,
 )
 from agent.dashboard.workflow_approval import (
-    WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
@@ -56,8 +55,6 @@ ThreadAction = Literal[
     "update_plan",
     "approve_plan",
     "request_plan_changes",
-    "approve_workflow_push",
-    "reject_workflow_push",
 ]
 PlanFormat = Literal["html", "markdown"]
 _MAX_MESSAGE_CHARS = 20_000
@@ -387,8 +384,6 @@ def _available_actions(
         actions.append("cancel")
     if plan_status and plan_status not in {"approved", "cancelled", "shared"}:
         actions.append("update_plan")
-    if any(record.get("status") == WORKFLOW_APPROVAL_PENDING for record in approvals.values()):
-        actions.extend(["approve_workflow_push", "reject_workflow_push"])
     if admin and running:
         actions.append("admin_cancel")
     return actions
@@ -591,8 +586,6 @@ def _unexpected_action_arguments(
         "update_plan": {"content", "content_format"},
         "approve_plan": set(),
         "request_plan_changes": {"comment"},
-        "approve_workflow_push": {"fingerprint"},
-        "reject_workflow_push": {"fingerprint"},
     }.get(action, set())
     provided = {
         key
@@ -631,7 +624,7 @@ async def manage_thread(
     plan_mode: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Perform a dashboard-equivalent action on an Open SWE thread."""
+    """Perform a dashboard-equivalent action; allowed arguments are send_message(message, model_id, effort, plan_mode), delete(confirm), add_plan_comment(comment), delete_plan_comment(comment_id), update_plan(content, content_format), and request_plan_changes(comment)."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -740,16 +733,6 @@ async def manage_thread(
                     session=actor.session,
                 )
             result = await plan_api.reject_plan(thread_id, session=actor.session)
-            return {"success": True, **result}
-        if action in {"approve_workflow_push", "reject_workflow_push"}:
-            if error := _required(fingerprint, "fingerprint", action):
-                return error
-            handler = (
-                workflow_approval_api.approve_workflow_push
-                if action == "approve_workflow_push"
-                else workflow_approval_api.reject_workflow_push
-            )
-            result = await handler(thread_id, fingerprint or "", session=actor.session)
             return {"success": True, **result}
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:
