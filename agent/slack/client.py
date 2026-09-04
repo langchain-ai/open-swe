@@ -62,6 +62,62 @@ class GitHubPrRef:
     url: str
 
 
+@dataclass(frozen=True)
+class SlackBotIdentity:
+    user_id: str
+    username: str
+    team_id: str | None
+
+
+def _optional_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+async def fetch_slack_bot_identity(token: str | None = None) -> SlackBotIdentity | None:
+    """Resolve the bot user behind a bot token via ``auth.test`` and ``users.info``.
+
+    ``auth.test`` needs no scopes and returns the bot's user id; ``users.info``
+    (``users:read``) supplies the handle people type as ``@name``. A missing
+    handle falls back to ``auth.test``'s ``user`` field.
+    """
+    bot_token = token or SLACK_BOT_TOKEN
+    if not bot_token:
+        return None
+    headers = {"Authorization": f"Bearer {bot_token}"}
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            auth = await client.post(f"{SLACK_API_BASE_URL}/auth.test", headers=headers)
+            auth_payload = auth.json()
+            if not isinstance(auth_payload, dict) or not auth_payload.get("ok"):
+                error = auth_payload.get("error") if isinstance(auth_payload, dict) else None
+                logger.warning("Slack auth.test failed: %s", error or "unexpected response")
+                return None
+            user_id = _optional_str(auth_payload.get("user_id"))
+            if user_id is None:
+                logger.warning("Slack auth.test returned no user_id")
+                return None
+            username = _optional_str(auth_payload.get("user")) or ""
+            team_id = _optional_str(auth_payload.get("team_id"))
+            info = await client.get(
+                f"{SLACK_API_BASE_URL}/users.info", headers=headers, params={"user": user_id}
+            )
+            info_payload = info.json()
+            if isinstance(info_payload, dict) and info_payload.get("ok"):
+                user = info_payload.get("user")
+                user = user if isinstance(user, dict) else {}
+                profile = user.get("profile")
+                profile = profile if isinstance(profile, dict) else {}
+                username = (
+                    _optional_str(user.get("name"))
+                    or _optional_str(profile.get("display_name"))
+                    or username
+                )
+    except Exception:
+        logger.warning("Could not resolve the Slack bot identity", exc_info=True)
+        return None
+    return SlackBotIdentity(user_id=user_id, username=username, team_id=team_id)
+
+
 def _slack_headers() -> dict[str, str]:
     if not SLACK_BOT_TOKEN:
         return {}
