@@ -24,6 +24,7 @@ from agent.dashboard.environments import (
     script_command,
 )
 from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
+from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.sandboxes.providers.langsmith import (
@@ -130,6 +131,7 @@ async def _create_sandbox_with_proxy(
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     environment_slug: str | None = None,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
@@ -147,7 +149,12 @@ async def _create_sandbox_with_proxy(
                 raise ValueError(msg)
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
-                await _configure_proxy(sandbox_backend.id, token, proxy_config)
+                await _configure_proxy(
+                    sandbox_backend.id,
+                    token,
+                    proxy_config,
+                    langsmith_credentials=langsmith_credentials,
+                )
             record_proxy_token_expiry(
                 thread_id,
                 expires_at,
@@ -161,12 +168,18 @@ async def _create_sandbox_with_proxy(
 
 
 async def _configure_proxy(
-    sandbox_id: str, token: str, base_proxy_config: dict[str, Any] | None
+    sandbox_id: str,
+    token: str,
+    base_proxy_config: dict[str, Any] | None,
+    *,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> None:
+    kwargs: dict[str, Any] = {}
     if base_proxy_config is not None:
-        await _configure_github_proxy(sandbox_id, token, base_proxy_config=base_proxy_config)
-    else:
-        await _configure_github_proxy(sandbox_id, token)
+        kwargs["base_proxy_config"] = base_proxy_config
+    if langsmith_credentials is not None:
+        kwargs["langsmith_credentials"] = langsmith_credentials
+    await _configure_github_proxy(sandbox_id, token, **kwargs)
 
 
 async def _refresh_github_proxy(
@@ -176,23 +189,25 @@ async def _refresh_github_proxy(
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> None:
-    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
+    """Refresh managed proxy credentials for reused LangSmith sandboxes."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
     async with aphase(thread_id, "sandbox.proxy_token"):
         token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
     if not token:
-        logger.warning(
-            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
-            sandbox_backend.id,
-        )
-        return
+        raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(current_backend.id, token, base_proxy_config)
+        await _configure_proxy(
+            current_backend.id,
+            token,
+            base_proxy_config,
+            langsmith_credentials=langsmith_credentials,
+        )
     record_proxy_token_expiry(
         thread_id,
         expires_at,
@@ -208,6 +223,7 @@ async def _refresh_github_proxy_or_fail(
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
@@ -217,6 +233,7 @@ async def _refresh_github_proxy_or_fail(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
             base_proxy_config=base_proxy_config,
+            langsmith_credentials=langsmith_credentials,
         )
     except Exception as exc:
         logger.warning(
@@ -271,6 +288,7 @@ async def _connect_existing_sandbox(
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
@@ -292,12 +310,16 @@ async def _connect_existing_sandbox(
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
     async with git_identity(thread_id, sandbox_backend):
+        refresh_kwargs: dict[str, Any] = {}
+        if langsmith_credentials is not None:
+            refresh_kwargs["langsmith_credentials"] = langsmith_credentials
         refreshed = await _refresh_github_proxy_or_fail(
             sandbox_backend,
             thread_id,
             github_proxy_token,
             github_proxy_repositories,
             base_proxy_config,
+            **refresh_kwargs,
         )
     return refreshed
 
@@ -309,6 +331,7 @@ async def ensure_sandbox_for_thread(
     github_proxy_repositories: Sequence[str] | None = None,
     environment_slug: str | None = None,
     allow_replacement: bool = False,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -355,6 +378,11 @@ async def ensure_sandbox_for_thread(
         else get_recorded_proxy_base_config(thread_id)
     )
     created_proxy_config: dict[str, Any] | None = None
+    create_kwargs = (
+        {"langsmith_credentials": langsmith_credentials}
+        if langsmith_credentials is not None
+        else {}
+    )
 
     if sandbox_backend is None and sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
@@ -363,6 +391,7 @@ async def ensure_sandbox_for_thread(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
             environment_slug=environment_slug,
+            **create_kwargs,
         )
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
         logger.info("Sandbox created: %s", sandbox_backend.id)
@@ -375,6 +404,7 @@ async def ensure_sandbox_for_thread(
                 github_proxy_token=github_proxy_token,
                 github_proxy_repositories=github_proxy_repositories,
                 base_proxy_config=base_proxy_config,
+                langsmith_credentials=langsmith_credentials,
             )
         except (SandboxGoneError, SandboxUnreachableError) as exc:
             gone = isinstance(exc, SandboxGoneError)
@@ -392,6 +422,7 @@ async def ensure_sandbox_for_thread(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
                     environment_slug=environment_slug,
+                    **create_kwargs,
                 )
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
             except Exception as create_exc:
@@ -428,6 +459,8 @@ async def ensure_sandbox_for_thread(
 async def reset_sandbox_for_thread(
     thread_id: str,
     create_params: dict[str, Any],
+    *,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> tuple[str, str]:
     """Bind a thread to a fresh sandbox created from raw provider options."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
@@ -447,7 +480,12 @@ async def reset_sandbox_for_thread(
     token, expires_at, permissions = await _resolve_proxy_token(None)
     if not token:
         raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
-    await _configure_proxy(new_sandbox.id, token, proxy_config)
+    await _configure_proxy(
+        new_sandbox.id,
+        token,
+        proxy_config,
+        langsmith_credentials=langsmith_credentials,
+    )
     await configure_git_identity(new_sandbox)
     sandbox_metadata: dict[str, Any] = {
         "sandbox_id": new_sandbox.id,
@@ -474,6 +512,7 @@ async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
     environment_slug: str | None = None,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> tuple[str, str]:
     """Bind a thread to a fresh sandbox while preserving its previous sandbox."""
     cached = SANDBOX_BACKENDS.get(thread_id)
@@ -482,9 +521,13 @@ async def recreate_sandbox_for_thread(
     if not old_sandbox_id:
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
 
+    create_kwargs: dict[str, Any] = {}
+    if langsmith_credentials is not None:
+        create_kwargs["langsmith_credentials"] = langsmith_credentials
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
         environment_slug=environment_slug,
+        **create_kwargs,
     )
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")

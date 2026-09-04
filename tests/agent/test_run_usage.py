@@ -34,6 +34,9 @@ def test_summarize_run_usage_uses_only_latest_human_turn() -> None:
     assert summary is not None
     assert summary.models == ("model-a", "model-b")
     assert summary.main_agent_tokens == 3_300
+    assert summary.input_tokens == 3_000
+    assert summary.output_tokens == 300
+    assert summary.total_tokens == 3_300
 
 
 def test_summarize_run_usage_excludes_cached_input_tokens() -> None:
@@ -53,6 +56,9 @@ def test_summarize_run_usage_excludes_cached_input_tokens() -> None:
 
     assert summary is not None
     assert summary.main_agent_tokens == 500
+    assert summary.input_tokens == 1_000
+    assert summary.output_tokens == 100
+    assert summary.total_tokens == 500
 
 
 def test_summarize_run_usage_ignores_messages_without_usage() -> None:

@@ -1,6 +1,7 @@
 import pytest
 
 from agent.dashboard import agent_usage
+from agent.utils.run_usage import RunUsageSummary
 
 
 class FakeStore:
@@ -73,6 +74,84 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
 
     assert payload["rows"][0]["agent_runs"] == 2
     assert (tuple(agent_usage.AGENT_RUN_NAMESPACE), 1) in store.search_calls
+
+
+@pytest.mark.asyncio
+async def test_run_completion_is_idempotent(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_010_000)
+    await agent_usage.record_agent_run_usage(
+        run_id="run-1",
+        thread_id="thread-1",
+        github_login="octo",
+        user_email=None,
+        model_id="claude",
+        effort=None,
+        source="dashboard",
+    )
+    usage = RunUsageSummary(
+        models=("claude",),
+        main_agent_tokens=150,
+        input_tokens=100,
+        output_tokens=50,
+        total_tokens=150,
+    )
+
+    await agent_usage.record_agent_run_completion(run_id="run-1", usage=usage)
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_020_000)
+    await agent_usage.record_agent_run_completion(run_id="run-1", usage=usage)
+
+    record = (await agent_usage._all(agent_usage.AGENT_RUN_NAMESPACE))[0]
+    assert record["input_tokens"] == 100
+    assert record["output_tokens"] == 50
+    assert record["total_tokens"] == 150
+    assert record["finished_at_ms"] == 1_800_000_010_000
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_aggregates_run_usage_with_partial_data(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
+    agent_usage._USAGE_CACHE.clear()
+    namespace = tuple(agent_usage.AGENT_RUN_NAMESPACE)
+    base = {
+        "thread_id": "thread-1",
+        "github_login": "octo",
+        "user_email": "",
+        "model_id": "claude",
+        "created_at_ms": 1_700_000_000_000,
+    }
+    store.values[(namespace, "run-1")] = {
+        **base,
+        "run_id": "run-1",
+        "total_tokens": 150,
+        "cost_usd": 1.0,
+        "finished_at_ms": 1_700_000_010_000,
+    }
+    store.values[(namespace, "run-2")] = {
+        **base,
+        "run_id": "run-2",
+        "created_at_ms": 1_700_000_020_000,
+        "total_tokens": 250,
+        "cost_usd": 1.25,
+        "finished_at_ms": 1_700_000_050_000,
+    }
+    store.values[(namespace, "run-3")] = {
+        **base,
+        "run_id": "run-3",
+        "created_at_ms": 1_700_000_060_000,
+    }
+
+    payload = await agent_usage.list_agent_usage_leaderboard(
+        period="all", limit=10, current_login="octo", current_email=None
+    )
+
+    row = payload["rows"][0]
+    assert row["total_tokens"] == 400
+    assert row["total_cost_usd"] == 2.25
+    assert row["avg_run_seconds"] == 20
 
 
 @pytest.mark.asyncio

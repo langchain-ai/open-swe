@@ -443,12 +443,14 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 
 | Section | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
-| `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
-| `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
-| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
-| `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints (or `DESKTOP_WORKING_ENV_SECTION` for local desktop runs) |
+| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
+| `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
+| `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
+| `PLAN_MODE_SECTION` | Read-only planning mode instructions |
+
+> **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
 
 ### Default prompt file
 

@@ -651,12 +651,6 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     update.validate_pairing()
-    if not await get_team_fable_enabled():
-        if (
-            update.default_model in FABLE_MODEL_IDS
-            or update.default_subagent_model in FABLE_MODEL_IDS
-        ):
-            raise HTTPException(400, "Fable is disabled for this workspace")
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 

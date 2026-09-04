@@ -127,6 +127,7 @@ export interface ModelOption {
   efforts: Array<string>
   default_effort: string
   supports_images: boolean
+  can_be_default?: boolean
   context_window?: number | null
 }
 
@@ -270,6 +271,9 @@ export interface UsageLeaderboardRow {
   agent_loc: number
   additions: number
   deletions: number
+  total_tokens: number
+  total_cost_usd: number
+  avg_run_seconds: number
 }
 
 export interface ReviewerStatsCounterRow {
