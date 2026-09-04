@@ -2,7 +2,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.agents.middleware import AgentState
+from langchain.agents.middleware import AgentState, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
 
@@ -21,13 +21,19 @@ def _message(input_tokens: int, output_tokens: int) -> AIMessage:
 
 
 @pytest.mark.asyncio
-async def test_records_latest_turn_and_schedules_cost_refresh() -> None:
+async def test_records_whole_run_across_queued_human_messages() -> None:
+    first = _message(100, 10)
+    first.response_metadata["open_swe_run_id"] = "run-1"
+    second = _message(200, 20)
+    second.response_metadata["open_swe_run_id"] = "run-1"
     state: AgentState = {
         "messages": [
             HumanMessage(content="old"),
-            _message(100, 10),
+            _message(400, 40),
             HumanMessage(content="current"),
-            _message(200, 20),
+            first,
+            HumanMessage(content="queued follow-up"),
+            second,
         ]
     }
     with (
@@ -48,7 +54,20 @@ async def test_records_latest_turn_and_schedules_cost_refresh() -> None:
         await record_run_usage.aafter_agent(state, cast(Runtime[Any], MagicMock()))
 
     usage = record.await_args.kwargs["usage"]
-    assert usage.input_tokens == 200
-    assert usage.output_tokens == 20
-    assert usage.total_tokens == 220
+    assert usage.input_tokens == 300
+    assert usage.output_tokens == 30
+    assert usage.total_tokens == 330
     schedule.assert_awaited_once_with({"thread_id": "thread-1", "run_id": "run-1"})
+
+
+@pytest.mark.asyncio
+async def test_tags_model_responses_with_run_id() -> None:
+    response = ModelResponse(result=[_message(100, 10)])
+    handler = AsyncMock(return_value=response)
+    with patch(
+        "agent.run_config.get_config",
+        return_value={"configurable": {"thread_id": "thread-1", "prepare_run_id": "run-1"}},
+    ):
+        result = await record_run_usage.awrap_model_call(MagicMock(), handler)
+
+    assert result.result[0].response_metadata["open_swe_run_id"] == "run-1"

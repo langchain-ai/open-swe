@@ -55,19 +55,29 @@ def _message_model(message: AIMessage) -> str | None:
     return None
 
 
-def summarize_run_usage(state: dict[str, Any] | None) -> RunUsageSummary | None:
-    """Summarize main-agent usage since the latest human message."""
+def summarize_run_usage(
+    state: dict[str, Any] | None, *, run_id: str | None = None
+) -> RunUsageSummary | None:
+    """Summarize main-agent usage for one run or the latest human turn."""
     if not isinstance(state, dict):
         return None
     messages = state.get("messages")
     if not isinstance(messages, list):
         return None
-    start = 0
-    for index in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[index], HumanMessage):
-            start = index + 1
-            break
-    ai_messages = [message for message in messages[start:] if isinstance(message, AIMessage)]
+    if run_id is not None:
+        ai_messages = [
+            message
+            for message in messages
+            if isinstance(message, AIMessage)
+            and message.response_metadata.get("open_swe_run_id") == run_id
+        ]
+    else:
+        start = 0
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], HumanMessage):
+                start = index + 1
+                break
+        ai_messages = [message for message in messages[start:] if isinstance(message, AIMessage)]
     if not ai_messages:
         return None
 
