@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { AccountSection } from "@/features/settings/components/AccountSection"
+import { ApiKeysSection } from "@/features/settings/components/ApiKeysSection"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
 import { EnvironmentsSection } from "@/features/settings/components/EnvironmentsSection"
@@ -10,6 +11,7 @@ import { PreferencesSection } from "@/features/settings/components/PreferencesSe
 import { PullRequestsSection } from "@/features/settings/components/PullRequestsSection"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { Skeleton } from "@/components/ui/skeleton"
+import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/my-settings")({
@@ -48,7 +50,15 @@ function MySettingsPage() {
       </main>
     )
   }
-  if (!session.data) return <RequireLogin />
+  if (!session.data) {
+    if (!isDesktopLocalModeEnabled()) return <RequireLogin />
+    return (
+      <main className="mx-auto max-w-3xl space-y-10 px-4 pt-14 pb-16 sm:px-8 sm:py-12">
+        <ApiKeysSection />
+        <DesktopVersionSection />
+      </main>
+    )
+  }
 
   return (
     <AppShell
@@ -62,6 +72,7 @@ function MySettingsPage() {
       <EnvironmentsSection isAdmin={session.data.is_admin} />
       <ConnectionsSection user={session.data} />
       <PersonalInstructionsSection />
+      <ApiKeysSection />
       <DesktopVersionSection />
     </AppShell>
   )

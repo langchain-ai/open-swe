@@ -56,7 +56,7 @@ export async function ensureDesktopModelCredential(
     }
   }
   return credential.variable
-    ? `Set ${credential.variable} in the environment before starting Open SWE.`
+    ? `Add an API key for this model in Settings, or set ${credential.variable} in the environment.`
     : "Sign in to use the selected model."
 }
 

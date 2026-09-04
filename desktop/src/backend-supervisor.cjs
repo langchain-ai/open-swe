@@ -280,6 +280,12 @@ class BackendSupervisor {
     );
   }
 
+  async restart() {
+    if (!this.child) return;
+    await this.close();
+    await this.start();
+  }
+
   credentialStatus(modelId) {
     return modelCredentialStatus(
       modelId,
@@ -287,6 +293,7 @@ class BackendSupervisor {
         ...process.env,
         ...this.options.env,
         ...this.gatewayEnvironment(),
+        ...this.options.providerEnv?.(),
       },
       { openAiOAuth: this.options.openAiOAuthAvailable?.() === true },
     );
