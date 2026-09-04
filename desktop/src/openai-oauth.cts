@@ -308,7 +308,7 @@ class OpenAiOAuthManager {
 
   async refresh() {
     const current = this.credentials;
-    if (!current) throw new Error("Sign in to use OpenAI models");
+    if (!current) throw new Error("Sign in with ChatGPT to use OpenAI models");
     const response = await this.fetch(TOKEN_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -322,7 +322,7 @@ class OpenAiOAuthManager {
       if (response.status === 400 || response.status === 401)
         this.clearCredentials();
       throw new Error(
-        `The OpenAI session could not be refreshed (${response.status})`,
+        `The ChatGPT session could not be refreshed (${response.status})`,
       );
     }
     const payload = await response.json();
@@ -335,7 +335,7 @@ class OpenAiOAuthManager {
     if (refreshedAccountId && refreshedAccountId !== current.accountId) {
       this.clearCredentials();
       throw new Error(
-        "The OpenAI account changed during token refresh; sign in again",
+        "The ChatGPT account changed during token refresh; sign in again",
       );
     }
     return this.saveCredentials({
@@ -348,7 +348,8 @@ class OpenAiOAuthManager {
   }
 
   async accessToken() {
-    if (!this.credentials) throw new Error("Sign in to use OpenAI models");
+    if (!this.credentials)
+      throw new Error("Sign in with ChatGPT to use OpenAI models");
     if (this.needsRefresh(this.credentials)) {
       if (!this.refreshing) {
         this.refreshing = this.refresh().finally(() => {
@@ -375,7 +376,7 @@ class OpenAiOAuthManager {
         const accessToken = await this.accessToken();
         const accountId = this.credentials?.accountId;
         if (!accountId)
-          throw new Error("The OpenAI session included no account ID");
+          throw new Error("The ChatGPT session included no account ID");
         response.writeHead(200, {
           "content-type": "application/json",
           "cache-control": "no-store",

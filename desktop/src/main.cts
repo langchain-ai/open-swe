@@ -499,7 +499,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
-    if (!openAiOAuth) throw new Error("OpenAI sign-in is unavailable");
+    if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
     return openAiOAuth.login((url) => shell.openExternal(url));
   });
   ipcMain.handle("desktop:start-local-thread", async (event, input) => {

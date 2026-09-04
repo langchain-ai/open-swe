@@ -52,7 +52,7 @@ export async function ensureDesktopModelCredential(
       const result = await desktop.signInLocalOpenAI()
       if (result.signedIn) return null
     } catch (cause) {
-      return cause instanceof Error ? cause.message : "OpenAI sign-in failed"
+      return cause instanceof Error ? cause.message : "ChatGPT sign-in failed"
     }
   }
   return credential.variable
