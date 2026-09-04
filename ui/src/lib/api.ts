@@ -271,6 +271,9 @@ export interface UsageLeaderboardRow {
   agent_loc: number
   additions: number
   deletions: number
+  total_tokens: number
+  total_cost_usd: number
+  avg_run_seconds: number
 }
 
 export interface ReviewerStatsCounterRow {
