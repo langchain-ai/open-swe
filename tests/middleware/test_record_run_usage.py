@@ -6,7 +6,8 @@ from langchain.agents.middleware import AgentState, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.middleware.record_run_usage import finalize_agent_run_usage, record_run_usage
+from agent.agent_cost import finalize_agent_run_usage
+from agent.middleware.record_run_usage import record_run_usage
 
 
 def _message(input_tokens: int, output_tokens: int) -> AIMessage:
@@ -42,17 +43,17 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
             return_value={"configurable": {"thread_id": "thread-1", "prepare_run_id": "run-1"}},
         ),
         patch(
-            "agent.middleware.record_run_usage.record_agent_run_completion",
+            "agent.agent_cost.record_agent_run_completion",
             new_callable=AsyncMock,
             return_value=True,
         ) as record,
         patch(
-            "agent.middleware.record_run_usage.schedule_agent_cost_refresh",
+            "agent.agent_cost.schedule_agent_cost_refresh",
             new_callable=AsyncMock,
             return_value=True,
         ) as schedule,
         patch(
-            "agent.middleware.record_run_usage.mark_agent_cost_refresh_scheduled",
+            "agent.agent_cost.mark_agent_cost_refresh_scheduled",
             new_callable=AsyncMock,
         ) as mark_scheduled,
     ):
@@ -70,22 +71,22 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
 async def test_retries_cost_scheduling_after_completion_was_recorded() -> None:
     with (
         patch(
-            "agent.middleware.record_run_usage.record_agent_run_completion",
+            "agent.agent_cost.record_agent_run_completion",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.middleware.record_run_usage.agent_run_needs_cost_refresh",
+            "agent.agent_cost.agent_run_needs_cost_refresh",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.middleware.record_run_usage.schedule_agent_cost_refresh",
+            "agent.agent_cost.schedule_agent_cost_refresh",
             new_callable=AsyncMock,
             side_effect=[False, True],
         ) as schedule,
         patch(
-            "agent.middleware.record_run_usage.mark_agent_cost_refresh_scheduled",
+            "agent.agent_cost.mark_agent_cost_refresh_scheduled",
             new_callable=AsyncMock,
         ) as mark_scheduled,
     ):

@@ -1,6 +1,5 @@
 """After-agent middleware that persists run usage telemetry."""
 
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -8,38 +7,8 @@ from langchain.agents.middleware import AgentMiddleware, AgentState, ModelReques
 from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
-from agent.agent_cost import schedule_agent_cost_refresh
-from agent.dashboard.agent_usage import (
-    agent_run_needs_cost_refresh,
-    mark_agent_cost_refresh_scheduled,
-    record_agent_run_completion,
-)
+from agent.agent_cost import finalize_agent_run_usage
 from agent.run_config import RunConfig
-from agent.utils.run_usage import summarize_run_usage
-
-logger = logging.getLogger(__name__)
-
-
-async def finalize_agent_run_usage(
-    *, run_id: str, thread_id: str, state: dict[str, Any] | None
-) -> None:
-    """Persist terminal run usage and schedule deferred cost enrichment."""
-    try:
-        recorded = await record_agent_run_completion(
-            run_id=run_id,
-            usage=summarize_run_usage(state, run_id=run_id),
-        )
-        if not recorded and not await agent_run_needs_cost_refresh(run_id=run_id):
-            return
-        scheduled = await schedule_agent_cost_refresh({"thread_id": thread_id, "run_id": run_id})
-        if scheduled:
-            await mark_agent_cost_refresh_scheduled(run_id=run_id)
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Failed to record completed agent usage",
-            extra={"usage_run_id": run_id, "usage_thread_id": thread_id},
-            exc_info=True,
-        )
 
 
 class RecordRunUsageMiddleware(AgentMiddleware):

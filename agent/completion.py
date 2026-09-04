@@ -19,10 +19,10 @@ from typing import Any
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
+from agent.agent_cost import finalize_agent_run_usage
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.linear.client import comment_on_linear_issue
-from agent.middleware.record_run_usage import finalize_agent_run_usage
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh

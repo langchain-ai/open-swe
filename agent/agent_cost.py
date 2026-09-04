@@ -6,8 +6,14 @@ from typing import Any, Literal, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.dashboard.agent_usage import record_agent_run_cost
+from agent.dashboard.agent_usage import (
+    agent_run_needs_cost_refresh,
+    mark_agent_cost_refresh_scheduled,
+    record_agent_run_completion,
+    record_agent_run_cost,
+)
 from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
+from agent.utils.run_usage import summarize_run_usage
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -133,3 +139,25 @@ async def run_agent_cost_refresh(
         "reason": "LangSmith cost unavailable",
         "attempt": next_attempt,
     }
+
+
+async def finalize_agent_run_usage(
+    *, run_id: str, thread_id: str, state: dict[str, Any] | None
+) -> None:
+    """Persist terminal run usage and schedule deferred cost enrichment."""
+    try:
+        recorded = await record_agent_run_completion(
+            run_id=run_id,
+            usage=summarize_run_usage(state, run_id=run_id),
+        )
+        if not recorded and not await agent_run_needs_cost_refresh(run_id=run_id):
+            return
+        scheduled = await schedule_agent_cost_refresh({"thread_id": thread_id, "run_id": run_id})
+        if scheduled:
+            await mark_agent_cost_refresh_scheduled(run_id=run_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to record completed agent usage",
+            extra={"usage_run_id": run_id, "usage_thread_id": thread_id},
+            exc_info=True,
+        )
