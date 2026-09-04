@@ -5,7 +5,6 @@ import base64
 import binascii
 import json
 import logging
-import os
 import posixpath
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -18,6 +17,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.environments import ENVIRONMENTS, slugify
@@ -119,7 +119,7 @@ async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
 
 
 def _agent_version_metadata() -> dict[str, str]:
-    revision = os.environ.get("LANGCHAIN_REVISION_ID")
+    revision = ENV.LANGCHAIN_REVISION_ID.optional()
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
 
 
@@ -135,11 +135,7 @@ def _langgraph_proxy_headers(
     headers = {"Content-Type": content_type}
     if accept:
         headers["Accept"] = accept
-    api_key = (
-        os.environ.get("LANGSMITH_API_KEY")
-        or os.environ.get("LANGCHAIN_API_KEY")
-        or os.environ.get("LANGSMITH_API_KEY_PROD")
-    )
+    api_key = ENV.LANGSMITH_API_KEY.optional()
     if api_key:
         headers["X-API-Key"] = api_key
     return headers

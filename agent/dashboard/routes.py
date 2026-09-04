@@ -4,7 +4,6 @@ import asyncio
 import hmac
 import json
 import logging
-import os
 import posixpath
 import shlex
 from time import perf_counter
@@ -24,6 +23,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
@@ -350,14 +350,14 @@ async def _filter_repo_models_for_user[RepoRecordT: _RepoScopedRecord](
 
 
 def _api_base_url() -> str:
-    v = os.environ.get("DASHBOARD_API_BASE_URL", "").rstrip("/")
+    v = ENV.DASHBOARD_API_BASE_URL.get().rstrip("/")
     if not v:
         raise HTTPException(500, "DASHBOARD_API_BASE_URL not configured")
     return v
 
 
 def _frontend_base_url() -> str:
-    v = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    v = ENV.DASHBOARD_BASE_URL.get().rstrip("/")
     if not v:
         raise HTTPException(500, "DASHBOARD_BASE_URL not configured")
     return v
@@ -372,7 +372,7 @@ def _cookie_security() -> tuple[bool, Literal["lax", "none"]]:
     rejected and the frontend/API are same-site, so fall back to
     ``SameSite=Lax`` without ``Secure``.
     """
-    if os.environ.get("DASHBOARD_API_BASE_URL", "").startswith("https://"):
+    if ENV.DASHBOARD_API_BASE_URL.get().startswith("https://"):
         return True, "none"
     return False, "lax"
 
@@ -461,7 +461,7 @@ async def auth_login(
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
-    client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
+    client_id = ENV.GITHUB_APP_CLIENT_ID.get()
     if not client_id:
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
     safe_redirect = sanitize_redirect_to(redirect_to) or _frontend_base_url()
@@ -2120,7 +2120,7 @@ async def api_thread_terminal_connection(
 
 
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
-    if os.environ.get("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
         return
     try:

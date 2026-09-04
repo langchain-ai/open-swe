@@ -10,7 +10,8 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 """
 
 import logging
-import os
+
+from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -40,25 +41,21 @@ def _env_bool(value: str | None) -> bool:
 def _langsmith_api_key() -> str | None:
     """LangSmith API key used to authenticate gateway calls.
 
-    Prefer a gateway-specific key, then the prod LangSmith key. LangGraph Cloud
-    may inject ``LANGSMITH_API_KEY`` for tracing/platform APIs, and that key can
-    lack the ``gateway:invoke`` permission required by the LLM Gateway.
+    Prefer a gateway-specific key, then the standard LangSmith key. The key
+    LangGraph Platform injects as ``LANGSMITH_API_KEY`` can lack the
+    ``gateway:invoke`` permission, which is what ``LANGSMITH_GATEWAY_API_KEY`` is for.
     """
-    return (
-        os.environ.get("LANGSMITH_GATEWAY_API_KEY")
-        or os.environ.get("LANGSMITH_API_KEY_PROD")
-        or os.environ.get("LANGSMITH_API_KEY")
-    )
+    return ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
 
 
 def gateway_base_url() -> str:
     """Gateway host, overridable via ``LANGSMITH_GATEWAY_BASE_URL`` (regional/self-hosted)."""
-    return (os.environ.get("LANGSMITH_GATEWAY_BASE_URL") or DEFAULT_GATEWAY_BASE_URL).rstrip("/")
+    return (ENV.LANGSMITH_GATEWAY_BASE_URL.optional() or DEFAULT_GATEWAY_BASE_URL).rstrip("/")
 
 
 def gateway_env_default() -> bool:
     """Deployment-level default for gateway routing (``LANGSMITH_GATEWAY_ENABLED``)."""
-    return _env_bool(os.environ.get("LANGSMITH_GATEWAY_ENABLED"))
+    return _env_bool(ENV.LANGSMITH_GATEWAY_ENABLED.optional())
 
 
 def gateway_openai_use_responses() -> bool:
@@ -69,7 +66,7 @@ def gateway_openai_use_responses() -> bool:
     ``LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false`` only for deployments that
     need to force Chat Completions through the gateway.
     """
-    raw = os.environ.get("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES")
+    raw = ENV.LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES.optional()
     if raw is None:
         return True
     return _env_bool(raw)
@@ -110,7 +107,7 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
     if not api_key:
         logger.warning(
             "LangSmith gateway enabled but no LANGSMITH_GATEWAY_API_KEY or "
-            "LANGSMITH_API_KEY(_PROD) is set; "
+            "LANGSMITH_API_KEY is set; "
             "calling the provider directly"
         )
         return None

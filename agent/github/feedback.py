@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -7,6 +6,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.config import ENV
 from agent.review.findings import comment_ids_for_finding, list_findings
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.langsmith import create_langsmith_feedback, delete_langsmith_feedback
@@ -14,9 +14,7 @@ from agent.utils.reviewer_outcomes import outcome_from_score, upsert_finding_out
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 
 GITHUB_FEEDBACK_REACTIONS: dict[str, float] = {
     "+1": 1.0,

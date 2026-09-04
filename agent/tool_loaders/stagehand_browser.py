@@ -3,12 +3,12 @@
 import base64
 import json
 import logging
-import os
 import shlex
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
+from agent.config import ENV
 from agent.run_config import RunConfig
 from agent.sandboxes.state import get_sandbox_backend
 
@@ -20,25 +20,25 @@ _SOCKET = "/tmp/open-swe-stagehand.sock"
 
 
 def _model_name() -> str:
-    return os.getenv("STAGEHAND_MODEL", _DEFAULT_MODEL)
+    return ENV.STAGEHAND_MODEL.get(_DEFAULT_MODEL)
 
 
 def _model_api_key() -> str | None:
     return (
-        os.getenv("STAGEHAND_MODEL_API_KEY")
-        or os.getenv("MODEL_API_KEY")
-        or os.getenv("ANTHROPIC_API_KEY")
+        ENV.STAGEHAND_MODEL_API_KEY.optional()
+        or ENV.MODEL_API_KEY.optional()
+        or ENV.ANTHROPIC_API_KEY.optional()
     )
 
 
 def _headless() -> bool:
-    return os.getenv("STAGEHAND_HEADLESS", "true").strip().lower() not in ("0", "false", "no")
+    return ENV.STAGEHAND_HEADLESS.get().strip().lower() not in ("0", "false", "no")
 
 
 def browser_tools_enabled() -> bool:
     """Whether sandbox-local browser automation is configured."""
     provider = _model_name().split("/", 1)[0].split(":", 1)[0]
-    return os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith" and bool(
+    return ENV.SANDBOX_TYPE.get() == "langsmith" and bool(
         _model_api_key() and provider in {"anthropic", "openai"}
     )
 

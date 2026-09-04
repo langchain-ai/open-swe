@@ -39,7 +39,7 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
         [SimpleNamespace(end_time=root_end)],
         SimpleNamespace(total_cost=1.234, last_end_time=root_end + timedelta(seconds=1)),
     )
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
     monkeypatch.setattr(
         ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
     )
@@ -69,7 +69,7 @@ async def test_langsmith_run_cost_filters_thread_stats(
         [SimpleNamespace(end_time=root_end)],
         SimpleNamespace(total_cost=0.25, last_end_time=root_end),
     )
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
     monkeypatch.setattr(
         ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
     )
@@ -89,7 +89,7 @@ async def test_langsmith_cost_waits_for_thread_stats_freshness(
         [SimpleNamespace(end_time=root_end)],
         SimpleNamespace(total_cost=2.0, last_end_time=root_end - timedelta(seconds=1)),
     )
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
     monkeypatch.setattr(
         ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
     )

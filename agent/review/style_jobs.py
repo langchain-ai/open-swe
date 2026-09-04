@@ -1,12 +1,12 @@
 """Kick off and sync per-repo review style analysis runs."""
 
 import logging
-import os
 import uuid
 from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.dispatch import create_durable_run
 from agent.input_messages import RunInput, build_run_input
 from agent.review.style_collector import (
@@ -28,7 +28,7 @@ _ASSISTANT_ID = "analyzer"
 
 def _client():
     """LangGraph SDK client for the current deployment (same resolution as webapp)."""
-    url = os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
+    url = ENV.LANGGRAPH_URL.optional()
     if url:
         return get_client(url=url)
     return get_client()
