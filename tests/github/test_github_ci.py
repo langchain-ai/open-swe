@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.utils import github_ci
+from agent.github import ci as github_ci
 
 
 class _FakeResponse:
@@ -29,7 +29,7 @@ class _FakeClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> "_FakeClient":
+    async def __aenter__(self) -> _FakeClient:
         return self
 
     async def __aexit__(self, *_: object) -> None:

@@ -9,25 +9,24 @@ from fastapi import HTTPException
 from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
-from agent.source_context import SourceContext
-from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
-
-from ..dispatch import create_durable_run
-from ..input_messages import InputMessageContext, build_run_input
-from ..utils.slack import (
+from agent.dashboard.admin import is_admin
+from agent.dashboard.options import gate_fable_model, normalize_model_choice
+from agent.dashboard.profiles import get_profile, get_valid_access_token
+from agent.dashboard.repo_access import repo_config_for_user, require_repo_access_for_user
+from agent.dashboard.team_settings import get_team_fable_enabled
+from agent.dashboard.thread_api import _agent_version_metadata, _resolve_run_email
+from agent.dashboard.user_mappings import slack_id_for_login
+from agent.dispatch import create_durable_run
+from agent.input_messages import InputMessageContext, build_run_input
+from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
-from ..utils.thread_ops import langgraph_client
-from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
-from .admin import is_admin
-from .options import gate_fable_model, normalize_model_choice
-from .profiles import get_profile, get_valid_access_token
-from .repo_access import repo_config_for_user, require_repo_access_for_user
-from .team_settings import get_team_fable_enabled
-from .thread_api import _agent_version_metadata, _resolve_run_email
-from .user_mappings import slack_id_for_login
+from agent.source_context import SourceContext
+from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
+from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 
 logger = logging.getLogger(__name__)
 

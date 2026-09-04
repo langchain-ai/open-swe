@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.integrations import currents_tools
+from agent.tool_loaders import currents as currents_tools
 
 
 @pytest.fixture(autouse=True)

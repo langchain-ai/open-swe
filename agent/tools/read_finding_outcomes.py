@@ -9,7 +9,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..utils.reviewer_outcomes import read_outcomes_for_repo
+from agent.utils.reviewer_outcomes import read_outcomes_for_repo
 
 
 async def read_finding_outcomes(limit: int = 60) -> dict[str, Any]:

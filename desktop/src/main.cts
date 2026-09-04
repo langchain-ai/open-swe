@@ -55,9 +55,12 @@ const {
   appRedirectUrl,
   backendRequestUrl,
   desktopExchangeUrl,
+  connectExchangeUrl,
+  connectLoginUrl,
   desktopLoginUrl,
   isAppLoginUrl,
   isAppUrl,
+  isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
@@ -98,15 +101,23 @@ let backendUrl = null;
 let mainWindow = null;
 let setupWindow = null;
 let loginFlow = null;
+const connectFlows = new Map();
 let quitting = false;
 let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
 let providerKeyStore = null;
-let updateState = { status: "idle" };
+type DesktopUpdateState = {
+  status: "idle" | "downloading" | "ready" | "installing";
+  version?: string;
+};
+let updateState: DesktopUpdateState = { status: "idle" };
 
-function setUpdateState(status, version) {
+function setUpdateState(
+  status: DesktopUpdateState["status"],
+  version?: string,
+) {
   updateState = { status, ...(version ? { version } : {}) };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:update-state", updateState);
@@ -365,15 +376,24 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
+    if (updateState.status === "installing") return true;
     if (updateState.status !== "ready") return false;
+    const version = updateState.version;
+    setUpdateState("installing", version);
     quitting = true;
-    await Promise.all([
-      closeAllTerminals(),
-      backendSupervisor?.close(),
-      openAiOAuth?.close(),
-    ]);
-    autoUpdater.quitAndInstall(false, true);
-    return true;
+    try {
+      await Promise.all([
+        closeAllTerminals(),
+        backendSupervisor?.close(),
+        openAiOAuth?.close(),
+      ]);
+      autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (error) {
+      quitting = false;
+      setUpdateState("ready", version);
+      throw error;
+    }
   });
 
   ipcMain.handle("desktop:projects", (event) => {
@@ -438,6 +458,11 @@ function configureDesktopIpc() {
     const removed = removeProject(projectsPath(), project.cwd);
     if (removed) sendProjectsChanged();
     return removed;
+  });
+
+  ipcMain.handle("desktop:connect-service", async (event, provider) => {
+    requireTrustedDesktopIpc(event);
+    return startConnectFlow(provider);
   });
 
   ipcMain.handle("desktop:open-external", async (event, value) => {
@@ -1023,6 +1048,86 @@ async function startExternalLogin() {
   }
 }
 
+/**
+ * Link a Slack or Notion account from the desktop app.
+ *
+ * The consent leg has to run in the user's own browser, which carries neither
+ * the app's session cookie nor the flow's state cookie — that mismatch is why
+ * connecting used to fail here. So the app starts the flow itself, sends the
+ * browser only to the provider, and redeems the loopback handoff under its own
+ * session, which is also what decides whose account the connection lands on.
+ */
+async function startConnectFlow(provider) {
+  if (!backendUrl || !isConnectProvider(provider)) return false;
+  connectFlows.get(provider)?.cancel();
+  connectFlows.delete(provider);
+
+  let flow;
+  try {
+    flow = await beginLogin({ connect: true });
+  } catch (error) {
+    dialog.showErrorBox(
+      `${appRuntime.name} could not connect ${provider}`,
+      `Could not open a local listener: ${error.message}`,
+    );
+    return false;
+  }
+  connectFlows.set(provider, flow);
+  try {
+    const started = await backendFetch(
+      connectLoginUrl(backendUrl, provider, flow),
+      { redirect: "manual" },
+    );
+    const location = started.headers.get("location");
+    if (!location) {
+      throw new Error(`Backend did not start the flow (${started.status})`);
+    }
+    await shell.openExternal(location);
+
+    const code = await flow.code;
+    if (connectFlows.get(provider) !== flow) return false;
+    if (!code) return false;
+
+    const exchange = await backendFetch(
+      connectExchangeUrl(backendUrl, provider),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, verifier: flow.verifier }),
+      },
+    );
+    if (!exchange.ok) {
+      throw new Error(`Backend rejected the connection (${exchange.status})`);
+    }
+    return true;
+  } catch (error) {
+    dialog.showErrorBox(
+      `${appRuntime.name} could not connect ${provider}`,
+      error.message,
+    );
+    return false;
+  } finally {
+    if (connectFlows.get(provider) === flow) {
+      flow.cancel();
+      connectFlows.delete(provider);
+    }
+  }
+}
+
+/** Call the backend as the app: its own origin, and the session it holds. */
+async function backendFetch(url, init: any = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("origin", APP_ORIGIN);
+  const cookies = await session.defaultSession.cookies.get({ url });
+  if (cookies.length) {
+    headers.set(
+      "cookie",
+      cookies.map(({ name, value }) => `${name}=${value}`).join("; "),
+    );
+  }
+  return fetch(url, { ...init, headers });
+}
+
 async function completeExternalLogin(verifier, code) {
   const response = await fetch(desktopExchangeUrl(backendUrl), {
     method: "POST",
@@ -1244,7 +1349,6 @@ if (!hasSingleInstanceLock) {
       return;
     }
 
-    if (process.platform === "darwin") app.dock.setIcon(iconPath());
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),
     );

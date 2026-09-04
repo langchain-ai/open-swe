@@ -4,10 +4,10 @@ from typing import Any
 
 import httpx
 
-from ..utils.url_safety import (
+from agent.tools._sandbox_output import chunk_output_as_jsonl, write_sandbox_output
+from agent.utils.url_safety import (
     request_with_safe_redirects as _request_with_safe_redirects,
 )
-from ._sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 
 logger = logging.getLogger(__name__)
 

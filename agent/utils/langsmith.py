@@ -13,7 +13,7 @@ from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 from langsmith.utils import LangSmithNotFoundError
 
-from .tracing import AGENT_TRACING_PROJECT
+from agent.utils.tracing import AGENT_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +142,10 @@ async def get_langsmith_thread_cost(
     thread_id: str,
     prepare_run_id: str,
     project_name: str = AGENT_TRACING_PROJECT,
+    *,
+    run_only: bool = False,
 ) -> LangSmithThreadCost | None:
-    """Return a cumulative thread cost correlated to a completed agent run."""
+    """Return a fresh thread or run cost correlated to a completed agent run."""
     client = _build_prod_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
@@ -167,11 +169,13 @@ async def get_langsmith_thread_cost(
         ]
         if not target_times:
             return None
-        stats = await client.threads.stats(
-            thread_id,
-            session_id=project_id,
-            selects=["TOTAL_COST", "LAST_END_TIME"],
-        )
+        stats_kwargs: dict[str, Any] = {
+            "session_id": project_id,
+            "selects": ["TOTAL_COST", "LAST_END_TIME"],
+        }
+        if run_only:
+            stats_kwargs["filter"] = _langsmith_metadata_filter("prepare_run_id", prepare_run_id)
+        stats = await client.threads.stats(thread_id, **stats_kwargs)
     except LangSmithNotFoundError as exc:
         raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
     except Exception as exc:  # noqa: BLE001
@@ -186,7 +190,7 @@ async def get_langsmith_thread_cost(
         return None
     try:
         total_cost = float(raw_cost)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
     target_end_time = max(target_times)
@@ -236,6 +240,52 @@ def _build_langsmith_feedback_clients() -> tuple[tuple[str, str], ...]:
 
 def _feedback_id(run_id: str, key: str) -> uuid.UUID:
     return uuid.uuid5(uuid.NAMESPACE_URL, f"langsmith-feedback:{run_id}:{key}")
+
+
+async def create_langsmith_thread_feedback(
+    thread_id: str,
+    key: str,
+    *,
+    score: float,
+    comment: str | None = None,
+    source_info: dict[str, Any] | None = None,
+    project_name: str = AGENT_TRACING_PROJECT,
+) -> bool:
+    client = _build_prod_langsmith_client()
+    if client is None:
+        logger.warning("No LangSmith API key configured, skipping thread feedback")
+        return False
+    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
+        "LANGSMITH_TRACING_PROJECT_ID_PROD"
+    )
+    if not project_id:
+        logger.warning("LangSmith tracing project is unavailable, skipping thread feedback")
+        return False
+    feedback_id = _feedback_id(thread_id, key)
+    payload = {
+        "id": str(feedback_id),
+        "key": key,
+        "score": score,
+        "comment": comment,
+        "session_id": project_id,
+        "feedback_thread_id": thread_id,
+        "feedback_source": {"type": "api", "metadata": source_info or {}},
+    }
+    try:
+        await client._arequest_with_retries("POST", "/feedback", json=payload)
+        return True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await client._arequest_with_retries(
+            "PATCH",
+            f"/feedback/{feedback_id}",
+            json={"score": score, "comment": comment},
+        )
+        return True
+    except Exception:
+        logger.exception("Failed to create or update LangSmith thread feedback for %s", thread_id)
+        return False
 
 
 async def _update_feedback(

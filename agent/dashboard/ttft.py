@@ -56,7 +56,7 @@ class AssistantTextEventDetector:
             return None
         try:
             payload = json.loads(b"\n".join(data_lines))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except json.JSONDecodeError, UnicodeDecodeError:
             return None
         return payload if isinstance(payload, dict) else None
 

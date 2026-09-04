@@ -26,7 +26,7 @@ return create_deep_agent(
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
+By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
@@ -54,16 +54,16 @@ The proxy token is minted at runtime from the GitHub App installation credential
 
 ### Using a different sandbox provider
 
-Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/sandboxes/providers/` and a factory function registered in `agent/sandboxes/providers/registry.py`:
 
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
-| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+| `langsmith` (default) | `agent/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `agent/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
+| `runloop` | `agent/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `e2b` | `agent/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
+| `modal` | `agent/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `agent/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
@@ -71,7 +71,7 @@ For `langsmith`, sandboxes default to the same LangSmith credentials as tracing.
 
 ### Adding a new sandbox provider
 
-1. **Create an integration file** at `agent/integrations/my_provider.py` with a factory function matching this signature:
+1. **Create an integration file** at `agent/sandboxes/providers/my_provider.py` with a factory function matching this signature:
 
 ```python
 def create_my_provider_sandbox(sandbox_id: str | None = None):
@@ -87,12 +87,12 @@ def create_my_provider_sandbox(sandbox_id: str | None = None):
     ...
 ```
 
-2. **Register it** in `agent/utils/sandbox.py` by adding it to `SANDBOX_FACTORIES`:
+2. **Register it** in `agent/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
 
 ```python
 SANDBOX_FACTORIES = {
     ...
-    "my_provider": ("agent.integrations.my_provider", "create_my_provider_sandbox"),
+    "my_provider": ("agent.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
 }
 ```
 
@@ -130,7 +130,7 @@ class MySandbox(BaseSandbox):
         )
 ```
 
-See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py` for a full reference implementation.
+See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsmith.py` for a full reference implementation.
 
 ---
 
@@ -222,9 +222,9 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 |---|---|---|
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
-| `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
-| `slack_attach_html` | `agent/tools/slack_attach_html.py` | Attach sandbox HTML previews to Slack threads |
-| `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
+| `linear_comment` | `agent/linear/tools/comment.py` | Post comments on Linear tickets |
+| `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
+| `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
 
 ### Adding a tool
 
@@ -347,7 +347,7 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 ### Customizing Linear routing
 
-The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
+The `LINEAR_TEAM_TO_REPO` dict in `agent/linear/team_repo_map.py` maps Linear teams and projects to GitHub repos:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -443,12 +443,14 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 
 | Section | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
-| `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
-| `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
-| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
-| `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints (or `DESKTOP_WORKING_ENV_SECTION` for local desktop runs) |
+| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
+| `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
+| `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
+| `PLAN_MODE_SECTION` | Read-only planning mode instructions |
+
+> **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
 
 ### Default prompt file
 

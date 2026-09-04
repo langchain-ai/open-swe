@@ -8,6 +8,8 @@ const {
   backendRequestUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  connectExchangeUrl,
+  connectLoginUrl,
   isAppLoginUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
@@ -172,6 +174,17 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
   assert.equal(
     desktopExchangeUrl("https://backend.example/base/"),
     "https://backend.example/dashboard/api/auth/desktop/exchange",
+  );
+  assert.equal(
+    connectLoginUrl("https://backend.example", "slack", {
+      challenge: "abc",
+      port: 51234,
+    }),
+    "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
+  );
+  assert.equal(
+    connectExchangeUrl("https://backend.example", "notion"),
+    "https://backend.example/dashboard/api/notion/desktop/exchange",
   );
 });
 

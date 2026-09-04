@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-slack_reaction_tool = importlib.import_module("agent.tools.slack_add_reaction")
+slack_reaction_tool = importlib.import_module("agent.slack.tools.add_reaction")
 
 
 def _config() -> dict[str, Any]:

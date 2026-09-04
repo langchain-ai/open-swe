@@ -9,8 +9,8 @@ from langgraph_sdk.errors import ConflictError
 
 from agent import baby_sit, scheduler
 from agent import store as agent_store
+from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
-from agent.utils.slack import GitHubPrRef
 
 
 class _Store:
@@ -421,7 +421,7 @@ async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(scheduler, "evaluate_watch", evaluate)
 
     result = await scheduler._launch(
-        {"task": "baby_sit", "watch_key": "acme/repo#7"},
+        scheduler.SchedulerState(task="baby_sit", watch_key="acme/repo#7"),
         {"configurable": {}},
     )
 

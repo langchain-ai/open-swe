@@ -18,47 +18,10 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.source_context import SourceContext
-
-from ..dispatch import dispatch_agent_run
-from ..input_messages import (
-    PersonIdentity,
-    build_input_messages,
-    dynamic_context_hashes_from_messages,
-    injected_dynamic_context_hashes_from_metadata,
-)
-from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
-from ..utils.json_types import (
-    JsonObject,
-    ThreadLike,
-    as_json_object,
-    as_thread_dict,
-    thread_metadata,
-)
-from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import (
-    lookup_slack_thread_run_mapping,
-    parse_github_pr_url,
-    update_slack_trace_reply_for_web_handoff,
-)
-from ..utils.slack_code_channels import CODE_CHANNEL_SESSION_TS
-from ..utils.thread_ops import (
-    get_thread_active_status,
-    langgraph_client,
-    langgraph_url,
-    queue_message_for_thread,
-)
-from ..utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    merge_participants,
-    participant_search_filters,
-)
-from ..utils.timing import phase
-from .admin import is_admin
-from .agent_overrides import normalize_profile_overrides
-from .environments import ENVIRONMENTS, slugify
-from .options import (
+from agent.dashboard.admin import is_admin
+from agent.dashboard.agent_overrides import normalize_profile_overrides
+from agent.dashboard.environments import ENVIRONMENTS, slugify
+from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -67,16 +30,53 @@ from .options import (
     model_supports_images,
     normalize_model_choice,
 )
-from .pr_diff import build_compare_diff_files, build_pr_diff_files
-from .profiles import get_profile, get_valid_access_token
-from .pull_request_checks import PullRequestState, get_pull_request_check_states
-from .pull_request_context import get_pull_request_context
-from .pull_request_status import get_pull_request_statuses
-from .slack_oauth import SLACK_TEAM_ID
-from .team_settings import get_team_default_model, get_team_fable_enabled
-from .thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
-from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
-from .user_mappings import email_for_login
+from agent.dashboard.profiles import get_profile, get_valid_access_token
+from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
+from agent.dashboard.thread_pins import list_thread_pin_ids, pin_thread, unpin_thread
+from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from agent.dashboard.user_mappings import email_for_login
+from agent.dispatch import dispatch_agent_run
+from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
+from agent.github.pull_request_context import get_pull_request_context
+from agent.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
+from agent.github.pull_request_status import get_pull_request_statuses
+from agent.input_messages import (
+    PersonIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
+    injected_dynamic_context_hashes_from_metadata,
+)
+from agent.slack.client import (
+    lookup_slack_thread_run_mapping,
+    parse_github_pr_url,
+    update_slack_trace_reply_for_web_handoff,
+)
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from agent.slack.oauth import SLACK_TEAM_ID
+from agent.source_context import SourceContext
+from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from agent.utils.json_types import (
+    JsonObject,
+    ThreadLike,
+    as_json_object,
+    as_thread_dict,
+    thread_metadata,
+)
+from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.thread_ops import (
+    get_thread_active_status,
+    langgraph_client,
+    langgraph_url,
+    queue_message_for_thread,
+)
+from agent.utils.thread_participants import (
+    PARTICIPANT_EMAILS_KEY,
+    PARTICIPANT_LOGINS_KEY,
+    merge_participants,
+    participant_search_filters,
+)
+from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ _SANDBOX_CREATING_SENTINEL = "__creating__"
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
-    from agent.sandboxes.providers import create_sandbox as _create_sandbox
+    from agent.sandboxes.providers.registry import create_sandbox as _create_sandbox
 
     return await _create_sandbox(*args, **kwargs)
 
@@ -556,6 +556,7 @@ async def _thread_summary(
             else None
         ),
         "resolved": _is_thread_resolved(metadata),
+        "attentionReason": _metadata_string(metadata, "attention_reason"),
         "resolvedAt": (
             int(metadata["resolved_at_ms"])
             if isinstance(metadata.get("resolved_at_ms"), (int, float))
@@ -1655,12 +1656,29 @@ async def _enrich_run_start_command(
         overrides["agent_effort"] = chosen_effort
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
-    if _is_thread_resolved(metadata):
-        metadata_update["resolved"] = False
-        metadata_update["resolved_at_ms"] = None
     metadata_update["updated_at_ms"] = _now_ms()
-    metadata = {**metadata, **metadata_update}
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
+    if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
+        async with agent_thread_pr_state_lock(client, thread_id):
+            current = await client.threads.get(thread_id)
+            metadata = thread_metadata(current)
+            if _is_thread_resolved(metadata):
+                metadata_update["resolved"] = False
+                metadata_update["resolved_at_ms"] = None
+            if metadata.get("auto_resolved_by_prs") is True:
+                metadata_update["auto_resolved_by_prs"] = False
+            if metadata.get("attention_reason"):
+                metadata_update["attention_reason"] = None
+            metadata = {**metadata, **metadata_update}
+            await client.threads.update(thread_id=thread_id, metadata=metadata)
+    else:
+        if _is_thread_resolved(metadata):
+            metadata_update["resolved"] = False
+            metadata_update["resolved_at_ms"] = None
+        if metadata.get("attention_reason"):
+            metadata_update["attention_reason"] = None
+        metadata = {**metadata, **metadata_update}
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
@@ -1751,9 +1769,7 @@ async def send_dashboard_message(
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
-    if _is_thread_resolved(metadata):
-        metadata_update["resolved"] = False
-        metadata_update["resolved_at_ms"] = None
+    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
 
     active = await get_thread_active_status(thread_id)
     if active is None:
@@ -1766,7 +1782,25 @@ async def send_dashboard_message(
 
     active_model = _metadata_model_id(metadata) if body.images else None
     content = _user_message_content(prompt, body.images, model_id=active_model)
-    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    if pr_linked or metadata.get("auto_resolved_by_prs") is True:
+        async with agent_thread_pr_state_lock(client, thread_id):
+            current = await client.threads.get(thread_id)
+            metadata = thread_metadata(current)
+            if _is_thread_resolved(metadata):
+                metadata_update["resolved"] = False
+                metadata_update["resolved_at_ms"] = None
+            if metadata.get("auto_resolved_by_prs") is True:
+                metadata_update["auto_resolved_by_prs"] = False
+            if metadata.get("attention_reason"):
+                metadata_update["attention_reason"] = None
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    else:
+        if _is_thread_resolved(metadata):
+            metadata_update["resolved"] = False
+            metadata_update["resolved_at_ms"] = None
+        if metadata.get("attention_reason"):
+            metadata_update["attention_reason"] = None
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
@@ -1915,14 +1949,20 @@ async def resolve_dashboard_thread(
 ) -> dict[str, Any]:
     """Mark a thread resolved/unresolved via thread metadata."""
     client = langgraph_client()
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    metadata_update: dict[str, Any] = {
-        "resolved": resolved,
-        "resolved_at_ms": _now_ms() if resolved else None,
-    }
+    await _authorized_thread(thread_id, login, email=email)
     try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        async with agent_thread_pr_state_lock(client, thread_id):
+            thread = await _authorized_thread(thread_id, login, email=email)
+            metadata = thread_metadata(thread)
+            metadata_update: dict[str, Any] = {
+                "resolved": resolved,
+                "resolved_at_ms": _now_ms() if resolved else None,
+                "auto_resolved_by_prs": False,
+                "attention_reason": None,
+            }
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
@@ -2343,8 +2383,7 @@ async def get_dashboard_thread_working_tree_diff(
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
     from agent.sandboxes.paths import resolve_sandbox_work_dir
-
-    from ..utils.turn_checkpoint import read_turn_diff
+    from agent.utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     sandbox_id = metadata.get("sandbox_id")
@@ -2352,11 +2391,9 @@ async def get_dashboard_thread_working_tree_diff(
         return _missing_diff()
     try:
         sandbox = await create_sandbox(sandbox_id)
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not connect to sandbox %s for working tree diff", sandbox_id, exc_info=True
-        )
-        return _missing_diff()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
+        raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)
     repo_path = posixpath.join(work_dir, repo_name) if repo_name else None

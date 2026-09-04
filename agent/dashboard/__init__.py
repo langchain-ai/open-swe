@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any
 __all__ = ["router"]
 
 if TYPE_CHECKING:
-    from .routes import router
+    from agent.dashboard.routes import router
 
 
 def __getattr__(name: str) -> Any:
     if name == "router":
-        from .routes import router
+        from agent.dashboard.routes import router
 
         globals()[name] = router
         return router

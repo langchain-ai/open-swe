@@ -12,7 +12,12 @@ async def test_sandbox_reset_forwards_public_and_hidden_create_options(
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = {"configurable": {"thread_id": "thread-1", "github_login": "ramonn"}}
     with (
-        patch("agent.tools.admin_gate.get_config", return_value=config),
+        patch("agent.run_config.get_config", return_value=config),
+        patch(
+            "agent.tools.sandbox_reset.get_sandbox_langsmith_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch(
             "agent.sandboxes.lifecycle.reset_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -48,7 +53,7 @@ async def test_sandbox_reset_forwards_public_and_hidden_create_options(
 async def test_sandbox_reset_rejects_non_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = {"configurable": {"thread_id": "thread-1", "github_login": "someone-else"}}
-    with patch("agent.tools.admin_gate.get_config", return_value=config):
+    with patch("agent.run_config.get_config", return_value=config):
         result = await sandbox_reset.ainvoke({"_internal_runtime": "v2"})
 
     assert result == {

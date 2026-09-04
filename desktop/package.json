@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -74,6 +74,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "artifactName": "Open-SWE-${version}-${arch}-mac.${ext}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Open SWE uses the microphone for message dictation."
       },
@@ -104,8 +105,8 @@
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
     "@electron/notarize": "3.1.1",
-    "@types/node": "22.20.1",
-    "electron": "41.10.3",
+    "@types/node": "26.3.0",
+    "electron": "43.4.1",
     "electron-builder": "26.15.3",
     "typescript": "5.9.3"
   },
