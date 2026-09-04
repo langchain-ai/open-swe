@@ -5,6 +5,7 @@ import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
+  AutomationTrigger,
   SlackNotificationMode,
 } from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
@@ -71,6 +72,8 @@ export function AutomationEditor({
   const deleteSchedule = useDeleteAgentSchedule()
 
   const initialCron = schedule?.schedule ?? template?.schedule ?? null
+  const initialTrigger = schedule?.trigger ?? "schedule"
+  const [trigger, setTrigger] = useState<AutomationTrigger>(initialTrigger)
   const [name, setName] = useState(schedule?.name ?? template?.name ?? "")
   const [prompt, setPrompt] = useState(
     schedule?.prompt ?? template?.prompt ?? ""
@@ -100,6 +103,7 @@ export function AutomationEditor({
     canManage &&
     (name !== (schedule?.name ?? template?.name ?? "") ||
       prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
+      trigger !== initialTrigger ||
       cron !== initialCron ||
       repo !== (schedule?.repo ?? null) ||
       slackChannelId !== (schedule?.slackChannelId ?? "") ||
@@ -115,7 +119,10 @@ export function AutomationEditor({
   const errorMessage = error instanceof Error ? error.message : null
   const isSaving = createSchedule.isPending || updateSchedule.isPending
 
-  const canSave = name.trim().length > 0 && prompt.trim().length > 0 && !!cron
+  const canSave =
+    name.trim().length > 0 &&
+    prompt.trim().length > 0 &&
+    (trigger === "github_issue_opened" ? !!repo : !!cron)
 
   const onPickTrigger = (value: string | null) => {
     if (value === null) {
@@ -128,7 +135,7 @@ export function AutomationEditor({
   }
 
   const handleSave = () => {
-    if (!canSave || !cron) return
+    if (!canSave) return
     const modelIsReal = models.some((m) => m.id === activeSelection?.modelId)
     const modelId = modelIsReal ? (activeSelection?.modelId ?? null) : null
     const effort = modelIsReal ? (activeSelection?.effort ?? null) : null
@@ -138,7 +145,8 @@ export function AutomationEditor({
         {
           name: name.trim(),
           prompt: prompt.trim(),
-          schedule: cron.trim(),
+          schedule: trigger === "schedule" ? cron?.trim() : null,
+          trigger,
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
@@ -162,7 +170,8 @@ export function AutomationEditor({
         body: {
           name: name.trim(),
           prompt: prompt.trim(),
-          schedule: cron.trim(),
+          schedule: trigger === "schedule" ? cron?.trim() : null,
+          trigger,
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
@@ -271,7 +280,20 @@ export function AutomationEditor({
 
         <SectionLabel>Triggers</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-1.5">
-          {cron && (
+          <Select
+            value={trigger}
+            onValueChange={(value) => value && setTrigger(value as AutomationTrigger)}
+            disabled={!canManage}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="schedule">Schedule</SelectItem>
+              <SelectItem value="github_issue_opened">GitHub issue opened</SelectItem>
+            </SelectContent>
+          </Select>
+          {trigger === "schedule" && cron && (
             <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
               <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
               {customMode ? (
@@ -301,8 +323,8 @@ export function AutomationEditor({
               </button>
             </div>
           )}
-          {cron && <div className="mx-3 h-px bg-border/60" />}
-          {canManage && (
+          {trigger === "schedule" && cron && <div className="mx-3 h-px bg-border/60" />}
+          {canManage && trigger === "schedule" && (
             <ScheduleTriggerPicker
               onSelect={onPickTrigger}
               triggerLabel={cron ? "Change trigger" : "Add Trigger"}
