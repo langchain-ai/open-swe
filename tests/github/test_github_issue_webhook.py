@@ -5,6 +5,7 @@ import importlib
 import json
 import logging
 from typing import cast
+from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
@@ -167,6 +168,74 @@ def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> Non
         "reason": "Automatic review disabled for repository",
     }
     assert called is False
+
+
+def test_github_webhook_push_rejects_non_member_for_public_repo(monkeypatch) -> None:
+    process_push = AsyncMock()
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", "trusted-org")
+    monkeypatch.setattr(
+        webhook_common, "_is_repo_auto_review_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(webhook_common, "is_user_active_org_member", AsyncMock(return_value=False))
+    monkeypatch.setattr(github_webhooks, "process_github_push_event", process_push)
+
+    client = TestClient(app)
+    response = _post_github_webhook(
+        client,
+        "push",
+        {
+            "repository": {
+                "owner": {"login": "langchain-ai"},
+                "name": "open-swe",
+                "private": False,
+            },
+            "sender": {"login": "external-user"},
+            "ref": "refs/heads/feature",
+            "after": "deadbeef",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ignored",
+        "reason": "Sender is not a member of the allowed organization for public-repo triggers",
+    }
+    process_push.assert_not_awaited()
+
+
+def test_github_webhook_push_accepts_allowed_sender(monkeypatch) -> None:
+    process_push = AsyncMock()
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", "trusted-org")
+    monkeypatch.setattr(
+        webhook_common, "_is_repo_auto_review_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(webhook_common, "is_user_active_org_member", AsyncMock(return_value=True))
+    monkeypatch.setattr(github_webhooks, "process_github_push_event", process_push)
+
+    client = TestClient(app)
+    response = _post_github_webhook(
+        client,
+        "push",
+        {
+            "repository": {
+                "owner": {"login": "langchain-ai"},
+                "name": "open-swe",
+                "private": False,
+            },
+            "sender": {"login": "trusted-user"},
+            "ref": "refs/heads/feature",
+            "after": "deadbeef",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "accepted",
+        "message": "Processing GitHub push for reviewer watch",
+    }
+    process_push.assert_awaited_once()
 
 
 def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
