@@ -35,7 +35,7 @@ async def finalize_agent_run_usage(
         if scheduled:
             await mark_agent_cost_refresh_scheduled(run_id=run_id)
     except Exception:  # noqa: BLE001
-        logger.debug(
+        logger.warning(
             "Failed to record completed agent usage",
             extra={"usage_run_id": run_id, "usage_thread_id": thread_id},
             exc_info=True,
