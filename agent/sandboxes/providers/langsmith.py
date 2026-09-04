@@ -813,8 +813,12 @@ class LangSmithProvider(SandboxProvider):
 
             effective_snapshot_id = snapshot_id or ""
             extra_fields = _merge_sandbox_create_extra_fields(create_params)
-            if not effective_snapshot_id:
-                extra_fields["snapshot_id"] = ""
+            # The API boots from its default root snapshot only when the key is
+            # absent: `snapshot_id` is a UUID there, and "" fails to parse as one
+            # before any validation runs. The SDK already omits a falsy id, so
+            # only an injected empty value can put it back on the wire.
+            if not extra_fields.get("snapshot_id"):
+                extra_fields.pop("snapshot_id", None)
             _install_create_extra_fields(client, extra_fields)
 
             try:

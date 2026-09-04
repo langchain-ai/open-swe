@@ -240,21 +240,57 @@ class _FakeSandboxClient:
         return {"sandbox": kwargs["snapshot_id"]}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("snapshot_id", [None, ""])
-async def test_provider_passes_empty_snapshot_id_to_api(snapshot_id: str | None) -> None:
+def _stub_create_response() -> tuple[AsyncSandboxClient, AsyncMock]:
     client = AsyncSandboxClient(api_key="key", api_endpoint="https://example.com/v2/sandboxes")
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.json.return_value = {"name": "sandbox-new", "status": "ready"}
     post = AsyncMock(return_value=response)
     client._http.post = post
+    return client, post
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_id", [None, ""])
+async def test_provider_omits_snapshot_id_when_unset(snapshot_id: str | None) -> None:
+    """No configured snapshot must send no `snapshot_id` key at all.
+
+    The API boots its default root snapshot only when the field is absent. It
+    is a UUID server-side, so sending "" is rejected with a 422 before any
+    validation runs, and no sandbox is created.
+    """
+    client, post = _stub_create_response()
 
     with patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client):
         await LangSmithProvider(api_key="key").get_or_create(snapshot_id=snapshot_id)
 
     assert post.await_args is not None
-    assert post.await_args.kwargs["json"]["snapshot_id"] == ""
+    assert "snapshot_id" not in post.await_args.kwargs["json"]
+
+
+@pytest.mark.asyncio
+async def test_provider_sends_explicit_snapshot_id() -> None:
+    client, post = _stub_create_response()
+
+    with patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client):
+        await LangSmithProvider(api_key="key").get_or_create(snapshot_id="snap-1")
+
+    assert post.await_args is not None
+    assert post.await_args.kwargs["json"]["snapshot_id"] == "snap-1"
+
+
+@pytest.mark.asyncio
+async def test_provider_drops_empty_snapshot_id_from_create_params() -> None:
+    """An empty id reaching us through create_params must not be forwarded."""
+    client, post = _stub_create_response()
+
+    with patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client):
+        await LangSmithProvider(api_key="key").get_or_create(
+            snapshot_id=None, create_params={"snapshot_id": ""}
+        )
+
+    assert post.await_args is not None
+    assert "snapshot_id" not in post.await_args.kwargs["json"]
 
 
 @pytest.mark.asyncio
