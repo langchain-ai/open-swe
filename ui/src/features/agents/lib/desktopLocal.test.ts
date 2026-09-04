@@ -49,7 +49,7 @@ describe("ensureDesktopModelCredential", () => {
     })
 
     await expect(ensureDesktopModelCredential("anthropic:test")).resolves.toBe(
-      "Set ANTHROPIC_API_KEY in the environment before starting Open SWE."
+      "Add an API key for this model in Settings, or set ANTHROPIC_API_KEY in the environment."
     )
   })
 })

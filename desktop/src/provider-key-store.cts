@@ -39,16 +39,17 @@ class ProviderKeyStore {
     }
   }
 
-  write() {
-    if (!Object.keys(this.keys).length) {
+  write(keys) {
+    if (!Object.keys(keys).length) {
       try {
         fs.unlinkSync(this.options.storagePath);
       } catch (error) {
         if (error?.code !== "ENOENT") throw error;
       }
+      this.keys = keys;
       return;
     }
-    const encrypted = this.options.encryptString(JSON.stringify(this.keys));
+    const encrypted = this.options.encryptString(JSON.stringify(keys));
     fs.mkdirSync(path.dirname(this.options.storagePath), { recursive: true });
     const temporary = `${this.options.storagePath}.${process.pid}.tmp`;
     try {
@@ -57,6 +58,7 @@ class ProviderKeyStore {
     } finally {
       fs.rmSync(temporary, { force: true });
     }
+    this.keys = keys;
   }
 
   status() {
@@ -74,15 +76,15 @@ class ProviderKeyStore {
     if (!validVariable(variable)) throw new Error("Unsupported API key");
     const key = typeof value === "string" ? value.trim() : "";
     if (!key || key.length > 512) throw new Error("Enter a valid API key");
-    this.keys[variable] = key;
-    this.write();
+    this.write({ ...this.keys, [variable]: key });
     return this.status();
   }
 
   clear(variable) {
     if (!validVariable(variable)) throw new Error("Unsupported API key");
-    delete this.keys[variable];
-    this.write();
+    const keys = { ...this.keys };
+    delete keys[variable];
+    this.write(keys);
     return this.status();
   }
 }
