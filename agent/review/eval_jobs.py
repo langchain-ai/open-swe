@@ -21,6 +21,7 @@ from agent.review.eval_store import (
 )
 from agent.review.findings import REVIEW_FINDING_CAP
 from agent.store import get_value, now_iso, put_value
+from agent.utils.langgraph_url import configured_langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
 
 
 def _resolve_langgraph_url() -> str | None:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
+    return configured_langgraph_url()
 
 
 def _eval_project() -> str:

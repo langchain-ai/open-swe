@@ -11,7 +11,7 @@ The minimum install needs these values, and nothing else:
 
 | Variable | Where it comes from |
 |---|---|
-| `LANGSMITH_API_KEY_PROD` | LangSmith → Settings → API Keys |
+| `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys |
 | One model provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`), **or** `LANGSMITH_GATEWAY_ENABLED=true` | Your provider, or the LangSmith LLM Gateway |
 | `GITHUB_APP_CLIENT_ID` | GitHub App settings page |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App settings page → Private keys |
@@ -112,13 +112,13 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for tracing and for the 
 
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
-3. Save it as `LANGSMITH_API_KEY_PROD`
+3. Save it as `LANGSMITH_API_KEY`
 
 That is the whole LangSmith setup:
 
 - **Sandboxes** boot from the LangSmith default snapshot, which ships `git`, `gh`, Python, `uv`, and Node. Build your own image only when your repos need more — see [Custom sandbox snapshot and environments](#custom-sandbox-snapshot-and-environments).
 - **Trace links** ("View trace" in Slack and GitHub) find your workspace and the `open-swe-agent` / `open-swe-review` projects by name, so no tenant or project ids are required.
-- **Tracing itself** is on automatically on LangGraph Platform. For local `make dev`, also export `LANGSMITH_API_KEY` (the same key) if you want local runs traced.
+- **Tracing** is on automatically, locally and on LangGraph Platform: this is the same variable the LangSmith SDK and `langgraph dev` read, and the platform injects it for you.
 
 ## 5. Create the Slack app
 
@@ -223,7 +223,7 @@ Re-running `make setup` keeps values that are already set; add `--force` to rota
 Your `.env` now looks like this:
 
 ```bash
-LANGSMITH_API_KEY_PROD="lsv2_..."
+LANGSMITH_API_KEY="lsv2_..."
 ANTHROPIC_API_KEY="sk-ant-..."          # or OPENAI_API_KEY / GOOGLE_API_KEY, or LANGSMITH_GATEWAY_ENABLED="true"
 GITHUB_APP_CLIENT_ID="Iv1...."
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
@@ -538,7 +538,7 @@ FIREWORKS_API_KEY=""                   # fireworks: models
 BASETEN_API_KEY=""                     # Baseten models when not using the LangSmith Gateway
 LLM_MODEL_ID=""                        # Default model, provider:model format (see CUSTOMIZATION.md)
 
-# Route provider calls through the LangSmith LLM Gateway using LANGSMITH_API_KEY_PROD
+# Route provider calls through the LangSmith LLM Gateway using LANGSMITH_API_KEY
 # instead of per-provider keys. Admins can also toggle this per team in the dashboard.
 LANGSMITH_GATEWAY_ENABLED="false"
 
@@ -597,7 +597,7 @@ Set the variables from your `.env`, plus the standalone Agent Server requirement
 
 Set `LANGGRAPH_URL` to the public backend URL so webhooks (and the dashboard) can create runs against this same server. Update your webhook URLs (GitHub App, Slack, Linear) to the production URL.
 
-**Backend — LangGraph Platform:** alternatively, push your code to a GitHub repository, connect the repo to LangGraph Platform, set the same environment variables in the deployment config, and use the hosted deployment URL for `LANGGRAPH_URL` and webhook callbacks. The platform injects `LANGSMITH_API_KEY` for tracing; Open SWE's own LangSmith calls keep using `LANGSMITH_API_KEY_PROD`.
+**Backend — LangGraph Platform:** alternatively, push your code to a GitHub repository, connect the repo to LangGraph Platform, set the same environment variables in the deployment config, and use the hosted deployment URL for `LANGGRAPH_URL` and webhook callbacks. The platform injects `LANGSMITH_API_KEY`, and Open SWE uses that same key for sandboxes, trace links, and feedback.
 
 **Dashboard** — the `ui/` app builds to a Nitro server that renders routes on request. Set `DASHBOARD_API_URL` in its environment to your hosted backend URL; it is read per request, so one image serves any backend. Browser requests to `/dashboard/api/*` and webhook deliveries to `/webhooks/*` are proxied to it, and server renders call it directly with the request's `osw_session` cookie forwarded.
 
@@ -617,17 +617,17 @@ None of these are needed for a normal installation. Overrides pin a value Open S
 |---|---|---|
 | `GITHUB_APP_INSTALLATION_ID` | Override | Installation resolved from the repository/organization of the run; if none, the app's only installation is used. With several installations and no context, token minting is skipped with a warning naming the accounts. |
 | `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | Override | Discovered from `SLACK_BOT_TOKEN` via `auth.test` and `users.info` at startup (retried on the first webhook if Slack was unreachable). Setting the user id disables discovery. |
-| `LANGSMITH_TENANT_ID_PROD` | Override | Read from the tracing project's metadata (or the first project in the workspace). |
-| `LANGSMITH_URL_PROD` | Override | Derived from `LANGSMITH_ENDPOINT` (`https://smith.langchain.com` for the default endpoint; the API host minus `/api` for self-hosted LangSmith). |
-| `LANGSMITH_ENDPOINT`, `LANGSMITH_ENDPOINT_PROD` | Override | `https://api.smith.langchain.com`. Set for self-hosted or regional LangSmith. |
+| `LANGSMITH_ENDPOINT` | Override | `https://api.smith.langchain.com`. Set for self-hosted or regional LangSmith; the web host for trace links is derived from it. |
 | `DEFAULT_SANDBOX_SNAPSHOT_ID` | Override | LangSmith default snapshot, unless an admin set a base snapshot. |
 | `SANDBOX_TYPE` | Override | `langsmith`. |
 | `LANGGRAPH_URL` | Override | `http://localhost:2024`. Set to the public backend URL in production. |
 | `GITHUB_APP_ID` | Deprecated | The JWT issuer is `GITHUB_APP_CLIENT_ID`; the app id is only read when the client id is unset. |
 | `DEFAULT_REPO_OWNER`, `DEFAULT_REPO_NAME` | Deprecated | Seed the team default repository when no team setting has been saved. Use **Admin → Team settings → Default Repository**. |
 | `SLACK_REPO_OWNER`, `SLACK_REPO_NAME` | Deprecated | Slack-only fallback repository; the team default repository replaces it. |
+| `LANGSMITH_API_KEY_PROD`, `LANGSMITH_ENDPOINT_PROD`, `LANGGRAPH_URL_PROD` | Deprecated | Aliases from when a deployment talked to a second LangSmith workspace. Read only when the standard name is unset; use `LANGSMITH_API_KEY`, `LANGSMITH_ENDPOINT`, `LANGGRAPH_URL`. |
+| `LANGSMITH_TENANT_ID_PROD`, `LANGSMITH_URL_PROD` | Deprecated | The tenant id is discovered from the workspace and the web host is derived from `LANGSMITH_ENDPOINT`. |
 | `LANGSMITH_TRACING_PROJECT_ID_PROD` | Deprecated | Trace links resolve the `open-swe-agent` / `open-swe-review` projects by name. |
-| `LANGCHAIN_API_KEY`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_PROJECT` | Deprecated | Legacy SDK aliases, ignored by Open SWE. Use `LANGSMITH_API_KEY_PROD`, `LANGSMITH_TRACING`, and per-graph projects. |
+| `LANGCHAIN_API_KEY`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_PROJECT` | Deprecated | Legacy SDK aliases, ignored by Open SWE. Use `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and per-graph projects. |
 
 ## Troubleshooting
 
@@ -667,7 +667,7 @@ None of these are needed for a normal installation. Overrides pin a value Open S
 
 ### Sandbox creation failures
 
-- Verify `LANGSMITH_API_KEY_PROD` is set and valid
+- Verify `LANGSMITH_API_KEY` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
 - If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`; clear the admin **Base snapshot** or `DEFAULT_SANDBOX_SNAPSHOT_ID` to fall back to the LangSmith default snapshot
 - If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support

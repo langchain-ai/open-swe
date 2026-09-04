@@ -45,6 +45,7 @@ from agent.input_messages import (
     build_run_input,
 )
 from agent.run_config import RunConfig
+from agent.utils.langgraph_url import langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -199,9 +200,7 @@ COMPLETION_WEBHOOK_URL: str | None = _resolve_completion_webhook_url(
 
 
 def _langgraph_url() -> str:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get(
-        "LANGGRAPH_URL_PROD", "http://localhost:2024"
-    )
+    return langgraph_url()
 
 
 def dispatch_client() -> LangGraphClient:

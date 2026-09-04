@@ -24,6 +24,7 @@ from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.utils.langgraph_url import langgraph_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.run_usage import RunUsageSummary
 from agent.utils.url_safety import request_with_safe_redirects
@@ -42,9 +43,7 @@ _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = langgraph_url()
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 _SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
 SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10

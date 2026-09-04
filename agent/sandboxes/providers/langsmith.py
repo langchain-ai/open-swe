@@ -23,6 +23,7 @@ from langsmith.sandbox import (
 from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
+from agent.utils.langsmith import langsmith_api_key, langsmith_api_url
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +58,9 @@ _MANAGED_PROXY_RULE_NAMES = frozenset({"open-swe-langsmith"})
 def _get_langsmith_api_key() -> str | None:
     """Get LangSmith API key from environment.
 
-    Checks LANGSMITH_API_KEY first, then falls back to LANGSMITH_API_KEY_PROD
-    for LangGraph Cloud deployments where LANGSMITH_API_KEY is reserved.
+    Same resolution as the rest of the app (``LANGSMITH_API_KEY``).
     """
-    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+    return langsmith_api_key()
 
 
 def _get_sandbox_api_key() -> str | None:
@@ -81,11 +81,7 @@ def _get_sandbox_endpoint() -> str:
     the bare root (e.g. ``https://api.smith.langchain.com``) used to build the
     proxy-config URL; the SDK clients take :func:`_get_sandbox_api_endpoint`.
     """
-    return (
-        os.environ.get("SANDBOX_LANGSMITH_ENDPOINT")
-        or os.environ.get("LANGSMITH_ENDPOINT")
-        or "https://api.smith.langchain.com"
-    )
+    return os.environ.get("SANDBOX_LANGSMITH_ENDPOINT") or langsmith_api_url()
 
 
 def _get_sandbox_api_endpoint() -> str:
@@ -747,7 +743,7 @@ class LangSmithProvider(SandboxProvider):
         self._api_key = api_key or _get_sandbox_api_key()
         self._api_endpoint = _get_sandbox_api_endpoint()
         if not self._api_key:
-            msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
+            msg = "LANGSMITH_API_KEY not set"
             raise ValueError(msg)
 
     @classmethod

@@ -18,12 +18,11 @@ from agent.slack.client import (
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from agent.slack.events import claim_slack_event
 from agent.source_context import SourceContext
+from agent.utils.langgraph_url import langgraph_url
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = langgraph_url()
 _QUEUE_RECORDS = (
     (("queue",), "pending_messages"),
     (("autofix",), "pending_event"),

@@ -57,30 +57,44 @@ def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
     return client
 
 
-def _prod_api_key() -> str | None:
-    return os.environ.get("LANGSMITH_API_KEY_PROD") or os.environ.get("LANGSMITH_API_KEY")
+DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 
 
-def _prod_api_url() -> str:
-    return os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
-        "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
+def langsmith_api_key() -> str | None:
+    """The LangSmith API key, read the way the SDK reads it (``LANGSMITH_API_KEY``).
+
+    ``LANGSMITH_API_KEY_PROD`` is a deprecated alias from when deployments talked
+    to a second workspace; it is only consulted when the standard name is unset.
+    """
+    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD") or None
+
+
+def langsmith_api_url() -> str:
+    """The LangSmith API endpoint (``LANGSMITH_ENDPOINT``; ``LANGSMITH_ENDPOINT_PROD`` deprecated)."""
+    return (
+        os.environ.get("LANGSMITH_ENDPOINT")
+        or os.environ.get("LANGSMITH_ENDPOINT_PROD")
+        or DEFAULT_LANGSMITH_ENDPOINT
     )
 
 
 def langsmith_host_url() -> str:
-    """Web host for trace links: ``LANGSMITH_URL_PROD`` or derived from the API endpoint."""
+    """Web host for trace links, derived from the API endpoint.
+
+    ``LANGSMITH_URL_PROD`` is a deprecated explicit override.
+    """
     explicit = os.environ.get("LANGSMITH_URL_PROD", "").strip()
     if explicit:
         return explicit.rstrip("/")
-    return str(get_host_url(None, _prod_api_url())).rstrip("/")
+    return str(get_host_url(None, langsmith_api_url())).rstrip("/")
 
 
-def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
-    """Build a LangSmith client scoped to the prod tenant for project lookups."""
-    api_key = _prod_api_key()
+def _build_langsmith_client() -> AsyncLangSmithClient | None:
+    """Build the LangSmith client used for project lookups, or None without a key."""
+    api_key = langsmith_api_key()
     if not api_key:
         return None
-    return async_langsmith_client(api_key, _prod_api_url())
+    return async_langsmith_client(api_key, langsmith_api_url())
 
 
 def _remember_tenant_id(value: Any) -> None:
@@ -91,10 +105,10 @@ def _remember_tenant_id(value: Any) -> None:
 
 def _discover_tenant_id() -> str | None:
     """Any project in the workspace carries the tenant id; read the first one."""
-    api_key = _prod_api_key()
+    api_key = langsmith_api_key()
     if not api_key:
         return None
-    client = sync_langsmith_client(api_key, _prod_api_url())
+    client = sync_langsmith_client(api_key, langsmith_api_url())
     for project in client.list_projects(limit=1):
         tenant_id = getattr(project, "tenant_id", None)
         if tenant_id:
@@ -103,7 +117,7 @@ def _discover_tenant_id() -> str | None:
 
 
 async def resolve_tenant_id() -> str | None:
-    """``LANGSMITH_TENANT_ID_PROD`` when set; otherwise discovered once and cached."""
+    """Discovered once and cached; ``LANGSMITH_TENANT_ID_PROD`` is a deprecated override."""
     explicit = os.environ.get("LANGSMITH_TENANT_ID_PROD", "").strip()
     if explicit:
         return explicit
@@ -122,7 +136,7 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     """Resolve a LangSmith project id from its name, caching definitive results."""
     if project_name in _PROJECT_ID_CACHE:
         return _PROJECT_ID_CACHE[project_name] or None
-    client = _build_prod_langsmith_client()
+    client = _build_langsmith_client()
     if client is None:
         return None
     try:
@@ -193,7 +207,7 @@ async def get_langsmith_thread_cost(
     run_only: bool = False,
 ) -> LangSmithThreadCost | None:
     """Return a fresh thread or run cost correlated to a completed agent run."""
-    client = _build_prod_langsmith_client()
+    client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
     project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
@@ -261,17 +275,7 @@ def _build_langsmith_feedback_clients() -> tuple[tuple[str, str], ...]:
     configs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
-    api_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-    client_configs = (
-        (
-            os.environ.get("LANGSMITH_API_KEY"),
-            api_endpoint,
-        ),
-        (
-            os.environ.get("LANGSMITH_API_KEY_PROD"),
-            os.environ.get("LANGSMITH_ENDPOINT_PROD", api_endpoint),
-        ),
-    )
+    client_configs = ((langsmith_api_key(), langsmith_api_url()),)
 
     for api_key, api_url in client_configs:
         if not api_key or not api_url:
@@ -298,7 +302,7 @@ async def create_langsmith_thread_feedback(
     source_info: dict[str, Any] | None = None,
     project_name: str = AGENT_TRACING_PROJECT,
 ) -> bool:
-    client = _build_prod_langsmith_client()
+    client = _build_langsmith_client()
     if client is None:
         logger.warning("No LangSmith API key configured, skipping thread feedback")
         return False

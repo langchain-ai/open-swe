@@ -12,6 +12,8 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 import logging
 import os
 
+from agent.utils.langsmith import langsmith_api_key
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_GATEWAY_BASE_URL = "https://gateway.smith.langchain.com"
@@ -40,15 +42,11 @@ def _env_bool(value: str | None) -> bool:
 def _langsmith_api_key() -> str | None:
     """LangSmith API key used to authenticate gateway calls.
 
-    Prefer a gateway-specific key, then the prod LangSmith key. LangGraph Cloud
-    may inject ``LANGSMITH_API_KEY`` for tracing/platform APIs, and that key can
-    lack the ``gateway:invoke`` permission required by the LLM Gateway.
+    Prefer a gateway-specific key, then the standard LangSmith key. The key
+    LangGraph Platform injects as ``LANGSMITH_API_KEY`` can lack the
+    ``gateway:invoke`` permission, which is what ``LANGSMITH_GATEWAY_API_KEY`` is for.
     """
-    return (
-        os.environ.get("LANGSMITH_GATEWAY_API_KEY")
-        or os.environ.get("LANGSMITH_API_KEY_PROD")
-        or os.environ.get("LANGSMITH_API_KEY")
-    )
+    return os.environ.get("LANGSMITH_GATEWAY_API_KEY") or langsmith_api_key()
 
 
 def gateway_base_url() -> str:
@@ -110,7 +108,7 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
     if not api_key:
         logger.warning(
             "LangSmith gateway enabled but no LANGSMITH_GATEWAY_API_KEY or "
-            "LANGSMITH_API_KEY(_PROD) is set; "
+            "LANGSMITH_API_KEY is set; "
             "calling the provider directly"
         )
         return None

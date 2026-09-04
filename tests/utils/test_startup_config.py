@@ -7,7 +7,7 @@ import pytest
 from agent.utils import startup_config
 
 _MINIMUM = {
-    "LANGSMITH_API_KEY_PROD": "lsv2-secret",
+    "LANGSMITH_API_KEY": "lsv2-secret",
     "GITHUB_APP_CLIENT_ID": "Iv1.client",
     "GITHUB_APP_PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\\nsecret",
     "GITHUB_WEBHOOK_SECRET": "webhook-secret",
@@ -66,7 +66,12 @@ def test_summary_never_contains_secret_values() -> None:
         ("DEFAULT_REPO_NAME", "Team settings"),
         ("LANGSMITH_TRACING_PROJECT_ID_PROD", "by name"),
         ("LANGCHAIN_PROJECT", "no effect"),
-        ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY_PROD"),
+        ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY"),
+        ("LANGSMITH_API_KEY_PROD", "LANGSMITH_API_KEY"),
+        ("LANGSMITH_ENDPOINT_PROD", "LANGSMITH_ENDPOINT"),
+        ("LANGSMITH_URL_PROD", "LANGSMITH_ENDPOINT"),
+        ("LANGSMITH_TENANT_ID_PROD", "discovered"),
+        ("LANGGRAPH_URL_PROD", "LANGGRAPH_URL"),
         ("LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING"),
     ],
 )
@@ -76,6 +81,17 @@ def test_deprecated_variable_warns(name: str, fragment: str) -> None:
     assert len(warnings) == 1
     assert warnings[0].startswith(f"{name} is deprecated")
     assert fragment in warnings[0]
+
+
+def test_legacy_prod_key_still_enables_langsmith_with_a_warning() -> None:
+    env = dict(_MINIMUM)
+    env["LANGSMITH_API_KEY_PROD"] = env.pop("LANGSMITH_API_KEY")
+
+    assert "LangSmith: enabled" in startup_config.configuration_summary(env)
+    assert any(
+        w.startswith("LANGSMITH_API_KEY_PROD is deprecated")
+        for w in startup_config.deprecated_env_warnings(env)
+    )
 
 
 def test_no_deprecations_for_minimum_config() -> None:

@@ -18,7 +18,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 
 MINIMUM_KEYS: tuple[str, ...] = (
-    "LANGSMITH_API_KEY_PROD",
+    "LANGSMITH_API_KEY",
     "GITHUB_APP_CLIENT_ID",
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_WEBHOOK_SECRET",
@@ -40,7 +40,7 @@ DASHBOARD_KEYS: tuple[str, ...] = (
 GENERATED_KEYS: tuple[str, ...] = ("DASHBOARD_JWT_SECRET", "TOKEN_ENCRYPTION_KEY")
 SECRET_KEYS: frozenset[str] = frozenset(
     {
-        "LANGSMITH_API_KEY_PROD",
+        "LANGSMITH_API_KEY",
         "GITHUB_APP_PRIVATE_KEY",
         "GITHUB_WEBHOOK_SECRET",
         "GITHUB_APP_CLIENT_SECRET",
@@ -185,8 +185,8 @@ def collect_answers(
     def want(key: str) -> bool:
         return not existing.get(key, "").strip()
 
-    if want("LANGSMITH_API_KEY_PROD"):
-        answers["LANGSMITH_API_KEY_PROD"] = ask_secret("LangSmith API key (lsv2_...)")
+    if want("LANGSMITH_API_KEY"):
+        answers["LANGSMITH_API_KEY"] = ask_secret("LangSmith API key (lsv2_...)")
 
     has_model = any(existing.get(key, "").strip() for key in MODEL_PROVIDER_KEYS.values() if key)
     gateway_on = existing.get("LANGSMITH_GATEWAY_ENABLED", "").strip().lower() in {

@@ -1,7 +1,6 @@
 """Kick off and sync per-repo review style analysis runs."""
 
 import logging
-import os
 import uuid
 from typing import Any
 
@@ -20,6 +19,7 @@ from agent.review.styles import (
 )
 from agent.thread_ids import review_style_thread_id
 from agent.utils.analyzer_skills import build_skill_files
+from agent.utils.langgraph_url import configured_langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ _ASSISTANT_ID = "analyzer"
 
 def _client():
     """LangGraph SDK client for the current deployment (same resolution as webapp)."""
-    url = os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
+    url = configured_langgraph_url()
     if url:
         return get_client(url=url)
     return get_client()

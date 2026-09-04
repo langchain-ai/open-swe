@@ -62,7 +62,7 @@ from agent.utils.json_types import (
     as_thread_dict,
     thread_metadata,
 )
-from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.langsmith import get_langsmith_trace_url, langsmith_api_key
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -135,7 +135,7 @@ def _langgraph_proxy_headers(
     headers = {"Content-Type": content_type}
     if accept:
         headers["Accept"] = accept
-    api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+    api_key = langsmith_api_key()
     if api_key:
         headers["X-API-Key"] = api_key
     return headers

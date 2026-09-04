@@ -21,7 +21,12 @@ from langsmith import AsyncClient as AsyncLangSmithClient
 
 from agent.review.findings import Finding
 from agent.run_config import RunConfig
-from agent.utils.langsmith import async_langsmith_client, sync_langsmith_client
+from agent.utils.langsmith import (
+    async_langsmith_client,
+    langsmith_api_key,
+    langsmith_api_url,
+    sync_langsmith_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +70,10 @@ def outcome_from_score(score: float | None, *, source: str) -> tuple[str, str] |
 
 def _outcomes_credentials() -> tuple[str, str] | None:
     """Resolve the outcomes-dataset credentials, preferring the prod tenant."""
-    prod_key = os.environ.get("LANGSMITH_API_KEY_PROD")
-    if prod_key:
-        api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
-            "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
-        )
-        return prod_key, api_url
-    api_key = os.environ.get("LANGSMITH_API_KEY")
+    api_key = langsmith_api_key()
     if not api_key:
         return None
-    return api_key, os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    return api_key, langsmith_api_url()
 
 
 async def _find_dataset(client: AsyncLangSmithClient) -> Any:

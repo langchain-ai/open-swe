@@ -75,7 +75,7 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
             calls.append(project_name)
             return _FakeProject()
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
     first = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
     second = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
@@ -101,7 +101,7 @@ async def test_resolve_project_id_retries_transient_failure(
             calls.append(project_name)
             raise RuntimeError("403 Forbidden")
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
@@ -119,7 +119,7 @@ async def test_create_thread_feedback_posts_thread_scope(
         ) -> None:
             requests.append((method, endpoint, kwargs))
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
     monkeypatch.setattr(
         ls_utils,
         "_resolve_project_id_by_name",
@@ -168,7 +168,7 @@ async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch)
     def _boom() -> None:
         raise AssertionError("must not build a client when the tenant id is unset")
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", _boom)
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", _boom)
 
     assert await ls_utils.get_langsmith_trace_url("t5") is None
 
@@ -191,7 +191,7 @@ async def test_tenant_id_is_learned_from_project_lookup(monkeypatch: pytest.Monk
         async def read_project(self, *, project_name: str) -> _Project:
             return _Project()
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _Client())
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _Client())
 
     assert await ls_utils._resolve_project_id_by_name("open-swe-agent") == "pid"
     assert await ls_utils.resolve_tenant_id() == "tenant-from-project"
@@ -264,6 +264,7 @@ def test_host_url_derived_from_self_hosted_endpoint(monkeypatch: pytest.MonkeyPa
 
 def test_host_url_derived_from_regional_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LANGSMITH_URL_PROD", raising=False)
+    monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
     monkeypatch.setenv("LANGSMITH_ENDPOINT_PROD", "https://eu.api.smith.langchain.com")
 
     assert ls_utils.langsmith_host_url() == "https://eu.smith.langchain.com"
@@ -274,3 +275,42 @@ def test_host_url_default_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
     assert ls_utils.langsmith_host_url() == "https://smith.langchain.com"
+
+
+def test_api_key_prefers_standard_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "standard")
+    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "legacy")
+
+    assert ls_utils.langsmith_api_key() == "standard"
+
+
+def test_api_key_falls_back_to_deprecated_prod_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "legacy")
+
+    assert ls_utils.langsmith_api_key() == "legacy"
+
+
+def test_api_key_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("LANGSMITH_API_KEY", "LANGSMITH_API_KEY_PROD"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert ls_utils.langsmith_api_key() is None
+
+
+def test_api_url_prefers_standard_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://a.example/api")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT_PROD", "https://b.example/api")
+
+    assert ls_utils.langsmith_api_url() == "https://a.example/api"
+
+
+def test_feedback_clients_use_a_single_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "standard")
+    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "legacy")
+    monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
+    monkeypatch.delenv("LANGSMITH_ENDPOINT_PROD", raising=False)
+
+    assert ls_utils._build_langsmith_feedback_clients() == (
+        ("standard", "https://api.smith.langchain.com"),
+    )

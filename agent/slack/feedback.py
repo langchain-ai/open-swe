@@ -1,7 +1,6 @@
 """Slack reaction feedback handling."""
 
 import logging
-import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -9,15 +8,14 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack.client import lookup_slack_run_mapping
+from agent.utils.langgraph_url import langgraph_url
 from agent.utils.langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from agent.utils.reviewer_outcomes import outcome_from_score as _outcome_from_score
 from agent.utils.reviewer_outcomes import upsert_run_outcome
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = langgraph_url()
 
 FEEDBACK_REACTIONS: dict[str, float] = {
     "+1": 1.0,

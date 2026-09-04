@@ -144,6 +144,7 @@ from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
+from agent.utils.langgraph_url import langgraph_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
 from agent.utils.multimodal import (
     dedupe_urls,  # noqa: F401
@@ -376,9 +377,7 @@ DOCS_PLZ_SLACK_GATE_REPLY = (
     "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
 )
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = langgraph_url()
 
 _AGENT_VERSION_METADATA: dict[str, str] = (
     {"LANGSMITH_AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}

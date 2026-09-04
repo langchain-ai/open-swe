@@ -66,14 +66,14 @@ def test_parse_env_handles_quotes_comments_and_export() -> None:
 
 
 def test_render_env_replaces_in_place_and_appends_once() -> None:
-    existing = '# LangSmith\nLANGSMITH_API_KEY_PROD=""\nFOO=bar\n'
-    updates = {"LANGSMITH_API_KEY_PROD": "lsv2-x", "SLACK_BOT_TOKEN": "xoxb-x"}
+    existing = '# LangSmith\nLANGSMITH_API_KEY=""\nFOO=bar\n'
+    updates = {"LANGSMITH_API_KEY": "lsv2-x", "SLACK_BOT_TOKEN": "xoxb-x"}
 
     first = setup_env.render_env(existing, updates)
     second = setup_env.render_env(first, updates)
 
     assert first.splitlines()[0] == "# LangSmith"
-    assert 'LANGSMITH_API_KEY_PROD="lsv2-x"' in first
+    assert 'LANGSMITH_API_KEY="lsv2-x"' in first
     assert "FOO=bar" in first
     assert first.count("SLACK_BOT_TOKEN=") == 1
     assert first.count(setup_env.MARKER) == 1
@@ -154,7 +154,7 @@ def test_collect_answers_gateway_skips_model_key(tmp_path: Path) -> None:
 def test_collect_answers_skips_values_already_present(tmp_path: Path) -> None:
     ask, ask_secret, asked = _scripted({}, {})
     existing = {
-        "LANGSMITH_API_KEY_PROD": "x",
+        "LANGSMITH_API_KEY": "x",
         "ANTHROPIC_API_KEY": "x",
         "GITHUB_APP_CLIENT_ID": "x",
         "GITHUB_APP_PRIVATE_KEY": "x",
@@ -194,7 +194,7 @@ def test_main_non_interactive_writes_secure_file(
     for key in (*setup_env.MINIMUM_KEYS, *setup_env.DASHBOARD_KEYS, *setup_env.GENERATED_KEYS):
         monkeypatch.delenv(key, raising=False)
     values = {
-        "LANGSMITH_API_KEY_PROD": "lsv2-secret",
+        "LANGSMITH_API_KEY": "lsv2-secret",
         "ANTHROPIC_API_KEY": "sk-ant-secret",
         "GITHUB_APP_CLIENT_ID": "Iv1.abc",
         "GITHUB_APP_PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\\nabc\\n-----END RSA PRIVATE KEY-----",

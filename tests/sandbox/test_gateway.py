@@ -267,19 +267,19 @@ def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None
     assert gateway.gateway_overrides("openai:gpt-5.6-sol") is None
 
 
-def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deprecated_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
     overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
     assert overrides["api_key"] == "ls-prod-key"
 
 
-def test_prod_key_preferred_over_platform_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_standard_key_preferred_over_deprecated_prod_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
     monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
     overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
-    assert overrides["api_key"] == "ls-prod-key"
+    assert overrides["api_key"] == "ls-platform-key"
 
 
 def test_gateway_key_preferred_over_prod_key(monkeypatch: pytest.MonkeyPatch) -> None:
