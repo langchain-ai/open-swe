@@ -1,6 +1,5 @@
 """FastAPI application composition."""
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -8,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
+from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.dashboard.plan_api import plan_router
 from agent.dashboard.workflow_approval_api import workflow_approval_router
@@ -39,7 +39,7 @@ def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     allowed_origins = [
         origin.strip()
-        for origin in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",")
+        for origin in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")
         if origin.strip()
     ]
     if "*" in allowed_origins:

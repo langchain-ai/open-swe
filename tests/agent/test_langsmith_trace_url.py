@@ -71,7 +71,7 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
             calls.append(project_name)
             return _FakeProject()
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
     first = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
     second = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
@@ -97,7 +97,7 @@ async def test_resolve_project_id_retries_transient_failure(
             calls.append(project_name)
             raise RuntimeError("403 Forbidden")
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
@@ -115,7 +115,7 @@ async def test_create_thread_feedback_posts_thread_scope(
         ) -> None:
             requests.append((method, endpoint, kwargs))
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
     monkeypatch.setattr(
         ls_utils,
         "_resolve_project_id_by_name",
@@ -164,6 +164,6 @@ async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch)
     def _boom() -> None:
         raise AssertionError("must not build a client when the tenant id is unset")
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", _boom)
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", _boom)
 
     assert await ls_utils.get_langsmith_trace_url("t5") is None

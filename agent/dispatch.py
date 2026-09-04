@@ -26,7 +26,6 @@ busy-check and the custom store-queue) with one function that uses:
 """
 
 import logging
-import os
 import uuid
 from typing import Any
 from urllib.parse import urlparse
@@ -35,6 +34,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
+from agent.config import ENV
 from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -159,8 +159,8 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
 # (completion.verify_run_complete_token). Secret unset, or URL relative/loopback
 # → no webhook attached (the completion reply is best-effort; it must never
 # break run creation).
-_COMPLETION_WEBHOOK_BASE = os.environ.get("COMPLETION_WEBHOOK_URL") or "/webhooks/run-complete"
-_RUN_COMPLETE_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
+_COMPLETION_WEBHOOK_BASE = ENV.COMPLETION_WEBHOOK_URL.optional() or "/webhooks/run-complete"
+_RUN_COMPLETE_SECRET = ENV.RUN_COMPLETE_WEBHOOK_SECRET.optional()
 
 
 def _is_loopback_webhook(url: str) -> bool:
@@ -199,9 +199,7 @@ COMPLETION_WEBHOOK_URL: str | None = _resolve_completion_webhook_url(
 
 
 def _langgraph_url() -> str:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get(
-        "LANGGRAPH_URL_PROD", "http://localhost:2024"
-    )
+    return ENV.LANGGRAPH_URL.get()
 
 
 def dispatch_client() -> LangGraphClient:

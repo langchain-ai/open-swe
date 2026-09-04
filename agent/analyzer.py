@@ -8,16 +8,17 @@ Uses the same sandbox + ``gh`` pattern as the reviewer agent. The dashboard
 user's OAuth token is injected into the LangSmith GitHub proxy so ``gh`` works
 on public repos even when the GitHub App is not installed on them.
 """
-# ruff: noqa: E402
 
+# ruff: noqa: E402
 import logging
-import os
 import warnings
 from typing import Any, cast
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+
+from agent.config import ENV
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -94,7 +95,7 @@ async def _configure_sandbox_github_proxy(
     sandbox_backend: SandboxBackendProtocol,
     github_token: str,
 ) -> None:
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
     await _configure_github_proxy(backend.id, github_token)

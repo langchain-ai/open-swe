@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from stagehand import AsyncStagehand
 
+from agent.config import ENV
+
 _CLIENT: Any = None
 _SESSION: Any = None
 _PROXY: asyncio.Server | None = None
@@ -144,9 +146,9 @@ async def _session(request: dict[str, Any]) -> Any:
         proxy_port = await _proxy()
         _CLIENT = AsyncStagehand(
             server="local",
-            model_api_key=os.environ.get("MODEL_API_KEY", "proxy-injected"),
+            model_api_key=ENV.MODEL_API_KEY.get("proxy-injected"),
             local_headless=request.get("headless", True),
-            local_chrome_path=os.environ.get("STAGEHAND_LOCAL_CHROME_PATH", "/usr/bin/chromium"),
+            local_chrome_path=ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
         )
         _SESSION = await _CLIENT.sessions.start(
             model_name=request["model_name"],
@@ -154,9 +156,7 @@ async def _session(request: dict[str, Any]) -> Any:
                 "type": "local",
                 "launch_options": {
                     "headless": request.get("headless", True),
-                    "executable_path": os.environ.get(
-                        "STAGEHAND_LOCAL_CHROME_PATH", "/usr/bin/chromium"
-                    ),
+                    "executable_path": ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
                     "args": [f"--proxy-server=http://127.0.0.1:{proxy_port}"],
                 },
             },

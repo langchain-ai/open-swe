@@ -21,12 +21,12 @@ whose snapshot is not ready, runs fall back to the configured base snapshot.
 
 import json
 import logging
-import os
 import re
 from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
+from agent.config import ENV
 from agent.review.styles import normalize_repo_full_name
 from agent.store import TypedStore, now_iso
 
@@ -112,7 +112,7 @@ def snapshot_name_prefix() -> str:
     A configured prefix carrying a colon would produce a name the platform
     rejects, so it is dropped rather than passed through.
     """
-    prefix = os.environ.get("ENVIRONMENT_SNAPSHOT_PREFIX", "").strip()
+    prefix = ENV.ENVIRONMENT_SNAPSHOT_PREFIX.get("").strip()
     if ":" in prefix:
         logger.warning(
             "ENVIRONMENT_SNAPSHOT_PREFIX %r contains a colon, which snapshot names "
@@ -508,7 +508,7 @@ def parse_environment_tag(text: str) -> tuple[str | None, str]:
 
 def _require_capture_support() -> None:
     """Only the langsmith provider has a snapshot API to capture into."""
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    sandbox_type = ENV.SANDBOX_TYPE.get()
     if sandbox_type != "langsmith":
         raise RuntimeError(
             f"capturing an environment snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"

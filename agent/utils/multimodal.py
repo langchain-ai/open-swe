@@ -3,7 +3,6 @@
 import base64
 import logging
 import mimetypes
-import os
 import re
 from urllib.parse import urlparse
 
@@ -15,6 +14,7 @@ from langchain_core.messages.content import (
     create_text_block,
 )
 
+from agent.config import ENV
 from agent.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
     if provider is None or _image_provider(current_url) != provider:
         return None
     if provider == "linear":
-        linear_api_key = os.environ.get("LINEAR_API_KEY", "")
+        linear_api_key = ENV.LINEAR_API_KEY.get()
         if linear_api_key:
             return {"Authorization": linear_api_key}
         logger.warning(
@@ -74,7 +74,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
             current_url,
         )
     else:
-        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+        slack_bot_token = ENV.SLACK_BOT_TOKEN.get()
         if slack_bot_token:
             return {"Authorization": f"Bearer {slack_bot_token}"}
         logger.warning(

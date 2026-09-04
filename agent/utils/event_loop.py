@@ -10,6 +10,8 @@ import logging
 import os
 import sys
 
+from agent.config import ENV
+
 logger = logging.getLogger(__name__)
 
 ISOLATED_LOOPS_ENV = "BG_JOB_ISOLATED_LOOPS"
@@ -22,7 +24,7 @@ def pin_single_event_loop() -> None:
     Raises if the setting cannot be forced: running with isolated loops is worse
     than not booting, because it fails later as a permanently unusable thread.
     """
-    requested = os.environ.get(ISOLATED_LOOPS_ENV, "").strip().lower() in _TRUTHY
+    requested = ENV.BG_JOB_ISOLATED_LOOPS.get_bool()
     # Covers the server reading its config after us; importing it here instead
     # would drag in a module that demands DATABASE_URI just to be loaded.
     os.environ[ISOLATED_LOOPS_ENV] = "false"

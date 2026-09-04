@@ -10,11 +10,12 @@ the run-completion webhook — reports it instead of the run going silent.
 
 import asyncio
 import logging
-import os
 from collections.abc import Awaitable, Callable
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+
+from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class ModelCallTimeoutError(TimeoutError):
 
 
 def _configured_timeout_seconds() -> float:
-    raw = os.environ.get("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS")
+    raw = ENV.OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS.optional()
     if not raw:
         return DEFAULT_MODEL_CALL_TIMEOUT_SECONDS
     try:
