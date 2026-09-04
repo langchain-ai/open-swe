@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -945,6 +946,24 @@ async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.Monke
     assert dispatches == ["t1"]
     assert results[0] == {"status": "approved", "run_id": "run-1"}
     assert results[1] == {"status": "approved", "already_approved": True}
+
+
+def test_plan_approval_locks_are_not_retained_when_idle() -> None:
+    import gc
+    import weakref
+
+    from agent.dashboard import plan_api
+
+    plan_api._plan_approval_locks.clear()
+    lock = asyncio.Lock()
+    plan_api._plan_approval_locks["thread-1"] = lock
+    lock_ref = weakref.ref(lock)
+
+    del lock
+    gc.collect()
+
+    assert lock_ref() is None
+    assert "thread-1" not in plan_api._plan_approval_locks
 
 
 async def test_failed_approval_dispatch_rolls_back_and_can_retry(

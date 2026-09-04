@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from typing import Any
+from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
@@ -37,7 +38,7 @@ from agent.slack.client import post_slack_thread_reply
 from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
-_plan_approval_locks: dict[str, asyncio.Lock] = {}
+_plan_approval_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 plan_router = APIRouter(
     prefix="/dashboard/api/plan",
