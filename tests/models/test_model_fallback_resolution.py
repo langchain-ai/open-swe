@@ -27,6 +27,7 @@ from agent.dashboard.team_settings import (
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
 SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
 SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
+SUPPORTED_ASTRA = "openai:gpt-6-astra"
 SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
@@ -48,13 +49,14 @@ def test_provider_fallback_resolves_openai_within_provider() -> None:
     fallback = provider_fallback_pair("openai:gpt-5-legacy", "low")
     assert fallback is not None
     model, effort = fallback
-    assert model == SUPPORTED_OPENAI
+    assert model == SUPPORTED_ASTRA
     assert effort == "low"
 
 
-def test_supported_openai_models_are_the_gpt_5_6_family() -> None:
+def test_supported_openai_models() -> None:
     openai_options = [model for model in SUPPORTED_MODELS if model["id"].startswith("openai:")]
     assert [(model["id"], model["label"]) for model in openai_options] == [
+        ("openai:gpt-6-astra", "GPT-6 Astra"),
         ("openai:gpt-5.6-sol", "GPT-5.6 Sol"),
         ("openai:gpt-5.6-terra", "GPT-5.6 Terra"),
         ("openai:gpt-5.6-luna", "GPT-5.6 Luna"),
@@ -86,7 +88,7 @@ def test_supported_models_do_not_hardcode_context_windows() -> None:
 
 
 def test_model_profile_context_window_uses_codex_override() -> None:
-    assert model_profile_context_window(SUPPORTED_OPENAI) == 272_000
+    assert model_profile_context_window(SUPPORTED_ASTRA) == 1_050_000
 
 
 def test_model_profile_context_window_uses_fireworks_profile_for_kimi_k3() -> None:
@@ -102,6 +104,7 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
     enriched = models_with_profile_context_windows(models)
     assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
+        "openai:gpt-6-astra": 1_050_000,
         "openai:gpt-5.6-sol": 272_000,
         "openai:gpt-5.6-terra": 272_000,
         "openai:gpt-5.6-luna": 272_000,
