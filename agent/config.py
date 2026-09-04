@@ -160,7 +160,7 @@ ENV.var(
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",
-    "LangSmith workspace id used in trace links.",
+    "LangSmith workspace id used in trace links; discovered from the workspace when unset.",
     aliases=("LANGSMITH_TENANT_ID_PROD",),
 )
 ENV.var(
@@ -239,7 +239,14 @@ ENV.var(
 )
 
 # --- GitHub ------------------------------------------------------------------------------
-ENV.var("GITHUB_APP_ID", "Numeric GitHub App id used as the JWT issuer.")
+ENV.var(
+    "GITHUB_APP_ID",
+    "Numeric GitHub App id.",
+    deprecated=(
+        "GITHUB_APP_CLIENT_ID is the GitHub App JWT issuer; GITHUB_APP_ID is only used when "
+        "GITHUB_APP_CLIENT_ID is unset."
+    ),
+)
 ENV.var("GITHUB_APP_CLIENT_ID", "GitHub App client id for the dashboard OAuth flow.")
 ENV.var(
     "GITHUB_APP_CLIENT_SECRET",
@@ -249,7 +256,11 @@ ENV.var(
 ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
-ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
+ENV.var(
+    "GITHUB_APP_INSTALLATION_ID",
+    "GitHub App installation used when a run names none; discovered when the app has a "
+    "single installation.",
+)
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "GITHUB_OAUTH_PROVIDER_ID", "LangSmith OAuth provider id for the legacy brokered GitHub auth."
@@ -272,17 +283,35 @@ ENV.var("PUBLIC_REPO_ORG_GATE", "Single org whose members may trigger runs on pu
 ENV.var(
     "DEFAULT_REPO_OWNER",
     "Default GitHub owner when a run names no repository.",
-    default="langchain-ai",
+    deprecated="set the default repository in Admin → Team settings instead.",
 )
-ENV.var("DEFAULT_REPO_NAME", "Default GitHub repository when a run names none.")
-ENV.var("SLACK_REPO_OWNER", "Slack-specific default repository owner.")
-ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
+ENV.var(
+    "DEFAULT_REPO_NAME",
+    "Default GitHub repository when a run names none.",
+    deprecated="set the default repository in Admin → Team settings instead.",
+)
+ENV.var(
+    "SLACK_REPO_OWNER",
+    "Slack-specific default repository owner.",
+    deprecated="set the default repository in Admin → Team settings instead.",
+)
+ENV.var(
+    "SLACK_REPO_NAME",
+    "Slack-specific default repository name.",
+    deprecated="set the default repository in Admin → Team settings instead.",
+)
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
-ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
-ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention detection.")
+ENV.var(
+    "SLACK_BOT_USER_ID",
+    "Slack user id of the bot, for mention detection; discovered via auth.test when unset.",
+)
+ENV.var(
+    "SLACK_BOT_USERNAME",
+    "Slack handle of the bot, for plain-text mention detection; discovered when unset.",
+)
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
