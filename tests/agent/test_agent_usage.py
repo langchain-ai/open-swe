@@ -103,10 +103,9 @@ async def test_run_completion_is_idempotent(monkeypatch):
     )
     usage = RunUsageSummary(
         models=("claude",),
-        main_agent_tokens=150,
+        total_tokens=150,
         input_tokens=100,
         output_tokens=50,
-        total_tokens=150,
     )
 
     await agent_usage.record_agent_run_completion(run_id="run-1", usage=usage)

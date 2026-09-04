@@ -357,10 +357,12 @@ async def record_agent_run_completion(*, run_id: str, usage: RunUsageSummary | N
             return False
         value = {**existing, "finished_at_ms": _now_ms()}
         if usage is not None:
-            for field in ("input_tokens", "output_tokens", "total_tokens"):
-                amount = getattr(usage, field)
-                if amount is not None:
-                    value[field] = amount
+            counts = {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+            }
+            value.update({field: count for field, count in counts.items() if count is not None})
         await _client().store.put_item(AGENT_RUN_NAMESPACE, key, value)
     return True
 

@@ -475,8 +475,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     parts = [model_text] if model_text else []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
-    elif usage.main_agent_tokens is not None:
-        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
+    elif usage.total_tokens is not None:
+        parts.append(f"{_format_token_count(usage.total_tokens)} main-agent tokens")
     return " • ".join(parts)
 
 
