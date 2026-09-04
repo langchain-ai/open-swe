@@ -38,7 +38,7 @@ ORG_GUIDELINES_MAX_CHARS = 10_000
 REVIEW_TRACING_PROJECT_MAX_CHARS = 256
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
-ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-5"
+ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
 # Titles are a one-shot classification; no extended thinking needed.
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
