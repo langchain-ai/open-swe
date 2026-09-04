@@ -36,6 +36,7 @@ SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
+SLACK_CHANNEL_INFO_CACHE_MAX_ENTRIES = 256
 
 SlackChannelContext = dict[str, str | bool | None]
 _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -1035,8 +1036,16 @@ def _cached_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
 
 
 def _cache_slack_channel_info(channel_id: str, channel: dict[str, Any]) -> None:
+    now = time.time()
+    for cached_id, (expires_at, _cached_channel) in tuple(_SLACK_CHANNEL_INFO_CACHE.items()):
+        if expires_at <= now:
+            _SLACK_CHANNEL_INFO_CACHE.pop(cached_id, None)
+    _SLACK_CHANNEL_INFO_CACHE.pop(channel_id, None)
+    while len(_SLACK_CHANNEL_INFO_CACHE) >= SLACK_CHANNEL_INFO_CACHE_MAX_ENTRIES:
+        oldest_id = next(iter(_SLACK_CHANNEL_INFO_CACHE))
+        _SLACK_CHANNEL_INFO_CACHE.pop(oldest_id, None)
     _SLACK_CHANNEL_INFO_CACHE[channel_id] = (
-        time.time() + SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS,
+        now + SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS,
         dict(channel),
     )
 
