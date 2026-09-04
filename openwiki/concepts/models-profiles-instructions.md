@@ -1,11 +1,11 @@
 ---
-type: concept
+type: configuration concept
 title: Models, Profiles, Team Defaults & Instructions
-description: How the agent resolves which LLM and reasoning effort a run uses (per-thread config over per-user profile over team default), how supported model IDs and effort/gateway/Fable rules are enforced, how models are constructed in agent/utils/model.py, and how per-repo versus per-user custom instructions are layered into a run.
+description: How the agent validates and resolves model and reasoning-effort choices across team settings, profiles, and thread snapshots, then constructs provider-specific chat models. It also describes dashboard option enrichment and the scope and precedence of repository and sender instructions.
 tags: [models, reasoning-effort, profiles, team-defaults, instructions, model-selection, gateway, fable]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-08-27T06:27:22.313Z
+    at: 2026-08-31T08:17:06.525Z
 sources:
   - id: openwiki-source-09b129ff728dd4990ea2f25e
     resource: repo://agent/dashboard/agent_instructions.py
@@ -15,6 +15,8 @@ sources:
     resource: repo://agent/dashboard/options.py
   - id: openwiki-source-d9f679c15adbf4b3f612d406
     resource: repo://agent/dashboard/profiles.py
+  - id: openwiki-source-61ace7d4952db9ddb8316aeb
+    resource: repo://agent/dashboard/routes.py
   - id: openwiki-source-23002b87792ed6949edb723b
     resource: repo://agent/dashboard/team_settings.py
   - id: openwiki-source-dc33a233b67bb1d08952543c
@@ -29,243 +31,215 @@ sources:
     resource: repo://agent/utils/gateway.py
   - id: openwiki-source-56ade344fdbe7d47c84f008f
     resource: repo://agent/utils/model.py
-generated: { by: "openwiki/0.4.2", at: "2026-08-27T06:27:22.313Z" }
+  - id: openwiki-source-bd05fb2fcc2066f4d449df18
+    resource: repo://agent/utils/thread_settings.py
+  - id: openwiki-source-654bec991273a9eb3ccdf2c1
+    resource: repo://tests/dashboard/test_dashboard_thread_api.py
+  - id: openwiki-source-72fb34b832807b302aeea76e
+    resource: repo://tests/models/test_model_fallback_resolution.py
+generated: { by: "openwiki/0.4.2", at: "2026-08-31T08:17:06.525Z" }
 ---
 
 # Models, Profiles, Team Defaults & Instructions
 
-Every agent run must pick a concrete `(model_id, reasoning_effort)` pair and load
-the right custom instructions before it can start. Two independent layered
-systems govern that: a **model/effort resolution chain** (team default → per-user
-profile → per-thread config) and an **instruction layering** system (per-repo
-instructions vs. per-user instructions, both subordinate to `AGENTS.md`). This
-page explains where each layer lives, how they combine, and the provider-specific
-rules that turn an abstract effort into concrete API kwargs.
+A run needs both a constructible `(model_id, effort)` pair and the instructions
+that apply to its repository and current sender. These are separate layered
+systems: model selection is resolved into a thread snapshot, while repository
+instructions are thread-stable and personal instructions are attached per
+message. See [Agent graph](../architecture/agent-graph.md), [Threads and
+state](threads-and-state.md), [Dashboard UI](../integrations/dashboard-ui.md),
+and [Context engineering](../workflows/context-engineering.md) for the adjoining
+runtime, persistence, UI, and prompt concerns.
 
-Related: the run factory that consumes all of this lives in the
-[agent graph / server](../architecture/agent-graph.md); model fallback and
-per-request timeouts are applied through the
-[middleware stack](../architecture/middleware-stack.md); and how instructions and
-sender context are assembled into the prompt is part of
-[context engineering](../workflows/context-engineering.md).
+## Selectable models and validation
 
-## Supported models, efforts, and the options registry
+`agent/dashboard/options.py` is the selectable-model registry. Its
+`SUPPORTED_MODELS` records provide the provider-prefixed id, display label,
+allowed `efforts`, `default_effort`, and `supports_images`; `SUPPORTED_MODEL_IDS`
+is the membership set used by resolvers. Effort is intentionally model-specific:
+for example, Kimi K3 accepts only `low`, `high`, and `max`, while other models
+may accept `none`, `xhigh`, or both. `model_supports_effort` and
+`model_supports_images` check against that record rather than a global effort
+vocabulary.
 
-`agent/dashboard/options.py` is the single registry of what the workspace may
-select. `SUPPORTED_MODELS` is a hand-maintained list of `ModelOption` records —
-each with a provider-prefixed `id` (e.g. `anthropic:claude-opus-5`,
-`openai:gpt-5.6-sol`, `fireworks:accounts/fireworks/models/kimi-k3`), a display
-`label`, the `efforts` it accepts, a `default_effort`, and a `supports_images`
-flag. The efforts list is per-model and non-uniform: some models omit `none`,
-Kimi K3 only accepts `low`/`high`/`max`, and only a subset advertise `xhigh`/`max`.
+The `/options` dashboard endpoint filters Fable choices when disabled, gates its
+returned agent and subagent defaults too, and returns *copies* enriched with a
+`context_window` where it can be determined. Context-window lookup first uses
+Codex overrides for the GPT-5.6 variants, otherwise the LangChain partner
+profile loader, then a small fallback table for models whose profile is absent.
+The static registry itself does not carry those enriched values.
 
-`model_supports_effort` and `model_supports_images` gate every stored selection
-against this registry, and `SUPPORTED_MODEL_IDS` is the frozen set every
-resolution layer checks membership in. The global hardcoded fallback pair is
-`DEFAULT_MODEL_ID` / `DEFAULT_MODEL_EFFORT`, surfaced through
-`default_model_pair()`.
+### Stale and deprecated IDs
 
-### Deprecated ids and same-provider fallback
+There are two materially different stale-selection paths:
 
-Stored selections (profiles, team defaults, per-thread config, schedules) are not
-discarded when a model id disappears. `DEPRECATED_MODEL_REPLACEMENTS` maps retired
-ids onto their replacement, and `canonical_model_pair` applies that mapping,
-preserving effort when the replacement supports it. For ids that merely dropped
-out of the supported set (e.g. an Opus minor-version bump), `provider_fallback_pair`
-keeps the selection on the same provider and, where possible, the same Claude
-family, rather than silently falling through to the cross-provider global default.
+* An **unsupported but non-deprecated** provider-prefixed id can use
+  `provider_fallback_pair`. It selects the first supported option on the same
+  provider, preferring the matching Claude family when available, preserves a
+  compatible effort (including Gemini's `none` to `minimal` accommodation), and
+  otherwise uses that option's default effort. An unknown provider has no such
+  fallback.
+* An ID in `DEPRECATED_MODEL_IDS` is deliberately not selectable and is excluded
+  from provider fallback. Profile response normalization removes its pair; team
+  settings normalize it to an unset pair; resolution therefore defers to the
+  applicable team or global default.
 
-## Model/effort resolution precedence
+`DEPRECATED_MODEL_REPLACEMENTS` currently has empty replacement values and
+`canonical_model_pair()` currently always returns `None`. Callers may invoke
+that helper, but it **does not canonicalize or replace deprecated IDs**. Do not
+add a claim that a deprecated id is automatically migrated unless the helper
+and its callers are changed together.
 
-The authoritative resolution happens in the run factory in `agent/server.py`. It
-starts from the team default and overrides upward, so the **later** a layer sits
-in the chain, the higher its priority:
+`default_model_pair()` is the final hardcoded fallback: it returns
+`DEFAULT_MODEL_ID` / `DEFAULT_MODEL_EFFORT` when that pair remains valid, or the
+first registry option and its default effort if not. Team resolvers use a valid
+configured pair first, then the same-provider fallback, then this global pair;
+this protects runs from stale store values.
 
-1. **Team default** — `get_team_default_model("agent")` seeds `(model_id, effort)`
-   for the main model and its subagent.
-2. **Per-user profile override** — if a triggering `github_login` resolves to a
-   profile with a valid `(default_model, reasoning_effort)`, it replaces the team
-   default (and by default drives the subagent too, unless the profile sets its
-   own subagent pair).
-3. **Stored thread settings** — a thread that already has a `model_id` reuses it.
-4. **Per-thread run config** — an explicit `configurable.agent_model_id` /
-   `agent_effort` is the one thing allowed to move a thread off its stored
-   settings; the new choice is then persisted back onto the thread.
+## Resolution, snapshotting, and dashboard choice
 
-`agent_overrides.resolve_agent_model_id` documents and implements the same order
-(`per-thread → profile → team default`) for callers that only need the model id,
-and the dashboard's `thread_api._resolve_agent_model_choice` applies the identical
-chain for interactive selection.
+For a new hosted agent thread, `get_agent` starts with the team main and
+subagent defaults. A valid sender profile can replace the main pair and, unless
+there is an explicit profile subagent pair, replaces the subagent pair as well.
+It then stores the resulting settings on the thread. Once a thread has a stored
+`model_id`, later runs use that snapshot rather than reapplying the current
+sender's profile; sender identity, personal instructions, and PR preferences
+remain per-message. A valid explicit `configurable.agent_model_id` plus
+`agent_effort` is the intentional exception: it replaces the main and subagent
+choice and the revised snapshot is persisted. Thread settings also cache the
+repository instructions; reads and writes are fail-soft, so an unreadable
+snapshot behaves as absent and a failed write does not abort the run.
 
-<!-- openwiki: mermaid parse failed and this diagram was converted to a text fence so it does not break rendering. Fix the diagram source and restore the mermaid fence. Parser error: Heuristic: an unescaped angle bracket inside a label breaks rendering; rephrase the label. -->
-```text
+```mermaid
 flowchart TD
-  T["Team default<br/>get_team_default_model(agent)"] --> P{"Profile override<br/>valid and present?"}
-  P -- yes --> PU["Use profile<br/>default_model/reasoning_effort"]
-  P -- no --> TU["Keep team default"]
-  PU --> S{"Stored thread<br/>model_id set?"}
-  TU --> S
-  S -- yes --> SU["Use stored thread settings"]
-  S -- no --> SK["Keep resolved so far"]
-  SU --> C{"Explicit per-thread<br/>agent_model_id valid?"}
-  SK --> C
-  C -- yes --> CU["Use per-thread choice<br/>then persist to thread"]
-  C -- no --> CK["Keep resolved so far"]
-  CU --> G["gate_fable_model"]
-  CK --> G
-  G --> M["provider_model_kwargs + make_model"]
+  Team["Team main and subagent defaults"] --> Profile{"New snapshot and valid profile"}
+  Profile -- "yes" --> ProfilePair["Apply profile pair and optional subagent pair"]
+  Profile -- "no" --> Defaults["Keep team pairs"]
+  ProfilePair --> Stored{"Stored thread model exists"}
+  Defaults --> Stored
+  Stored -- "yes" --> Snapshot["Use stored thread settings"]
+  Stored -- "no" --> Resolved["Use resolved defaults"]
+  Snapshot --> Explicit{"Valid explicit run pair"}
+  Resolved --> Explicit
+  Explicit -- "yes" --> Override["Replace pair and persist snapshot"]
+  Explicit -- "no" --> Persist["Persist initial resolved snapshot"]
+  Override --> Fable["Apply Fable gate"]
+  Persist --> Fable
+  Fable --> Build["Build provider model"]
 ```
 
-Resolution precedence: each lower-priority source is overridden by a valid
-higher-priority one before the Fable gate and model construction.
+*Caption: hosted-agent model resolution freezes a first-run choice into thread settings; a valid explicit run pair is the route that rewrites it.*
 
-Every layer that produces a default runs its candidate through
-`_resolve_default_pair`: use the pair if it is supported, else the same-provider
-fallback, else the global default. This is why the factory always ends with a
-valid, constructible pair even when the store is stale or a selection is unknown.
+The compact `resolve_agent_model_id` helper follows per-thread input, then
+profile, then team default for callers that only need an id. The dashboard's
+`_resolve_agent_model_choice` starts at the team agent default, applies a valid
+profile choice, then a valid request pair. A deprecated request suppresses those
+overrides and leaves the team default. Before accepting image input, the
+dashboard checks the resolved model's image capability; for a newly enriched
+run with images it substitutes `default_vision_model_pair()` when the selected
+model is text-only. Direct message-content validation otherwise rejects images
+for a text-only or missing model with HTTP 422.
 
-### Where each layer's state lives
+## Team settings and profiles
 
-- **Team defaults** live in a single LangGraph Store record keyed `"default"` in
-  the `["team_settings"]` namespace (`agent/dashboard/team_settings.py`).
-  `get_team_settings` merges the stored record over hardcoded defaults and is
-  deliberately fail-soft: an unreachable store degrades to defaults rather than
-  failing every run. Distinct roles resolve independently —
-  `get_team_default_model` handles `agent`/`reviewer`/`chat` (with `chat`
-  inheriting the agent default when unset), and there are dedicated resolvers for
-  the diff-grouping pass and the thread-title model.
-- **Per-user profiles** live in the `["profiles"]` namespace
-  (`agent/dashboard/profiles.py`). Profiles hold `default_model`,
-  `reasoning_effort`, an optional subagent pair, and non-model preferences such as
-  `default_repo` and `draft_prs`. `agent_overrides.load_profile` reads them
-  fail-soft on the run-start path (a store blip costs the run its per-user
-  overrides, not the run itself), while dashboard reads use
-  `profiles.get_profile` so failures surface.
-- **Per-thread config** arrives on the run's `configurable` and is persisted into
-  the thread's stored settings by the factory.
+Team settings are one LangGraph Store record, key `"default"`, in
+`["team_settings"]`. `get_team_settings` overlays non-`None` stored values on
+hardcoded defaults and fails soft to those defaults if the store cannot be
+read. The team exposes separate defaults for agent, reviewer, and review chat;
+chat inherits the agent setting when its own pair is absent or invalid.
+Grouping similarly inherits the reviewer subagent pair, while thread-title
+resolution has its own configured default.
 
-Profile writes are split from OAuth token writes on purpose: user-editable
-settings live in `["profiles"]` and the encrypted GitHub token lives in
-`["oauth_tokens"]`, so a profile save and a concurrent login/refresh cannot
-clobber each other's fields.
+The `TeamSettingsUpdate` and `ProfileUpdate` models validate model/effort pairs
+on writes. Non-deprecated stale profile ids may be normalized to a same-provider
+choice during an update; deprecated values are cleared for responses and do not
+receive a canonical replacement. When Fable is disabled, team-settings
+validation also rewrites any submitted Fable defaults to a safe non-Fable
+fallback so the stored record does not advertise a disabled model.
 
-## Reasoning effort → provider kwargs
+Profiles live in `["profiles"]` and include the main and optional subagent pair,
+default repository and branch preferences, CI and draft-review preferences, and
+other user-editable settings. OAuth credentials deliberately live separately in
+`["oauth_tokens"]`; profile writes and encrypted-token refreshes consequently do
+not overwrite each other. The run-start `load_profile` path logs and returns
+`None` on store failure, sacrificing a per-user override rather than the run.
+Dashboard profile reads use `get_profile`, so storage failures surface instead.
 
-An effort string is abstract; each provider expresses reasoning differently.
-`agent/utils/model.py` translates a resolved effort into provider-specific kwargs
-via `provider_model_kwargs`, which dispatches on the model id's provider prefix:
+## Construction, gateway, and fallback
 
-- **OpenAI** (`openai:`) → `openai_reasoning_for` returns a `reasoning` dict.
-  Every non-`none` effort requests `summary: "auto"` so the Responses API emits
-  visible reasoning text; `effort: "none"` disables reasoning and attaches no
-  summary.
-- **Anthropic** (`anthropic:`) → `anthropic_thinking_for` sets
-  `{type: "adaptive", display: "summarized"}` (so summarized thinking is returned
-  rather than the default omitted display), and `anthropic_effort_for` passes the
-  effort through when it is one of `low/medium/high/xhigh/max`.
-- **Google Gemini 3+** (`google_genai:` and `is_gemini_3_family`) →
-  `google_thinking_level_for` maps effort onto `thinking_level`
-  (`minimal/low/medium/high`, collapsing `high/xhigh/max` to `high`).
-- **Fireworks** (`fireworks:`) → `fireworks_reasoning_effort_for` sets
-  `model_kwargs.reasoning_effort`; the per-model `efforts` lists in `options.py`
-  gate which values can reach it.
-- **Baseten** (`baseten:`) → passes `reasoning_effort` through for
-  `low/high/max`.
+`provider_model_kwargs` converts resolved effort into provider-specific
+arguments: OpenAI receives `reasoning` (with `summary: "auto"` except for
+`none`), Anthropic receives adaptive summarized `thinking` plus supported
+`effort`, Gemini 3 receives `thinking_level`, Fireworks receives
+`model_kwargs.reasoning_effort`, and Baseten accepts `reasoning_effort` for
+`low`, `high`, or `max`.
 
-## Model construction: `make_model`
+`make_model` supplies a default of six retries and a 600-second request timeout
+for each shipped provider prefix, then constructs through `init_chat_model`. It
+uses OpenAI's Responses API with `store=False`, `output_version="responses/v1"`,
+and `reasoning.encrypted_content`; when direct OpenAI has no API key but desktop
+OAuth is available, it builds the desktop OAuth model instead. Baseten is passed
+to the OpenAI-compatible integration and, without the gateway, requires
+`BASETEN_API_KEY` and its service base URL. Constructed models are cached by
+model id, gateway argument, max tokens, frozen kwargs, and event-loop identity;
+`close_cached_models` clears and closes them.
 
-`make_model(model_id, use_gateway=..., **ModelKwargs)` builds the actual chat
-model via LangChain's `init_chat_model`, applying provider-specific wiring:
+Gateway selection is tri-state: an explicit team `gateway_enabled` boolean wins,
+and `None` inherits `LANGSMITH_GATEWAY_ENABLED`. If routing can be applied,
+`gateway_overrides` provides gateway URL, LangSmith key, and OpenAI Responses
+API choice. An unroutable provider or absent gateway key is logged and falls
+back to direct-provider configuration rather than failing merely because the
+gateway was requested.
 
-- **Retries and timeout.** A default `max_retries` of `6` is applied (higher than
-  the Anthropic SDK default so a 529 burst gets a fair chance before fallback),
-  and a per-request `timeout` of `600s` is set for the known provider prefixes so
-  a stalled connection becomes a retry instead of a wedged run.
-- **OpenAI Responses API.** OpenAI models are configured to use the Responses API
-  with `store: false`, `output_version: "responses/v1"`, and
-  `include: ["reasoning.encrypted_content"]`. Desktop OpenAI OAuth is used when no
-  `OPENAI_API_KEY` is set and the gateway is not applied.
-- **Baseten.** Routed as an OpenAI-compatible provider; when the gateway is off it
-  requires `BASETEN_API_KEY` and points at the Baseten base URL.
-- **Context-window overrides.** `model_profile_with_context_override` injects a
-  `profile` with the Codex context-window overrides (e.g. 272k for GPT-5.6
-  variants) so LangChain's bundled models.dev profile does not undercount.
-- **Caching.** Constructed models are cached keyed on `(model_id, use_gateway,
-  max_tokens, frozen kwargs, event-loop id)`; `close_cached_models` tears them
-  down.
+This operational fallback is different from stale-id recovery. The factory
+installs `ModelFallbackMiddleware` using `LLM_FALLBACK_MODEL_ID` when set, else
+`fallback_model_id_for`: Anthropic and OpenAI primary models cross-fallback to
+each other, while Google, local, and self-hosted prefixes receive no automatic
+cross-provider fallback.
 
-### Gateway routing
+Fable models are workspace-gated. `gate_fable_model` turns a resolved Fable id
+into the non-Fable Anthropic fallback when `fable_enabled` is false while
+preserving a supported effort. The factory gates its main, subagent, and title
+models after snapshot resolution; the dashboard resolver and `/options` output
+also gate choices, preventing disabled Fable from being offered or constructed.
 
-Whether a model is routed through the LangSmith LLM Gateway is a tri-state:
-`resolve_gateway_enabled` treats a team `gateway_enabled` of `True`/`False` as
-authoritative and `None` as inheriting the `LANGSMITH_GATEWAY_ENABLED` deployment
-default (`gateway_env_default`). When enabled, `gateway_overrides` supplies
-`base_url`/`api_key`/`use_responses_api` that override the direct-provider
-defaults. `make_model` resolves the deployment default itself when `use_gateway`
-is `None`; async callers pass the team-resolved value.
+## Instruction stores and authority
 
-### Cross-provider fallback
+Repository custom instructions are records in `["agent_instructions"]`, keyed by
+`owner/name`. At the first hosted run the factory resolves the effective default
+repository, reads its instruction text, and puts that text in the thread
+snapshot. `construct_system_prompt` renders it as **Repository-specific Custom
+Instructions**, so it stays shared across the thread. The lookup is fail-soft;
+an unavailable instruction store produces no repository custom section.
 
-`fallback_model_id_for` returns a **cross-provider** fallback for the primary:
-Anthropic primaries fall back to OpenAI and vice versa, and it returns `None` for
-providers (Google, local, self-hosted) that should not be silently re-routed off
-their host. The factory wires this into `ModelFallbackMiddleware` (see the
-[middleware stack](../architecture/middleware-stack.md)), honoring an
-`LLM_FALLBACK_MODEL_ID` env override first.
+Personal instructions are independent `["user_instructions"]` records keyed by
+GitHub login and limited to 20,000 characters. The dashboard can edit them and
+the agent can use `save_user_instructions`, so separating them from the profile
+avoids conflicting writers. During preparation, the factory loads the triggering
+user's current text and `construct_sender_context` renders it in a trusted
+sender-context message. It applies only to that sender's current turn, not to
+other participants or future messages.
 
-## Fable (ZDR) gating
+Instruction conflict authority is explicit in the rendered prompt:
 
-`anthropic:claude-fable-*` models are gated by a workspace-wide `fable_enabled`
-team toggle. `gate_fable_model` swaps a resolved Fable id for a safe non-Fable
-Anthropic model (via `fable_disabled_fallback`) whenever Fable is disabled but a
-Fable id reached the point of construction. This gate is applied at **every**
-model-construction entrypoint — the run factory applies it to the main, subagent,
-and title models after all precedence resolution, and the dashboard applies it in
-`_resolve_agent_model_choice` — so a disabled Fable model can never reach
-`make_model` regardless of which layer selected it.
+1. Repository `AGENTS.md`, if present, overrides prompt defaults.
+2. Repository-specific custom instructions are mandatory but yield to
+   `AGENTS.md`.
+3. Sender-level personal instructions yield to both repository custom
+   instructions and `AGENTS.md`.
 
-## Two instruction stores
+Thus the relevant order is `AGENTS.md > repository custom instructions >
+user-level instructions`; environment instructions are below the repository
+custom layer as well.
 
-Custom instructions come from two independent stores that attach to a run at
-different points, giving them different scope and lifetime.
+## Focused regression coverage
 
-### Per-repo instructions (system prompt)
-
-`agent/dashboard/agent_instructions.py` stores admin-authored, per-repository
-instructions in the `["agent_instructions"]` namespace, keyed by `owner/name`.
-For a run, the factory resolves the effective repo and loads
-`get_repo_agent_instructions`, storing the text as the thread's
-`repo_instructions`. It is rendered into the **system prompt** via
-`_render_repo_instructions_section` (`agent/prompt.py`) as "Repository-specific
-Custom Instructions" with the same authority as the system prompt. Because it is
-part of the system prompt, it applies to the whole thread, not a single turn.
-
-### Per-user instructions (sender message)
-
-`agent/dashboard/user_instructions.py` stores per-user instructions in the
-`["user_instructions"]` namespace, keyed by GitHub login (capped at
-`MAX_USER_INSTRUCTIONS_CHARS = 20_000`). These can be edited in the dashboard
-Profile tab **or** written by the agent itself via the `save_user_instructions`
-tool, which is why they live in their own namespace rather than on the profile
-record — so agent-written updates and dashboard saves cannot clobber each other.
-They are attached to the **triggering user's message** through
-`construct_sender_context` and rendered by `_render_user_instructions_section` as
-"Sender's Custom Instructions (user-level)", explicitly scoped to *only this
-turn*.
-
-### Conflict rule
-
-The layering has a strict precedence for conflicts, stated in the prompt text
-itself:
-
-- `AGENTS.md` (read from the repo at runtime) is the highest authority; the system
-  prompt tells the agent its contents override defaults with the same authority as
-  the prompt.
-- **Repository-specific custom instructions** are mandatory but yield to
-  `AGENTS.md` on conflict.
-- **User-level (sender) instructions** yield to *both* repository instructions and
-  `AGENTS.md` on conflict, and apply only to the current turn.
-
-So the effective ordering is `AGENTS.md > repo custom instructions > user-level
-instructions`. Repo instructions ride in the shared system prompt; user
-instructions ride with the sender's message and are per-turn and per-user.
+`tests/models/test_model_fallback_resolution.py` covers non-deprecated
+same-provider fallback, effort preservation/defaulting, deprecated-id deferral,
+profile/team behavior, context-window enrichment, and Fable gating.
+`tests/models/test_agent_subagent_models.py` verifies profile inheritance and
+explicit subagent overrides through the factory. Dashboard thread tests cover
+profile/request precedence, deprecated request behavior, image capability
+rejection, and vision fallback. When changing the registry or a normalization
+path, update these cases before adding a new provider or changing a model's
+effort list.

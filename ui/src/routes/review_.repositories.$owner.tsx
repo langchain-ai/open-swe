@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 
 import { AppShell } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
@@ -51,17 +52,25 @@ function RepositoriesOwnerPage() {
     [autoReview.data?.repos]
   )
 
-  const [pagePosition, setPagePosition] = useState({ owner, page: 0 })
-  const page = pagePosition.owner === owner ? pagePosition.page : 0
+  const [searchPosition, setSearchPosition] = useState({ owner, search: "" })
+  const search = searchPosition.owner === owner ? searchPosition.search : ""
+  const query = search.trim().toLowerCase()
+  const filteredRepos = query
+    ? ownerRepos.filter((r) => r.full_name.toLowerCase().includes(query))
+    : ownerRepos
+
+  const pageKey = `${owner}:${query}`
+  const [pagePosition, setPagePosition] = useState({ key: pageKey, page: 0 })
+  const page = pagePosition.key === pageKey ? pagePosition.page : 0
   const setPage = (next: (current: number) => number) => {
-    setPagePosition({ owner, page: next(page) })
+    setPagePosition({ key: pageKey, page: next(page) })
   }
 
-  const totalPages = Math.max(1, Math.ceil(ownerRepos.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(filteredRepos.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages - 1)
   const pageStart = safePage * PAGE_SIZE
-  const pageEnd = Math.min(pageStart + PAGE_SIZE, ownerRepos.length)
-  const pageRepos = ownerRepos.slice(pageStart, pageEnd)
+  const pageEnd = Math.min(pageStart + PAGE_SIZE, filteredRepos.length)
+  const pageRepos = filteredRepos.slice(pageStart, pageEnd)
 
   if (session.isLoading) {
     return (
@@ -98,15 +107,26 @@ function RepositoriesOwnerPage() {
             {autoReviewCount}/{ownerRepos.length} run automatically
           </span>
         </div>
+        <Input
+          type="search"
+          value={search}
+          onChange={(event) =>
+            setSearchPosition({ owner, search: event.target.value })
+          }
+          placeholder="Search repositories…"
+          aria-label="Search repositories"
+        />
         <div className="rounded-lg border border-border bg-card">
           {loading && (
             <div className="p-4">
               <Skeleton className="h-32 w-full" />
             </div>
           )}
-          {!loading && ownerRepos.length === 0 && (
+          {!loading && filteredRepos.length === 0 && (
             <p className="px-4 py-3 text-xs text-muted-foreground">
-              No repositories found for this installation.
+              {ownerRepos.length === 0
+                ? "No repositories found for this installation."
+                : "No repositories match your search."}
             </p>
           )}
           <ul className="divide-y divide-border">
@@ -159,10 +179,10 @@ function RepositoriesOwnerPage() {
               )
             })}
           </ul>
-          {ownerRepos.length > PAGE_SIZE && (
+          {filteredRepos.length > PAGE_SIZE && (
             <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
               <span className="text-muted-foreground">
-                Showing {pageStart + 1}-{pageEnd} of {ownerRepos.length}
+                Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
               </span>
               <div className="flex items-center gap-2">
                 <Button

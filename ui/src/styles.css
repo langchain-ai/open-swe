@@ -4,6 +4,7 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/ibm-plex-sans";
 @import "./styles/agents.css";
+@import "./styles/markdown.css";
 @source "../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
@@ -120,8 +121,6 @@
     /* Height of the right panel's tab bar; the empty-state launcher offsets by
        it so its cards center against the whole panel. */
     --workspace-topbar-height: 2.25rem;
-    --glass-blur: 12px;
-    --glass-opacity: 80%;
     --chart-1: oklch(0.872 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.45 0 0);
@@ -169,7 +168,6 @@
     --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 16%);
     --ring: oklch(0.556 0 0);
-    --glass-blur: 16px;
     --chart-1: oklch(0.872 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.45 0 0);
@@ -191,18 +189,11 @@
 
 @layer utilities {
   /*
-   * Elevated glass needs a denser tint than broad ambient surfaces. Nesting the
-   * opacity mix inside an 18% popover tint keeps high-contrast page content
-   * from blooming through menus.
+   * Menus are opaque: blurring a translucent tint still let high-contrast page
+   * content bleed through and made stacked panes (model picker submenu) unreadable.
    */
   .dropdown-glass {
-    background: color-mix(
-      in srgb,
-      var(--popover) 18%,
-      color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
-    );
-    -webkit-backdrop-filter: blur(var(--glass-blur));
-    backdrop-filter: blur(var(--glass-blur));
+    background: var(--popover);
     border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
     box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
   }

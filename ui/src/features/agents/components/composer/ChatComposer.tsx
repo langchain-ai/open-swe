@@ -22,6 +22,7 @@ import { EnvironmentSelector } from "./EnvironmentSelector"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
+  LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
 import {
@@ -37,7 +38,11 @@ import type {
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
-import type { DesktopProject } from "@/desktop"
+import type {
+  DesktopProject,
+  DesktopProjectRef,
+  DesktopWorkspaceMode,
+} from "@/desktop"
 import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -109,13 +114,15 @@ export interface ChatComposerProps {
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
   selectedLocalProjectBranch?: string | null
-  localProjectBranches?: Array<string>
+  localProjectBranches?: Array<DesktopProjectRef>
+  localWorkspaceMode?: DesktopWorkspaceMode
+  localWorktreeLabel?: string
+  onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
   onRefreshLocalProjectBranch?: () => void
   onSelectLocalProjectBranch?: (branch: string) => void
-  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -233,12 +240,14 @@ export const ChatComposer = memo(function ChatComposer({
   selectedLocalProjectPath = null,
   selectedLocalProjectBranch = null,
   localProjectBranches = [],
+  localWorkspaceMode = "local",
+  localWorktreeLabel,
+  onLocalWorkspaceModeChange,
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
   onRefreshLocalProjectBranch,
   onSelectLocalProjectBranch,
-  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -280,6 +289,14 @@ export const ChatComposer = memo(function ChatComposer({
         shortcuts: ["shift+enter"],
         group: "Composer",
         showInPalette: false,
+      },
+      {
+        id: "open-model-picker",
+        label: "Choose model",
+        aliases: ["model picker", "change model", "reasoning effort"],
+        shortcuts: ["mod+shift+m"],
+        group: "Composer",
+        run: () => setModelPickerOpen(true),
       },
       ...(activeRun?.running
         ? [
@@ -675,7 +692,10 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       )}
 
-      {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
+      {(onRepoChange ||
+        onRunTargetChange ||
+        onEnvironmentChange ||
+        onSelectLocalProjectBranch) && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
@@ -686,6 +706,7 @@ export const ChatComposer = memo(function ChatComposer({
               repos={repos}
               searchPlaceholder="Search projects…"
               selectedRepo={selectedRepo}
+              side="top"
             />
           )}
           {runTarget === "local" &&
@@ -698,6 +719,7 @@ export const ChatComposer = memo(function ChatComposer({
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
+                side="top"
               />
             )}
           {runTarget && onRunTargetChange && (
@@ -712,17 +734,22 @@ export const ChatComposer = memo(function ChatComposer({
           )}
           {runTarget === "local" &&
             onRefreshLocalProjectBranch &&
-            onSelectLocalProjectBranch &&
-            onCreateLocalProjectBranch && (
+            onSelectLocalProjectBranch && (
               <LocalBranchSelector
-                branches={localProjectBranches}
+                refs={localProjectBranches}
                 disabled={!selectedLocalProjectPath}
-                onCreateBranch={onCreateLocalProjectBranch}
                 onRefresh={onRefreshLocalProjectBranch}
                 onSelectBranch={onSelectLocalProjectBranch}
                 selectedBranch={selectedLocalProjectBranch}
               />
             )}
+          {runTarget === "local" && onSelectLocalProjectBranch && (
+            <LocalWorkspaceSelector
+              onChange={onLocalWorkspaceModeChange}
+              value={localWorkspaceMode}
+              worktreeLabel={localWorktreeLabel}
+            />
+          )}
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   CircleNotchIcon,
+  DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
@@ -16,7 +17,13 @@ import {
 import { Kanban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
+import type {
+  PullRequestSnapshot,
+  SidebarProject,
+} from "@/features/agents/lib/api"
+import type { AgentThread } from "@/features/agents/lib/types"
 import type {
   SidebarProjectGroup,
   SidebarThreadItem,
@@ -61,7 +68,11 @@ import {
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
-  useSidebarThreads,
+  useSidebarActiveThread,
+  useSidebarPinnedThreads,
+  useSidebarProjects,
+  useSidebarProjectThreads,
+  useSidebarRecents,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
@@ -73,10 +84,10 @@ import {
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
   applyProjectKeyAliases,
-  cloudProjectKeysByLabel,
   cloudSidebarThread,
   groupSidebarThreadsByProject,
   localSidebarThread,
+  sidebarProjectKey,
   sidebarProjectOptions,
   sortSidebarThreads,
 } from "@/features/agents/lib/sidebarThreads"
@@ -96,8 +107,19 @@ interface AgentsSidebarProps {
   layout: SidebarLayout
 }
 
+interface HydratedProjectGroup extends SidebarProjectGroup {
+  repoFullName: string | null
+  updatedAt: number
+  activeThread?: AgentThread
+}
+
 const NAV = [
-  { to: "/agents/threads", label: "Kanban", icon: Kanban },
+  {
+    to: "/agents/threads",
+    label: "Kanban",
+    icon: Kanban,
+    badge: "Experimental",
+  },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
@@ -105,6 +127,22 @@ const NAV = [
 
 /** Threads shown per project before the group needs a "Show more". */
 const PROJECT_PREVIEW_COUNT = 5
+
+function cloudProjectAliases(
+  projects: ReadonlyArray<SidebarProject>
+): Map<string, string> {
+  const keys = new Map<string, Array<string>>()
+  for (const project of projects) {
+    const label = project.name.trim().toLowerCase()
+    const key = sidebarProjectKey(project.repoFullName)
+    if (label && key) keys.set(label, [...(keys.get(label) ?? []), key])
+  }
+  return new Map(
+    [...keys].flatMap(([label, values]) =>
+      values.length === 1 ? [[label, values[0] as string]] : []
+    )
+  )
+}
 
 /**
  * Tracks whether the scroll container has content hidden above or below, so
@@ -173,13 +211,30 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const sidebar = useSidebarThreads({
-    activeThreadId,
-    includeAutomations:
-      prefs.filters.includeAutomations ||
-      prefs.filters.sources.includes("schedule"),
+  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
+    status: "idle",
+  })
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    if (!desktop) return
+    void desktop.getUpdateState().then(setUpdateState)
+    return desktop.onUpdateState(setUpdateState)
+  }, [])
+  const projectMode = prefs.organize === "project"
+  const includeAutomations =
+    prefs.filters.includeAutomations ||
+    prefs.filters.sources.includes("schedule")
+  const pinnedQuery = useSidebarPinnedThreads({ enabled: !localOnly })
+  const recentsQuery = useSidebarRecents({
+    projectMode,
+    includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly,
+  })
+  const projectsQuery = useSidebarProjects({
+    includeAutomations,
+    includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly && projectMode,
   })
   const localThreads = useDesktopLocalThreads({ enabled: isDesktop })
   const localSessions = localThreads.data ?? []
@@ -192,20 +247,44 @@ export function AgentsSidebar({
     addProject: addLocalProject,
     removeProject: removeLocalProject,
   } = useDesktopProjects()
+  const projectCommands = useMemo(
+    () =>
+      isDesktop
+        ? [
+            {
+              id: "add-project",
+              label: "Add project",
+              aliases: ["open folder", "add folder", "repository", "repo"],
+              group: "Workspace",
+              run: async () => {
+                await addLocalProject()
+              },
+            },
+          ]
+        : [],
+    [addLocalProject, isDesktop]
+  )
+  useRegisterAppCommands(projectCommands)
 
-  const pinnedThreads = sidebar.data.pinned ?? []
+  const pinnedThreads = pinnedQuery.data ?? []
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
-  const activeThreads = sidebar.data.active.items.filter(
+  const pageThreads = recentsQuery.items.filter(
     (thread) => !cloudPinnedIds.has(thread.id)
   )
-  const resolvedThreads = sidebar.data.resolved.items.filter(
-    (thread) => !cloudPinnedIds.has(thread.id)
+  const activeThread = useSidebarActiveThread({
+    activeThreadId,
+    loadedThreads: [...pinnedThreads, ...pageThreads],
+    includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly,
+  })
+  const activeInProject = Boolean(
+    projectMode && activeThread?.repoFullName.trim()
   )
-  const visibleThreads = [
-    ...pinnedThreads,
-    ...activeThreads,
-    ...resolvedThreads,
+  const recentThreads = [
+    ...(activeThread && !activeInProject ? [activeThread] : []),
+    ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
   ]
+  const visibleThreads = [...pinnedThreads, ...recentThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
@@ -227,49 +306,95 @@ export function AgentsSidebar({
     // Cloud threads are omitted server-side unless includeResolved; local
     // archiving is client-side, so it has to honour the same switch here.
     .filter((item) => prefs.filters.includeResolved || !item.resolved)
-  const cloudItems = [
-    ...pinnedThreads.map(cloudSidebarThread),
-    ...activeThreads.map(cloudSidebarThread),
-    ...resolvedThreads.map(cloudSidebarThread),
-  ]
   // Fold a local checkout into the cloud project of the same name so the repo
   // renders as one folder; project keys are otherwise full identities.
-  const aliases = cloudProjectKeysByLabel(cloudItems)
+  const serverProjects = projectsQuery.data ?? []
+  const activeProject = activeThread?.repoFullName.trim()
+    ? {
+        repoFullName: activeThread.repoFullName,
+        name: activeThread.repo,
+        updatedAt: activeThread.updatedAt,
+      }
+    : undefined
+  const cloudProjects =
+    activeProject &&
+    !serverProjects.some(
+      (project) =>
+        project.repoFullName.toLowerCase() ===
+        activeProject.repoFullName.toLowerCase()
+    )
+      ? [activeProject, ...serverProjects]
+      : serverProjects
+  const aliases = cloudProjectAliases(cloudProjects)
   const alignedLocalItems = applyProjectKeyAliases(localItems, aliases)
   const pinnedItems = [
     ...pinnedThreads.map(cloudSidebarThread),
     ...alignedLocalItems.filter((item) => localPinnedIds.has(item.id)),
   ]
   const threadItems: Array<SidebarThreadItem> = [
-    ...activeThreads.map(cloudSidebarThread),
-    ...resolvedThreads.map(cloudSidebarThread),
-    ...alignedLocalItems.filter((item) => !localPinnedIds.has(item.id)),
+    ...recentThreads.map(cloudSidebarThread),
+    ...(projectMode
+      ? []
+      : alignedLocalItems.filter((item) => !localPinnedIds.has(item.id))),
   ]
   const allItems = [...pinnedItems, ...threadItems]
-  const projects = sidebarProjectOptions(allItems, localProjects)
   const filteredPinnedItems = sortSidebarThreads(
     filterThreads(pinnedItems, prefs.filters),
     prefs.sortPinned
   )
-  const filteredThreadItems = filterThreads(threadItems, prefs.filters)
-  // "In one list" drops the per-project buckets and pours everything into
-  // Recents, so the Projects section disappears along with its groups.
-  const grouped =
-    prefs.organize === "list"
-      ? {
-          projects: [],
-          recents: sortSidebarThreads(filteredThreadItems, prefs.sortChats),
-        }
-      : groupSidebarThreadsByProject(
-          filteredThreadItems,
-          projects,
-          prefs.sortChats
-        )
+  const recents = sortSidebarThreads(
+    filterThreads(threadItems, prefs.filters),
+    prefs.sortChats
+  )
+  const unpinnedLocalItems = alignedLocalItems.filter(
+    (item) => !localPinnedIds.has(item.id)
+  )
+  const localGroups = projectMode
+    ? groupSidebarThreadsByProject(
+        filterThreads(unpinnedLocalItems, prefs.filters),
+        sidebarProjectOptions(unpinnedLocalItems, localProjects),
+        prefs.sortChats
+      ).projects
+    : []
+  const projectGroups: Array<HydratedProjectGroup> = projectMode
+    ? [
+        ...cloudProjects.map((project) => {
+          const key = sidebarProjectKey(project.repoFullName)!
+          return {
+            key,
+            label: project.name,
+            repoFullName: project.repoFullName,
+            updatedAt: project.updatedAt,
+            activeThread:
+              activeInProject &&
+              activeThread?.repoFullName.toLowerCase() ===
+                project.repoFullName.toLowerCase()
+                ? activeThread
+                : undefined,
+            threads:
+              localGroups.find((group) => group.key === key)?.threads ?? [],
+          }
+        }),
+        ...localGroups
+          .filter(
+            (group) =>
+              !cloudProjects.some(
+                (project) =>
+                  sidebarProjectKey(project.repoFullName) === group.key
+              )
+          )
+          .map((group) => ({
+            ...group,
+            repoFullName: null,
+            updatedAt: group.threads[0]?.updatedAt ?? 0,
+          })),
+      ].sort((left, right) => right.updatedAt - left.updatedAt)
+    : []
   const pinnedProjectKeys = new Set(prefs.pinnedProjectKeys)
-  const pinnedGroups = grouped.projects.filter((group) =>
+  const pinnedGroups = projectGroups.filter((group) =>
     pinnedProjectKeys.has(group.key)
   )
-  const unpinnedGroups = grouped.projects.filter(
+  const unpinnedGroups = projectGroups.filter(
     (group) => !pinnedProjectKeys.has(group.key)
   )
 
@@ -315,12 +440,15 @@ export function AgentsSidebar({
       ? `cloud:${activeThreadId}`
       : undefined
 
-  const rowProps = (item: SidebarThreadItem) => ({
+  const rowProps = (
+    item: SidebarThreadItem,
+    live: PullRequestSnapshot | undefined = pullRequestFor(item)
+  ) => ({
     item,
     isActive: item.key === activeKey,
     pinned: isPinned(item),
     archived: isArchived(item),
-    live: pullRequestFor(item),
+    live,
     compact: prefs.compact,
     onNavigate: layout.closeOnMobile,
     onDeleteLocal: refreshLocalThreads,
@@ -330,6 +458,13 @@ export function AgentsSidebar({
 
   const sectionCollapsed = (key: string) =>
     prefs.collapsedSectionKeys.includes(key)
+  const hydrateProjectThreads = (threads: Array<AgentThread>) =>
+    filterThreads(
+      threads
+        .filter((thread) => !cloudPinnedIds.has(thread.id))
+        .map(cloudSidebarThread),
+      prefs.filters
+    )
 
   // Projects and Recents share one menu: both control the same list.
   const removeProjectItems = isDesktop && localProjects.length > 0 && (
@@ -407,7 +542,7 @@ export function AgentsSidebar({
     </>
   )
 
-  const renderProjectGroup = (group: SidebarProjectGroup) => (
+  const renderProjectGroup = (group: HydratedProjectGroup) => (
     <ProjectGroup
       key={group.key}
       group={group}
@@ -415,34 +550,37 @@ export function AgentsSidebar({
       collapsed={prefs.collapsedProjectKeys.includes(group.key)}
       expanded={prefs.expandedProjectKeys.includes(group.key)}
       pinned={pinnedProjectKeys.has(group.key)}
+      includeResolved={prefs.filters.includeResolved}
+      includeAutomations={includeAutomations}
+      sort={prefs.sortChats}
+      activeThreadId={activeThreadId}
+      openThread={openThread}
+      hydrate={hydrateProjectThreads}
       onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
       onExpand={() => expandProject(group.key)}
       onTogglePin={() => toggleProjectPin(group.key)}
-      renderRow={(item) => (
-        <SidebarThreadRow key={item.key} {...rowProps(item)} indent />
+      renderRow={(item, live) => (
+        <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
       )}
     />
   )
 
-  const cloudPending = !localOnly && sidebar.isPending
-  const resolvedLoading =
+  const cloudPending =
     !localOnly &&
-    !sidebar.isPending &&
-    prefs.filters.includeResolved &&
-    sidebar.resolvedQuery.isLoading
+    (pinnedQuery.isPending ||
+      recentsQuery.isPending ||
+      (projectMode && projectsQuery.isPending))
+  const cloudError =
+    pinnedQuery.isError ||
+    recentsQuery.isError ||
+    (projectMode && projectsQuery.isError)
   const sourcesLoading = cloudPending || (isDesktop && localThreads.isPending)
-  const hasMoreActive = !sidebar.isPending && sidebar.data.active.hasMore
-  const hasMoreArchived =
-    !sidebar.isPending &&
-    prefs.filters.includeResolved &&
-    sidebar.data.resolved.hasMore
   const isEmpty =
     !cloudPending &&
     (!isDesktop || !localThreads.isPending) &&
-    !resolvedLoading &&
     filteredPinnedItems.length === 0 &&
-    grouped.projects.length === 0 &&
-    grouped.recents.length === 0
+    projectGroups.length === 0 &&
+    recents.length === 0
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -491,8 +629,8 @@ export function AgentsSidebar({
         <div className="relative flex min-h-0 flex-1 flex-col">
           {scrollEdges.top && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-border" />
-              <div className="pointer-events-none absolute inset-x-0 top-px z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
             </>
           )}
           {scrollEdges.bottom && (
@@ -528,6 +666,11 @@ export function AgentsSidebar({
                     >
                       <Icon className="size-4" />
                       {item.label}
+                      {"badge" in item && (
+                        <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] leading-none font-medium text-muted-foreground">
+                          {item.badge}
+                        </span>
+                      )}
                     </Link>
                   )
                 })}
@@ -536,10 +679,14 @@ export function AgentsSidebar({
             {sourcesLoading && allItems.length === 0 && (
               <ThreadListSkeleton compact={prefs.compact} />
             )}
-            {sidebar.isError && (
+            {cloudError && (
               <ThreadSourceError
                 label="Cloud threads unavailable"
-                onRetry={() => void sidebar.refetch()}
+                onRetry={() => {
+                  void pinnedQuery.refetch()
+                  void recentsQuery.refetch()
+                  if (projectMode) void projectsQuery.refetch()
+                }}
               />
             )}
             {localThreads.isError && (
@@ -596,38 +743,34 @@ export function AgentsSidebar({
               </section>
             )}
 
-            {prefs.organize === "project" &&
-              (unpinnedGroups.length > 0 || isDesktop) && (
-                <section className="mb-3">
-                  <SidebarSectionHeader
-                    label="Projects"
-                    collapsed={sectionCollapsed("projects")}
-                    onToggleCollapsed={() => toggleSectionCollapsed("projects")}
-                    menu={
-                      <SidebarSectionMenu label="Projects options">
-                        {viewMenuItems}
-                        {removeProjectItems}
-                      </SidebarSectionMenu>
-                    }
-                    action={
-                      isDesktop ? (
-                        <SidebarSectionAction
-                          label="Add project"
-                          icon={<PlusIcon className="size-4" />}
-                          onClick={() => void addLocalProject()}
-                        />
-                      ) : undefined
-                    }
-                  />
-                  {!sectionCollapsed("projects") &&
-                    unpinnedGroups.map(renderProjectGroup)}
-                </section>
-              )}
+            {projectMode && (unpinnedGroups.length > 0 || isDesktop) && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Projects"
+                  collapsed={sectionCollapsed("projects")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                  menu={
+                    <SidebarSectionMenu label="Projects options">
+                      {viewMenuItems}
+                      {removeProjectItems}
+                    </SidebarSectionMenu>
+                  }
+                  action={
+                    isDesktop ? (
+                      <SidebarSectionAction
+                        label="Add project"
+                        icon={<PlusIcon className="size-4" />}
+                        onClick={() => void addLocalProject()}
+                      />
+                    ) : undefined
+                  }
+                />
+                {!sectionCollapsed("projects") &&
+                  unpinnedGroups.map(renderProjectGroup)}
+              </section>
+            )}
 
-            {(grouped.recents.length > 0 ||
-              hasMoreActive ||
-              hasMoreArchived ||
-              resolvedLoading) && (
+            {(recents.length > 0 || recentsQuery.hasMore) && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Recents"
@@ -651,35 +794,22 @@ export function AgentsSidebar({
                 />
                 {!sectionCollapsed("recents") && (
                   <>
-                    {grouped.recents.map((item) => (
+                    {recents.map((item) => (
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
-                    {(hasMoreActive || hasMoreArchived) && (
-                      <LoadMoreThreadsButton
+                    {recentsQuery.hasMore && (
+                      <LoadMoreThreadsOnScroll
                         label="Load more threads"
-                        loading={
-                          sidebar.activeQuery.isFetchingNextPage ||
-                          sidebar.resolvedQuery.isFetchingNextPage
-                        }
-                        onClick={() => {
-                          if (hasMoreActive)
-                            void sidebar.activeQuery.fetchNextPage()
-                          if (hasMoreArchived)
-                            void sidebar.resolvedQuery.fetchNextPage()
-                        }}
+                        root={scrollViewport}
+                        loading={recentsQuery.isFetchingNextPage}
+                        onLoadMore={recentsQuery.fetchNextPage}
                       />
-                    )}
-                    {resolvedLoading && (
-                      <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-                        <CircleNotchIcon className="size-3.5 animate-spin" />
-                        Loading archived threads…
-                      </div>
                     )}
                   </>
                 )}
               </section>
             )}
-            {isEmpty && !sidebar.isError && !localThreads.isError && (
+            {isEmpty && !cloudError && !localThreads.isError && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
                 {hasActiveFilters(prefs.filters)
                   ? "No threads match these filters."
@@ -690,8 +820,8 @@ export function AgentsSidebar({
         </div>
       </TooltipProvider>
 
-      <div className="p-2">
-        <div className="min-w-0">
+      <div className="flex items-center gap-2 p-2">
+        <div className="min-w-0 flex-1">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
           ) : (
@@ -703,6 +833,29 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
+        {updateState.status !== "idle" && (
+          <button
+            type="button"
+            title={
+              updateState.status === "ready" ? "Update" : "Downloading update…"
+            }
+            aria-label={
+              updateState.status === "ready" ? "Update" : "Downloading update"
+            }
+            disabled={updateState.status !== "ready"}
+            onClick={() => void window.openSweDesktop?.installUpdate()}
+            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60"
+          >
+            {updateState.status === "downloading" ? (
+              <CircleNotchIcon className="size-4 animate-spin group-hover:hidden" />
+            ) : (
+              <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+            )}
+            <span className="hidden group-hover:inline">
+              {updateState.status === "ready" ? "Update" : "Downloading…"}
+            </span>
+          </button>
+        )}
       </div>
     </SidebarFrame>
   )
@@ -714,29 +867,70 @@ function ProjectGroup({
   collapsed,
   expanded,
   pinned,
+  includeResolved,
+  includeAutomations,
+  sort,
+  activeThreadId,
+  openThread,
+  hydrate,
   onToggleCollapsed,
   onExpand,
   onTogglePin,
   renderRow,
 }: {
-  group: SidebarProjectGroup
+  group: HydratedProjectGroup
   activeKey?: string
   collapsed: boolean
   expanded: boolean
   pinned: boolean
+  includeResolved: boolean
+  includeAutomations: boolean
+  sort: ChatSort
+  activeThreadId?: string
+  openThread: (threadId: string) => void
+  hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
   onTogglePin: () => void
-  renderRow: (item: SidebarThreadItem) => React.ReactNode
+  renderRow: (
+    item: SidebarThreadItem,
+    live: PullRequestSnapshot | undefined
+  ) => React.ReactNode
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
-  const preview = group.threads.slice(0, PROJECT_PREVIEW_COUNT)
-  const active = group.threads.find((thread) => thread.key === activeKey)
+  const project = useSidebarProjectThreads({
+    repoFullName: group.repoFullName,
+    includeResolved,
+    includeAutomations,
+    enabled: !collapsed,
+  })
+  const cloudThreads = [
+    ...(group.activeThread ? [group.activeThread] : []),
+    ...project.items.filter((thread) => thread.id !== group.activeThread?.id),
+  ]
+  useSeedAgentThreadDetails(cloudThreads, activeThreadId)
+  useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
+  const threads = sortSidebarThreads(
+    [...hydrate(cloudThreads), ...group.threads],
+    sort
+  )
+  const pullRequestFor = useSidebarPullRequests(
+    threads,
+    Boolean(group.repoFullName)
+  )
+  const preview = threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const active = threads.find((thread) => thread.key === activeKey)
   const shown = expanded
-    ? group.threads
+    ? threads
     : active && !preview.includes(active)
       ? [...preview.slice(0, -1), active]
       : preview
+  const loading =
+    project.isFetchingNextPage ||
+    (Boolean(group.repoFullName) && !collapsed && project.isPending)
+  const hasMore = expanded
+    ? project.hasMore
+    : threads.length > PROJECT_PREVIEW_COUNT || project.hasMore
 
   return (
     <div className="mb-1">
@@ -766,14 +960,39 @@ function ProjectGroup({
       </div>
       {!collapsed && (
         <>
-          {shown.map(renderRow)}
-          {shown.length < group.threads.length && (
+          {shown.map((item) => renderRow(item, pullRequestFor(item)))}
+          {shown.length === 0 && loading && (
+            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/70">
+              <CircleNotchIcon className="size-3.5 animate-spin" />
+              Loading chats…
+            </div>
+          )}
+          {shown.length === 0 && !loading && !project.isError && (
+            <p className="py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/60">
+              No chats
+            </p>
+          )}
+          {project.isError && (
             <button
               type="button"
-              onClick={onExpand}
-              className="flex w-full items-center rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground"
+              onClick={() => void project.refetch()}
+              className="w-full py-1 pr-2.5 pl-6 text-left text-[13px] text-destructive"
             >
-              Show more
+              Retry loading chats
+            </button>
+          )}
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!expanded) onExpand()
+                else project.fetchNextPage()
+              }}
+              disabled={loading}
+              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+            >
+              {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
+              {loading ? "Loading…" : "Show more"}
             </button>
           )}
         </>
@@ -841,26 +1060,51 @@ function ThreadSourceError({
   )
 }
 
-function LoadMoreThreadsButton({
+function LoadMoreThreadsOnScroll({
   label,
+  root,
   loading,
-  onClick,
+  onLoadMore,
 }: {
-  /** Screen-reader label; the button itself just reads "Show more". */
   label: string
+  root: React.RefObject<HTMLDivElement | null>
   loading: boolean
-  onClick: () => void
+  onLoadMore: () => void
 }) {
+  const sentinel = useRef<HTMLButtonElement>(null)
+  const load = useRef(onLoadMore)
+  useEffect(() => {
+    load.current = onLoadMore
+  })
+  useEffect(() => {
+    const node = sentinel.current
+    if (!node || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!loading && entries.some((entry) => entry.isIntersecting)) {
+          load.current()
+        }
+      },
+      { root: root.current, rootMargin: "200px" }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [loading, root])
+
   return (
     <button
+      ref={sentinel}
       type="button"
-      onClick={onClick}
+      onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="mt-0.5 flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-2.5 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] text-muted-foreground/70"
     >
-      {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
-      {loading ? "Loading…" : "Show more"}
+      {loading ? (
+        <CircleNotchIcon className="size-3.5 animate-spin" />
+      ) : (
+        <span className="sr-only">{label}</span>
+      )}
     </button>
   )
 }
@@ -879,8 +1123,19 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const sidebarCommands = useMemo(
-    () => [
+  const pinThread = usePinAgentThread()
+  const resolveThread = useResolveAgentThread()
+  const pinnedThreads = useSidebarPinnedThreads({
+    enabled: Boolean(activeThreadId),
+  })
+  const activeThread = useSidebarActiveThread({
+    activeThreadId,
+    loadedThreads: [],
+    includeResolved: true,
+    enabled: Boolean(activeThreadId),
+  })
+  const sidebarCommands = useMemo(() => {
+    const commands = [
       {
         id: "toggle-sidebar",
         label: "Toggle sidebar",
@@ -891,9 +1146,61 @@ export function AgentsShell({
         desktopId: "toggle-sidebar" as const,
         desktopShortcuts: ["mod+b"],
       },
-    ],
-    [layout.toggle]
-  )
+    ]
+    if (!activeThread) return commands
+    const reference =
+      activeThread.pullRequests?.at(-1)?.url ??
+      activeThread.pr?.url ??
+      activeThread.id
+    return [
+      ...commands,
+      {
+        id: "copy-thread-reference",
+        label:
+          reference === activeThread.id ? "Copy thread ID" : "Copy PR link",
+        aliases: ["copy reference", "pull request", "pr link"],
+        shortcuts: ["mod+shift+c"],
+        group: "Thread",
+        run: () => navigator.clipboard.writeText(reference),
+      },
+      {
+        id: "pin-thread",
+        label: pinnedThreads.data?.some(
+          (thread) => thread.id === activeThread.id
+        )
+          ? "Unpin thread"
+          : "Pin thread",
+        aliases: ["pin thread", "unpin thread"],
+        shortcuts: ["mod+shift+p"],
+        group: "Thread",
+        run: () =>
+          pinThread.mutate({
+            threadId: activeThread.id,
+            pinned: !pinnedThreads.data?.some(
+              (thread) => thread.id === activeThread.id
+            ),
+          }),
+      },
+      {
+        id: "archive-thread",
+        label: activeThread.resolved ? "Unarchive thread" : "Archive thread",
+        aliases: ["resolve thread", "settle thread", "restore thread"],
+        shortcuts: ["mod+shift+s"],
+        group: "Thread",
+        run: () =>
+          resolveThread.mutate({
+            threadId: activeThread.id,
+            resolved: !activeThread.resolved,
+          }),
+      },
+    ]
+  }, [
+    activeThread,
+    layout.toggle,
+    pinThread,
+    pinnedThreads.data,
+    resolveThread,
+  ])
   useRegisterAppCommands(sidebarCommands)
 
   return (

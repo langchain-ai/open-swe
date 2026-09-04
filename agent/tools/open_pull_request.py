@@ -8,15 +8,17 @@ import httpx
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.auth.github_app import get_github_app_installation_token
+
 from ..dashboard.agent_usage import record_agent_pr_usage
 from ..dashboard.plan_store import get_plan_content
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
 from ..utils.slack_code_channels import (
     is_code_channel_session,
     repo_context_bar_items,
+    set_agent_resource,
     set_context_bar,
     set_view,
 )
@@ -653,6 +655,20 @@ async def _record_pr_telemetry(
                         dashboard_url=dashboard_thread_url(thread_id) or "",
                     ),
                 )
+                if isinstance(pr_url, str):
+                    await set_agent_resource(
+                        channel_id,
+                        {
+                            "url": pr_url,
+                            "resource_type": "pull_request",
+                            "title": (
+                                pr_title[:255]
+                                if isinstance(pr_title, str) and pr_title
+                                else "Pull request"
+                            ),
+                            "provider": "GitHub",
+                        },
+                    )
                 response = await client.get(
                     f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
                     headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},

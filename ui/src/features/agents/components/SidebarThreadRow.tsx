@@ -339,7 +339,7 @@ export function SidebarThreadRow({
         ) : null}
       </span>
 
-      <span className="hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
+      <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
         <button
           type="button"
           aria-label={pinned ? "Unpin thread" : "Pin thread"}
@@ -446,14 +446,12 @@ export function SidebarThreadRow({
               )}
               {thread?.sourceUrl && (
                 <ContextMenu.LinkItem
-                  href={thread.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                  href={thread.sourceAppUrl ?? thread.sourceUrl}
                   closeOnClick
                   className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                 >
                   <IoLogoSlack className="size-3.5" />
-                  Open Slack thread
+                  Open in Slack
                 </ContextMenu.LinkItem>
               )}
               <ContextMenu.Item
@@ -515,9 +513,11 @@ export function SidebarThreadRow({
         isDeleting={isDeleting}
         onConfirm={() => void onConfirmDelete()}
         detail={
-          item.location === "local"
-            ? "This removes its history but does not revert changes made to your project."
-            : undefined
+          item.location !== "local"
+            ? undefined
+            : item.thread.ownedWorktrees?.length
+              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+              : "This removes its history but does not revert changes made to your project."
         }
         error={deleteError}
       />

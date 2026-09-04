@@ -1,5 +1,5 @@
 # Files
 
-- [Dashboard API & Web/Desktop UI](dashboard-ui.md) - How the FastAPI dashboard router exposes GitHub OAuth, profiles, admin, review, usage, schedules, and the Agents thread API to the ui/ TanStack-router web app and the experimental Electron desktop wrapper, and how the UI reaches the backend same-origin.
+- [Dashboard API & Web/Desktop UI](dashboard-ui.md) - How the dashboard FastAPI surface exposes authenticated thread discovery, project grouping, pinning, and thread operations to the TanStack Start UI while preserving proxy and Electron local-execution boundaries.
 - [Observability & MCP Integrations](observability-and-mcp.md) - Optional server-side integrations — Datadog and LangSmith observability tools, Corridor and Notion MCP, Currents, and the Stagehand browser — and the security model that gates them and keeps credentials out of the sandbox.
-- [Sandbox Provider Integrations](sandbox-providers.md) - Reference for the pluggable sandbox providers Open SWE can run agents in, how the SANDBOX_TYPE selector and SANDBOX_FACTORIES registry choose a provider, the env vars each provider needs, and how to add a new provider.
+- [Sandbox Provider Integrations](sandbox-providers.md) - How Open SWE selects, creates, reconnects to, and operates sandbox backends. Includes the LangSmith async execution deadline and fallback behavior, provider-specific configuration, and extension guidance.

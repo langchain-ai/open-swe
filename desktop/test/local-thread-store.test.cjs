@@ -138,3 +138,18 @@ test("persists archived state without reordering the thread", (t) => {
   assert.equal(restored.get(thread.id).archived, true);
   assert.equal(restored.update(thread.id, { archived: false }).archived, false);
 });
+
+test("remembers a created worktree after the thread moves off it", (t) => {
+  const fixture = temporaryStore(t);
+  const store = fixture.create();
+  const thread = store.create({
+    cwd: path.resolve("/tmp/project"),
+    prompt: "x",
+  });
+  const worktree = path.resolve("/tmp/worktrees/project-abcd1234");
+  store.setWorktree(thread.id, worktree, true);
+  store.setWorktree(thread.id, null);
+  const reloaded = fixture.create().get(thread.id);
+  assert.equal(reloaded.worktreePath, null);
+  assert.deepEqual(reloaded.ownedWorktrees, [worktree]);
+});

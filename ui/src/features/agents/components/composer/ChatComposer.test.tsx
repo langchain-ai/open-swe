@@ -23,8 +23,8 @@ const stream = {
   disconnect: vi.fn(),
 }
 
-vi.mock("@langchain/react", () => ({
-  useStreamContext: () => stream,
+vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
+  useAgentThreadRuntime: () => stream,
 }))
 
 const cancelThread = vi.fn((threadId: string) =>

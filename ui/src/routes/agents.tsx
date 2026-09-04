@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
@@ -47,19 +47,6 @@ function AgentsLayout() {
       : undefined
   const activeLocalSessionId =
     section === "agents" && threadId === "local" ? nestedRoute : undefined
-  const [streamTarget, setStreamTarget] = useState({
-    activeThreadId,
-    threadId: activeThreadId,
-  })
-  if (streamTarget.activeThreadId !== activeThreadId) {
-    setStreamTarget({
-      activeThreadId,
-      threadId:
-        streamTarget.activeThreadId && activeThreadId
-          ? streamTarget.threadId
-          : activeThreadId,
-    })
-  }
   const localOnly = !session.data && isDesktopLocalModeEnabled()
   const isLocalRoute =
     pathname === "/agents" ||
@@ -84,9 +71,9 @@ function AgentsLayout() {
       activeLocalSessionId={activeLocalSessionId}
     >
       <AgentThreadStreamProvider
-        threadId={streamTarget.threadId ?? null}
-        onThreadId={(id) => {
-          setStreamTarget({ activeThreadId: id, threadId: id })
+        threadId={activeLocalSessionId ?? activeThreadId ?? null}
+        transport={activeLocalSessionId ? "local" : "cloud"}
+        onThreadCreated={(id) => {
           if (!activeThreadId) {
             void navigate({ to: "/agents/$threadId", params: { threadId: id } })
           }

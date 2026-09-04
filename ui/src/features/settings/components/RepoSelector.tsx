@@ -22,6 +22,7 @@ interface RepoSelectorProps {
   className?: string
   triggerClassName?: string
   dropdownClassName?: string
+  side?: "top" | "bottom"
   disabled?: boolean
 }
 
@@ -37,6 +38,7 @@ export function RepoSelector({
   className,
   triggerClassName,
   dropdownClassName,
+  side = "bottom",
   disabled = false,
 }: RepoSelectorProps) {
   const [open, setOpen] = useState(false)
@@ -82,7 +84,8 @@ export function RepoSelector({
       {open && (
         <div
           className={cn(
-            "absolute top-full left-0 z-50 mt-1 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
+            "absolute left-0 z-50 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
+            side === "top" ? "bottom-full mb-1" : "top-full mt-1",
             dropdownClassName
           )}
         >

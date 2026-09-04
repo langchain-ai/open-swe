@@ -24,7 +24,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from .sandbox import create_sandbox
+from agent.sandboxes.providers import create_sandbox
 
 logger = logging.getLogger(__name__)
 

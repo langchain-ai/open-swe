@@ -14,6 +14,20 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.auth.github_app import (
+    get_github_app_installation_token,  # noqa: F401
+    get_github_app_installation_token_with_expiry,
+)
+from agent.auth.resolve import (
+    is_bot_token_only_mode,
+    resolve_github_token_from_email,
+)
+from agent.auth.thread_token import (
+    cache_github_token_for_thread,
+    get_github_token_from_thread,
+    github_token_principal,
+    invalidate_cached_github_token,
+)
 from agent.source_context import SourceContext
 
 from ..dashboard.agent_overrides import (
@@ -55,16 +69,8 @@ from ..review.findings import (
 )
 from ..review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from ..review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
-from ..utils.auth import (
-    is_bot_token_only_mode,
-    resolve_github_token_from_email,
-)
 from ..utils.comments import get_recent_comments  # noqa: F401
 from ..utils.dashboard_links import dashboard_thread_url  # noqa: F401
-from ..utils.github_app import (
-    get_github_app_installation_token,  # noqa: F401
-    get_github_app_installation_token_with_expiry,
-)
 from ..utils.github_checks import complete_review_check_run, create_review_check_run  # noqa: F401
 from ..utils.github_comments import (
     OPEN_SWE_TAGS,
@@ -81,12 +87,6 @@ from ..utils.github_comments import (
     verify_github_signature,
 )
 from ..utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from ..utils.github_token import (
-    cache_github_token_for_thread,
-    get_github_token_from_thread,
-    github_token_principal,
-    invalidate_cached_github_token,
-)
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.json_types import ThreadLike, as_thread_dict
 from ..utils.linear import post_linear_trace_comment  # noqa: F401

@@ -52,17 +52,24 @@ async function expectComposerReady(page: Page) {
 }
 
 async function sidebarThreadIds(page: Page): Promise<Array<string>> {
-  const res = await page.request.get(
-    "/dashboard/api/threads/sidebar?active_limit=50&resolved_limit=50",
-  );
-  expect(res.ok(), await res.text()).toBeTruthy();
-  const payload = (await res.json()) as {
-    active: { items: Array<{ id: string }> };
-    resolved: { items: Array<{ id: string }> };
-  };
-  return [...payload.active.items, ...payload.resolved.items].map(
-    (item) => item.id,
-  );
+  const ids: Array<string> = [];
+  for (const resolved of [false, true]) {
+    let offset = 0;
+    while (true) {
+      const res = await page.request.get(
+        `/dashboard/api/threads/page?limit=50&offset=${offset}&resolved=${resolved}&scope=interactive`,
+      );
+      expect(res.ok(), await res.text()).toBeTruthy();
+      const payload = (await res.json()) as {
+        items: Array<{ id: string }>;
+        hasMore?: boolean;
+      };
+      ids.push(...payload.items.map((item) => item.id));
+      if (!payload.hasMore) break;
+      offset += payload.items.length;
+    }
+  }
+  return ids;
 }
 
 async function typeIntoComposer(page: Page, text: string) {

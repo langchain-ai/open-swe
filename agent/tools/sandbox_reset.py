@@ -63,7 +63,7 @@ async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
         if value is not None
     }
     try:
-        from ..server import reset_sandbox_for_thread
+        from agent.sandboxes.lifecycle import reset_sandbox_for_thread
 
         old_sandbox_id, new_sandbox_id = await reset_sandbox_for_thread(thread_id, create_params)
     except Exception as exc:

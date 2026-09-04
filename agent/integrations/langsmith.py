@@ -19,8 +19,8 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
-from agent.utils.sandbox import SandboxGoneError
-from agent.utils.sandbox_retry import retry_transient_sandbox_errors
+from agent.sandboxes.providers import SandboxGoneError
+from agent.sandboxes.retry import retry_transient_sandbox_errors
 
 logger = logging.getLogger(__name__)
 

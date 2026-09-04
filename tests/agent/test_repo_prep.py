@@ -2,7 +2,7 @@ from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from agent.utils.repo_prep import materialize_trusted_skills, prepare_review_repo
+from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 
 
 class _FakeSandboxBackend:
