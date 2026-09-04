@@ -49,7 +49,7 @@ test.describe("dashboard attachments (real dashboard UI)", () => {
     // Persisted state holds the reference, never the bytes.
     await waitForStateToContain(page, threadId, "<media>");
     const state = await threadState(page, threadId);
-    expect(state).toContain(".open-swe-media/");
+    expect(state).toContain("/uploads/");
     expect(state).not.toContain(PNG_BASE64);
 
     // A cold load renders the image from the server, not from the optimistic
@@ -63,7 +63,7 @@ test.describe("dashboard attachments (real dashboard UI)", () => {
     const src = await image.getAttribute("src");
     expect(src).toMatch(
       new RegExp(
-        `/dashboard/api/threads/${threadId}/media/[0-9a-f]{64}\\.png$`,
+        `/dashboard/api/threads/${threadId}/media/[0-9a-f]{64}-pixel\\.png$`,
       ),
     );
     await expect

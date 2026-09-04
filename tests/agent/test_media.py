@@ -14,6 +14,7 @@ from agent.media import (
     MediaUpload,
     download_media,
     media_data,
+    media_file_name,
     media_mime_type,
     media_refs_from_content,
     store_media,
@@ -55,7 +56,7 @@ async def test_store_media_is_content_addressed_beside_the_checkout() -> None:
 
     refs = await store_media(backend, [_PNG, _PNG])
 
-    path = f"/workspace/.open-swe-media/{_PNG_SHA}.png"
+    path = f"/uploads/{_PNG_SHA}-shot.png"
     assert [ref.path for ref in refs] == [path, path]
     assert refs[0] == MediaRef(
         path=path, mime_type="image/png", sha256=_PNG_SHA, size=len(_PNG.data), file_name="shot.png"
@@ -83,7 +84,7 @@ async def test_media_refs_round_trip_through_the_envelope() -> None:
 
 async def test_download_media_caches_by_path() -> None:
     backend = _backend()
-    path = f"/workspace/.open-swe-media/{_PNG_SHA}.png"
+    path = f"/uploads/{_PNG_SHA}.png"
 
     assert await download_media(backend, path) == b"png bytes"
     assert await download_media(backend, path) == b"png bytes"
@@ -94,12 +95,24 @@ async def test_download_media_caches_by_path() -> None:
 async def test_download_media_returns_none_for_a_missing_file() -> None:
     backend = _backend(download_error="file_not_found")
 
-    assert await download_media(backend, "/workspace/.open-swe-media/missing.png") is None
+    assert await download_media(backend, "/uploads/missing.png") is None
 
 
 def test_media_mime_type_only_accepts_stored_file_names() -> None:
     assert media_mime_type(f"{_PNG_SHA}.png") == "image/png"
-    assert media_mime_type(f"{_PNG_SHA}.jpg") == "image/jpeg"
+    assert media_mime_type(f"{_PNG_SHA}-Screen-shot.jpg") == "image/jpeg"
     assert media_mime_type("../etc/passwd") is None
+    assert media_mime_type(f"{_PNG_SHA}-../x.png") is None
     assert media_mime_type(f"{_PNG_SHA}.svg") is None
     assert media_mime_type("short.png") is None
+
+
+def test_media_file_name_keeps_a_readable_stem_without_trusting_it() -> None:
+    assert media_file_name("a" * 64, "image/png") == "a" * 64 + ".png"
+    assert media_file_name("a" * 64, "image/jpeg", "My Screen shot.jpeg") == (
+        "a" * 64 + "-My-Screen-shot.jpg"
+    )
+    assert media_file_name("a" * 64, "image/png", "../../etc/passwd") == "a" * 64 + "-passwd.png"
+    assert media_file_name("a" * 64, "image/png", "x" * 200 + ".png").endswith(
+        "-" + "x" * 64 + ".png"
+    )

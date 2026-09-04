@@ -127,7 +127,7 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
 
 
 _REF = MediaRef(
-    path="/workspace/.open-swe-media/" + "a" * 64 + ".png",
+    path="/uploads/" + "a" * 64 + ".png",
     mime_type="image/png",
     sha256="a" * 64,
     size=3,

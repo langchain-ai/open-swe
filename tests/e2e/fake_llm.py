@@ -384,6 +384,77 @@ def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+_UPLOAD_PATH_RE = re.compile(r"<path>(/uploads/[^<]+)</path>")
+
+
+def _uploaded_image_path(messages: list[BaseMessage]) -> str:
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            match = _UPLOAD_PATH_RE.search(_text(msg.content))
+            if match:
+                return match.group(1)
+    return "/uploads/missing.png"
+
+
+def _image_copy_path(path: str) -> str:
+    stem, _, ext = path.rpartition(".")
+    return f"{stem}-copy.{ext}"
+
+
+def _image_inspect_step(messages: list[BaseMessage]) -> AIMessage:
+    path = _uploaded_image_path(messages)
+    copy = _image_copy_path(path)
+    # Shell commands run from the local sandbox root, where virtual `/uploads/...`
+    # lives at `uploads/...`.
+    script = (
+        "python3 - <<'EOF'\n"
+        "import struct\n"
+        f"data = open({path.lstrip('/')!r}, 'rb').read()\n"
+        "width, height = struct.unpack('>II', data[16:24])\n"
+        f"open({copy.lstrip('/')!r}, 'wb').write(data)\n"
+        "print(f'{width}x{height}')\n"
+        "EOF"
+    )
+    return AIMessage(
+        content="Reading the attachment's dimensions and saving a copy.",
+        tool_calls=[{"name": "execute", "args": {"command": script}, "id": "call-image-inspect"}],
+    )
+
+
+def _image_read_step(messages: list[BaseMessage]) -> AIMessage:
+    copy = _image_copy_path(_uploaded_image_path(messages))
+    return AIMessage(
+        content="Looking at the copy.",
+        tool_calls=[{"name": "read_file", "args": {"file_path": copy}, "id": "call-image-read"}],
+    )
+
+
+def _image_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    size = "unknown"
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage) and msg.tool_call_id == "call-image-inspect":
+            match = re.search(r"\d+x\d+", _text(msg.content))
+            if match:
+                size = match.group(0)
+            break
+    copy = _image_copy_path(_uploaded_image_path(messages))
+    return AIMessage(
+        content="Reporting back.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {
+                    "message": (
+                        f"The attached image is {size} pixels. "
+                        f"I saved a copy at `{copy}` and viewed it."
+                    )
+                },
+                "id": "call-image-reply",
+            }
+        ],
+    )
+
+
 PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.html"
 
 PLAN_HTML = """<!doctype html>
@@ -710,6 +781,18 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-code-channel-followup",
         ),
     ),
+    "image": (
+        _tool_step(
+            "Acknowledging the attachment.",
+            "slack_thread_reply",
+            {"message": "Taking a look at the attached image."},
+            "call-image-ack",
+        ),
+        _dynamic_step(_image_inspect_step),
+        _dynamic_step(_image_read_step),
+        _dynamic_step(_image_reply_step),
+        StepSpec(content="Inspected the attachment."),
+    ),
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
@@ -1014,6 +1097,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
     ),
     ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
+    ScriptRule("image", lambda ctx: ctx.human_count <= 1 and "E2E_IMAGE" in ctx.first_text),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )

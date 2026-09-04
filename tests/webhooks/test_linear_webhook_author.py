@@ -12,7 +12,7 @@ from agent.media import MediaRef, media_refs_from_content
 def _media_ref(url: str) -> MediaRef:
     digest = hashlib.sha256(url.encode()).hexdigest()
     return MediaRef(
-        path=f"/workspace/.open-swe-media/{digest}.png",
+        path=f"/uploads/{digest}.png",
         mime_type="image/png",
         sha256=digest,
         size=1,

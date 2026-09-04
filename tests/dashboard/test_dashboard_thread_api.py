@@ -288,7 +288,7 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
         attached["uploads"] = uploads
         return [
             MediaRef(
-                path=f"/workspace/.open-swe-media/{'b' * 64}.png",
+                path=f"/uploads/{'b' * 64}.png",
                 mime_type="image/png",
                 sha256="b" * 64,
                 size=len(upload.data),

@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web desktop install-desktop install-checkout
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-local web desktop install-desktop install-checkout
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -9,6 +9,11 @@ all: help
 
 dev:
 	uv run langgraph dev --no-browser --port 2024
+
+# Real model (OPENAI_API_KEY from .env), everything else local: fake Slack and
+# GitHub, fake sign-in, sandbox rooted in a temp dir. Open http://127.0.0.1:3000/login.
+dev-local:
+	bash ./tests/e2e/dev-local.sh
 
 web:
 	pnpm run dev
@@ -78,6 +83,7 @@ typecheck:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
+	@echo 'dev-local                    - real model, everything else local (fake Slack/GitHub + sign-in) at http://127.0.0.1:3000/login'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'run                          - run webhook server'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'

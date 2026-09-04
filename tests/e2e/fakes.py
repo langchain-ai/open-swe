@@ -6,8 +6,10 @@ sees in the UI is exactly what the agent produced.
 """
 
 import shutil
+import struct
 import subprocess
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +49,14 @@ def new_thread_ts() -> str:
 
 
 def add_slack_message(
-    channel: str, thread_ts: str, *, user: str, text: str, blocks: Any = None, is_bot: bool = False
+    channel: str,
+    thread_ts: str,
+    *,
+    user: str,
+    text: str,
+    blocks: Any = None,
+    is_bot: bool = False,
+    files: list[dict[str, Any]] | None = None,
 ) -> str:
     ts = next_slack_ts()
     actual_thread_ts = thread_ts or ts
@@ -59,9 +68,38 @@ def add_slack_message(
             "thread_ts": actual_thread_ts,
             "blocks": blocks,
             "is_bot": is_bot,
+            "files": files or [],
         }
     )
     return ts
+
+
+DEMO_IMAGE_WIDTH = 64
+DEMO_IMAGE_HEIGHT = 48
+
+
+def demo_image_png() -> bytes:
+    """A 64x48 RGB gradient, the image the fake Slack serves as a file attachment."""
+    width, height = DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    rows = b"".join(
+        b"\x00" + bytes(v for x in range(width) for v in ((x * 4) % 256, (y * 5) % 256, 128))
+        for y in range(height)
+    )
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
 
 
 def slack_thread(channel: str, thread_ts: str) -> list[dict[str, Any]]:

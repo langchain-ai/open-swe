@@ -3,6 +3,7 @@
 import logging
 import mimetypes
 import os
+import posixpath
 import re
 from urllib.parse import urlparse
 
@@ -107,7 +108,12 @@ async def fetch_image(image_url: str, client: httpx.AsyncClient) -> MediaUpload 
                 "image_bytes": len(response.content),
             },
         )
-        return MediaUpload(data=response.content, mime_type=content_type, source_url=image_url)
+        return MediaUpload(
+            data=response.content,
+            mime_type=content_type,
+            file_name=posixpath.basename(urlparse(image_url).path) or None,
+            source_url=image_url,
+        )
     except Exception:
         logger.exception("Failed to fetch image", extra={"image_url": image_url})
         return None

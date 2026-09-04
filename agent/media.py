@@ -20,13 +20,12 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent.input_messages import input_message_data_items
 from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
-from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 
 MEDIA_DATA_KEY = "media"
-MEDIA_DIR_NAME = ".open-swe-media"
+MEDIA_DIR = "/uploads"
 MAX_MEDIA_BYTES = 10 * 1024 * 1024
 IMAGE_EXTENSIONS: dict[str, str] = {
     "image/gif": "gif",
@@ -34,7 +33,8 @@ IMAGE_EXTENSIONS: dict[str, str] = {
     "image/png": "png",
     "image/webp": "webp",
 }
-_MEDIA_FILE_NAME = re.compile(r"^[0-9a-f]{64}\.(gif|jpg|png|webp)$")
+_MEDIA_FILE_NAME = re.compile(r"^[0-9a-f]{64}(?:-[A-Za-z0-9._-]{1,64})?\.(gif|jpg|png|webp)$")
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _MIME_BY_EXTENSION = {ext: mime for mime, ext in IMAGE_EXTENSIONS.items()}
 _CACHE_LIMIT_BYTES = 256 * 1024 * 1024
 
@@ -78,8 +78,12 @@ def media_data(refs: Iterable[MediaRef]) -> dict[str, object]:
     return {MEDIA_DATA_KEY: dumped} if dumped else {}
 
 
-def media_file_name(sha256: str, mime_type: str) -> str:
-    return f"{sha256}.{IMAGE_EXTENSIONS[mime_type]}"
+def media_file_name(sha256: str, mime_type: str, file_name: str | None = None) -> str:
+    """``<sha>-<original stem>.<ext>``: content-addressed, but readable for the model."""
+    stem = posixpath.splitext(posixpath.basename(file_name or ""))[0]
+    stem = _UNSAFE_NAME_CHARS.sub("-", stem).strip("-.")[:64]
+    suffix = f"-{stem}" if stem else ""
+    return f"{sha256}{suffix}.{IMAGE_EXTENSIONS[mime_type]}"
 
 
 def media_mime_type(file_name: str) -> str | None:
@@ -88,22 +92,18 @@ def media_mime_type(file_name: str) -> str | None:
     return _MIME_BY_EXTENSION[match.group(1)] if match else None
 
 
-async def media_directory(backend: SandboxBackendProtocol) -> str:
-    """Beside the checkout, so attachments never show up in the repository's status."""
-    return posixpath.join(await resolve_sandbox_work_dir(backend), MEDIA_DIR_NAME)
-
-
 async def store_media(
     backend: SandboxBackendProtocol, uploads: list[MediaUpload]
 ) -> list[MediaRef]:
     if not uploads:
         return []
-    directory = await media_directory(backend)
     refs: list[MediaRef] = []
     files: dict[str, bytes] = {}
     for upload in uploads:
         digest = hashlib.sha256(upload.data).hexdigest()
-        path = posixpath.join(directory, media_file_name(digest, upload.mime_type))
+        path = posixpath.join(
+            MEDIA_DIR, media_file_name(digest, upload.mime_type, upload.file_name)
+        )
         files[path] = upload.data
         refs.append(
             MediaRef(
@@ -147,7 +147,7 @@ async def read_thread_media(thread_id: str, file_name: str) -> tuple[bytes, str]
     if mime_type is None:
         return None
     backend = await get_sandbox_backend(thread_id)
-    path = posixpath.join(await media_directory(backend), file_name)
+    path = posixpath.join(MEDIA_DIR, file_name)
     data = await download_media(backend, path)
     return (data, mime_type) if data is not None else None
 

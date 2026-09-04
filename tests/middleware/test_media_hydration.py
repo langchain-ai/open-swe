@@ -16,7 +16,7 @@ from agent.middleware.media_hydration import MediaHydrationMiddleware
 _VISION_MODEL = "openai:gpt-5.6-sol"
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _REF = MediaRef(
-    path="/workspace/.open-swe-media/" + "c" * 64 + ".png",
+    path="/uploads/" + "c" * 64 + ".png",
     mime_type="image/png",
     sha256="c" * 64,
     size=3,

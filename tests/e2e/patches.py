@@ -40,6 +40,23 @@ def apply() -> None:
 
     from e2e_env import FAKE_GITHUB_API, FAKE_SLACK_API
 
+    # The fake Slack serves attachment bytes from this loopback harness, which
+    # the SSRF guard would otherwise refuse. Allow only the harness host.
+    from agent.utils import url_safety
+
+    _resolve_and_validate = url_safety.resolve_and_validate
+
+    def _resolve_allowing_harness(url: str):  # noqa: ANN202
+        import socket
+        from urllib.parse import urlparse
+
+        hostname = urlparse(url).hostname
+        if hostname in {"127.0.0.1", "localhost"}:
+            return True, "", hostname, socket.getaddrinfo(hostname, None)
+        return _resolve_and_validate(url)
+
+    url_safety.resolve_and_validate = _resolve_allowing_harness
+
     # The LLM is the only agent-internal piece we fake, and only by default.
     # Set E2E_REAL_LLM=1 to drive the harness (mock Slack/GitHub, real agent)
     # with a real model — useful for manually exercising plan review etc. The
