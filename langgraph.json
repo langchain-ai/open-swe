@@ -25,11 +25,12 @@
   "env": ".env",
   "dockerfile_lines": [
     "# Bundle the dashboard so the deployment serves it at / (docs/INSTALLATION.md, Dashboard).",
+    "# The build is made for http.mount_prefix from langgraph.json, so the UI's asset URLs and router match where the server mounts it.",
     "# Best effort: a failed UI build leaves the backend deployable without the bundled UI.",
-    "COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json /tmp/dashboard-src/",
+    "COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json langgraph.json /tmp/dashboard-src/",
     "COPY ui /tmp/dashboard-src/ui",
     "ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
-    "RUN ( set -e && apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates && arch=$(uname -m) && case $arch in x86_64) node_arch=x64;; aarch64) node_arch=arm64;; *) echo unsupported arch $arch; exit 1;; esac && curl -fsSL https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-$node_arch.tar.xz | tar -xJ -C /usr/local --strip-components=1 && corepack enable && cd /tmp/dashboard-src && pnpm install --frozen-lockfile --filter open-swe-dashboard... && pnpm --filter open-swe-dashboard run build && mkdir -p /opt/open-swe-dashboard && cp -R ui/.output/public/. /opt/open-swe-dashboard/ ) || echo 'dashboard build failed; continuing without the bundled UI'; rm -rf /tmp/dashboard-src /usr/local/lib/node_modules /usr/local/bin/node /usr/local/bin/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/pnpm /usr/local/bin/pnpx /root/.cache /root/.local/share/pnpm /var/lib/apt/lists/*",
+    "RUN ( set -e && apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates && arch=$(uname -m) && case $arch in x86_64) node_arch=x64;; aarch64) node_arch=arm64;; *) echo unsupported arch $arch; exit 1;; esac && curl -fsSL https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-$node_arch.tar.xz | tar -xJ -C /usr/local --strip-components=1 && corepack enable && cd /tmp/dashboard-src && pnpm install --frozen-lockfile --filter open-swe-dashboard... && export DASHBOARD_BASE_PATH=\"$(python3 -c 'import json; print(json.load(open(\"langgraph.json\")).get(\"http\", {}).get(\"mount_prefix\") or \"\")')/\" && pnpm --filter open-swe-dashboard run build && mkdir -p /opt/open-swe-dashboard && cp -R ui/.output/public/. /opt/open-swe-dashboard/ ) || echo 'dashboard build failed; continuing without the bundled UI'; rm -rf /tmp/dashboard-src /usr/local/lib/node_modules /usr/local/bin/node /usr/local/bin/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/pnpm /usr/local/bin/pnpx /root/.cache /root/.local/share/pnpm /var/lib/apt/lists/*",
     "ENV DASHBOARD_STATIC_DIR=/opt/open-swe-dashboard"
   ]
 }
