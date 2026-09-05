@@ -64,6 +64,7 @@ from langgraph_sdk import get_client  # noqa: E402
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from agent.slack.client import lookup_slack_thread_id  # noqa: E402
+from agent.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -907,6 +908,10 @@ async def slack_archive_code_channel(request: Request) -> JSONResponse:
 async def slack_get_permalink(channel: str = "", message_ts: str = "") -> JSONResponse:  # noqa: ARG001
     return _ok({"permalink": f"{BASE_URL}/mock/slack"})
 
+
+# A dashboard build under ui/.output puts the UI catch-all on the app before the
+# mock pages above were registered; keep it behind them.
+keep_dashboard_ui_last(app)
 
 # Quietly reference imports used only for env side effects.
 _ = (e2e_env, HUMAN_USER)
