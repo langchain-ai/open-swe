@@ -10,7 +10,7 @@ import os
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -960,6 +960,71 @@ async def post_slack_ephemeral_message(
         except httpx.HTTPError:
             logger.exception("Slack chat.postEphemeral request failed")
             return False
+
+
+SLACK_USER_ID_RE = re.compile(r"^[UW][A-Z0-9_]+$")
+
+
+def slack_user_ids(values: Iterable[str]) -> list[str]:
+    """The Slack user ids in `values`, de-duplicated, mentions unwrapped."""
+    ids: list[str] = []
+    for value in values:
+        candidate = value.strip().removeprefix("<@").removesuffix(">").split("|")[0].strip()
+        candidate = candidate.upper()
+        if SLACK_USER_ID_RE.fullmatch(candidate) and candidate not in ids:
+            ids.append(candidate)
+    return ids
+
+
+async def invite_to_slack_channel(
+    channel_id: str, user_ids: Iterable[str]
+) -> tuple[list[str], str]:
+    """Invite people to a channel, returning who is in and why anyone is not.
+
+    `force` matters: without it Slack refuses the whole batch when any single
+    user fails, so one stale id would cost everyone else their invitation. With
+    it, failures come back per user in `errors`.
+
+    A refusal is not fatal — a public channel is still reachable by its link —
+    so the caller decides what to do with the error.
+    """
+    users = slack_user_ids(user_ids)
+    if not SLACK_BOT_TOKEN or not channel_id or not users:
+        return [], "" if users else "no_users"
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/conversations.invite",
+                headers=_slack_headers(),
+                json={"channel": channel_id, "users": ",".join(users), "force": True},
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Slack conversations.invite request failed", exc_info=True)
+            return [], f"{', '.join(users)}: http_error: {type(exc).__name__}"
+    if not isinstance(data, dict):
+        return [], f"{', '.join(users)}: invalid_response"
+
+    # Someone already in the channel is in the channel, which is what was asked.
+    failures = {
+        str(entry.get("user") or ""): str(entry.get("error") or "failed")
+        for entry in data.get("errors") or []
+        if isinstance(entry, dict)
+        and not entry.get("ok")
+        and entry.get("user")
+        and entry.get("error") != "already_in_channel"
+    }
+    top_error = str(data.get("error") or "")
+    if not data.get("ok") and top_error and top_error != "already_in_channel":
+        logger.info("Could not invite %s to %s: %s", users, channel_id, top_error)
+        return [], f"{', '.join(users)}: {top_error}"
+    if failures:
+        logger.info("Could not invite %s to %s", failures, channel_id)
+    return (
+        [user for user in users if user not in failures],
+        ", ".join(f"{user} ({reason})" for user, reason in failures.items()),
+    )
 
 
 async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> bool:
