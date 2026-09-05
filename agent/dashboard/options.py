@@ -1,5 +1,6 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
+import os
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
@@ -341,13 +342,20 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
 
 
 def default_model_pair() -> tuple[str, str]:
-    """Hardcoded fallback (model_id, reasoning_effort) used when no team default is set."""
-    if DEFAULT_MODEL_ID in SUPPORTED_MODEL_IDS and model_supports_effort(
-        DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
-    ):
-        return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
-    first = SUPPORTED_MODELS[0]
-    return first["id"], first["default_effort"]
+    """Deployment fallback used when no team default is set."""
+    model_id = os.environ.get("LLM_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
+    effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
+    for model in SUPPORTED_MODELS:
+        if model["id"] == model_id and model.get("can_be_default", True):
+            effort = (
+                effort
+                or _fallback_effort_for(model, DEFAULT_MODEL_EFFORT)
+                or model["default_effort"]
+            )
+            if effort not in model["efforts"]:
+                raise ValueError(f"Unsupported LLM_REASONING_EFFORT {effort!r} for {model_id!r}")
+            return model_id, effort
+    raise ValueError(f"Unsupported default LLM_MODEL_ID: {model_id!r}")
 
 
 def default_vision_model_pair() -> tuple[str, str]:
