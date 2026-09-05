@@ -5,7 +5,6 @@ from langchain.chat_models import init_chat_model
 
 from agent.config import ENV
 from agent.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
-from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.gateway import gateway_env_default, gateway_overrides
 from agent.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
@@ -354,8 +353,13 @@ def validate_local_dev_llm_config() -> None:
     intended to catch missing credentials for the default model specified
     via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
     from team, profile, or thread configuration and is not validated here.
+
+    Only an explicitly configured localhost dashboard URL counts: the derived
+    default follows LANGGRAPH_URL, which is unset (so localhost) on a fresh
+    LangGraph Platform deployment until its URL exists, and failing startup
+    there would leave the deployment unable to ever get one.
     """
-    dashboard_url = dashboard_base_url()
+    dashboard_url = ENV.DASHBOARD_BASE_URL.optional() or ""
     if not dashboard_url.startswith("http://localhost"):
         return
 
