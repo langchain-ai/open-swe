@@ -73,6 +73,16 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
 
 
 @pytest.fixture(autouse=True)
+def _no_slack_identity_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ``ensure_slack_bot_identity`` from calling Slack during tests.
+
+    A far-future attempt timestamp trips its retry throttle; tests of the
+    discovery itself reset it to ``None``.
+    """
+    monkeypatch.setattr(webhook_common, "_SLACK_IDENTITY_ATTEMPTED_AT", float("inf"))
+
+
+@pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
     """Keep the process-global TTL cache from leaking team settings between tests."""
     ttl_cache.clear()

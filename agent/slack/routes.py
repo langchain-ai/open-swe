@@ -41,6 +41,24 @@ def _bounded_payload_text(label: str, payload: dict[str, Any]) -> str:
     return f"{label}\n```json\n{serialized[:8000]}\n```"
 
 
+async def _repo_config_or_reply(
+    channel_id: str, thread_ts: str, **kwargs: Any
+) -> dict[str, str] | None:
+    """Resolve the repository for a Slack turn, telling the thread what is missing.
+
+    Returns None after replying, so the caller answers Slack with 200: a 4xx would
+    only make Slack redeliver the event, and nobody would see why nothing happened.
+    """
+    try:
+        return await common.get_slack_repo_config(channel_id, thread_ts, **kwargs)
+    except common.SlackRepositoryNotConfigured:
+        common.logger.info("No repository for Slack channel=%s thread=%s", channel_id, thread_ts)
+        await common.post_slack_thread_reply(
+            channel_id, thread_ts, common.no_repository_slack_reply()
+        )
+        return None
+
+
 async def _queue_code_channel_turn(
     background_tasks: common.BackgroundTasks,
     *,
@@ -67,13 +85,15 @@ async def _queue_code_channel_turn(
         return {"status": "ignored", "reason": "Duplicate code channel interaction"}
 
     channel_context = await common._get_slack_channel_context(channel_id)
-    repo_config = await common.get_slack_repo_config(
+    repo_config = await _repo_config_or_reply(
         channel_id,
         common.CODE_CHANNEL_SESSION_TS,
         slack_user_id=user_id,
         channel_context=channel_context,
         thread_id=thread_id,
     )
+    if repo_config is None:
+        return {"status": "ignored", "reason": "No repository configured"}
     background_tasks.add_task(
         service.process_slack_mention,
         {
@@ -155,13 +175,15 @@ async def _process_slack_message_update(
         return
     event_data["thread_id"] = thread_id
     event_data["channel_context"] = channel_context
-    repo_config = await common.get_slack_repo_config(
+    repo_config = await _repo_config_or_reply(
         channel_id,
         thread_ts,
         slack_user_id=user_id,
         channel_context=channel_context,
         thread_id=thread_id,
     )
+    if repo_config is None:
+        return
     await service.process_slack_mention(event_data, repo_config)
 
 
@@ -183,6 +205,7 @@ async def slack_webhook(
         common.logger.warning("Invalid Slack signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
+    await common.ensure_slack_bot_identity()
     try:
         payload = common.json.loads(body)
     except common.json.JSONDecodeError:
@@ -495,13 +518,15 @@ async def slack_webhook(
             "team_id": team_id,
             "app_context": updated_message.get("app_context") or event.get("app_context"),
         }
-        repo_config = await common.get_slack_repo_config(
+        repo_config = await _repo_config_or_reply(
             channel_id,
             thread_ts,
             slack_user_id=user_id,
             channel_context=channel_context,
             thread_id=thread_id,
         )
+        if repo_config is None:
+            return {"status": "ignored", "reason": "No repository configured"}
         if await common.claim_slack_event(event_id, channel_id, event_ts):
             background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
             return {"status": "accepted", "message": "Slack mention queued"}
@@ -576,6 +601,7 @@ async def slack_interactivity(
         common.logger.warning("Invalid Slack interactivity signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
+    await common.ensure_slack_bot_identity()
     form = common.parse_qs(body.decode("utf-8"))
     payload_raw = (form.get("payload") or [""])[0]
     try:

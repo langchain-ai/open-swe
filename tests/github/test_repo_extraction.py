@@ -32,6 +32,15 @@ class TestExtractRepoFromText:
         result = extract_repo_from_text("repo:my-repo", default_owner="custom-org")
         assert result == {"owner": "custom-org", "name": "my-repo"}
 
+    def test_repo_name_only_without_default_owner_returns_none(self) -> None:
+        assert extract_repo_from_text("fix repo:widgets", default_owner="") is None
+
+    def test_repo_name_only_has_no_hardcoded_owner(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import agent.utils.repo as repo_module
+
+        monkeypatch.setattr(repo_module, "_DEFAULT_REPO_OWNER", "")
+        assert extract_repo_from_text("fix repo:widgets") is None
+
     def test_github_url(self) -> None:
         result = extract_repo_from_text(
             "check https://github.com/langchain-ai/langgraph-api please"

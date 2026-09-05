@@ -80,7 +80,8 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         full_issue = issue
 
     repo_config = common.extract_repo_from_text(
-        comment_body, default_owner=common.DEFAULT_REPO_OWNER
+        comment_body,
+        default_owner=await common.default_repo_owner_hint(common.DEFAULT_REPO_OWNER),
     )
 
     if repo_config:

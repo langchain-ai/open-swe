@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -94,6 +95,7 @@ from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
     _parse_ts,  # noqa: F401
+    fetch_slack_bot_identity,
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_channel_context,
@@ -165,6 +167,8 @@ __all__ = [
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
     "DOCS_PLZ_SLACK_GATE_REPLY",
+    "default_repo_owner_hint",
+    "no_repository_slack_reply",
     "FEEDBACK_REACTIONS",
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
@@ -179,6 +183,7 @@ __all__ = [
     "SlackThreadMappingError",
     "_AGENT_VERSION_METADATA",
     "describe_open_swe_tags",
+    "ensure_slack_bot_identity",
     "mentions_open_swe",
     "_GH_PR_AGENT_STATE_ACTIONS",
     "_GH_PR_FIRST_REVIEW_ACTIONS",
@@ -334,7 +339,68 @@ DEFAULT_REPO_OWNER = ENV.DEFAULT_REPO_OWNER.get()
 DEFAULT_REPO_NAME = ENV.DEFAULT_REPO_NAME.get()
 SLACK_REPO_OWNER = ENV.SLACK_REPO_OWNER.get() or DEFAULT_REPO_OWNER
 SLACK_REPO_NAME = ENV.SLACK_REPO_NAME.get() or DEFAULT_REPO_NAME
+_SLACK_IDENTITY_RETRY_SECONDS = 60.0
+_SLACK_IDENTITY_ATTEMPTED_AT: float | None = None
+
+
+async def ensure_slack_bot_identity() -> None:
+    """Fill ``SLACK_BOT_USER_ID`` / ``SLACK_BOT_USERNAME`` from the bot token when unset.
+
+    An explicit ``SLACK_BOT_USER_ID`` disables discovery entirely (the username
+    is only a best-effort plain-text mention hint). Discovery is attempted at
+    most once a minute so a Slack outage cannot stall webhook handling.
+    """
+    global SLACK_BOT_USER_ID, SLACK_BOT_USERNAME, _SLACK_IDENTITY_ATTEMPTED_AT
+    if SLACK_BOT_USER_ID:
+        return
+    now = time.monotonic()
+    if (
+        _SLACK_IDENTITY_ATTEMPTED_AT is not None
+        and now - _SLACK_IDENTITY_ATTEMPTED_AT < _SLACK_IDENTITY_RETRY_SECONDS
+    ):
+        return
+    _SLACK_IDENTITY_ATTEMPTED_AT = now
+    identity = await fetch_slack_bot_identity()
+    if identity is None:
+        return
+    SLACK_BOT_USER_ID = SLACK_BOT_USER_ID or identity.user_id
+    SLACK_BOT_USERNAME = SLACK_BOT_USERNAME or identity.username
+    logger.info(
+        "Resolved Slack bot identity: user_id=%s username=%s",
+        SLACK_BOT_USER_ID,
+        SLACK_BOT_USERNAME,
+    )
+
+
 DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
+# Posted in the Slack thread when no repository can be resolved: a bare 4xx to
+# Slack is invisible to the person who asked.
+NO_REPOSITORY_SLACK_REPLY = (
+    "I don't know which repository to work in. Set a default in the dashboard under "
+    "Admin → Team settings → Default Repository (or in your own profile), or put "
+    "`repo:owner/name` in this channel's topic, then mention me again."
+)
+# Appended when Sign in with Slack is available: an unlinked person's profile
+# default cannot apply until their Slack account is linked to their GitHub login.
+LINK_SLACK_ACCOUNT_HINT = (
+    " Your own profile default is used once your Slack account is linked: in the "
+    "dashboard, My settings → Sign in with Slack."
+)
+
+
+def no_repository_slack_reply() -> str:
+    from agent.slack.oauth import slack_oauth_configured  # noqa: PLC0415
+
+    return NO_REPOSITORY_SLACK_REPLY + (LINK_SLACK_ACCOUNT_HINT if slack_oauth_configured() else "")
+
+
+class SlackRepositoryNotConfigured(HTTPException):
+    """No repository could be resolved for a Slack-triggered run."""
+
+    def __init__(self) -> None:
+        super().__init__(400, "no default repository configured")
+
+
 DOCS_PLZ_SLACK_GATE_REPLY = (
     "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
 )
@@ -375,7 +441,11 @@ def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
     """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
-    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME} if DEFAULT_REPO_NAME else {}
+    fallback = (
+        {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
+        if DEFAULT_REPO_OWNER and DEFAULT_REPO_NAME
+        else {}
+    )
 
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
         return fallback
@@ -809,6 +879,20 @@ async def upsert_agent_thread_metadata(
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)
 
 
+async def default_repo_owner_hint(env_owner: str = "") -> str:
+    """Owner assumed for ``repo:name`` shorthand.
+
+    The team default repository's owner; the deprecated env default only while
+    no team default is configured. Empty when neither is set, in which case the
+    shorthand is ignored and a full ``owner/name`` is required.
+    """
+    team_repo = await get_team_default_repo()
+    team_owner = (team_repo or {}).get("owner", "")
+    if isinstance(team_owner, str) and team_owner.strip():
+        return team_owner.strip()
+    return env_owner.strip()
+
+
 async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
@@ -823,10 +907,10 @@ async def get_slack_repo_config(
         2. A ``repo:owner/name`` token in the channel's topic/purpose.
         3. The triggering user's dashboard ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
-        4. Team default repo.
-        5. ``SLACK_REPO_*`` env defaults.
+        4. Team default repo (Admin → Team settings).
+        5. Deprecated ``SLACK_REPO_*`` / ``DEFAULT_REPO_*`` env defaults.
     """
-    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
+    env_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
@@ -848,6 +932,7 @@ async def get_slack_repo_config(
             )
 
     if not repo_config:
+        default_owner = await default_repo_owner_hint(env_owner)
         try:
             if channel_context is not None:
                 channel_description = get_slack_channel_context_description(channel_context)
@@ -893,11 +978,11 @@ async def get_slack_repo_config(
     if not repo_config:
         repo_config = await get_team_default_repo()
 
-    if not repo_config and default_owner and default_name:
-        repo_config = {"owner": default_owner, "name": default_name}
+    if not repo_config and env_owner and default_name:
+        repo_config = {"owner": env_owner, "name": default_name}
 
     if not repo_config:
-        raise HTTPException(400, "no default repository configured")
+        raise SlackRepositoryNotConfigured()
 
     return repo_config
 
