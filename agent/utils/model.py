@@ -5,6 +5,7 @@ from langchain.chat_models import init_chat_model
 
 from agent.config import ENV
 from agent.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
+from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.gateway import gateway_env_default, gateway_overrides
 from agent.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
@@ -354,7 +355,7 @@ def validate_local_dev_llm_config() -> None:
     via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
     from team, profile, or thread configuration and is not validated here.
     """
-    dashboard_url = ENV.DASHBOARD_BASE_URL.get()
+    dashboard_url = dashboard_base_url()
     if not dashboard_url.startswith("http://localhost"):
         return
 
