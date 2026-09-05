@@ -1,11 +1,11 @@
 # Installation Guide
 
-This guide gets Open SWE running with the **minimum supported installation: GitHub + Slack**. Everything else — the web dashboard, Linear, per-user GitHub identity, "Sign in with Slack", custom sandbox images, alternate sandbox providers, web search — is an optional add-on you enable later.
+This guide gets Open SWE running with the **minimum supported installation: GitHub + Slack**. Everything else — the web dashboard, Linear, per-user GitHub identity, "Sign in with Slack", custom sandbox images, alternate sandbox providers, web search — is an optional add-on you enable later. With the minimum install, runs are triggered from Slack and act as the GitHub App bot. Triggering runs from GitHub issue and pull request comments needs the dashboard add-on: those runs act as the commenting user, so that person has to have signed in to the dashboard once.
 
 Open SWE has two runnable pieces:
 
 - **The backend** — a LangGraph app (the `agent`, `reviewer`, `analyzer`, `chat`, and `scheduler` graphs) plus a FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API. Both are served together by `langgraph dev`.
-- **The dashboard** — an optional TanStack Start + Vite web app in `ui/` (package name `open-swe-dashboard`). It is a thin client over the FastAPI dashboard API. Webhook-driven use does not need it.
+- **The dashboard** — an optional TanStack Start + Vite web app in `ui/` (package name `open-swe-dashboard`). It is a thin client over the FastAPI dashboard API. Slack- and Linear-triggered runs do not need it; GitHub-comment triggers do, because they act as the commenting user.
 
 The minimum install needs these values, and nothing else:
 
@@ -268,17 +268,19 @@ make dev          # uv run langgraph dev --no-browser --port 2024
 
 ## 9. Verify it works
 
-### GitHub
-
-1. Go to any issue in a repository where the app is installed
-2. Create or comment on an issue with: `@openswe what files are in this repo?`
-3. You should see a 👀 reaction within a few seconds, a new run in your `LANGSMITH_PROJECT` LangSmith project, and a reply comment on the issue
-
 ### Slack
 
 1. In any channel where the bot is invited, set the channel topic to `repo:owner/name` (or rely on the team default repository)
 2. Mention the bot: `@Open SWE what's in the repo?`
 3. You should see a reply in the thread with the agent's response
+
+### GitHub
+
+GitHub-triggered runs act as the person who commented, so this needs the [dashboard add-on](#dashboard-web-ui): sign in to it once with the GitHub account that will comment. That records the user mapping and stores the GitHub token the run acts with; an unmapped commenter is skipped with a warning in the server log.
+
+1. Go to any issue in a repository where the app is installed
+2. Create or comment on an issue with: `@openswe what files are in this repo?`
+3. You should see a 👀 reaction within a few seconds, a new run in your `LANGSMITH_PROJECT` LangSmith project, and a reply comment on the issue
 
 ---
 
@@ -393,7 +395,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 **Configure team-to-repo mapping:**
 
-Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/utils/linear_team_repo_map.py`:
+Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/linear/team_repo_map.py`:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -676,7 +678,7 @@ Every variable Open SWE reads is declared once in `agent/config.py` with its def
 
 ### Agent not responding to comments
 
-- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter has a user mapping (Admin → User mappings) or self-onboarded
+- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter has signed in to the [dashboard](#dashboard-web-ui) once — GitHub-triggered runs act as that user and need the GitHub token the sign-in stores; the server log says `No email mapping for GitHub user` otherwise
 - For Linear: ensure the comment contains `@openswe` (case-insensitive)
 - For Slack: ensure the bot is invited to the channel and the message is an `@mention`
 - Check server logs for webhook processing errors

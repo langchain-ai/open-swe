@@ -135,7 +135,7 @@ Open SWE includes a LangGraph backend, a web dashboard, and an experimental desk
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
 - **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
 
-The minimum install is GitHub + Slack: a LangSmith API key, one model provider key, a GitHub App (client id, private key, webhook secret), and a Slack app (bot token, signing secret). Everything else is discovered at runtime or optional. Create the GitHub and Slack apps as described in the [Installation Guide](docs/INSTALLATION.md), then:
+The minimum install is GitHub + Slack: a LangSmith API key, one model provider key, a GitHub App (client id, private key, webhook secret), and a Slack app (bot token, signing secret). Everything else is discovered at runtime or optional. This install triggers runs from Slack; triggering from GitHub comments needs the dashboard add-on, because those runs act as the commenting user. Create the GitHub and Slack apps as described in the [Installation Guide](docs/INSTALLATION.md), then:
 
 ```bash
 git clone https://github.com/langchain-ai/open-swe.git
@@ -147,7 +147,7 @@ make setup   # guided .env: prompts for the credentials above, generates the loc
 make dev     # backend on http://localhost:2024
 ```
 
-The dashboard is an optional add-on: `pnpm install` and `make web` in a second terminal once you have followed its section of the guide.
+The dashboard is an optional add-on (needed for GitHub-comment triggers and per-user GitHub identity): `pnpm install` and `make web` in a second terminal once you have followed its section of the guide.
 
 Production self-hosting uses the standalone LangGraph Agent Server and requires its license key.
 
