@@ -267,7 +267,7 @@ def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None
     assert gateway.gateway_overrides("openai:gpt-5.6-sol") is None
 
 
-def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deprecated_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
     overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
