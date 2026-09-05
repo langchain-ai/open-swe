@@ -36,6 +36,8 @@ DASHBOARD_KEYS: tuple[str, ...] = (
     "DASHBOARD_BASE_URL",
     "DASHBOARD_API_BASE_URL",
     "CONFIGURED_ADMINS",
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
 )
 GENERATED_KEYS: tuple[str, ...] = ("DASHBOARD_JWT_SECRET", "TOKEN_ENCRYPTION_KEY")
 SECRET_KEYS: frozenset[str] = frozenset(
@@ -46,6 +48,7 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "GITHUB_APP_CLIENT_SECRET",
         "SLACK_BOT_TOKEN",
         "SLACK_SIGNING_SECRET",
+        "SLACK_CLIENT_SECRET",
         *GENERATED_KEYS,
         *(key for key in MODEL_PROVIDER_KEYS.values() if key),
     }
@@ -230,6 +233,14 @@ def collect_answers(
             )
         if want("CONFIGURED_ADMINS"):
             answers["CONFIGURED_ADMINS"] = ask("Admin GitHub logins (comma-separated)", "")
+        # Sign in with Slack: the verified GitHub <-> Slack link, on the same Slack app.
+        if want("SLACK_CLIENT_ID") and want("SLACK_CLIENT_SECRET"):
+            client_id = ask(
+                "Slack app client ID, for Sign in with Slack (leave empty to skip)", ""
+            ).strip()
+            if client_id:
+                answers["SLACK_CLIENT_ID"] = client_id
+                answers["SLACK_CLIENT_SECRET"] = ask_secret("Slack app client secret")
 
     return {key: value for key, value in answers.items() if value or key.startswith("_")}
 

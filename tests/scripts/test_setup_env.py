@@ -177,6 +177,21 @@ def test_collect_answers_dashboard_section_uses_defaults() -> None:
     assert answers["DASHBOARD_BASE_URL"] == setup_env.DEFAULT_DASHBOARD_BASE_URL
     assert answers["DASHBOARD_API_BASE_URL"] == setup_env.DEFAULT_DASHBOARD_API_BASE_URL
     assert "CONFIGURED_ADMINS" not in answers
+    assert "SLACK_CLIENT_ID" not in answers and "SLACK_CLIENT_SECRET" not in answers
+
+
+def test_collect_answers_dashboard_section_offers_sign_in_with_slack() -> None:
+    ask, ask_secret, asked = _scripted(
+        {"Slack app client ID, for Sign in with Slack (leave empty to skip)": "123.456"},
+        {"GitHub App client secret": "gh-secret", "Slack app client secret": "slack-secret"},
+    )
+    existing = dict.fromkeys(setup_env.MINIMUM_KEYS, "x") | {"OPENAI_API_KEY": "x"}
+
+    answers = setup_env.collect_answers(ask, ask_secret, existing=existing, dashboard=True)
+
+    assert answers["SLACK_CLIENT_ID"] == "123.456"
+    assert answers["SLACK_CLIENT_SECRET"] == "slack-secret"
+    assert "SLACK_CLIENT_SECRET" in setup_env.SECRET_KEYS
 
 
 def test_missing_minimum_reports_names_only() -> None:

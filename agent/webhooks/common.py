@@ -168,6 +168,7 @@ __all__ = [
     "DEFAULT_REPO_OWNER",
     "DOCS_PLZ_SLACK_GATE_REPLY",
     "default_repo_owner_hint",
+    "no_repository_slack_reply",
     "FEEDBACK_REACTIONS",
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
@@ -379,6 +380,18 @@ NO_REPOSITORY_SLACK_REPLY = (
     "Admin → Team settings → Default Repository (or in your own profile), or put "
     "`repo:owner/name` in this channel's topic, then mention me again."
 )
+# Appended when Sign in with Slack is available: an unlinked person's profile
+# default cannot apply until their Slack account is linked to their GitHub login.
+LINK_SLACK_ACCOUNT_HINT = (
+    " Your own profile default is used once your Slack account is linked: in the "
+    "dashboard, My settings → Sign in with Slack."
+)
+
+
+def no_repository_slack_reply() -> str:
+    from agent.slack.oauth import slack_oauth_configured  # noqa: PLC0415
+
+    return NO_REPOSITORY_SLACK_REPLY + (LINK_SLACK_ACCOUNT_HINT if slack_oauth_configured() else "")
 
 
 class SlackRepositoryNotConfigured(HTTPException):

@@ -16,6 +16,7 @@ _SURFACES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("LangSmith", ("LANGSMITH_API_KEY",)),
     ("GitHub", ("GITHUB_APP_CLIENT_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET")),
     ("Slack", ("SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET")),
+    ("Slack sign-in", ("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET")),
     ("Linear", ("LINEAR_API_KEY", "LINEAR_WEBHOOK_SECRET")),
     (
         "Dashboard",
