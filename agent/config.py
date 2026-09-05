@@ -319,9 +319,19 @@ ENV.var("LINEAR_API_KEY", "Linear API key.", secret=True)
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
-ENV.var("DASHBOARD_BASE_URL", "Public URL of the dashboard frontend.")
 ENV.var(
-    "DASHBOARD_API_BASE_URL", "Public URL browsers use for /dashboard/api/* and OAuth callbacks."
+    "DASHBOARD_BASE_URL",
+    "Public URL of the dashboard frontend; defaults to LANGGRAPH_URL when the dashboard build "
+    "is bundled with the backend.",
+)
+ENV.var(
+    "DASHBOARD_API_BASE_URL",
+    "Public URL browsers use for /dashboard/api/* and OAuth callbacks; defaults to LANGGRAPH_URL.",
+)
+ENV.var(
+    "DASHBOARD_STATIC_DIR",
+    "Directory holding the dashboard build (ui/.output/public) served at /; defaults to the "
+    "in-repo build when present.",
 )
 ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(
