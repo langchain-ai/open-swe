@@ -164,10 +164,10 @@ ENV.var(
     aliases=("LANGSMITH_TENANT_ID_PROD",),
 )
 ENV.var(
-    "LANGSMITH_TRACING_PROJECT_ID",
-    "Fallback tracing project id for trace links when the per-graph project cannot be "
-    "resolved by name.",
-    aliases=("LANGSMITH_TRACING_PROJECT_ID_PROD",),
+    "LANGSMITH_PROJECT",
+    "LangSmith project every run traces into and trace links point at; the SDK reads it and "
+    "LangGraph Platform sets it to the deployment name.",
+    default="default",
 )
 ENV.var(
     "LANGSMITH_URL_PROD",

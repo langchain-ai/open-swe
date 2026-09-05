@@ -60,7 +60,6 @@ from agent.utils import ttl_cache
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from agent.utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
 
@@ -204,4 +203,5 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     ).with_config(config)
 
 
-traced_analyzer = traced_graph_factory(get_analyzer, REVIEW_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_analyzer = get_analyzer

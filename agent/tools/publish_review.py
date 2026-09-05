@@ -63,7 +63,6 @@ from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
 from agent.utils.langsmith import get_langsmith_trace_url
-from agent.utils.tracing import REVIEW_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +186,7 @@ async def _resolve_review_trace_url(thread_id: str, config_override: bool | None
         return None
     if not thread_id:
         return None
-    return await get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
+    return await get_langsmith_trace_url(thread_id)
 
 
 async def _publish_review_eval_dry_run_async(
