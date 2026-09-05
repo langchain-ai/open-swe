@@ -145,3 +145,75 @@ test("login shell resolution parses null-delimited values without interpolating 
   assert.equal(result.MULTILINE, "a\nb=c");
   assert.equal(result.ORIGINAL, "yes");
 });
+
+test("manual OAuth roundtrips public config and encrypts secrets without renderer disclosure", (t) => {
+  const manager = fixture(t);
+  const input = {
+    name: "manual",
+    url: "http://localhost:9000/mcp",
+    auth_type: "oauth",
+    oauth_client_id: "manual-client",
+    oauth_scope: "read",
+    oauth_redirect_uri: "http://127.0.0.1:12345/callback",
+    oauth_token_endpoint_auth_method: "client_secret_basic",
+    oauth_client_secret: "manual-private-secret",
+  };
+  manager.save(input);
+  const row = manager.servers()[0];
+  assert.equal(row.oauth_client_secret_configured, true);
+  assert.equal(row.oauth_client_secret, undefined);
+  assert.equal(row.oauth_redirect_uri, input.oauth_redirect_uri);
+  const file = manager.credentialPath(row.name, row);
+  assert.equal(
+    fs
+      .readFileSync(manager.options.configPath, "utf8")
+      .includes(input.oauth_client_secret),
+    false,
+  );
+  assert.equal(
+    fs
+      .readFileSync(`${file}.secret`)
+      .includes(Buffer.from(input.oauth_client_secret)),
+    false,
+  );
+  manager.credentials(row.name, path.basename(file), {
+    tokens: { access_token: "keep-on-equivalent-edit" },
+  });
+  manager.save(Object.fromEntries(Object.entries(row).reverse()));
+  assert.equal(
+    manager.credentials(row.name, path.basename(file)).tokens.access_token,
+    "keep-on-equivalent-edit",
+  );
+  manager.save({ ...row, enabled: false });
+  manager.save({ ...row, oauth_scope: "read write" });
+  const updated = manager.servers()[0];
+  assert.equal(
+    manager.credentials(
+      updated.name,
+      path.basename(manager.credentialPath(updated.name, updated)),
+    ).client_secret,
+    input.oauth_client_secret,
+  );
+  manager.save({ ...updated, oauth_client_secret: "replacement" });
+  assert.equal(
+    manager.credentials(
+      updated.name,
+      path.basename(manager.credentialPath(updated.name, updated)),
+    ).client_secret,
+    "replacement",
+  );
+  manager.save({ ...updated, url: "http://localhost:9001/mcp" });
+  assert.equal(manager.servers()[0].oauth_client_secret_configured, false);
+  assert.throws(() =>
+    manager.save({
+      ...input,
+      oauth_redirect_uri: "https://evil.example/callback",
+    }),
+  );
+  const before = fs.readFileSync(manager.options.configPath, "utf8");
+  manager.options.encryptString = () => {
+    throw new Error("OS keychain unavailable");
+  };
+  assert.throws(() => manager.save(input), /OS keychain unavailable/);
+  assert.equal(fs.readFileSync(manager.options.configPath, "utf8"), before);
+});

@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 from cryptography.fernet import Fernet
+from langgraph_sdk.errors import ConflictError
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from starlette.requests import Request
@@ -19,6 +20,7 @@ from agent import store
 from agent.dashboard import mcp_connections as mc
 from agent.dashboard import mcp_http as mh
 from agent.dashboard import mcp_oauth as mo
+from agent.utils.distributed_lock import distributed_lock
 
 
 @pytest.fixture
@@ -41,7 +43,30 @@ async def environment(monkeypatch):
             ]
             return {"items": values[kwargs["offset"] : kwargs["offset"] + kwargs["limit"]]}
 
-    monkeypatch.setattr(store, "store_client", lambda: SimpleNamespace(store=Store()))
+    claims = set()
+
+    class Threads:
+        async def create(self, *, thread_id, if_exists, ttl):
+            await asyncio.sleep(0)
+            assert if_exists == "raise"
+            assert ttl == {"strategy": "keep_latest", "ttl": 60}
+            if thread_id in claims:
+                raise ConflictError(
+                    "Already owned",
+                    response=httpx.Response(
+                        409, request=httpx.Request("POST", "http://store/threads")
+                    ),
+                    body=None,
+                )
+            claims.add(thread_id)
+
+        async def delete(self, thread_id):
+            await asyncio.sleep(0)
+            claims.remove(thread_id)
+
+    monkeypatch.setattr(
+        store, "store_client", lambda: SimpleNamespace(store=Store(), threads=Threads())
+    )
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
     async def dns(host, port, **kwargs):
@@ -89,6 +114,24 @@ async def create(auth_type="bearer", **kwargs):
             **kwargs,
         },
     )
+
+
+async def test_cancelled_owner_is_not_replaced(environment):
+    entered = asyncio.Event()
+
+    async def owner():
+        async with distributed_lock(["cancelled-oauth"]):
+            entered.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(owner())
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    with pytest.raises(TimeoutError):
+        async with distributed_lock(["cancelled-oauth"], timeout=0):
+            pytest.fail("An abandoned owner must not be replaced without fencing")
 
 
 async def test_real_sdk_initialization_and_paginated_discovery(environment, monkeypatch):
@@ -151,10 +194,15 @@ async def test_encryption_crud_catalog_owner_and_url_change(environment):
     assert not disabled["enabled"]
     with pytest.raises(mh.MCPConnectionError, match="disabled"):
         await mc.connection_config("alice", record["id"])
+    await mc.save_connection(
+        "alice", {"id": record["id"], "oauth_client_id": "manual", "oauth_client_secret": "secret"}
+    )
     changed = await mc.save_connection(
         "alice", {"id": record["id"], "url": "https://other.example/mcp"}
     )
     assert not changed["bearer_token_configured"]
+    assert not changed["oauth_client_configured"]
+    assert not changed["oauth_client_secret_configured"]
     await mc.delete_connection("alice", record["id"])
     assert await mc.list_connections("alice") == []
 
@@ -322,11 +370,13 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
         "token_endpoint_auth_methods_supported": ["none"],
     }
 
-    async def discover(url):
+    async def discover(url, authorization_server=""):
+        assert not authorization_server
         return metadata, url, "read"
 
     async def request_json(method, url, **kwargs):
         calls.append((url, kwargs))
+        await asyncio.sleep(0.02)
         if url.endswith("register"):
             return {**kwargs["json"], "client_id": "client"}
         return {
@@ -351,7 +401,15 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
         hashlib.sha256(verifier.encode()).digest()
     ).decode().rstrip("=")
     assert query["code_challenge_method"] == ["S256"]
-    result = await mo.finish_oauth(state, "authorization-code")
+    results = await asyncio.gather(
+        mo.finish_oauth(state, "authorization-code"),
+        mo.finish_oauth(state, "authorization-code"),
+        return_exceptions=True,
+    )
+    result = next(result for result in results if isinstance(result, dict))
+    replay = next(result for result in results if isinstance(result, mh.MCPConnectionError))
+    assert replay.status_code == 400
+    assert sum(url.endswith("token") for url, _ in calls) == 1
     assert result["oauth_configured"]
     assert "oauth-access-secret" not in json.dumps(result)
     assert "oauth-refresh-secret" not in json.dumps(list(environment.values()))
@@ -362,6 +420,14 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     record = await mc._get("alice", public["id"])
     record["oauth"]["expires_at"] = time.time() - 1
     await mc._put("alice", record)
+    stale = await mc._get("alice", public["id"])
+    refreshed = await asyncio.gather(
+        mo.access_token("alice", record), mo.access_token("alice", stale)
+    )
+    assert refreshed == ["oauth-access-secret", "oauth-access-secret"]
+    assert (
+        sum(kwargs.get("data", {}).get("grant_type") == "refresh_token" for _, kwargs in calls) == 1
+    )
     config = await mc.connection_config("alice", public["id"])
     assert config["headers"] == {}
     flow = config["auth"].async_auth_flow(httpx.Request("POST", config["url"]))
@@ -369,6 +435,24 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     assert request.headers["authorization"] == "Bearer oauth-access-secret"
     await flow.aclose()
     assert calls[-1][1]["data"]["grant_type"] == "refresh_token"
+    record = await mc._get("alice", public["id"])
+    record["oauth"]["expires_at"] = time.time() - 1
+    await mc._put("alice", record)
+    attempts = 0
+
+    async def interrupted(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        await asyncio.sleep(0.02)
+        raise mh.MCPConnectionError(502, "OAuth endpoint rejected the request")
+
+    monkeypatch.setattr(mo, "request_json", interrupted)
+    failures = await asyncio.gather(
+        mo.access_token("alice", record), mo.access_token("alice", record), return_exceptions=True
+    )
+    assert attempts == 1
+    assert sorted(error.status_code for error in failures) == [409, 502]
+    assert (await mc._get("alice", public["id"]))["oauth"]["refresh_pending"]
     await mc.delete_connection("alice", public["id"])
     with pytest.raises(mh.MCPConnectionError, match="not found"):
         await anext(config["auth"].async_auth_flow(httpx.Request("POST", config["url"])))
@@ -467,20 +551,128 @@ async def test_manual_client_fallback_and_stale_callback(environment, monkeypatc
         "read",
     )
     assert client["client_id"] == "manual"
+    metadata.update(
+        issuer="https://auth.example/tenant",
+        authorization_endpoint="https://auth.example/authorize",
+        token_endpoint="https://auth.example/token",
+        response_types_supported=["code"],
+        code_challenge_methods_supported=["S256"],
+    )
+    prm = None
+    prm_status = 404
+    seen = []
+
+    async def upstream(request):
+        seen.append(request)
+        assert request.url.host == "93.184.216.34"
+        assert request.headers["host"] == request.extensions["sni_hostname"]
+        if "oauth-protected-resource" in request.url.path:
+            return httpx.Response(prm_status, json=prm)
+        if request.url.path == "/.well-known/oauth-authorization-server/tenant":
+            assert request.headers["host"] == "auth.example"
+            return httpx.Response(200, json=metadata)
+        if request.url.path == "/token":
+            fields = parse_qs((await request.aread()).decode())
+            assert fields["resource"] == ["https://example.com/mcp"]
+            assert fields["client_secret"] == ["secret"]
+            return httpx.Response(200, json={"access_token": "access", "token_type": "Bearer"})
+        return httpx.Response(401)
+
+    async def dns(host, port, **kwargs):
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                6,
+                "",
+                ("127.0.0.1" if host == "private.example" else "93.184.216.34", port),
+            )
+        ]
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda **kwargs: httpx.MockTransport(upstream))
+    for issuer in ("http://auth.example", "https://private.example"):
+        with pytest.raises(mh.MCPConnectionError):
+            await create("oauth", oauth_authorization_server=issuer)
+        with pytest.raises(mh.MCPConnectionError):
+            await mo._discover("https://example.com/mcp", issuer)
+    assert not seen
     record = await create(
         "oauth",
         oauth_client_id="manual",
         oauth_client_secret="secret",
+        oauth_scope="read",
         oauth_token_endpoint_auth_method="client_secret_post",
+        oauth_authorization_server="https://auth.example/tenant",
     )
-
-    async def discover(url):
-        return {**metadata, "authorization_endpoint": "https://auth.example/authorize"}, url, "read"
-
-    monkeypatch.setattr(mo, "_discover", discover)
+    fields = {
+        key: record[key]
+        for key in (
+            "oauth_client_id",
+            "oauth_scope",
+            "oauth_token_endpoint_auth_method",
+            "oauth_authorization_server",
+        )
+    }
+    assert fields == {
+        "oauth_client_id": "manual",
+        "oauth_scope": "read",
+        "oauth_token_endpoint_auth_method": "client_secret_post",
+        "oauth_authorization_server": "https://auth.example/tenant",
+    }
+    assert "oauth_client_secret" not in record
+    edited = await mc.save_connection("alice", {"id": record["id"], "name": "Edited", **fields})
+    assert all(edited[key] == value for key, value in fields.items())
+    assert edited["oauth_client_secret_configured"]
+    with pytest.raises(mh.MCPConnectionError, match="unavailable"):
+        await mo._discover(record["url"])
+    for status in (404, 405):
+        prm_status = status
+        url = await mo.start_oauth("alice", record["id"], "https://dashboard.example/callback")
+        query = parse_qs(urlsplit(url).query)
+        assert query["resource"] == [record["url"]]
+        assert query["scope"] == ["read"]
+        assert query["client_id"] == ["manual"]
+    result = await mo.finish_oauth(query["state"][0], "code")
+    assert result["oauth_configured"]
+    for status, body, message in (
+        (500, None, "discovery failed"),
+        (200, {}, "Invalid MCP OAuth"),
+        (
+            200,
+            {
+                "resource": "https://other.example/mcp",
+                "authorization_servers": [metadata["issuer"]],
+            },
+            "resource does not match",
+        ),
+        (
+            200,
+            {"resource": record["url"], "authorization_servers": ["https://other.example/"]},
+            "conflicts",
+        ),
+    ):
+        prm_status, prm = status, body
+        with pytest.raises(mh.MCPConnectionError, match=message):
+            await mo._discover(record["url"], fields["oauth_authorization_server"])
+    prm_status, prm = 404, None
+    for field, value, message in (
+        ("issuer", "https://other.example/", "issuer does not match"),
+        ("token_endpoint", "https://private.example/token", "public"),
+        ("code_challenge_methods_supported", ["plain"], "S256"),
+    ):
+        original = metadata[field]
+        metadata[field] = value
+        with pytest.raises(mh.MCPConnectionError, match=message):
+            await mo._discover(record["url"], fields["oauth_authorization_server"])
+        metadata[field] = original
     url = await mo.start_oauth("alice", record["id"], "https://dashboard.example/callback")
     state = parse_qs(urlsplit(url).query)["state"][0]
-    await mc.save_connection("alice", {"id": record["id"], "url": "https://other.example/mcp"})
+    changed = await mc.save_connection(
+        "alice", {"id": record["id"], "oauth_authorization_server": ""}
+    )
+    assert not changed["oauth_authorization_server"]
+    assert not changed["oauth_configured"]
     with pytest.raises(mh.MCPConnectionError, match="changed"):
         await mo.finish_oauth(state, "code")
 

@@ -16,6 +16,10 @@ export interface McpConnection extends McpPreset {
   oauth_configured: boolean
   oauth_client_configured: boolean
   oauth_client_secret_configured: boolean
+  oauth_client_id?: string
+  oauth_scope?: string
+  oauth_authorization_server?: string
+  oauth_token_endpoint_auth_method?: McpConnectionInput["oauth_token_endpoint_auth_method"]
   tested_at: string | null
   created_at: string
   updated_at: string
@@ -31,6 +35,7 @@ export interface McpConnectionInput {
   bearer_token?: string
   oauth_client_id?: string
   oauth_client_secret?: string
+  oauth_authorization_server?: string
   oauth_scope?: string
   oauth_token_endpoint_auth_method?:
     | "none"
@@ -58,6 +63,10 @@ export interface LocalMcpServer {
   auth_type?: "none" | "headers" | "oauth"
   oauth_client_id?: string
   oauth_scope?: string
+  oauth_redirect_uri?: string
+  oauth_token_endpoint_auth_method?: McpConnectionInput["oauth_token_endpoint_auth_method"]
+  oauth_client_secret?: string
+  oauth_client_secret_configured?: boolean
 }
 
 export interface McpDesktopBridge {

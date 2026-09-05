@@ -147,7 +147,6 @@ from agent.tool_loaders.corridor_mcp import (
     load_corridor_tools,
 )
 from agent.tool_loaders.currents import load_currents_tools
-from agent.tool_loaders.datadog_mcp import load_datadog_tools
 from agent.tool_loaders.langsmith import load_langsmith_tools
 from agent.tool_loaders.mcp import desktop_tool_groups, load_mcp_groups
 from agent.tool_loaders.stagehand_browser import load_browser_tools
@@ -448,7 +447,7 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     """Whether the triggering user may use the team observability tools.
 
     Gates on admin / explicitly-authorized emails so prompt-injected runs from
-    untrusted contributors cannot reach the team's Datadog/LangSmith data.
+    untrusted contributors cannot reach the team's LangSmith data.
     """
     cfg = RunConfig.from_config(config)
     candidate_login = profile_login or cfg.github_login
@@ -569,11 +568,7 @@ async def _load_observability_tools(authorized: bool, profile_login: str | None)
     """Load team observability tools for an authorized triggering user."""
     if not authorized:
         return []
-    datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
-        _cached_langsmith_tools(profile_login, allow_team=True),
-    )
-    return [*datadog_tools, *langsmith_tools]
+    return await _cached_langsmith_tools(profile_login, allow_team=True)
 
 
 async def _observability_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:

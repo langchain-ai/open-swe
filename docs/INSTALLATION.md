@@ -244,7 +244,7 @@ For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level
 
 `ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
 
-> **Observability access**: when team LangSmith credentials are connected, every active member of an organization in `ALLOWED_GITHUB_ORGS` can use the read-only LangSmith trace tools. Only list organizations whose full active membership may access team-level trace data. This does not grant Datadog access.
+> **Observability access**: when team LangSmith credentials are connected, every active member of an organization in `ALLOWED_GITHUB_ORGS` can use the read-only LangSmith trace tools. Only list organizations whose full active membership may access team-level trace data. MCP connections, including Datadog, are user-owned and do not inherit team access. Users with legacy Notion or team Datadog connections must reconnect through Plugins; legacy credentials are not migrated.
 
 > **Required GitHub App installation and permission**: install the App in every organization listed in `ALLOWED_GITHUB_ORGS` and grant **Organization → Members: Read-only** (see step 3a). Membership checks resolve each organization's installation and call `GET /orgs/{org}/memberships/{username}`. Missing installations, unapproved permissions, and API errors fail closed. `GITHUB_APP_INSTALLATION_ID` remains the default installation for ordinary GitHub operations.
 
@@ -746,6 +746,24 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 
 - Confirm the backend is running via `make dev` on `:2024` (not `make run` on `:8000`).
 - Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `make web` or `pnpm run dev`.
+
+### MCP connection ownership and OAuth recovery
+
+- Cloud MCP operations use a persistent LangGraph thread as an ownership lock. Normal validation, missing-record, and OAuth errors release it; cancellation, unexpected exceptions (including Store read/write failures), or an uncertain release can leave it held. Contenders wait up to 60 seconds before returning `503 MCP connection is unavailable; retry or recreate it`. The lock's `keep_latest` TTL is **60 minutes**, not a lease: it retains the thread rather than making ownership available again.
+- If the current operation is still running, allow it to finish. A retained lock blocks reads that acquire ownership, edits, deletion, and OAuth reconnect for that connection ID. Adding a **new connection** in Plugins creates a new ID and avoids that lock; it does not delete the old record, revoke its credentials, or stop its worker.
+- **Administrator recovery:** block new MCP requests and confirm the old owning worker is terminated, with no in-flight Store mutations remaining. If its identity is unknown, stop all backend replicas/workers that could own it. Only then delete the specific ownership thread through the deployment's authenticated LangGraph Threads API (`client.threads.delete(lock_id)`), not the connection's Store record. Never clear a lock merely because its TTL elapsed or a request timed out: a surviving owner can overwrite newer credentials or delete a replacement owner's lock. There is no dashboard unlock action. Derive the thread ID exactly as follows:
+
+  ```python
+  import json
+  import uuid
+
+  key = ["mcp_connections", "<owner-login>", "<connection-id>"]
+  lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:ownership:" + json.dumps(key)))
+  ```
+
+  OAuth callback ownership uses the same formula with the SHA-256 hex digest of the encrypted callback `state` instead of the connection ID. Prefer starting a fresh OAuth flow rather than recovering an old callback. Treat callback URLs/state as credentials; do not paste them into logs or tickets.
+- `MCP OAuth refresh interrupted; reconnect` means `refresh_pending` was persisted before a refresh whose outcome may be ambiguous. Start a fresh OAuth authorization; do not manually clear that flag or retry the old refresh token. Ordinary OAuth rejection releases ownership, so reconnect or deletion remains available unless a separate unexpected failure retained the lock. For provider-side `invalid_client`/`invalid_grant`, correct the registered client ID/secret, token-endpoint authentication method, and callback URI as applicable, then authorize again; clearing a lock does not repair invalid credentials. If encrypted records cannot be read, restore the required `TOKEN_ENCRYPTION_KEY` before recovery.
+- For cloud OAuth without protected-resource discovery, enter the provider's HTTPS **Authorization server URL (cloud only)** under Advanced OAuth settings alongside your registered client details; authorization-server metadata, matching issuer, S256 PKCE, public HTTPS endpoints, and any returned protected-resource metadata are still validated (the fallback resource is the canonical MCP URL).
 
 ### Sandbox creation failures
 

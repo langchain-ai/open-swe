@@ -243,7 +243,10 @@ export function McpConnectionsSection({ login }: { login: string }) {
                           : status === "error"
                             ? "Connection failed · check settings and test again"
                             : status === "local"
-                              ? "Connects when a local run starts"
+                              ? source === "local" &&
+                                row.record.auth_type === "oauth"
+                                ? "OAuth · browser sign-in when a local run starts"
+                                : "Connects when a local run starts"
                               : "Not tested"}
                   </p>
                 </div>

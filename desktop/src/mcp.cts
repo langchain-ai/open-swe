@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
 const { execFile } = require("node:child_process");
-const { promisify } = require("node:util");
+const { promisify, isDeepStrictEqual } = require("node:util");
 const { randomBytes, createHash, timingSafeEqual } = require("node:crypto");
 
 function readJson(file, fallback) {
@@ -48,14 +48,40 @@ function validateServer(name, server) {
     "auth_type",
     "oauth_client_id",
     "oauth_scope",
+    "oauth_redirect_uri",
+    "oauth_token_endpoint_auth_method",
     "enabled",
     "transport",
   ]);
   if (Object.keys(server).some((key) => !allowed.has(key)))
     throw new Error("Unsupported MCP configuration field");
-  for (const key of ["oauth_client_id", "oauth_scope"]) {
+  for (const key of ["oauth_client_id", "oauth_scope", "oauth_redirect_uri"]) {
     if (server[key] !== undefined && !text(server[key]))
       throw new Error(`Invalid MCP ${key}`);
+  }
+  if (
+    server.oauth_token_endpoint_auth_method !== undefined &&
+    !["none", "client_secret_basic", "client_secret_post"].includes(
+      server.oauth_token_endpoint_auth_method,
+    )
+  )
+    throw new Error("Invalid OAuth token endpoint authentication method");
+  if (server.oauth_redirect_uri) {
+    const redirect = new URL(server.oauth_redirect_uri);
+    if (
+      redirect.protocol !== "http:" ||
+      redirect.hostname !== "127.0.0.1" ||
+      !redirect.port ||
+      Number(redirect.port) === 0 ||
+      redirect.pathname !== "/callback" ||
+      redirect.username ||
+      redirect.password ||
+      redirect.search ||
+      redirect.hash
+    )
+      throw new Error(
+        "OAuth redirect URI must be http://127.0.0.1:PORT/callback",
+      );
   }
   if (server.enabled !== undefined && typeof server.enabled !== "boolean")
     throw new Error("Invalid MCP enabled flag");
@@ -168,13 +194,25 @@ class DesktopMcp {
           (Object.hasOwn(toggles, name) ? toggles[name] : undefined) ??
           server.enabled ??
           true,
+        oauth_client_secret_configured: fs.existsSync(
+          `${this.credentialPath(name, server)}.secret`,
+        ),
       };
     });
   }
   save(input) {
     if (!object(input)) throw new Error("Invalid MCP server");
-    const { name, enabled = true, transport: _transport, ...server } = input;
+    const {
+      name,
+      enabled = true,
+      transport: _transport,
+      oauth_client_secret: clientSecret,
+      oauth_client_secret_configured: _secretConfigured,
+      ...server
+    } = input;
     validateServer(name, { ...server, enabled });
+    if (clientSecret !== undefined && !text(clientSecret))
+      throw new Error("Invalid MCP client secret");
     const document = this.document();
     const previous = Object.hasOwn(document.mcpServers, name)
       ? document.mcpServers[name]
@@ -184,7 +222,33 @@ class DesktopMcp {
       delete comparable.enabled;
       delete comparable.transport;
     }
-    const changed = JSON.stringify(comparable) !== JSON.stringify(server);
+    const changed = !isDeepStrictEqual(
+      comparable,
+      JSON.parse(JSON.stringify(server)),
+    );
+    const secretFile = `${this.credentialPath(name, server)}.secret`;
+    let encryptedSecret;
+    if (clientSecret) {
+      if (
+        !server.url ||
+        server.auth_type !== "oauth" ||
+        !server.oauth_client_id
+      )
+        throw new Error(
+          "A client secret requires an OAuth server and client ID",
+        );
+      encryptedSecret = this.options.encryptString(clientSecret);
+    } else if (
+      previous &&
+      changed &&
+      server.auth_type === "oauth" &&
+      previous.url === server.url &&
+      previous.oauth_client_id === server.oauth_client_id
+    ) {
+      const previousSecret = `${this.credentialPath(name, previous)}.secret`;
+      if (fs.existsSync(previousSecret))
+        encryptedSecret = fs.readFileSync(previousSecret);
+    }
     if (changed) {
       Object.defineProperty(document.mcpServers, name, {
         value: server,
@@ -205,7 +269,9 @@ class DesktopMcp {
       writable: true,
     });
     atomicWrite(this.options.togglesPath, JSON.stringify(toggles));
-    if (previous && changed) this.clearCredentials(name, previous);
+    if (previous && (changed || clientSecret))
+      this.clearCredentials(name, previous);
+    if (encryptedSecret) atomicWrite(secretFile, encryptedSecret);
     return true;
   }
   delete(name) {
@@ -230,6 +296,8 @@ class DesktopMcp {
           server.url,
           server.oauth_client_id,
           server.oauth_scope,
+          server.oauth_redirect_uri,
+          server.oauth_token_endpoint_auth_method,
         ]),
       )
       .digest("hex");
@@ -237,6 +305,7 @@ class DesktopMcp {
   }
   clearCredentials(name, server) {
     fs.rmSync(this.credentialPath(name, server), { force: true });
+    fs.rmSync(`${this.credentialPath(name, server)}.secret`, { force: true });
   }
   credentials(name, key, value?) {
     const server = this.servers().find(
@@ -251,9 +320,15 @@ class DesktopMcp {
       return null;
     }
     try {
-      return JSON.parse(this.options.decryptString(fs.readFileSync(file)));
-    } catch (error) {
-      if (error.code === "ENOENT") return {};
+      const record = fs.existsSync(file)
+        ? JSON.parse(this.options.decryptString(fs.readFileSync(file)))
+        : {};
+      if (fs.existsSync(`${file}.secret`))
+        record.client_secret = this.options.decryptString(
+          fs.readFileSync(`${file}.secret`),
+        );
+      return record;
+    } catch {
       throw new Error("MCP secure credentials are unavailable");
     }
   }

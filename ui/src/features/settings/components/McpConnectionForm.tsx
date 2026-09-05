@@ -84,6 +84,7 @@ export function McpConnectionForm({
   const [url, setUrl] = useState(cloud?.url ?? local?.url ?? preset?.url ?? "")
   const [auth, setAuth] = useState<McpAuthType>(
     cloud?.auth_type ??
+      local?.auth_type ??
       preset?.auth_type ??
       (local?.headers && Object.keys(local.headers).length ? "headers" : "none")
   )
@@ -91,12 +92,26 @@ export function McpConnectionForm({
     local?.headers ? JSON.stringify(local.headers, null, 2) : ""
   )
   const [bearer, setBearer] = useState("")
-  const [clientId, setClientId] = useState("")
+  const [clientId, setClientId] = useState(
+    cloud?.oauth_client_id ?? local?.oauth_client_id ?? ""
+  )
   const [clientSecret, setClientSecret] = useState("")
-  const [scope, setScope] = useState("")
+  const [authorizationServer, setAuthorizationServer] = useState(
+    cloud?.oauth_authorization_server ?? ""
+  )
+  const [scope, setScope] = useState(
+    cloud?.oauth_scope ?? local?.oauth_scope ?? ""
+  )
+  const [redirectUri, setRedirectUri] = useState(
+    local?.oauth_redirect_uri ?? ""
+  )
   const [method, setMethod] = useState<
     NonNullable<McpConnectionInput["oauth_token_endpoint_auth_method"]> | ""
-  >("")
+  >(
+    cloud?.oauth_token_endpoint_auth_method ??
+      local?.oauth_token_endpoint_auth_method ??
+      ""
+  )
   const [command, setCommand] = useState(local?.command ?? "")
   const [args, setArgs] = useState(JSON.stringify(local?.args ?? []))
   const [env, setEnv] = useState(JSON.stringify(local?.env ?? {}, null, 2))
@@ -131,19 +146,16 @@ export function McpConnectionForm({
           record.headers = stringMap(headers, "Headers")
         if (auth === "bearer" && bearer) record.bearer_token = bearer
         if (auth === "oauth") {
-          if (clientId) record.oauth_client_id = clientId
+          record.oauth_client_id = clientId
+          record.oauth_authorization_server = authorizationServer.trim()
           if (clientSecret) record.oauth_client_secret = clientSecret
-          if (scope) record.oauth_scope = scope
+          record.oauth_scope = scope
           if (method) record.oauth_token_endpoint_auth_method = method
         }
         await onSave({ source, record })
       } else {
         if (transport === "stdio" && !command.trim())
           throw new Error("Enter a command.")
-        if (transport === "streamable_http" && auth === "oauth")
-          throw new Error(
-            "Save OAuth connections to Cloud to authorize them securely."
-          )
         await onSave({
           source,
           record: {
@@ -157,9 +169,22 @@ export function McpConnectionForm({
                   env: stringMap(env, "Environment"),
                   env_passthrough: passthrough.split(/[\s,]+/).filter(Boolean),
                   cwd: cwd.trim() || undefined,
+                  env_vars: local?.env_vars,
                 }
               : {
                   url: url.trim(),
+                  auth_type: auth === "bearer" ? "headers" : auth,
+                  ...(auth === "oauth"
+                    ? {
+                        oauth_client_id: clientId || undefined,
+                        oauth_scope: scope || undefined,
+                        oauth_redirect_uri: redirectUri || undefined,
+                        oauth_token_endpoint_auth_method: method || "none",
+                        ...(clientSecret
+                          ? { oauth_client_secret: clientSecret }
+                          : {}),
+                      }
+                    : {}),
                   headers:
                     auth === "bearer"
                       ? { Authorization: `Bearer ${bearer}` }
@@ -227,7 +252,6 @@ export function McpConnectionForm({
                     const next = event.target.value as "cloud" | "local"
                     setSource(next)
                     if (next === "cloud") setTransport("streamable_http")
-                    if (next === "local" && auth === "oauth") setAuth("none")
                   }}
                 >
                   <option value="cloud">Cloud</option>
@@ -326,9 +350,7 @@ export function McpConnectionForm({
                     <option value="none">None</option>
                     <option value="bearer">Bearer token</option>
                     <option value="headers">Custom headers</option>
-                    <option value="oauth" disabled={source === "local"}>
-                      OAuth (Cloud)
-                    </option>
+                    <option value="oauth">OAuth</option>
                   </select>
                 </Field>
                 {auth === "bearer" && (
@@ -367,8 +389,9 @@ export function McpConnectionForm({
                 {auth === "oauth" && (
                   <>
                     <p className="text-xs text-muted-foreground">
-                      Save the server, then select Authorize to sign in with
-                      your provider.
+                      {source === "cloud"
+                        ? "Save the server, then select Authorize to sign in with your provider."
+                        : "Save the server, then start a local run. Your browser opens for authorization when needed. OAuth credentials are stored in the OS keychain; a secure keychain is required."}
                     </p>
                     <details className="rounded-lg border border-border p-3">
                       <summary className="cursor-pointer text-xs font-medium">
@@ -376,21 +399,35 @@ export function McpConnectionForm({
                       </summary>
                       <div className="mt-4 space-y-4">
                         <p className="text-xs text-muted-foreground">
-                          Optional for servers supporting automatic client
-                          registration. Blank fields preserve existing values
-                          when editing.
+                          {source === "cloud"
+                            ? "Optional for servers supporting automatic discovery and client registration. A blank secret keeps the saved secret."
+                            : "For a manually registered client, enter its client ID and registered loopback redirect URI. A blank secret keeps the saved secret for the same server and client ID."}
                         </p>
+                        {source === "cloud" && (
+                          <Field label="Authorization server URL (cloud only)">
+                            <Input
+                              type="url"
+                              maxLength={2048}
+                              value={authorizationServer}
+                              onChange={(event) =>
+                                setAuthorizationServer(event.target.value)
+                              }
+                              placeholder="https://auth.example.com"
+                            />
+                            <span className="font-normal text-muted-foreground">
+                              Optional when protected-resource discovery is
+                              unavailable. Enter the provider's HTTPS issuer
+                              URL, not its authorize endpoint.
+                            </span>
+                          </Field>
+                        )}
                         <Field label="Client ID">
                           <Input
                             value={clientId}
                             onChange={(event) =>
                               setClientId(event.target.value)
                             }
-                            placeholder={
-                              cloud?.oauth_client_configured
-                                ? "Configured · leave blank to keep"
-                                : "Optional client ID"
-                            }
+                            placeholder="Optional client ID"
                           />
                         </Field>
                         <Field label="Client secret">
@@ -402,12 +439,25 @@ export function McpConnectionForm({
                               setClientSecret(event.target.value)
                             }
                             placeholder={
-                              cloud?.oauth_client_secret_configured
+                              cloud?.oauth_client_secret_configured ||
+                              local?.oauth_client_secret_configured
                                 ? "Configured · leave blank to keep"
                                 : "Optional client secret"
                             }
                           />
                         </Field>
+                        {source === "local" && (
+                          <Field label="Redirect URI (manual clients)">
+                            <Input
+                              type="url"
+                              value={redirectUri}
+                              onChange={(event) =>
+                                setRedirectUri(event.target.value)
+                              }
+                              placeholder="http://127.0.0.1:PORT/callback"
+                            />
+                          </Field>
+                        )}
                         <Field label="Scopes">
                           <Input
                             value={scope}

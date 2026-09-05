@@ -1,11 +1,12 @@
 """Resumable, encrypted MCP OAuth authorization-code flows with PKCE and refresh."""
 
+import asyncio
 import hashlib
 import json
 import secrets
 import time
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote_plus, urlencode
 
 import httpx
 from mcp.client.auth.oauth2 import PKCEParameters
@@ -22,7 +23,7 @@ from mcp.shared.auth import (
     ProtectedResourceMetadata,
 )
 from mcp.shared.auth_utils import check_resource_allowed, resource_url_from_server_url
-from pydantic import ValidationError
+from pydantic import AnyHttpUrl, ValidationError
 
 from agent.dashboard.mcp_connections import _get, _lock, _put, _seal, _unseal, discover_connection
 from agent.dashboard.mcp_http import (
@@ -40,35 +41,67 @@ _FLOW_TTL = 600
 
 
 async def _metadata(urls: list[str]) -> dict[str, Any]:
-    for url in urls:
-        try:
-            return await request_json("GET", url, headers={"Accept": "application/json"})
-        except MCPConnectionError as exc:
-            if exc.status_code == 400:
-                raise
-    raise MCPConnectionError(502, "MCP OAuth metadata discovery failed")
+    async with asyncio.timeout(30), safe_client(timeout=httpx.Timeout(20)) as client:
+        for url in urls:
+            async with client.stream(
+                "GET", url, headers={"Accept": "application/json"}
+            ) as response:
+                if response.status_code in {404, 405}:
+                    continue
+                if not response.is_success:
+                    raise MCPConnectionError(502, "MCP OAuth metadata discovery failed")
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 1_048_576:
+                        raise MCPConnectionError(502, "OAuth response exceeds the size limit")
+                data = json.loads(body)
+                if not isinstance(data, dict):
+                    raise ValueError
+                return data
+    raise MCPConnectionError(404, "MCP OAuth metadata discovery is unavailable")
 
 
-async def _discover(url: str) -> tuple[dict[str, Any], str, str]:
+async def _discover(url: str, authorization_server: str = "") -> tuple[dict[str, Any], str, str]:
     try:
+        if authorization_server:
+            await resolve_url(authorization_server)
+            authorization_server = str(AnyHttpUrl(authorization_server))
         async with safe_client(timeout=httpx.Timeout(20)) as client:
             async with client.stream(
                 "GET", url, headers={"Accept": "application/json, text/event-stream"}
             ) as response:
                 metadata_url = extract_resource_metadata_from_www_auth(response)
                 scope = extract_scope_from_www_auth(response)
-        prm = ProtectedResourceMetadata.model_validate(
-            await _metadata(build_protected_resource_metadata_discovery_urls(metadata_url, url))
+        if metadata_url:
+            await resolve_url(metadata_url)
+        try:
+            resource_metadata = await _metadata(
+                build_protected_resource_metadata_discovery_urls(metadata_url, url)
+            )
+        except MCPConnectionError as exc:
+            if not authorization_server or exc.status_code != 404:
+                raise
+            resource_metadata = None
+        prm = (
+            ProtectedResourceMetadata.model_validate(resource_metadata)
+            if resource_metadata is not None
+            else None
         )
-        resource = str(prm.resource)
+        resource = str(prm.resource) if prm else resource_url_from_server_url(url)
         if not check_resource_allowed(
             requested_resource=resource_url_from_server_url(url), configured_resource=resource
         ):
             raise MCPConnectionError(502, "OAuth resource does not match the MCP endpoint")
         await resolve_url(resource)
-        if not prm.authorization_servers:
+        servers = [str(server) for server in prm.authorization_servers or []] if prm else []
+        if authorization_server and servers and authorization_server not in servers:
+            raise MCPConnectionError(
+                502, "OAuth authorization server conflicts with resource metadata"
+            )
+        issuer = authorization_server or (servers[0] if servers else "")
+        if not issuer:
             raise MCPConnectionError(502, "MCP OAuth authorization server is missing")
-        issuer = str(prm.authorization_servers[0])
         await resolve_url(issuer)
         metadata = OAuthMetadata.model_validate(
             await _metadata(build_oauth_authorization_server_metadata_discovery_urls(issuer, url))
@@ -87,9 +120,9 @@ async def _discover(url: str) -> tuple[dict[str, Any], str, str]:
         return (
             metadata.model_dump(mode="json"),
             resource,
-            scope or " ".join(prm.scopes_supported or []),
+            scope or (" ".join(prm.scopes_supported or []) if prm else ""),
         )
-    except httpx.HTTPError, ValidationError, ValueError:
+    except httpx.HTTPError, ValidationError, ValueError, TimeoutError:
         raise MCPConnectionError(502, "Invalid MCP OAuth discovery response") from None
 
 
@@ -144,7 +177,9 @@ async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
         record = await _get(login, id)
         if record["auth_type"] != "oauth":
             raise MCPConnectionError(409, "Select OAuth authentication first")
-        metadata, resource, suggested_scope = await _discover(record["url"])
+        metadata, resource, suggested_scope = await _discover(
+            record["url"], record.get("oauth_authorization_server", "")
+        )
         scope = record.get("oauth_scope") or suggested_scope
         client = await _client(record, metadata, redirect_uri, scope)
         pkce = PKCEParameters.generate()
@@ -190,7 +225,7 @@ async def _token(oauth: dict[str, Any], fields: dict[str, str]) -> dict[str, Any
         data["client_secret"] = client["client_secret"]
     elif method == "client_secret_basic":
         auth = httpx.BasicAuth(
-            quote(client["client_id"], safe=""), quote(client["client_secret"], safe="")
+            quote_plus(client["client_id"], safe=""), quote_plus(client["client_secret"], safe="")
         )
         headers["Authorization"] = next(
             auth.auth_flow(httpx.Request("POST", "https://oauth.invalid"))
@@ -266,7 +301,17 @@ async def finish_oauth(state: str, code: str) -> dict[str, Any]:
 
 
 async def access_token(login: str, record: dict[str, Any]) -> str:
+    async with _lock(login, record["id"]):
+        current = await _get(login, record["id"])
+        if not current["enabled"] or current["revision"] != record["revision"]:
+            raise MCPConnectionError(409, "MCP connection changed; reconnect")
+        return await _access_token_locked(login, current)
+
+
+async def _access_token_locked(login: str, record: dict[str, Any]) -> str:
     oauth = record.get("oauth", {})
+    if oauth.get("refresh_pending"):
+        raise MCPConnectionError(409, "MCP OAuth refresh interrupted; reconnect")
     tokens = oauth.get("tokens", {})
     if not tokens.get("access_token"):
         raise MCPConnectionError(409, "MCP OAuth authorization required")
@@ -274,9 +319,12 @@ async def access_token(login: str, record: dict[str, Any]) -> str:
     if expires_at is not None and expires_at <= time.time() + 60:
         if not tokens.get("refresh_token"):
             raise MCPConnectionError(409, "MCP OAuth authorization expired; reconnect")
+        oauth["refresh_pending"] = True
+        await _put(login, record)
         refreshed = await _token(
             oauth, {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}
         )
+        oauth.pop("refresh_pending")
         _store_tokens(oauth, refreshed)
         await _put(login, record)
     return oauth["tokens"]["access_token"]

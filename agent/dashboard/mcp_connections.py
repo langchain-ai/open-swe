@@ -5,7 +5,8 @@ import json
 import re
 import time
 import uuid
-import weakref
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import partial
 from typing import Any
 
@@ -19,6 +20,7 @@ from starlette.responses import Response, StreamingResponse
 from agent.dashboard.mcp_http import MCPConnectionError, resolve_url, safe_client
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value, search_all_values
+from agent.utils.distributed_lock import distributed_lock
 
 MCP_PRESETS = [
     {"name": "Notion", "url": "https://mcp.notion.com/mcp", "auth_type": "oauth"},
@@ -26,7 +28,6 @@ MCP_PRESETS = [
     {"name": "Datadog (US1)", "url": "https://mcp.datadoghq.com/v1/mcp", "auth_type": "oauth"},
 ]
 _NAMESPACE = "mcp_connections"
-_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
 _FORBIDDEN_HEADERS = {
     "host",
     "authorization",
@@ -62,13 +63,22 @@ def _connection_id(value: str) -> str:
     return value
 
 
-def _lock(login: str, connection_id: str) -> asyncio.Lock:
-    key = (login, connection_id)
-    lock = _locks.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _locks[key] = lock
-    return lock
+@asynccontextmanager
+async def _lock(login: str, connection_id: str) -> AsyncIterator[None]:
+    _namespace(login)
+    error = None
+    try:
+        async with distributed_lock([_NAMESPACE, login, connection_id]):
+            try:
+                yield
+            except MCPConnectionError as exc:
+                error = exc
+    except Exception:
+        raise MCPConnectionError(
+            503, "MCP connection is unavailable; retry or recreate it"
+        ) from None
+    if error is not None:
+        raise error
 
 
 def _seal(value: dict[str, Any]) -> dict[str, str]:
@@ -117,6 +127,11 @@ def _public(record: dict[str, Any]) -> dict[str, Any]:
                 "updated_at",
             )
         },
+        **{
+            key: record.get(key, "")
+            for key in ("oauth_client_id", "oauth_scope", "oauth_authorization_server")
+        },
+        "oauth_token_endpoint_auth_method": record.get("oauth_token_endpoint_auth_method", "none"),
         "headers_configured": bool(record.get("headers")),
         "bearer_token_configured": bool(record.get("bearer_token")),
         "oauth_configured": bool(record.get("oauth", {}).get("tokens")),
@@ -173,6 +188,7 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
         "bearer_token",
         "oauth_client_id",
         "oauth_client_secret",
+        "oauth_authorization_server",
         "oauth_token_endpoint_auth_method",
         "oauth_scope",
     }
@@ -199,6 +215,8 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
         record["name"] = _text(record["name"], 100)
         url = _text(record["url"], 2048)
         record["url"] = str((await resolve_url(url))[0])
+        issuer = _text(record.get("oauth_authorization_server", ""), 2048, empty=True)
+        record["oauth_authorization_server"] = str((await resolve_url(issuer))[0]) if issuer else ""
         record["auth_type"] = _text(record["auth_type"], 20)
         if type(record["enabled"]) is not bool or record["auth_type"] not in {
             "none",
@@ -226,15 +244,19 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
             "oauth_client_id",
             "oauth_client_secret",
             "oauth_scope",
+            "oauth_authorization_server",
             "oauth_token_endpoint_auth_method",
         )
-        if any(existing.get(field) != record.get(field) for field in security_fields):
+        if any(existing.get(field, "") != record.get(field, "") for field in security_fields):
             record.pop("oauth", None)
         if existing and existing["url"] != record["url"]:
             if "headers" not in data:
                 record["headers"] = {}
             if "bearer_token" not in data:
                 record["bearer_token"] = ""
+            for field in ("oauth_client_id", "oauth_client_secret"):
+                if field not in data:
+                    record[field] = ""
         record["revision"] = uuid.uuid4().hex
         record["updated_at"] = now_iso()
         await _put(login, record)
@@ -256,9 +278,9 @@ async def _headers(login: str, record: dict[str, Any]) -> dict[str, str]:
             raise MCPConnectionError(409, "MCP authentication must be configured")
         return {"Authorization": f"Bearer {token}"}
     if record["auth_type"] == "oauth":
-        from agent.dashboard.mcp_oauth import access_token
+        from agent.dashboard.mcp_oauth import _access_token_locked
 
-        return {"Authorization": f"Bearer {await access_token(login, record)}"}
+        return {"Authorization": f"Bearer {await _access_token_locked(login, record)}"}
     return {}
 
 
@@ -301,11 +323,15 @@ async def connection_config(login: str, id: str) -> dict[str, Any]:
 async def _discover(login: str, record: dict[str, Any]) -> dict[str, Any]:
     record["tool_names"] = []
     try:
+        headers = await _headers(login, record)
+    except MCPConnectionError:
+        headers = None
+    try:
+        if headers is None:
+            raise MCPConnectionError(409, "MCP authentication must be configured")
         async with asyncio.timeout(45):
             config = await _config(login, record)
-            async with config["httpx_client_factory"](
-                headers=await _headers(login, record)
-            ) as client:
+            async with config["httpx_client_factory"](headers=headers) as client:
                 async with streamable_http_client(record["url"], http_client=client) as (
                     read,
                     write,

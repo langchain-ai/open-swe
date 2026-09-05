@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 import os
 import re
 import secrets
@@ -26,6 +27,7 @@ from mcp.shared.auth import (
     ProtectedResourceMetadata,
 )
 
+logger = logging.getLogger(__name__)
 _ENV_LITERAL = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
 _oauth_locks: dict[str, asyncio.Lock] = {}
 _BROKER_URL = os.environ.pop("OPEN_SWE_MCP_BROKER_URL", "")
@@ -195,7 +197,10 @@ class _KeychainStorage:
 class _LocalOAuthProvider(OAuthClientProvider):
     async def _initialize(self) -> None:
         await super()._initialize()
-        record = self.context.storage.record
+        storage = self.context.storage
+        if not isinstance(storage, _KeychainStorage):
+            raise TypeError("Desktop OAuth requires keychain storage")
+        record = storage.record
         self.context.token_expiry_time = record.get("expires_at")
         if record.get("metadata"):
             self.context.oauth_metadata = OAuthMetadata.model_validate(record["metadata"])
@@ -259,7 +264,11 @@ async def _oauth(
                 writer.close()
                 writers.discard(writer)
 
-        redirects = record.get("client", {}).get("redirect_uris", [])
+        redirects = (
+            [connection["oauth_redirect_uri"]]
+            if connection.get("oauth_redirect_uri")
+            else record.get("client", {}).get("redirect_uris", [])
+        )
         port = 0
         if redirects:
             parsed = urlsplit(redirects[0])
@@ -274,13 +283,17 @@ async def _oauth(
                 redirect_uris=[redirect_uri],
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
-                token_endpoint_auth_method="none",
+                token_endpoint_auth_method=connection.get(
+                    "oauth_token_endpoint_auth_method", "none"
+                ),
                 scope=connection.get("oauth_scope"),
             )
             if connection.get("oauth_client_id") and not record.get("client"):
                 await storage.set_client_info(
                     OAuthClientInformationFull(
-                        **metadata.model_dump(), client_id=connection["oauth_client_id"]
+                        **metadata.model_dump(),
+                        client_id=connection["oauth_client_id"],
+                        client_secret=record.get("client_secret"),
                     )
                 )
 
@@ -326,40 +339,52 @@ async def local_mcp_tools() -> AsyncIterator[list[BaseTool]]:
         connections = await _connections(response.json())
         tools = []
         for connection in sorted(connections, key=lambda item: item["name"]):
-            if connection.get("command"):
-                transport = stdio_client(
-                    StdioServerParameters(
-                        command=connection["command"],
-                        args=connection["args"],
-                        env=connection["env"],
-                        cwd=connection["cwd"],
-                    )
+            try:
+                tools.extend(await stack.enter_async_context(_connection_tools(broker, connection)))
+            except Exception:
+                logger.warning(
+                    "Desktop MCP connection unavailable",
+                    extra={"connection_name": connection["name"]},
                 )
-            else:
-                auth = None
-                if (
-                    not connection.get("cloud")
-                    and connection.get("auth_type") != "none"
-                    and not any(key.lower() == "authorization" for key in connection["headers"])
-                ):
-                    auth = await stack.enter_async_context(_oauth(broker, connection))
-                client = await stack.enter_async_context(
-                    httpx.AsyncClient(
-                        headers={
-                            **connection["headers"],
-                            **({"Origin": "open-swe://app"} if connection.get("cloud") else {}),
-                        },
-                        auth=auth,
-                        follow_redirects=False,
-                        trust_env=False,
-                        timeout=httpx.Timeout(30, read=300),
-                    )
-                )
-                transport = streamable_http_client(connection["url"], http_client=client)
-            streams = await stack.enter_async_context(transport)
-            session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
-            await session.initialize()
-            tools.extend(
-                await load_mcp_tools(session, server_name=connection["name"], tool_name_prefix=True)
-            )
         yield tools
+
+
+@asynccontextmanager
+async def _connection_tools(
+    broker: httpx.AsyncClient, connection: dict[str, Any]
+) -> AsyncIterator[list[BaseTool]]:
+    async with AsyncExitStack() as stack:
+        if connection.get("command"):
+            transport = stdio_client(
+                StdioServerParameters(
+                    command=connection["command"],
+                    args=connection["args"],
+                    env=connection["env"],
+                    cwd=connection["cwd"],
+                )
+            )
+        else:
+            auth = None
+            if (
+                not connection.get("cloud")
+                and connection.get("auth_type") in {None, "oauth"}
+                and not any(key.lower() == "authorization" for key in connection["headers"])
+            ):
+                auth = await stack.enter_async_context(_oauth(broker, connection))
+            client = await stack.enter_async_context(
+                httpx.AsyncClient(
+                    headers={
+                        **connection["headers"],
+                        **({"Origin": "open-swe://app"} if connection.get("cloud") else {}),
+                    },
+                    auth=auth,
+                    follow_redirects=False,
+                    trust_env=False,
+                    timeout=httpx.Timeout(30, read=300),
+                )
+            )
+            transport = streamable_http_client(connection["url"], http_client=client)
+        streams = await stack.enter_async_context(transport)
+        session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
+        await session.initialize()
+        yield await load_mcp_tools(session, server_name=connection["name"], tool_name_prefix=True)

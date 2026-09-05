@@ -9,6 +9,8 @@ from typing import Any, cast
 
 import httpx
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langchain_core.utils.pydantic import model_json_schema
+from langchain_mcp_adapters.sessions import Connection
 from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool, load_mcp_tools
 from mcp.types import Tool
 
@@ -60,7 +62,7 @@ class _Connection:
         self.version = _version(record)
         self.lock = asyncio.Lock()
 
-    async def config(self) -> dict[str, Any]:
+    async def config(self) -> Connection:
         key = (self.login, self.id)
         if key in _auth_failures:
             records = await list_connections(self.login)
@@ -71,7 +73,7 @@ class _Connection:
             if _auth_failures[key] == self.version:
                 raise MCPConnectionError(409, "Reconnect this MCP connection before retrying")
             _auth_failures.pop(key, None)
-        return await connection_config(self.login, self.id)
+        return cast(Connection, await connection_config(self.login, self.id))
 
     def failed(self, error: BaseException) -> None:
         if _auth_failure(error):
@@ -81,11 +83,11 @@ class _Connection:
         logger.warning("MCP connection unavailable", extra={"connection_id": self.id})
 
     def wrap(self, tool: BaseTool) -> BaseTool:
-        schema = tool.args_schema
+        schema = tool.args_schema if tool.args_schema is not None else tool.get_input_schema()
         definition = Tool(
             name=tool.name,
             description=tool.description,
-            inputSchema=schema if isinstance(schema, dict) else schema.model_json_schema(),
+            inputSchema=schema if isinstance(schema, dict) else model_json_schema(schema),
         )
 
         async def call(**arguments: Any) -> Any:
@@ -96,6 +98,8 @@ class _Connection:
                         StructuredTool,
                         convert_mcp_tool_to_langchain_tool(None, definition, connection=config),
                     )
+                    if fresh.coroutine is None:
+                        raise TypeError("MCP tool requires an async implementation")
                     return await fresh.coroutine(**arguments)
                 except ToolException:
                     raise
@@ -110,7 +114,7 @@ class _Connection:
             coroutine=call,
             name=prefixed_tool_name(self.server, tool.name),
             description=tool.description,
-            args_schema=tool.args_schema,
+            args_schema=schema,
             response_format="content_and_artifact",
             handle_tool_error=True,
         )

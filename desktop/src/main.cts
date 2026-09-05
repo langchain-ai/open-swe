@@ -1082,7 +1082,7 @@ async function startExternalLogin() {
 }
 
 /**
- * Link a Slack or Notion account from the desktop app.
+ * Link a Slack account from the desktop app.
  *
  * The consent leg has to run in the user's own browser, which carries neither
  * the app's session cookie nor the flow's state cookie — that mismatch is why

@@ -113,7 +113,7 @@ def safe_client(
 
 async def request_json(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
     try:
-        async with safe_client(timeout=httpx.Timeout(20)) as client:
+        async with asyncio.timeout(30), safe_client(timeout=httpx.Timeout(20)) as client:
             async with client.stream(method, url, **kwargs) as response:
                 if not response.is_success:
                     raise MCPConnectionError(502, "OAuth endpoint rejected the request")
@@ -126,5 +126,5 @@ async def request_json(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
                 if not isinstance(data, dict):
                     raise ValueError
                 return data
-    except httpx.HTTPError, ValueError:
+    except httpx.HTTPError, ValueError, TimeoutError:
         raise MCPConnectionError(502, "Invalid OAuth endpoint response") from None
