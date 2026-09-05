@@ -193,8 +193,8 @@ ENV.var(
 )
 ENV.var(
     "LANGSMITH_GATEWAY_ENABLED",
-    "Route provider calls through the LangSmith LLM Gateway.",
-    default="false",
+    "Route provider calls through the LangSmith LLM Gateway; defaults to on when "
+    "LANGSMITH_GATEWAY_API_KEY is set and off otherwise.",
 )
 ENV.var(
     "LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES",
