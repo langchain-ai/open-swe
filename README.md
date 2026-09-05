@@ -50,6 +50,7 @@ Each cloud coding thread is bound to its own persistent sandbox, so the agent ca
 
 - Investigates repositories, plans work, edits code, and runs focused validation
 - Commits and pushes changes, then opens or updates pull requests
+- Links delivery pull requests to their originating threads so those threads can resolve automatically when the pull requests are merged or closed
 - Uses subagents to parallelize research and independent work
 - Supports reusable skills, repository instructions, and custom environments
 
