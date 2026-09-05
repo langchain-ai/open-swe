@@ -131,3 +131,18 @@ def test_startup_summary_names_the_build(build_dir: Path) -> None:
     assert (
         startup_config.dashboard_ui_summary() == f"Dashboard UI: bundled from {build_dir.resolve()}"
     )
+
+
+def test_serving_under_a_mount_prefix(build_dir: Path) -> None:
+    """``http.mount_prefix`` wraps the whole app in a Mount; paths are read relative to it."""
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    client = TestClient(Starlette(routes=[Mount("/open-swe", app=app_module.create_app())]))
+
+    assert client.get("/open-swe/", headers=HTML).text == SHELL
+    assert client.get("/open-swe/agents/t1", headers=HTML).text == SHELL
+    assert client.get("/open-swe/favicon.png").content == b"\x89PNG"
+    assert client.get("/open-swe/assets/app-abc123.js").status_code == 200
+    assert client.get("/open-swe/threads", headers=HTML).status_code == 404
+    assert client.get("/", headers=HTML).status_code == 404
