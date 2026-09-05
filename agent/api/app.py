@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agent.api.health import router as health_router
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
+from agent.dashboard.oauth import allowed_dashboard_origins
 from agent.dashboard.plan_api import plan_router
 from agent.dashboard.workflow_approval_api import workflow_approval_router
 from agent.github.routes import router as github_webhook_router
@@ -45,15 +46,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
-    allowed_origins = [
-        origin.strip()
-        for origin in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")
-        if origin.strip()
-    ]
-    if "*" in allowed_origins:
+    extra_origins = ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")
+    if "*" in (origin.strip() for origin in extra_origins):
         raise RuntimeError(
             "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
         )
+    # The dashboard's own origin (DASHBOARD_BASE_URL) is always allowed;
+    # DASHBOARD_ALLOWED_ORIGINS only adds further cross-origin frontends.
+    allowed_origins = sorted(allowed_dashboard_origins())
     if allowed_origins:
         app.add_middleware(
             CORSMiddleware,
