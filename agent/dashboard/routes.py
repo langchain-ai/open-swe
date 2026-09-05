@@ -254,6 +254,11 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from agent.utils.dashboard_links import (
+    dashboard_api_base_url,
+    dashboard_base_url,
+    dashboard_is_same_origin,
+)
 from agent.utils.thread_ops import langgraph_url
 from agent.utils.timing import server_timing_header
 
@@ -350,31 +355,29 @@ async def _filter_repo_models_for_user[RepoRecordT: _RepoScopedRecord](
 
 
 def _api_base_url() -> str:
-    v = ENV.DASHBOARD_API_BASE_URL.get().rstrip("/")
-    if not v:
-        raise HTTPException(500, "DASHBOARD_API_BASE_URL not configured")
-    return v
+    return dashboard_api_base_url()
 
 
 def _frontend_base_url() -> str:
-    v = ENV.DASHBOARD_BASE_URL.get().rstrip("/")
+    v = dashboard_base_url()
     if not v:
         raise HTTPException(500, "DASHBOARD_BASE_URL not configured")
     return v
 
 
 def _cookie_security() -> tuple[bool, Literal["lax", "none"]]:
-    """Cookie ``secure``/``samesite`` flags derived from the API scheme.
+    """Cookie ``secure``/``samesite`` flags derived from where the dashboard is served.
 
-    Production serves the API over HTTPS and the dashboard is a separate
-    (cross-site) origin, so the session cookie must be ``Secure; SameSite=None``.
-    Local dev runs over ``http://localhost`` where ``Secure`` cookies are
-    rejected and the frontend/API are same-site, so fall back to
-    ``SameSite=Lax`` without ``Secure``.
+    On the API's own origin (the bundled dashboard, or local dev) the session
+    cookie is ``SameSite=Lax``, ``Secure`` only over HTTPS since ``Secure``
+    cookies are rejected on ``http://localhost``. A dashboard on another origin
+    (the split deployment) needs ``Secure; SameSite=None`` for the browser to
+    send the cookie cross-site.
     """
-    if ENV.DASHBOARD_API_BASE_URL.get().startswith("https://"):
-        return True, "none"
-    return False, "lax"
+    secure = dashboard_api_base_url().startswith("https://")
+    if not secure or dashboard_is_same_origin():
+        return secure, "lax"
+    return True, "none"
 
 
 def _set_session_cookie(response: Response, jwt_token: str) -> None:

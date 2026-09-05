@@ -208,6 +208,7 @@ async def test_post_slack_thread_reply_with_ts_returns_http_error(
 async def test_post_slack_thread_reply_with_ts_sends_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Pick"}}]

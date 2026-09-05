@@ -20,6 +20,7 @@ from starlette.requests import HTTPConnection
 from agent.config import ENV
 from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
+from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ def allowed_dashboard_origins() -> set[str]:
     else.
     """
     origins: set[str] = set()
-    base = ENV.DASHBOARD_BASE_URL.get().strip()
+    base = dashboard_base_url()
     if base:
         origins.add(_origin_of(base))
     for entry in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(","):
@@ -129,7 +130,7 @@ def _is_blocked_redirect_path(path: str) -> bool:
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
     """Return a safe post-login redirect URL."""
-    fallback = ENV.DASHBOARD_BASE_URL.get().strip()
+    fallback = dashboard_base_url()
     if not redirect_to:
         return fallback
     trimmed = redirect_to.strip()
@@ -393,7 +394,7 @@ def build_settings_url() -> str | None:
     safe to share in a public Slack thread. The user signs in with GitHub from
     their own session and connects Slack via verified OIDC on the settings page.
     """
-    frontend_base = ENV.DASHBOARD_BASE_URL.get().rstrip("/")
+    frontend_base = dashboard_base_url()
     if not frontend_base:
         return None
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"

@@ -165,8 +165,13 @@ const SHELL_PAGE = {
   sitemap: { exclude: true },
 }
 
+// Where the app is served from. "/" for the dev server and the standalone image;
+// a LangGraph `http.mount_prefix` (plus trailing slash) when the backend bundles
+// the build and serves it under that prefix.
+const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
+
 const config = defineConfig({
-  base: "/",
+  base: BASE_PATH,
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [

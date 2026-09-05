@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web desktop install-desktop install-checkout setup
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web build-dashboard desktop install-desktop install-checkout setup
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -12,6 +12,13 @@ dev:
 
 web:
 	pnpm run dev
+
+# Build the dashboard into ui/.output/public; `make dev` then serves it at /.
+# With a LangGraph http.mount_prefix, pass DASHBOARD_BASE_PATH=<prefix>/ so the
+# build's asset URLs and router match where the server mounts it.
+build-dashboard:
+	pnpm install --frozen-lockfile --filter open-swe-dashboard...
+	pnpm --filter open-swe-dashboard run build
 
 run:
 	uv run uvicorn agent.webapp:app --reload --port 8000

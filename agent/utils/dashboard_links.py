@@ -1,15 +1,40 @@
 """Shared builders for dashboard ("Open in Web") URLs."""
 
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from agent.config import ENV
-
-_DEFAULT_DASHBOARD_BASE_URL = "https://openswe.vercel.app"
+from agent.utils.dashboard_ui import dashboard_static_dir
 
 
 def dashboard_base_url() -> str:
-    """Return the configured dashboard base URL."""
-    return ENV.DASHBOARD_BASE_URL.get(_DEFAULT_DASHBOARD_BASE_URL).strip().rstrip("/")
+    """Public base URL of the dashboard frontend, or ``""`` when there is none.
+
+    An explicit ``DASHBOARD_BASE_URL`` wins. Otherwise the dashboard lives on the
+    backend's own origin when its build is bundled, so ``LANGGRAPH_URL`` is the
+    base; with neither there is no dashboard to link to.
+    """
+    explicit = ENV.DASHBOARD_BASE_URL.optional()
+    if explicit:
+        return explicit.rstrip("/")
+    if dashboard_static_dir() is not None:
+        return ENV.LANGGRAPH_URL.get().rstrip("/")
+    return ""
+
+
+def dashboard_api_base_url() -> str:
+    """Public URL browsers use for ``/dashboard/api/*``; the backend's own unless overridden."""
+    return (ENV.DASHBOARD_API_BASE_URL.optional() or ENV.LANGGRAPH_URL.get()).rstrip("/")
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+def dashboard_is_same_origin() -> bool:
+    """True when the dashboard is served from the API's own origin."""
+    frontend = dashboard_base_url()
+    return bool(frontend) and _origin(frontend) == _origin(dashboard_api_base_url())
 
 
 def dashboard_thread_url(thread_id: str) -> str | None:
