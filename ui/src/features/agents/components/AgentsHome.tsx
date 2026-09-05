@@ -467,7 +467,7 @@ export function AgentsHome() {
           <div className="flex min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
             <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-6">
               <img
-                src="/logo-mark.png"
+                src={`${import.meta.env.BASE_URL}logo-mark.png`}
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />
