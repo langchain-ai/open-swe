@@ -422,7 +422,7 @@ def _patch_enrich_deps(
     async def fake_diff(*, owner, repo, pr_number, token):
         return "diff --git a/x b/x\n+added\n"
 
-    async def fake_token(repositories=None):
+    async def fake_token(repositories=None, **_kwargs):
         return "app-token"
 
     async def fake_head(owner, repo, pr_number):

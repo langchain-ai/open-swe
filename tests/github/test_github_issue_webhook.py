@@ -1133,7 +1133,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         auto_review_checked = True
         return False
 
-    async def fake_get_github_app_installation_token() -> str | None:
+    async def fake_get_github_app_installation_token(**_kwargs: Any) -> str | None:
         return "app-token"
 
     async def fake_get_github_app_installation_token_with_expiry(
@@ -1350,7 +1350,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
         captured["email"] = email
         return "user-token"
 
-    async def fake_get_github_app_installation_token() -> str | None:
+    async def fake_get_github_app_installation_token(**_kwargs: Any) -> str | None:
         return None
 
     async def fake_react_to_github_comment(
@@ -1431,7 +1431,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
         return "user-token"
 
-    async def fake_get_github_app_installation_token() -> str | None:
+    async def fake_get_github_app_installation_token(**_kwargs: Any) -> str | None:
         return None
 
     async def fake_react_to_github_comment(

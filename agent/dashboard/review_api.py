@@ -758,7 +758,7 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
         number=pr_number,
         url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
     )
-    token, _ = await get_github_app_installation_token_with_expiry()
+    token, _ = await get_github_app_installation_token_with_expiry(owner=owner, repo=repo)
     if not token:
         raise HTTPException(502, "No GitHub App token available")
     pr_metadata = await fetch_github_pr_metadata(pr_ref, token=token)
