@@ -54,6 +54,7 @@ async def ensure_workflow_push_pending(
     diff_preview_truncated: bool = False,
     inherited_from: str | None = None,
     approval_url: str | None = None,
+    operation_kind: str = "workflow_push",
 ) -> tuple[dict[str, Any], bool]:
     """Store a pending approval unless a terminal record already exists."""
     approvals = await get_workflow_push_approvals(thread_id)
@@ -72,6 +73,7 @@ async def ensure_workflow_push_pending(
         "diff_preview_truncated": diff_preview_truncated,
         "inherited_from": inherited_from,
         "approval_url": approval_url,
+        "operation_kind": operation_kind,
     }
     if existing and existing.get("status") == WORKFLOW_APPROVAL_PENDING:
         record = {**existing, **review_fields}

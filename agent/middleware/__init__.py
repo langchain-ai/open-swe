@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
     "DynamicToolMiddleware": ".dynamic_tools",
+    "ExternalRepoWriteGuardMiddleware": ".external_repo_write_guard",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
@@ -34,6 +35,7 @@ _MIDDLEWARE_MODULES = {
 
 __all__ = [
     "DynamicToolMiddleware",
+    "ExternalRepoWriteGuardMiddleware",
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
     "ModelCallTimeoutMiddleware",
@@ -66,6 +68,7 @@ if TYPE_CHECKING:
     from agent.middleware.check_message_queue import check_message_queue_before_model
     from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from agent.middleware.exclude_tools import ExcludeToolsMiddleware
+    from agent.middleware.external_repo_write_guard import ExternalRepoWriteGuardMiddleware
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
     from agent.middleware.model_errors import ModelErrorMiddleware
     from agent.middleware.model_fallback import ModelFallbackMiddleware

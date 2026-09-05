@@ -109,6 +109,7 @@ class RunConfig(BaseModel):
 
     # Repository
     repo: Repo | None = None
+    approved_repo_owners: list[str] = []
     repo_private: bool | None = None
     repo_explicitly_none: bool | None = None
     branch_name: str | None = None

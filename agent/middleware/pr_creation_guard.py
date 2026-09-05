@@ -1,9 +1,7 @@
 """Block shell fallbacks that create pull requests outside open_pull_request."""
 
 import json
-import os
 import re
-import shlex
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -12,10 +10,26 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-_SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
-_SHELL_EXECUTABLES = {"bash", "dash", "sh", "zsh"}
-_MAX_SHELL_EXPANSION_DEPTH = 3
-_SHELL_EXPANSION_DEPTH_LIMIT_TOKEN = "__pr_creation_guard_shell_expansion_depth_limit__"
+from agent.middleware._shell_parsing import (
+    _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN,
+    _SHELL_SEPARATORS,
+)
+from agent.middleware._shell_parsing import (
+    executable_name as _executable_name,
+)
+from agent.middleware._shell_parsing import (
+    gh_api_endpoint as _gh_api_endpoint,
+)
+from agent.middleware._shell_parsing import (
+    gh_api_uses_mutation as _gh_api_uses_post_or_body,
+)
+from agent.middleware._shell_parsing import (
+    gh_subtokens as _gh_subtokens,
+)
+from agent.middleware._shell_parsing import (
+    shell_tokens as _shell_tokens,
+)
+
 _GITHUB_PULLS_ENDPOINT = re.compile(r"(?:^|/)repos/[^/\s]+/[^/\s]+/pulls/?$")
 _GITHUB_PULLS_URL = re.compile(r"https://api\.github\.com/repos/[^/\s]+/[^/\s]+/pulls/?")
 _BLOCK_ERROR = (
@@ -48,73 +62,6 @@ def _tool_call_id(request: ToolCallRequest) -> str | None:
     return None
 
 
-def _split_shell_tokens(command: str) -> list[str]:
-    try:
-        return shlex.split(command, posix=True)
-    except ValueError:
-        return command.split()
-
-
-def _executable_name(token: str) -> str:
-    return os.path.basename(token.strip("'\""))
-
-
-def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
-    for index, token in enumerate(tokens[shell_index + 1 :], start=shell_index + 1):
-        if token in _SHELL_SEPARATORS:
-            return None
-        if token == "-c" or (
-            token.startswith("-") and not token.startswith("--") and "c" in token[1:]
-        ):
-            if index + 1 < len(tokens) and tokens[index + 1] not in _SHELL_SEPARATORS:
-                return tokens[index + 1]
-            return None
-    return None
-
-
-def _has_nested_shell_command(tokens: list[str]) -> bool:
-    return any(
-        _executable_name(token) in _SHELL_EXECUTABLES
-        and _shell_command_argument(tokens, index) is not None
-        for index, token in enumerate(tokens)
-    )
-
-
-def _expand_nested_shell_tokens(tokens: list[str], depth: int = 0) -> list[str]:
-    if depth >= _MAX_SHELL_EXPANSION_DEPTH:
-        if _has_nested_shell_command(tokens):
-            return [*tokens, _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN]
-        return tokens
-
-    expanded = list(tokens)
-    for index, token in enumerate(tokens):
-        if _executable_name(token) not in _SHELL_EXECUTABLES:
-            continue
-        inner_command = _shell_command_argument(tokens, index)
-        if inner_command is None:
-            continue
-        expanded.extend(_expand_nested_shell_tokens(_split_shell_tokens(inner_command), depth + 1))
-    return expanded
-
-
-def _shell_tokens(command: str) -> list[str]:
-    return _expand_nested_shell_tokens(_split_shell_tokens(command))
-
-
-def _is_assignment(token: str) -> bool:
-    name, sep, _value = token.partition("=")
-    return bool(sep and name and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name))
-
-
-def _gh_subtokens(tokens: list[str], index: int) -> list[str]:
-    subtokens: list[str] = []
-    for token in tokens[index + 1 :]:
-        if token in _SHELL_SEPARATORS:
-            break
-        subtokens.append(token)
-    return subtokens
-
-
 def _contains_gh_pr_create(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
         if _executable_name(token) != "gh":
@@ -123,62 +70,6 @@ def _contains_gh_pr_create(tokens: list[str]) -> bool:
         for offset, subtoken in enumerate(subtokens[:-1]):
             if subtoken == "pr" and subtokens[offset + 1] == "create":
                 return True
-    return False
-
-
-_GH_API_VALUE_FLAGS = {
-    "-X",
-    "--method",
-    "-H",
-    "--header",
-    "-F",
-    "--field",
-    "-f",
-    "--raw-field",
-    "--hostname",
-    "--input",
-    "-q",
-    "--jq",
-    "-p",
-    "--preview",
-    "--cache",
-    "-t",
-    "--template",
-}
-
-
-def _gh_api_endpoint(subtokens: list[str]) -> str | None:
-    for index, token in enumerate(subtokens):
-        if token != "api":
-            continue
-        skip_next = False
-        for candidate in subtokens[index + 1 :]:
-            if skip_next:
-                skip_next = False
-                continue
-            if candidate.startswith("-"):
-                if "=" not in candidate and candidate in _GH_API_VALUE_FLAGS:
-                    skip_next = True
-                continue
-            if _is_assignment(candidate):
-                continue
-            return candidate.strip("'\"")
-    return None
-
-
-def _gh_api_uses_post_or_body(subtokens: list[str]) -> bool:
-    body_flags = {"-f", "--field", "-F", "--raw-field", "--input"}
-    for index, token in enumerate(subtokens):
-        upper = token.upper()
-        if upper in {"-XPOST", "--METHOD=POST"}:
-            return True
-        if token in {"-X", "--method"} and index + 1 < len(subtokens):
-            if subtokens[index + 1].upper() == "POST":
-                return True
-        if token.startswith("--method=") and token.split("=", 1)[1].upper() == "POST":
-            return True
-        if token in body_flags or any(token.startswith(f"{flag}=") for flag in body_flags):
-            return True
     return False
 
 
