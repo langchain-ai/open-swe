@@ -70,13 +70,27 @@ def test_typed_getters(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_deprecated_in_use_lists_aliases_and_obsolete_names() -> None:
-    env = {"LANGSMITH_API_KEY_PROD": "k", "LANGCHAIN_PROJECT": "p", "LANGSMITH_ENDPOINT": "e"}
+    env = {"LANGSMITH_API_KEY_PROD": "k", "LANGSMITH_ENDPOINT": "e"}
 
     found = dict(ENV.deprecated_in_use(env))
 
     assert found["LANGSMITH_API_KEY_PROD"] == "use LANGSMITH_API_KEY instead."
-    assert "LANGCHAIN_PROJECT" in found
     assert "LANGSMITH_ENDPOINT" not in found
+    # A legacy name on its own, with no current key configured at all, is reported.
+    assert "LANGCHAIN_API_KEY" in dict(ENV.deprecated_in_use({"LANGCHAIN_API_KEY": "k"}))
+
+
+def test_deprecated_names_the_platform_injects_next_to_current_ones_stay_quiet() -> None:
+    """LangGraph Platform sets LANGCHAIN_API_KEY and LANGCHAIN_PROJECT alongside LANGSMITH_*."""
+    env = {
+        "LANGSMITH_API_KEY": "k",
+        "LANGCHAIN_API_KEY": "k",
+        "LANGSMITH_TRACING": "true",
+        "LANGCHAIN_TRACING_V2": "true",
+        "LANGCHAIN_PROJECT": "p",
+    }
+
+    assert ENV.deprecated_in_use(env) == []
 
 
 def test_deprecated_in_use_is_quiet_for_current_names() -> None:

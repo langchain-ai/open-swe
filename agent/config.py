@@ -23,6 +23,10 @@ class EnvVar:
     aliases: tuple[str, ...] = ()
     secret: bool = False
     deprecated: str | None = None
+    # Current variable that makes this deprecated one redundant. When both are set
+    # (LangGraph Platform injects the legacy LANGCHAIN_* names next to the
+    # LANGSMITH_* ones) the deprecated one is not worth a warning.
+    replaced_by: str | None = None
 
     def _lookup(self, environ: Mapping[str, str] | None = None) -> tuple[str, str] | None:
         env = os.environ if environ is None else environ
@@ -98,10 +102,11 @@ class Registry:
         aliases: tuple[str, ...] = (),
         secret: bool = False,
         deprecated: str | None = None,
+        replaced_by: str | None = None,
     ) -> EnvVar:
         if name in self._vars:
             raise ValueError(f"{name} declared twice")
-        var = EnvVar(name, description, default, aliases, secret, deprecated)
+        var = EnvVar(name, description, default, aliases, secret, deprecated, replaced_by)
         self._vars[name] = var
         return var
 
@@ -128,6 +133,8 @@ class Registry:
         found: list[tuple[str, str]] = []
         for var in self._vars.values():
             if var.deprecated and var.is_set(environ):
+                if var.replaced_by and self._vars[var.replaced_by].is_set(environ):
+                    continue
                 found.append((var.name, var.deprecated))
             source = var.source(environ)
             if source is not None and source != var.name:
@@ -210,19 +217,25 @@ ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
 ENV.var(
+    "LANGSMITH_TRACING",
+    "Enables LangSmith tracing; read by the LangSmith SDK and injected by LangGraph Platform.",
+)
+ENV.var(
     "LANGCHAIN_API_KEY",
     "Legacy SDK alias.",
     deprecated="Open SWE reads LANGSMITH_API_KEY; this legacy alias is ignored.",
+    replaced_by="LANGSMITH_API_KEY",
 )
 ENV.var(
     "LANGCHAIN_TRACING_V2",
     "Legacy SDK alias.",
     deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
+    replaced_by="LANGSMITH_TRACING",
 )
 ENV.var(
     "LANGCHAIN_PROJECT",
-    "Legacy SDK alias.",
-    deprecated="graphs pin their own tracing projects; this legacy alias has no effect on Open SWE.",
+    "Legacy SDK alias, ignored: graphs pin their own tracing projects. LangGraph Platform "
+    "injects it.",
 )
 
 # --- GitHub ------------------------------------------------------------------------------
