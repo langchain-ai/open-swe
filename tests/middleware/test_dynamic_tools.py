@@ -217,6 +217,26 @@ async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
     assert "unavailable right now" in message.content
 
 
+async def test_a_group_retries_after_a_transient_build_failure() -> None:
+    attempts = 0
+    tool = _tool("analyzePlan")
+
+    async def load() -> list[BaseTool]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("mcp temporarily unreachable")
+        return [tool]
+
+    middleware = DynamicToolMiddleware(
+        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
+    )
+
+    assert await middleware._build(["analyzePlan"]) == ["analyzePlan"]
+    assert await middleware._build(["analyzePlan"]) == []
+    assert attempts == 2
+
+
 async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
     async def load() -> list[BaseTool]:
         return []
