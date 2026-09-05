@@ -869,16 +869,15 @@ async def upsert_agent_thread_metadata(
 async def default_repo_owner_hint(env_owner: str = "") -> str:
     """Owner assumed for ``repo:name`` shorthand.
 
-    The deprecated env default wins when set; otherwise the team default
-    repository's owner. Empty when neither is configured, in which case the
+    The team default repository's owner; the deprecated env default only while
+    no team default is configured. Empty when neither is set, in which case the
     shorthand is ignored and a full ``owner/name`` is required.
     """
-    owner = env_owner.strip()
-    if owner:
-        return owner
     team_repo = await get_team_default_repo()
     team_owner = (team_repo or {}).get("owner", "")
-    return team_owner.strip() if isinstance(team_owner, str) else ""
+    if isinstance(team_owner, str) and team_owner.strip():
+        return team_owner.strip()
+    return env_owner.strip()
 
 
 async def get_slack_repo_config(
