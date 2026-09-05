@@ -1,7 +1,7 @@
 # Files
 
-- [Agent Graph & get_agent Factory](agent-graph.md) - How Open SWE compiles the main coding-agent graph for an executable thread run, including prompt preparation, thread-scoped resources, tool surfaces, subagents, and middleware ordering.
-- [Middleware Stack](middleware-stack.md) - The ordered LangChain and Deep Agents middleware chain around Open SWE agent and reviewer model and tool calls, including failure boundaries, retries, and guardrails.
-- [System Architecture Overview](overview.md)
-- [Reviewer & Review-Style Analyzer Graphs](reviewer-and-analyzer.md) - How the read-only reviewer graph reviews one PR through a durable findings model and how the analyzer graph learns a per-repo review style in bootstrap and nightly continual modes.
-- [Sandbox Lifecycle & Providers](sandbox-lifecycle.md) - How each thread is bound to a per-thread sandbox through a get-or-create-then-reconnect lifecycle, how the SANDBOX_TYPE provider is selected, how the LangSmith GitHub proxy is configured, and how unreachable versus deleted sandboxes are handled.
+- [Coding Agent Assembly](agent-graph.md) - How each executable Open SWE thread run assembles its Deep Agent graph, including configuration and model resolution, sandbox-backed filesystem, skills, tools, subagents, and middleware.
+- [Middleware Stack and Failure Boundaries](middleware-stack.md) - Ordered middleware around Open SWE agent and reviewer model and tool calls. Covers lifecycle hooks, safety policy, queue interruption, deadlines, retries, and terminal failure behavior.
+- [Runtime Architecture and Entrypoints](overview.md) - How the LangGraph deployment, FastAPI composition, dashboard, webhooks, scheduler, and desktop client reach Open SWE's specialized runtime graphs.
+- [Review and Review-Style Graphs](reviewer-and-analyzer.md) - The read-only reviewer prepares and reviews GitHub pull requests through durable findings, while the analyzer learns and maintains repository-specific review guidance.
+- [Thread Sandbox Lifecycle](sandbox-lifecycle.md) - How a thread acquires, persists, reconnects to, replaces, and explicitly rebinds its sandbox, including provider dispatch, initialization, credentials, and failure safety.

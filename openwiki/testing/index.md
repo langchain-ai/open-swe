@@ -1,3 +1,3 @@
 # Files
 
-- [Testing Guide](overview.md) - Test-layer routing and focused test inventory for Open SWE, including dashboard thread contracts, shared pytest isolation, workspace suites, and the Playwright cross-boundary harness.
+- [Focused Validation Strategy](overview.md) - Route a change to the narrowest test seam that owns its contract, from Python graph and API tests through dashboard and desktop unit tests to the Playwright system harness. Includes targeted commands, isolation rules, and the cross-boundary behaviors that require end-to-end proof.
