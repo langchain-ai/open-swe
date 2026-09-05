@@ -329,6 +329,10 @@ ENV.var("FIREWORKS_API_KEY", "Fireworks API key.", secret=True)
 ENV.var("BASETEN_API_KEY", "Baseten API key.", secret=True)
 ENV.var("MODEL_API_KEY", "Generic model API key handed to sandbox tooling.", secret=True)
 ENV.var("LLM_MODEL_ID", "Default model in provider:model form.")
+ENV.var(
+    "LLM_REASONING_EFFORT",
+    "Reasoning effort for the default model (low, medium, high, max) when no team or profile setting applies.",
+)
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
 ENV.var(
     "STAGEHAND_MODEL",

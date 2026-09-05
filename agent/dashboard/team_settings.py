@@ -479,9 +479,9 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
         return pair
     from agent.utils.openai_oauth import desktop_openai_oauth_available
 
-    if os.environ.get("OPENAI_API_KEY") or desktop_openai_oauth_available():
+    if ENV.OPENAI_API_KEY.optional() or desktop_openai_oauth_available():
         return pair
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not ENV.ANTHROPIC_API_KEY.optional():
         return pair
     return ANTHROPIC_THREAD_TITLE_MODEL, ANTHROPIC_THREAD_TITLE_REASONING_EFFORT
 
