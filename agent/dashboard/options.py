@@ -1,10 +1,11 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
-import os
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
 from typing import NotRequired, TypedDict, cast
+
+from agent.config import ENV
 
 
 class ModelOption(TypedDict):
@@ -249,7 +250,7 @@ def gate_fable_model(
 
 DEFAULT_MODEL_ID: str = (
     "anthropic:claude-opus-5"
-    if os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("OPENAI_API_KEY")
+    if ENV.ANTHROPIC_API_KEY.optional() and not ENV.OPENAI_API_KEY.optional()
     else "openai:gpt-5.6-sol"
 )
 DEFAULT_MODEL_EFFORT: str = "medium"
@@ -347,8 +348,8 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
 
 def default_model_pair() -> tuple[str, str]:
     """Deployment fallback used when no team default is set."""
-    model_id = os.environ.get("LLM_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
-    effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
+    model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
+    effort = ENV.LLM_REASONING_EFFORT.get()
     for model in SUPPORTED_MODELS:
         if model["id"] == model_id and model.get("can_be_default", True):
             effort = (

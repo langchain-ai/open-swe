@@ -1,9 +1,10 @@
 """Create a LangSmith sandbox snapshot for open-swe."""
 
 import argparse
-import os
 
 from langsmith.sandbox import SandboxClient
+
+from agent.config import ENV
 
 DEFAULT_IMAGE = "johanneslangchain/open-swe-sandbox:gh-cli-amd64"
 DEFAULT_FS_CAPACITY = 32 * 1024**3  # 32 GiB
@@ -25,8 +26,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--api-key",
-        default=os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD"),
-        help="LangSmith API key",
+        default=ENV.LANGSMITH_API_KEY.optional(),
+        help="LangSmith API key (default: LANGSMITH_API_KEY, or its deprecated _PROD alias)",
     )
     args = parser.parse_args()
 

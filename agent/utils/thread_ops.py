@@ -8,10 +8,11 @@ run that's already in flight" path (``thread_api.send_dashboard_message``).
 """
 
 import logging
-import os
 from typing import Any
 
 from langgraph_sdk import get_client
+
+from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,7 @@ MAX_QUEUED_MESSAGES = 100
 
 
 def langgraph_url() -> str:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get(
-        "LANGGRAPH_URL_PROD", "http://localhost:2024"
-    )
+    return ENV.LANGGRAPH_URL.get()
 
 
 def langgraph_client():

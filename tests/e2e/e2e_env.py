@@ -66,7 +66,10 @@ _DEFAULTS = {
     "DEFAULT_REPO_OWNER": OWNER,
     "DEFAULT_REPO_NAME": REPO,
     # Bot-token-only mode: lets Slack runs proceed without a per-user OAuth token.
-    "LANGSMITH_API_KEY_PROD": "test-bot-mode",
+    # Tracing and the platform metadata loop stay off: the key is not real.
+    "LANGSMITH_API_KEY": "test-bot-mode",
+    "LANGSMITH_TRACING": "false",
+    "LANGSMITH_CONTROL_PLANE_API_KEY": "",
     # SDK client target (same dev server).
     "LANGGRAPH_URL": BASE_URL,
     # Dashboard: the "Open in Web" link target + session-cookie signing. Use

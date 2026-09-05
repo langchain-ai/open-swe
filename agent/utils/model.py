@@ -1,9 +1,9 @@
 import asyncio
-import os
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
+from agent.config import ENV
 from agent.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from agent.utils.gateway import gateway_env_default, gateway_overrides
 from agent.utils.openai_oauth import (
@@ -146,8 +146,8 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
 
     if model_id.startswith("openai:"):
         model_kwargs["base_url"] = (
-            os.environ.get("OPENAI_BASE_URL")
-            or os.environ.get("OPENAI_API_BASE")
+            ENV.OPENAI_BASE_URL.optional()
+            or ENV.OPENAI_BASE_URL.optional()
             or OPENAI_RESPONSES_WS_BASE_URL
         )
         model_kwargs["use_responses_api"] = True
@@ -164,7 +164,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     if (
         model_id.startswith("openai:")
         and not gateway_applied
-        and not os.environ.get("OPENAI_API_KEY")
+        and not ENV.OPENAI_API_KEY.optional()
         and desktop_openai_oauth_available()
     ):
         model_kwargs.pop("base_url", None)
@@ -181,7 +181,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         init_model_id = model_id.split(":", 1)[1]
         model_kwargs["model_provider"] = "openai"
         if not gateway_applied:
-            api_key = os.environ.get("BASETEN_API_KEY")
+            api_key = ENV.BASETEN_API_KEY.optional()
             if not api_key:
                 raise ValueError("BASETEN_API_KEY is required when Gateway routing is disabled")
             model_kwargs["base_url"] = BASETEN_BASE_URL
@@ -354,23 +354,23 @@ def validate_local_dev_llm_config() -> None:
     via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
     from team, profile, or thread configuration and is not validated here.
     """
-    dashboard_url = os.environ.get("DASHBOARD_BASE_URL", "")
+    dashboard_url = ENV.DASHBOARD_BASE_URL.get()
     if not dashboard_url.startswith("http://localhost"):
         return
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
+    model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
 
     if (
         model_id.startswith("openai:")
-        and not os.environ.get("OPENAI_API_KEY")
+        and not ENV.OPENAI_API_KEY.optional()
         and not desktop_openai_oauth_available()
     ):
         raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
+    elif model_id.startswith("anthropic:") and not ENV.ANTHROPIC_API_KEY.optional():
         raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("google_genai:") and not os.environ.get("GOOGLE_API_KEY"):
+    elif model_id.startswith("google_genai:") and not ENV.GOOGLE_API_KEY.optional():
         raise ValueError(f"GOOGLE_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("groq:") and not os.environ.get("GROQ_API_KEY"):
+    elif model_id.startswith("groq:") and not ENV.GROQ_API_KEY.optional():
         raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("fireworks:") and not os.environ.get("FIREWORKS_API_KEY"):
+    elif model_id.startswith("fireworks:") and not ENV.FIREWORKS_API_KEY.optional():
         raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")

@@ -1,17 +1,17 @@
 """Linear API utilities."""
 
 import logging
-import os
 from typing import Any
 
 import httpx
 
+from agent.config import ENV
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
+LINEAR_API_KEY = ENV.LINEAR_API_KEY.get()
 LINEAR_API_URL = "https://api.linear.app/graphql"
 
 

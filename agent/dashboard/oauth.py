@@ -4,7 +4,6 @@ import base64
 import hashlib
 import hmac
 import logging
-import os
 import re
 import secrets
 import time
@@ -18,6 +17,7 @@ import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
+from agent.config import ENV
 from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -69,12 +69,12 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
     return {"sub": login, "email": email if isinstance(email, str) else None}
 
 
-GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
-GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
+GITHUB_APP_CLIENT_ID = ENV.GITHUB_APP_CLIENT_ID.get()
+GITHUB_APP_CLIENT_SECRET = ENV.GITHUB_APP_CLIENT_SECRET.get()
 
 
 def _secret() -> str:
-    s = os.environ.get("DASHBOARD_JWT_SECRET", "")
+    s = ENV.DASHBOARD_JWT_SECRET.get()
     if not s:
         raise HTTPException(500, "DASHBOARD_JWT_SECRET not configured")
     return s
@@ -88,10 +88,10 @@ def allowed_dashboard_origins() -> set[str]:
     else.
     """
     origins: set[str] = set()
-    base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    base = ENV.DASHBOARD_BASE_URL.get().strip()
     if base:
         origins.add(_origin_of(base))
-    for entry in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(","):
+    for entry in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(","):
         entry = entry.strip()
         if entry:
             origins.add(_origin_of(entry))
@@ -129,7 +129,7 @@ def _is_blocked_redirect_path(path: str) -> bool:
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
     """Return a safe post-login redirect URL."""
-    fallback = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    fallback = ENV.DASHBOARD_BASE_URL.get().strip()
     if not redirect_to:
         return fallback
     trimmed = redirect_to.strip()
@@ -163,9 +163,7 @@ def _allowed_login_orgs() -> frozenset[str]:
     disabled (fail-open) to preserve existing deployments.
     """
     return frozenset(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
+        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
     )
 
 
@@ -395,7 +393,7 @@ def build_settings_url() -> str | None:
     safe to share in a public Slack thread. The user signs in with GitHub from
     their own session and connects Slack via verified OIDC on the settings page.
     """
-    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    frontend_base = ENV.DASHBOARD_BASE_URL.get().rstrip("/")
     if not frontend_base:
         return None
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"

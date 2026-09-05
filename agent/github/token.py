@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -12,6 +11,7 @@ import jwt
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import (
     cache_github_token_for_thread,
@@ -48,15 +48,15 @@ class GitHubUserAuthRequired(RuntimeError):
         super().__init__(f"GitHub authentication required for {source} user '{github_login}'")
 
 
-LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
-LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-LANGSMITH_HOST_API_URL = os.environ.get("LANGSMITH_HOST_API_URL", "https://api.host.langchain.com")
-GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
-X_SERVICE_AUTH_JWT_SECRET = os.environ.get("X_SERVICE_AUTH_JWT_SECRET", "")
-USER_ID_API_KEY_MAP = os.environ.get("USER_ID_API_KEY_MAP", "")
+LANGSMITH_API_KEY = ENV.LANGSMITH_API_KEY.get()
+LANGSMITH_API_URL = ENV.LANGSMITH_ENDPOINT.get()
+LANGSMITH_HOST_API_URL = ENV.LANGSMITH_HOST_API_URL.get()
+GITHUB_OAUTH_PROVIDER_ID = ENV.GITHUB_OAUTH_PROVIDER_ID.get()
+X_SERVICE_AUTH_JWT_SECRET = ENV.X_SERVICE_AUTH_JWT_SECRET.get()
+USER_ID_API_KEY_MAP = ENV.USER_ID_API_KEY_MAP.get()
 
 logger.debug(
-    "Auth env snapshot: LANGSMITH_API_KEY_PROD=%s LANGSMITH_ENDPOINT=%s "
+    "Auth env snapshot: LANGSMITH_API_KEY=%s LANGSMITH_ENDPOINT=%s "
     "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s",
     "set" if LANGSMITH_API_KEY else "missing",
     "set" if LANGSMITH_API_URL else "missing",
@@ -68,7 +68,7 @@ logger.debug(
 def is_bot_token_only_mode() -> bool:
     """Check if we're in bot-token-only mode.
 
-    This is the case when LANGSMITH_API_KEY_PROD is set (deployed) but neither
+    This is the case when LANGSMITH_API_KEY is set (deployed) but neither
     X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning we
     can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
     installation token is used for all git operations instead.
@@ -457,7 +457,7 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
     bot_token, expires_at = await get_github_app_installation_token_with_expiry()
     if not bot_token:
         raise RuntimeError(
-            "Bot-token-only mode is active (LANGSMITH_API_KEY_PROD set without "
+            "Bot-token-only mode is active (LANGSMITH_API_KEY set without "
             "X_SERVICE_AUTH_JWT_SECRET) but the GitHub App is not configured. "
             "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATION_ID."
         )
@@ -479,7 +479,7 @@ async def resolve_github_token(
     per-user OAuth token from the dashboard store; GitHub runs are login-based;
     otherwise resolution falls back to email-based auth.
 
-    In bot-token-only mode (LANGSMITH_API_KEY_PROD set without
+    In bot-token-only mode (LANGSMITH_API_KEY set without
     X_SERVICE_AUTH_JWT_SECRET), the GitHub App installation token is used
     for all operations instead of per-user OAuth tokens.
 
