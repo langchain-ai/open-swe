@@ -239,7 +239,14 @@ ENV.var(
 )
 
 # --- GitHub ------------------------------------------------------------------------------
-ENV.var("GITHUB_APP_ID", "Numeric GitHub App id used as the JWT issuer.")
+ENV.var(
+    "GITHUB_APP_ID",
+    "Numeric GitHub App id.",
+    deprecated=(
+        "GITHUB_APP_CLIENT_ID is the GitHub App JWT issuer; GITHUB_APP_ID is only used when "
+        "GITHUB_APP_CLIENT_ID is unset."
+    ),
+)
 ENV.var("GITHUB_APP_CLIENT_ID", "GitHub App client id for the dashboard OAuth flow.")
 ENV.var(
     "GITHUB_APP_CLIENT_SECRET",
@@ -249,7 +256,11 @@ ENV.var(
 ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
-ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
+ENV.var(
+    "GITHUB_APP_INSTALLATION_ID",
+    "GitHub App installation used when a run names none; discovered when the app has a "
+    "single installation.",
+)
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "GITHUB_OAUTH_PROVIDER_ID", "LangSmith OAuth provider id for the legacy brokered GitHub auth."
