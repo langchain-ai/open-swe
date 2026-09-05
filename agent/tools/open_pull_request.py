@@ -17,14 +17,9 @@ from agent.slack.client import (
     get_slack_permalink,
     parse_github_pr_url,
 )
-from agent.slack.code_channels import (
-    is_code_channel_session,
-    repo_context_bar_items,
-    set_agent_resource,
-    set_context_bar,
-    set_view,
-)
-from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.slack.surfaces import slack_surface
+from agent.source_context import SlackThreadRef
+from agent.utils.dashboard_links import dashboard_plan_url
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +61,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     github_login = cfg.github_login
 
     if source in _USER_TOKEN_SOURCES and github_login and github_login.strip():
-        from agent.dashboard.profiles import get_valid_access_token
+        from ..dashboard.profiles import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
         if user_token:
@@ -641,20 +636,16 @@ async def _record_pr_telemetry(
                 thread_id,
                 cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
-            if active and is_code_channel_session(str(active.get("thread_ts") or "")):
-                channel_id = str(active.get("channel_id") or "")
-                await set_context_bar(
-                    channel_id,
-                    repo_context_bar_items(
-                        {"owner": owner, "name": repo},
-                        branch=head,
-                        pr_url=pr_url if isinstance(pr_url, str) else "",
-                        dashboard_url=dashboard_thread_url(thread_id) or "",
-                    ),
+            surface = slack_surface(SlackThreadRef.parse(active))
+            if surface is not None and surface.has_chrome:
+                await surface.sync_context(
+                    repo={"owner": owner, "name": repo},
+                    thread_id=thread_id,
+                    branch=head,
+                    pr_url=pr_url if isinstance(pr_url, str) else "",
                 )
                 if isinstance(pr_url, str):
-                    await set_agent_resource(
-                        channel_id,
+                    await surface.set_resource(
                         {
                             "url": pr_url,
                             "resource_type": "pull_request",
@@ -664,20 +655,14 @@ async def _record_pr_telemetry(
                                 else "Pull request"
                             ),
                             "provider": "GitHub",
-                        },
+                        }
                     )
                 response = await client.get(
                     f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
                     headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},
                 )
                 if response.status_code == 200 and response.text.strip():
-                    await set_view(
-                        channel_id,
-                        "diff",
-                        content=response.text,
-                        base_branch=base,
-                        head_branch=head,
-                    )
+                    await surface.publish_diff(response.text, base_branch=base, head_branch=head)
     except Exception:
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True
@@ -686,7 +671,7 @@ async def _record_pr_telemetry(
 
 async def _plan_reference_line(cfg: RunConfig) -> str | None:
     thread_id = cfg.thread_id
-    if thread_id is None:
+    if not thread_id:
         return None
     try:
         plan = await get_plan_content(thread_id)
@@ -703,9 +688,10 @@ async def _plan_reference_line(cfg: RunConfig) -> str | None:
 
 async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
     """Build source reference lines for the run."""
+    source = cfg.source
     lines: list[str] = []
 
-    if cfg.source == "slack":
+    if source == "slack":
         active = await get_active_slack_thread(
             get_client(),
             cfg.thread_id,
@@ -721,14 +707,18 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
                 permalink = await get_slack_permalink(channel_id, thread_ts)
         if isinstance(permalink, str) and permalink.strip():
             lines.append(f"- Slack thread: {permalink.strip()}")
-    elif cfg.source == "linear" and cfg.linear_issue:
-        url, identifier = cfg.linear_issue.url, cfg.linear_issue.identifier
+    elif source == "linear":
+        linear_issue = cfg.linear_issue
+        url = linear_issue.url if linear_issue else ""
+        identifier = linear_issue.identifier if linear_issue else ""
         if url:
             lines.append(f"- Linear ticket: [{identifier or url}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
-    elif cfg.source in ("github", "github_issue") and cfg.github_issue:
-        url, number = cfg.github_issue.url, cfg.github_issue.number
+    elif source in ("github", "github_issue"):
+        github_issue = cfg.github_issue
+        url = github_issue.url if github_issue else ""
+        number = github_issue.number if github_issue else None
         if url:
             label = f"#{number}" if number else url
             lines.append(f"- GitHub issue: [{label}]({url})")

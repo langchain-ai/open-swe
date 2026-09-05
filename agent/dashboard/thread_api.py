@@ -51,8 +51,8 @@ from agent.slack.client import (
     parse_github_pr_url,
     update_slack_trace_reply_for_web_handoff,
 )
-from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
+from agent.slack.surfaces import slack_surface
 from agent.source_context import SourceContext
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import (
@@ -395,7 +395,8 @@ def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
 
 def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
+    surface = slack_surface(slack_thread)
+    if slack_thread is None or surface is None or surface.kind != "slack_channel":
         return None
     channel_id = slack_thread.channel_id.strip()
     team_id = SLACK_TEAM_ID.strip()
@@ -2383,7 +2384,8 @@ async def get_dashboard_thread_working_tree_diff(
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
     from agent.sandboxes.paths import resolve_sandbox_work_dir
-    from agent.utils.turn_checkpoint import read_turn_diff
+
+    from ..utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     sandbox_id = metadata.get("sandbox_id")

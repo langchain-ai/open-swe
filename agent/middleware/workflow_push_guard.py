@@ -28,7 +28,7 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
 )
-from agent.slack.tools.thread_reply import build_workflow_approval_blocks
+from agent.slack.session import build_workflow_approval_blocks
 from agent.utils.dashboard_links import dashboard_workflow_approval_url
 
 logger = logging.getLogger(__name__)

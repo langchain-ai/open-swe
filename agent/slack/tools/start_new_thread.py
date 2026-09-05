@@ -6,16 +6,13 @@ from typing import Any
 from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
-from agent.dispatch import dispatch_agent_run
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    bind_slack_thread_id,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
-    store_slack_run_mapping,
 )
-from agent.source_context import SourceContext
+from agent.slack.spawn import SpawnDestination, SpawnHandoff, SpawnOrigin, spawn_slack_session
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
@@ -139,22 +136,6 @@ async def _run_prompt(
     )
 
 
-def _new_slack_thread_context(
-    original: dict[str, Any],
-    *,
-    channel_id: str,
-    thread_ts: str,
-) -> dict[str, Any]:
-    return {
-        "channel_id": channel_id,
-        "thread_ts": thread_ts,
-        "triggering_user_id": original.get("triggering_user_id", ""),
-        "triggering_user_name": original.get("triggering_user_name", ""),
-        "triggering_user_email": original.get("triggering_user_email", ""),
-        "triggering_event_ts": thread_ts,
-    }
-
-
 async def slack_start_new_thread(
     title: str,
     instructions: str,
@@ -203,7 +184,7 @@ async def slack_start_new_thread(
                 ),
             }
         github_login = cfg.github_login
-        if not github_login or not github_login.strip():
+        if not (github_login or "").strip():
             return {
                 "success": False,
                 "error": (
@@ -213,7 +194,7 @@ async def slack_start_new_thread(
             }
         try:
             await require_repo_access_for_user(
-                github_login.strip(), f"{repo['owner']}/{repo['name']}"
+                (github_login or "").strip(), f"{repo['owner']}/{repo['name']}"
             )
         except HTTPException as exc:
             return {
@@ -269,74 +250,33 @@ async def slack_start_new_thread(
             "hint": _failure_hint(details_error),
         }
 
+    # The breakout's own links go in its first prompt, so it needs its thread id
+    # before the session starts.
     thread_id = str(uuid.uuid4())
-    await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
-    new_slack_thread = _new_slack_thread_context(
-        current_slack_thread,
-        channel_id=clean_channel_id,
-        thread_ts=message_ts,
+    session = await spawn_slack_session(
+        client,
+        destination=SpawnDestination(channel_id=clean_channel_id, thread_ts=message_ts),
+        origin=SpawnOrigin.from_config(cfg, current_slack_thread),
+        handoff=SpawnHandoff(
+            title=clean_title,
+            content=await _run_prompt(
+                clean_title, clean_instructions, repo, current_slack_thread, thread_id
+            ),
+            repo=repo,
+            source_context={
+                "breakout_from": {
+                    "channel_id": clean_channel_id,
+                    "thread_ts": current_thread_ts or "",
+                    "message_ts": current_slack_thread.get("triggering_event_ts", ""),
+                }
+            },
+        ),
+        thread_id=thread_id,
     )
-    breakout_from = {
-        "channel_id": clean_channel_id,
-        "thread_ts": current_thread_ts or "",
-        "message_ts": current_slack_thread.get("triggering_event_ts", ""),
-    }
-
-    metadata: dict[str, Any] = {
-        "source": "slack",
-        "title": clean_title[:80],
-        "source_context": SourceContext.parse(
-            {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
-        ).dump(),
-    }
-    if repo:
-        metadata.update(
-            {
-                "repo": repo,
-                "repo_owner": repo["owner"],
-                "repo_name": repo["name"],
-            }
-        )
-    if cfg.github_login:
-        metadata["github_login"] = cfg.github_login
-    if cfg.user_email:
-        metadata["triggering_user_email"] = cfg.user_email.strip().lower()
-
-    new_configurable: dict[str, Any] = {
-        "slack_thread": new_slack_thread,
-        "source": "slack",
-    }
-    if repo:
-        new_configurable["repo"] = repo
-    for key in ("user_email", "github_login", "agent_model_id", "agent_effort"):
-        value = cfg.get(key)
-        if value:
-            new_configurable[key] = value
-
-    await client.threads.create(thread_id=thread_id, if_exists="do_nothing", metadata=metadata)
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
-
-    run = await dispatch_agent_run(
-        thread_id,
-        await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
-        new_configurable,
-        source="slack",
-        client=client,
-    )
-    run_id = run.get("run_id") if isinstance(run, dict) else None
-    if isinstance(run_id, str) and run_id:
-        await store_slack_run_mapping(
-            client,
-            clean_channel_id,
-            message_ts,
-            run_id,
-            message_ts=message_ts,
-            triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
-        )
 
     return {
         "success": True,
-        "thread_id": thread_id,
+        "thread_id": session.thread_id,
         "thread_ts": message_ts,
-        "dashboard_url": dashboard_thread_url(thread_id),
+        "dashboard_url": session.dashboard_url,
     }

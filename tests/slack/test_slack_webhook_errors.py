@@ -472,8 +472,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     monkeypatch.setattr(slack_webhook.common, "_upsert_slack_thread_repo_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
-    thinking = AsyncMock()
-    monkeypatch.setattr(slack_webhook, "stream_slack_thinking_steps", thinking)
     monkeypatch.setattr(slack_webhook.common, "store_slack_run_mapping", store_mapping)
 
     await slack_webhook._process_slack_mention_impl(
@@ -501,7 +499,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert "old text" not in serialized
     assert "## Conversation Context" not in serialized
     assert await_args.kwargs["explicitly_tagged"] is False
-    thinking.assert_not_awaited()
     store_args = store_mapping.await_args
     assert store_args is not None
     assert store_args.kwargs["message_ts"] == "1.0"

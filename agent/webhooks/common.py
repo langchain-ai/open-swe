@@ -103,6 +103,7 @@ from agent.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
+    invite_to_slack_channel,  # noqa: F401
     is_slack_channel_named,
     lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
@@ -111,6 +112,7 @@ from agent.slack.client import (
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
     resolve_slack_thread_id,  # noqa: F401
+    respond_to_slack_command,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
     slack_channel_allows_operations,  # noqa: F401
     store_slack_run_mapping,  # noqa: F401
@@ -261,8 +263,10 @@ __all__ = [
     "list_reviewer_findings",
     "logger",
     "login_for_email",
+    "invite_to_slack_channel",
     "login_for_slack_id",
     "lookup_slack_thread_id",
+    "respond_to_slack_command",
     "model_supports_images",
     "normalize_slack_channel_context",
     "parse_qs",

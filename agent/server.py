@@ -98,6 +98,7 @@ from agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
+    SlackTranscriptMiddleware,
     StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
@@ -137,6 +138,7 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
+from agent.slack.surfaces import slack_surface
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.corridor_mcp import (
     CORRIDOR_TOOL_NAMES,
@@ -150,6 +152,7 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
+    ask_user_choice,
     background_execute,
     background_task,
     capture_environment_snapshot,
@@ -196,6 +199,7 @@ from agent.tools import (
     slack_attach_html,
     slack_move_thread,
     slack_read_thread_messages,
+    slack_reply_to_message,
     slack_start_new_thread,
     slack_thread_reply,
     trigger_automation,
@@ -663,6 +667,49 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
     )
 
 
+def _projects_transcript(cfg: RunConfig) -> bool:
+    """Whether this run's surface carries the agent's words on its own."""
+    surface = slack_surface(cfg.slack_thread)
+    return surface is not None and surface.projects_transcript
+
+
+def _transcript_middleware(cfg: RunConfig, thread_id: str) -> list[Any]:
+    """Deliver the run's words to surfaces that have to be told about them."""
+    location = cfg.slack_thread
+    if location is None or not _projects_transcript(cfg):
+        return []
+    # `prepare_run_id` is minted per dispatch and stored in the run's config, so a
+    # resumed run keeps writing into the message it already opened.
+    run_key = cfg.prepare_run_id
+    if not run_key:
+        return []
+    return [
+        SlackTranscriptMiddleware(
+            thread_id=thread_id,
+            run_key=run_key,
+            channel_id=location.channel_id,
+            reply_thread_ts=location.reply_thread_ts,
+            session_thread_ts=location.thread_ts,
+            triggering_user_id=location.triggering_user_id,
+            triggering_event_ts=location.triggering_event_ts,
+            team_id=location.team_id,
+        )
+    ]
+
+
+def _session_reply_tools(cfg: RunConfig) -> list[Any]:
+    """The posting tool that matches how this surface delivers what the agent says.
+
+    In a code channel the agent's words are already streamed to the channel, so
+    posting is only ever a reply under one message. Anywhere else, a reply *is*
+    how the agent speaks.
+    """
+    surface = slack_surface(cfg.slack_thread)
+    if surface is not None and surface.projects_transcript:
+        return [slack_reply_to_message]
+    return [slack_thread_reply]
+
+
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
     if cfg.source not in {"slack", "schedule"} or cfg.slack_thread is None:
@@ -895,6 +942,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(cfg),
+                code_channel=_projects_transcript(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
             ),
         }
@@ -1149,11 +1197,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     slack_tools = [
+        ask_user_choice,
         manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
         slack_read_thread_messages,
+        slack_reply_to_message,
         slack_start_new_thread,
         slack_thread_reply,
     ]
@@ -1193,13 +1243,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        ask_user_choice,
         manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
         slack_read_thread_messages,
+        *_session_reply_tools(cfg),
         slack_start_new_thread,
-        slack_thread_reply,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
     if local_run:
@@ -1313,6 +1364,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     admin_environments=admin_thread,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                *_transcript_middleware(cfg, thread_id or ""),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),

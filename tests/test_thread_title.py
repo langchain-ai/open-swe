@@ -103,7 +103,7 @@ async def test_title_generation_renames_code_channel(monkeypatch: pytest.MonkeyP
     )
     client = type("Client", (), {"threads": threads})()
     rename = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr("agent.thread_title.rename_session", rename)
+    monkeypatch.setattr("agent.slack.surfaces.channel.rename_session", rename)
 
     await generate_and_store_thread_title(
         thread_id="thread-123",
@@ -144,7 +144,7 @@ async def test_title_generation_renames_channel_promoted_during_update(
     )
     client = type("Client", (), {"threads": threads})()
     rename = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr("agent.thread_title.rename_session", rename)
+    monkeypatch.setattr("agent.slack.surfaces.channel.rename_session", rename)
 
     await generate_and_store_thread_title(
         thread_id="thread-123",

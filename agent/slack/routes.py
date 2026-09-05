@@ -15,6 +15,20 @@ from agent.webhooks import common
 router = APIRouter()
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
+#: Message subtypes Slack uses to narrate a channel's own housekeeping.
+_MEMBERSHIP_SUBTYPES = frozenset(
+    {
+        "channel_join",
+        "channel_leave",
+        "group_join",
+        "group_leave",
+        "channel_topic",
+        "channel_purpose",
+        "channel_name",
+        "channel_archive",
+        "channel_unarchive",
+    }
+)
 _EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external participants."
 
 
@@ -95,6 +109,36 @@ async def _queue_code_channel_turn(
         repo_config,
     )
     return {"status": "accepted", "message": "Code channel interaction queued"}
+
+
+async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
+    """Leave a note about who joined or left, for the session's next turn.
+
+    Nothing is being asked, so this must not start a run of its own; the queue
+    is drained before the next model call, whatever triggers it.
+    """
+    client = get_langgraph_client()
+    try:
+        thread_id = await common.lookup_slack_thread_id(
+            client, channel_id, common.CODE_CHANNEL_SESSION_TS
+        )
+    except common.SlackThreadMappingError:
+        return
+    if not thread_id or not text.strip():
+        return
+    await common.queue_message_for_thread(
+        thread_id,
+        [
+            {
+                "type": "text",
+                "text": (
+                    "This channel's membership changed while you were idle: "
+                    f"{text.strip()}\nNothing is being asked of you. Note who is here "
+                    "and carry on with whatever comes next."
+                ),
+            }
+        ],
+    )
 
 
 async def _lookup_delivered_message_update(
@@ -419,6 +463,15 @@ async def slack_webhook(
     ):
         return {"status": "ignored", "reason": "Event from a bot"}
 
+    # Slack narrates joins, leaves and channel renames as messages, and a code
+    # channel treats every message as addressed to the agent — so without this
+    # an invite makes it greet the person it just invited. It is still worth
+    # knowing who is in the room, so it waits in the queue for the next turn.
+    if {event.get("subtype"), updated_message.get("subtype")} & _MEMBERSHIP_SUBTYPES:
+        if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
+            background_tasks.add_task(_queue_channel_housekeeping, channel_id, text)
+        return {"status": "ignored", "reason": "Slack channel housekeeping, not a request"}
+
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
 
@@ -559,6 +612,69 @@ async def slack_code_channel_command(
     return {"response_type": "ephemeral", "text": f"Working on /{command}…"}
 
 
+@router.post("/webhooks/slack/code-channel-open")
+async def slack_open_code_channel_command(
+    request: common.Request, background_tasks: common.BackgroundTasks
+) -> dict[str, str]:
+    """Open a code channel for the prompt a workspace slash command carried.
+
+    Nothing is posted in the channel the command was typed in: the answer is
+    ephemeral, and the work happens in the new channel.
+    """
+    body = await request.body()
+    if not common.verify_slack_signature(
+        body=body,
+        timestamp=request.headers.get("X-Slack-Request-Timestamp", ""),
+        signature=request.headers.get("X-Slack-Signature", ""),
+        secret=common.SLACK_SIGNING_SECRET,
+    ):
+        common.logger.warning("Invalid Slack code channel open signature")
+        raise common.HTTPException(status_code=401, detail="Invalid signature")
+
+    form = common.parse_qs(body.decode("utf-8"))
+    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    channel_id = value("channel_id")
+    user_id = value("user_id")
+    prompt = value("text")
+    response_url = value("response_url")
+    if not channel_id or not user_id:
+        return {"response_type": "ephemeral", "text": "That command was missing its context."}
+    if not prompt:
+        return {
+            "response_type": "ephemeral",
+            "text": "Say what the channel should work on: `/code fix the flaky login test`.",
+        }
+    if len(prompt) > 4000:
+        return {"response_type": "ephemeral", "text": "That prompt is too long for one command."}
+
+    channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+    if not common.slack_channel_allows_operations(channel_context):
+        common.logger.warning("Blocked a code channel command from channel=%s", channel_id)
+        return {
+            "response_type": "ephemeral",
+            "text": "Open SWE does not operate in this channel.",
+        }
+
+    repo_config = await common.get_slack_repo_config(
+        channel_id,
+        common.CODE_CHANNEL_SESSION_TS,
+        slack_user_id=user_id,
+        channel_context=channel_context,
+    )
+    background_tasks.add_task(
+        service.process_code_channel_command,
+        {
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "text": prompt,
+            "response_url": response_url,
+            "team_id": value("team_id"),
+            "repo": repo_config,
+        },
+    )
+    return {"response_type": "ephemeral", "text": "Opening a code channel…"}
+
+
 @router.post("/webhooks/slack/interactivity")
 async def slack_interactivity(
     request: common.Request, background_tasks: common.BackgroundTasks
@@ -678,6 +794,8 @@ async def slack_interactivity(
         if not channel_id or not thread_ts or not fingerprint:
             return {"status": "ignored", "reason": "Missing workflow approval context"}
 
+        if await common.is_code_channel(channel_id):
+            thread_ts = common.CODE_CHANNEL_SESSION_TS
         thread_id = await common.lookup_slack_thread_id(
             get_langgraph_client(), channel_id, thread_ts
         )
@@ -759,6 +877,8 @@ async def slack_interactivity(
         if not channel_id or not thread_ts:
             return {"status": "ignored", "reason": "Missing Slack action context"}
 
+        if await common.is_code_channel(channel_id):
+            thread_ts = common.CODE_CHANNEL_SESSION_TS
         thread_id = await common.lookup_slack_thread_id(
             get_langgraph_client(), channel_id, thread_ts
         )
@@ -830,6 +950,11 @@ async def slack_interactivity(
     if not channel_id or not thread_ts or not event_ts or not user_id:
         return {"status": "ignored", "reason": "Missing Slack action context"}
 
+    # A code channel is one session for the whole channel, so an action on a
+    # channel-level message belongs to that session rather than to a thread
+    # hanging off the message it was clicked on.
+    if await common.is_code_channel(channel_id):
+        thread_ts = common.CODE_CHANNEL_SESSION_TS
     thread_id = await common.lookup_slack_thread_id(get_langgraph_client(), channel_id, thread_ts)
     if not thread_id:
         return {"status": "ignored", "reason": "Slack thread is not associated"}

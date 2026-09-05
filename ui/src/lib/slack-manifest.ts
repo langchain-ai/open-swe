@@ -34,6 +34,17 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       slash_command_url:
         "https://<your-backend-url>/webhooks/slack/code-channel-commands",
     }
+    // A workspace command, unlike the per-channel ones a session registers at
+    // runtime: usable from any channel to start a task in a channel of its own.
+    features.slash_commands = [
+      {
+        command: "/code",
+        url: "https://<your-backend-url>/webhooks/slack/code-channel-open",
+        description: "Open a code channel and start work on a task there",
+        usage_hint: "fix the flaky login test",
+        should_escape: false,
+      },
+    ]
   }
 
   return {
@@ -47,7 +58,16 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       redirect_urls: ["http://localhost:2024/dashboard/api/slack/callback"],
       scopes: {
         bot: codeChannelsEnabled
-          ? [...LEGACY_BOT_SCOPES, "code_channels:manage", "files:read"]
+          ? [
+              ...LEGACY_BOT_SCOPES,
+              "code_channels:manage",
+              "commands",
+              "files:read",
+              // A channel opened by command has no origin message to invite its
+              // author, so the app puts them in it.
+              "channels:manage",
+              "groups:write",
+            ]
           : LEGACY_BOT_SCOPES,
       },
     },
