@@ -14,6 +14,8 @@ web:
 	pnpm run dev
 
 # Build the dashboard into ui/.output/public; `make dev` then serves it at /.
+# With a LangGraph http.mount_prefix, pass DASHBOARD_BASE_PATH=<prefix>/ so the
+# build's asset URLs and router match where the server mounts it.
 build-dashboard:
 	pnpm install --frozen-lockfile --filter open-swe-dashboard...
 	pnpm --filter open-swe-dashboard run build

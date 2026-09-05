@@ -4,6 +4,17 @@ import { isCrossOriginApiBase, resolveDashboardApiBase } from "./api-base"
 
 describe("resolveDashboardApiBase", () => {
   it("uses the configured API for the web UI", () => {
+    expect(resolveDashboardApiBase(undefined, "https:")).toBe("")
+    expect(resolveDashboardApiBase("", "https:", "/open-swe/")).toBe(
+      "/open-swe"
+    )
+    expect(
+      resolveDashboardApiBase(
+        "https://backend.example/",
+        "https:",
+        "/open-swe/"
+      )
+    ).toBe("https://backend.example")
     expect(resolveDashboardApiBase("https://backend.example/", "https:")).toBe(
       "https://backend.example"
     )
