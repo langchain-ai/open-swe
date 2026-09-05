@@ -263,7 +263,7 @@ make dev          # uv run langgraph dev --no-browser --port 2024
 ## 8. Tell Open SWE which repository to work in
 
 - **GitHub** triggers always know the repository: the issue or pull request the mention came from.
-- **Slack** messages name a repository with `repo:owner/name` (or a GitHub URL) in the message, or once per channel in the channel topic or purpose. A run that cannot resolve a repository is rejected with `no default repository configured`.
+- **Slack** takes the repository from, in order: the thread's existing repository, a `repo:owner/name` token (or GitHub URL) in the channel's topic or purpose, the triggering user's profile default (their Slack email is matched to the GitHub account email on their dashboard profile; [Sign in with Slack](#sign-in-with-slack) or an Admin → User mappings entry overrides that), and finally the team default. A `repo:` token in the message text itself is not read. When nothing resolves, the bot replies in the thread saying so.
 - A **team-wide default** lives in **Admin → Team settings → Default Repository** in the [dashboard](#dashboard-web-ui), or over the API: `PUT /dashboard/api/team-settings` with `{"default_repo": "owner/name"}` using an [admin credential](#admin-api-credentials). With a default set, `repo:name` shorthand (no owner) also resolves against that owner.
 
 ## 9. Verify it works
@@ -276,8 +276,8 @@ make dev          # uv run langgraph dev --no-browser --port 2024
 
 ### Slack
 
-1. In any channel where the bot is invited, start a thread (or set the channel topic to `repo:owner/name` first)
-2. Mention the bot: `@Open SWE repo:owner/name what's in the repo?`
+1. In any channel where the bot is invited, set the channel topic to `repo:owner/name` (or rely on the team default repository)
+2. Mention the bot: `@Open SWE what's in the repo?`
 3. You should see a reply in the thread with the agent's response
 
 ---
@@ -645,7 +645,7 @@ Every variable Open SWE reads is declared once in `agent/config.py` with its def
 
 - Verify `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_PRIVATE_KEY` are set correctly; the private key must include the full `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines
 - Ensure the GitHub App is installed on the target repositories
-- `The GitHub App has N installations` in the logs: runs without repository context cannot pick an installation. Set `GITHUB_APP_INSTALLATION_ID`, or make sure Slack messages name a repository (or a team default repository is set)
+- `The GitHub App has N installations` in the logs: runs without repository context cannot pick an installation. Set `GITHUB_APP_INSTALLATION_ID`, or make sure Slack channels carry a `repo:owner/name` topic (or a team default repository is set)
 - `The GitHub App is not installed on any account yet`: complete step 3c
 
 ### Slack mentions are ignored
