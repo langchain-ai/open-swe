@@ -41,7 +41,7 @@ export function SandboxSettingsPanel() {
         }. New sandboxes boot from this unless their environment has a ready snapshot.`
       : base?.base_snapshot_source === "env"
         ? "Using DEFAULT_SANDBOX_SNAPSHOT_ID. Set a value here to change it without a redeploy."
-        : "No base snapshot configured — new sandboxes cannot start until one is set here or in DEFAULT_SANDBOX_SNAPSHOT_ID."
+        : "No base snapshot configured — new sandboxes boot from the LangSmith default snapshot (git, gh, Python and Node preinstalled). Set one here or in DEFAULT_SANDBOX_SNAPSHOT_ID to use a custom image."
 
   return (
     <div className="flex flex-col gap-2 p-4">
@@ -75,15 +75,7 @@ export function SandboxSettingsPanel() {
           </Button>
         )}
       </div>
-      <p
-        className={`text-xs ${
-          base?.base_snapshot_source === "unset"
-            ? "text-destructive"
-            : "text-muted-foreground"
-        }`}
-      >
-        {hint}
-      </p>
+      <p className="text-xs text-muted-foreground">{hint}</p>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   )
