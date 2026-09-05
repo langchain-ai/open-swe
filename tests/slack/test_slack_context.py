@@ -878,9 +878,10 @@ def test_get_slack_repo_config_shorthand_uses_team_default_owner(
     assert repo == {"owner": "acme", "name": "tools"}
 
 
-def test_get_slack_repo_config_shorthand_prefers_env_owner(
+def test_get_slack_repo_config_shorthand_prefers_team_owner_over_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The deprecated SLACK_REPO_OWNER only fills in while no team default exists."""
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
     _clear_env_repo_defaults(monkeypatch)
     monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "env-owner")
@@ -895,7 +896,7 @@ def test_get_slack_repo_config_shorthand_prefers_env_owner(
         )
     )
 
-    assert repo == {"owner": "env-owner", "name": "tools"}
+    assert repo == {"owner": "acme", "name": "tools"}
 
 
 def test_get_slack_repo_config_shorthand_without_any_owner_falls_through(
@@ -934,10 +935,11 @@ async def test_default_repo_owner_hint_precedence(monkeypatch: pytest.MonkeyPatc
         webhook_common, "get_team_default_repo", _team_default_repo("acme", "widgets")
     )
 
-    assert await webhook_common.default_repo_owner_hint("env-owner") == "env-owner"
+    assert await webhook_common.default_repo_owner_hint("env-owner") == "acme"
     assert await webhook_common.default_repo_owner_hint("") == "acme"
 
     monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+    assert await webhook_common.default_repo_owner_hint("env-owner") == "env-owner"
     assert await webhook_common.default_repo_owner_hint("") == ""
 
 
