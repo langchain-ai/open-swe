@@ -8,6 +8,7 @@ import os
 from collections.abc import Mapping
 
 from agent.config import ENV
+from agent.utils.dashboard_ui import dashboard_static_dir
 
 logger = logging.getLogger(__name__)
 
@@ -19,18 +20,14 @@ _SURFACES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Linear", ("LINEAR_API_KEY", "LINEAR_WEBHOOK_SECRET")),
     (
         "Dashboard",
-        (
-            "GITHUB_APP_CLIENT_SECRET",
-            "DASHBOARD_JWT_SECRET",
-            "TOKEN_ENCRYPTION_KEY",
-            "DASHBOARD_BASE_URL",
-            "DASHBOARD_API_BASE_URL",
-        ),
+        ("GITHUB_APP_CLIENT_SECRET", "DASHBOARD_JWT_SECRET", "TOKEN_ENCRYPTION_KEY"),
     ),
 )
 
 # Discovery-backed values: listed as overrides only when explicitly set.
 _OVERRIDES: tuple[str, ...] = (
+    "DASHBOARD_BASE_URL",
+    "DASHBOARD_API_BASE_URL",
     "GITHUB_APP_INSTALLATION_ID",
     "SLACK_BOT_USER_ID",
     "SLACK_BOT_USERNAME",
@@ -64,8 +61,16 @@ def configuration_summary(env: Mapping[str, str]) -> list[str]:
     return lines
 
 
+def dashboard_ui_summary() -> str:
+    static_dir = dashboard_static_dir()
+    if static_dir is None:
+        return "Dashboard UI: not bundled"
+    return f"Dashboard UI: bundled from {static_dir}"
+
+
 def log_startup_configuration() -> None:
     for line in configuration_summary(os.environ):
         logger.info("config: %s", line)
+    logger.info("config: %s", dashboard_ui_summary())
     for warning in deprecated_env_warnings(os.environ):
         logger.warning("config: %s", warning)
