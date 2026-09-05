@@ -372,6 +372,22 @@ async def ensure_slack_bot_identity() -> None:
 
 
 DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
+# Posted in the Slack thread when no repository can be resolved: a bare 4xx to
+# Slack is invisible to the person who asked.
+NO_REPOSITORY_SLACK_REPLY = (
+    "I don't know which repository to work in. Set a default in the dashboard under "
+    "Admin → Team settings → Default Repository (or in your own profile), or put "
+    "`repo:owner/name` in this channel's topic, then mention me again."
+)
+
+
+class SlackRepositoryNotConfigured(HTTPException):
+    """No repository could be resolved for a Slack-triggered run."""
+
+    def __init__(self) -> None:
+        super().__init__(400, "no default repository configured")
+
+
 DOCS_PLZ_SLACK_GATE_REPLY = (
     "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
 )
@@ -954,7 +970,7 @@ async def get_slack_repo_config(
         repo_config = {"owner": env_owner, "name": default_name}
 
     if not repo_config:
-        raise HTTPException(400, "no default repository configured")
+        raise SlackRepositoryNotConfigured()
 
     return repo_config
 
