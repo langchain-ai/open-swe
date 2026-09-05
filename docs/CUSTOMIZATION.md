@@ -205,8 +205,8 @@ Routing is opt-in and off by default. Enable it either way:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
-| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY`. |
+| `LANGSMITH_GATEWAY_ENABLED` | on when `LANGSMITH_GATEWAY_API_KEY` is set, else off | Deployment-level default for gateway routing; set explicitly to override. |
+| `LANGSMITH_GATEWAY_API_KEY` | unset | Dedicated LangSmith key for Gateway calls; setting it also turns routing on. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY` when routing is enabled some other way. |
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
