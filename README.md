@@ -135,6 +135,8 @@ Open SWE includes a LangGraph backend, a web dashboard, and an experimental desk
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
 - **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
 
+Local development needs Python 3.14+, [uv](https://docs.astral.sh/uv/), and—only for the dashboard—Node 22.22.2+ with [pnpm](https://pnpm.io/).
+
 Complete the required `.env`, GitHub App, and sandbox setup in the [Installation Guide](docs/INSTALLATION.md), then install the backend and dashboard dependencies:
 
 ```bash
@@ -149,8 +151,8 @@ pnpm install
 Run the services in separate terminals:
 
 ```bash
-make dev  # terminal 1: backend
-make web  # terminal 2: dashboard
+make dev  # terminal 1: backend on http://localhost:2024
+make web  # terminal 2: dashboard on http://localhost:3000
 ```
 
 Production self-hosting uses the standalone LangGraph Agent Server and requires its license key.
