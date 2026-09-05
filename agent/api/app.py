@@ -1,5 +1,6 @@
 """FastAPI application composition."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,9 @@ from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.utils.event_loop import pin_single_event_loop
+from agent.webhooks.common import ensure_slack_bot_identity
+
+logger = logging.getLogger(__name__)
 
 # Before the queue starts: it reads this when it builds its workers, and Open SWE
 # cannot survive them landing on different loops.
@@ -29,6 +33,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     pin_single_event_loop()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    try:
+        await ensure_slack_bot_identity()
+    except Exception:  # noqa: BLE001
+        logger.debug("Slack bot identity discovery failed at startup", exc_info=True)
     try:
         yield
     finally:

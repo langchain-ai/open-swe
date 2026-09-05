@@ -283,17 +283,35 @@ ENV.var("PUBLIC_REPO_ORG_GATE", "Single org whose members may trigger runs on pu
 ENV.var(
     "DEFAULT_REPO_OWNER",
     "Default GitHub owner when a run names no repository.",
-    default="langchain-ai",
+    deprecated="set the default repository in Admin → Team settings instead.",
 )
-ENV.var("DEFAULT_REPO_NAME", "Default GitHub repository when a run names none.")
-ENV.var("SLACK_REPO_OWNER", "Slack-specific default repository owner.")
-ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
+ENV.var(
+    "DEFAULT_REPO_NAME",
+    "Default GitHub repository when a run names none.",
+    deprecated="set the default repository in Admin → Team settings instead.",
+)
+ENV.var(
+    "SLACK_REPO_OWNER",
+    "Slack-specific default repository owner.",
+    deprecated="set the default repository in Admin → Team settings instead.",
+)
+ENV.var(
+    "SLACK_REPO_NAME",
+    "Slack-specific default repository name.",
+    deprecated="set the default repository in Admin → Team settings instead.",
+)
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
-ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
-ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention detection.")
+ENV.var(
+    "SLACK_BOT_USER_ID",
+    "Slack user id of the bot, for mention detection; discovered via auth.test when unset.",
+)
+ENV.var(
+    "SLACK_BOT_USERNAME",
+    "Slack handle of the bot, for plain-text mention detection; discovered when unset.",
+)
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
