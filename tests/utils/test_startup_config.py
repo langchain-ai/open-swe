@@ -23,8 +23,18 @@ def test_minimum_config_enables_github_and_slack_only() -> None:
     assert "LangSmith: enabled" in lines
     assert "GitHub: enabled" in lines
     assert "Slack: enabled" in lines
+    assert "Slack sign-in: disabled" in lines
     assert "Linear: disabled" in lines
     assert "Dashboard: disabled" in lines
+
+
+def test_slack_sign_in_is_its_own_surface() -> None:
+    env = {**_MINIMUM, "SLACK_CLIENT_ID": "123.456", "SLACK_CLIENT_SECRET": "client-secret"}
+
+    lines = startup_config.configuration_summary(env)
+
+    assert "Slack sign-in: enabled" in lines
+    assert "client-secret" not in " ".join(lines)
 
 
 def test_partial_surface_lists_missing_names() -> None:
