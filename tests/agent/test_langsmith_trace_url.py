@@ -8,7 +8,7 @@ _REAL_DISCOVER_TENANT_ID = ls_utils._discover_tenant_id
 @pytest.fixture(autouse=True)
 def _clear_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     ls_utils._PROJECT_ID_CACHE.clear()
-    ls_utils._TENANT_ID_CACHE = None
+    ls_utils._TENANT_ID_CACHE.clear()
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: None)
 
 
@@ -181,9 +181,33 @@ async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch)
 
 async def test_tenant_id_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_TENANT_ID", "tenant-env")
-    ls_utils._TENANT_ID_CACHE = "tenant-cached"
+    ls_utils._TENANT_ID_CACHE[ls_utils._workspace_key()] = "tenant-cached"
 
     assert await ls_utils.resolve_tenant_id() == "tenant-env"
+
+
+async def test_cached_ids_belong_to_the_credentials_that_produced_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rotating the key or pointing at another workspace must not reuse the old ids."""
+    monkeypatch.delenv("LANGSMITH_TENANT_ID", raising=False)
+    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key-a")
+    projects = {"key-a": ("pid-a", "tenant-a"), "key-b": ("pid-b", "tenant-b")}
+
+    class _Client:
+        async def read_project(self, *, project_name: str) -> object:
+            project_id, tenant_id = projects[ls_utils.ENV.LANGSMITH_API_KEY.get()]
+            return type("P", (), {"id": project_id, "tenant_id": tenant_id})()
+
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _Client())
+
+    assert await ls_utils._resolve_project_id_by_name("proj") == "pid-a"
+    assert await ls_utils.resolve_tenant_id() == "tenant-a"
+
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key-b")
+    assert await ls_utils._resolve_project_id_by_name("proj") == "pid-b"
+    assert await ls_utils.resolve_tenant_id() == "tenant-b"
 
 
 async def test_tenant_id_is_learned_from_project_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
