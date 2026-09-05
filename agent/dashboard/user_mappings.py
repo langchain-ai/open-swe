@@ -25,13 +25,20 @@ import logging
 import threading
 from typing import Any, Literal
 
-from agent.store import delete_value, get_value, now_iso, put_value, search_values
+from agent.store import (
+    delete_value,
+    get_value,
+    now_iso,
+    put_value,
+    search_all_values,
+    search_values,
+)
 
 logger = logging.getLogger(__name__)
 
 USER_MAPPINGS_NAMESPACE: list[str] = ["user_mappings"]
 
-MappingSource = Literal["slack_oauth"]
+MappingSource = Literal["slack_oauth", "profile_email"]
 MappingStatus = Literal["active", "pending"]
 
 
@@ -223,12 +230,52 @@ async def slack_id_for_login(login: str | None) -> str | None:
 
 
 async def login_for_email(email: str | None) -> str | None:
-    """Async email→login with cache fallthrough to the Store."""
+    """Async email→login with cache fallthrough to the Store, then to profiles.
+
+    A user who signed in to the dashboard already has their GitHub account email
+    on their profile, so when no explicit mapping exists that email is the
+    mapping: Slack and GitHub both verify the addresses they report, so matching
+    them needs no extra sign-in.
+    """
     cached = cached_login_for_email(email)
     if cached is not None:
         return cached
     await _ensure_cache_loaded()
-    return cached_login_for_email(email)
+    cached = cached_login_for_email(email)
+    if cached is not None:
+        return cached
+    return await _login_from_profile_email(email)
+
+
+async def _login_from_profile_email(email: str | None) -> str | None:
+    """Match ``email`` against dashboard profiles and cache the result as a mapping."""
+    from agent.dashboard.profiles import PROFILES_NAMESPACE  # noqa: PLC0415
+
+    norm = _norm_email(email)
+    if not norm:
+        return None
+    try:
+        profiles = await search_all_values(PROFILES_NAMESPACE)
+    except Exception:  # noqa: BLE001
+        logger.warning("Profile lookup for email mapping failed", exc_info=True)
+        return None
+    for profile in profiles:
+        login = _norm_login(profile.get("login"))
+        if login and _norm_email(profile.get("email")) == norm:
+            stamp = now_iso()
+            _index_record(
+                {
+                    "github_login": login,
+                    "work_email": norm,
+                    "slack_user_id": None,
+                    "source": "profile_email",
+                    "status": "active",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                }
+            )
+            return login
+    return None
 
 
 async def login_for_slack_id(slack_user_id: str | None) -> str | None:
