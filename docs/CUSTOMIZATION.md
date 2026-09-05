@@ -363,7 +363,7 @@ LINEAR_TEAM_TO_REPO = {
 The mapping is one step of the Linear resolution order (`agent/linear/routes.py`):
 
 1. A `repo:owner/name` (or `repo:name`) token in the `@openswe` comment.
-2. The commenting user's dashboard default repository, found by matching the Linear user's email to a dashboard login.
+2. The commenting user's dashboard default repository, found through the user mapping that carries the Linear user's email (recorded by Sign in with Slack or an admin mapping).
 3. The team/project mapping above.
 4. The team default repository.
 

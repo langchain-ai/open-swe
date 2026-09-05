@@ -263,7 +263,7 @@ make dev          # uv run langgraph dev --no-browser --port 2024
 ## 8. Tell Open SWE which repository to work in
 
 - **GitHub** triggers always know the repository: the issue or pull request the mention came from.
-- **Slack** takes the repository from, in order: the thread's existing repository, a `repo:owner/name` token (or GitHub URL) in the channel's topic or purpose, the triggering user's profile default (for a user linked with [Sign in with Slack](#sign-in-with-slack) or an Admin → User mappings entry; otherwise Open SWE matches their Slack email to the GitHub account email on a dashboard profile), and finally the team default. A `repo:` token in the message text itself is not read. When nothing resolves, the bot replies in the thread saying so.
+- **Slack** takes the repository from, in order: the thread's existing repository, a `repo:owner/name` token (or GitHub URL) in the channel's topic or purpose, the triggering user's profile default (for a user linked with [Sign in with Slack](#sign-in-with-slack) or an Admin → User mappings entry), and finally the team default. A `repo:` token in the message text itself is not read. When nothing resolves, the bot replies in the thread saying so.
 - A **team-wide default** lives in **Admin → Team settings → Default Repository** in the [dashboard](#dashboard-web-ui), or over the API: `PUT /dashboard/api/team-settings` with `{"default_repo": "owner/name"}` using an [admin credential](#admin-api-credentials). With a default set, `repo:name` shorthand (no owner) also resolves against that owner.
 
 ## 9. Verify it works
@@ -430,7 +430,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 <details id="sign-in-with-slack">
 <summary><strong>"Sign in with Slack" account linking</strong></summary>
 
-The dashboard lets a user link their Slack identity to their GitHub login via Slack OIDC ("Sign in with Slack"): **My settings → Sign in with Slack**. The link comes from Slack's verified claims, so it cannot be spoofed, and it works whatever email each account uses. Without it, Open SWE falls back to matching the Slack user's email against dashboard profiles (and, with the `users:read.email` scope, looks unmapped users up through `users.info`); that only covers people whose Slack and GitHub emails agree. The same verified work email also resolves Linear mentions. Requires the [dashboard](#dashboard-web-ui). Enable it with `make setup --dashboard` (it asks for the client id and secret) or by hand:
+The dashboard lets a user link their Slack identity to their GitHub login via Slack OIDC ("Sign in with Slack"): **My settings → Sign in with Slack**. The link comes from Slack's verified claims, so it cannot be spoofed, and it works whatever email each account uses. Without it, an admin links the person under **Admin → User mappings** (GitHub login plus work email, optionally the Slack user id). The same verified work email also resolves Linear mentions. Requires the [dashboard](#dashboard-web-ui). Enable it with `make setup --dashboard` (it asks for the client id and secret) or by hand:
 
 1. The manifest already registers the OIDC redirect (`.../dashboard/api/slack/callback`). Under **OpenID Connect** (or **Sign in with Slack**) make sure the `openid`, `email`, and `profile` user scopes are available.
 2. From **Basic Information → App Credentials**, save the app's **Client ID** as `SLACK_CLIENT_ID` and **Client Secret** as `SLACK_CLIENT_SECRET`.
