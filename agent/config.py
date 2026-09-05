@@ -160,7 +160,7 @@ ENV.var(
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",
-    "LangSmith workspace id used in trace links.",
+    "LangSmith workspace id used in trace links; discovered from the workspace when unset.",
     aliases=("LANGSMITH_TENANT_ID_PROD",),
 )
 ENV.var(
