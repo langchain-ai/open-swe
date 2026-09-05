@@ -177,6 +177,7 @@ from agent.dashboard.thread_api import (
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
+    get_dashboard_thread_media,
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
@@ -2072,6 +2073,17 @@ async def api_get_thread(
         session["sub"],
         email=session.get("email"),
         mark_viewed=mark_viewed,
+    )
+
+
+@router.get("/threads/{thread_id}/media/{file_name}")
+async def api_get_thread_media(
+    thread_id: str,
+    file_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    return await get_dashboard_thread_media(
+        thread_id, file_name, session["sub"], email=session.get("email")
     )
 
 

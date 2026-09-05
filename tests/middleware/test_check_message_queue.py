@@ -4,11 +4,12 @@ from xml.etree import ElementTree
 
 import pytest
 
+from agent.media import MediaRef, media_refs_from_content
 from agent.middleware.check_message_queue import (
     LinearNotifyState,
-    _build_blocks_from_payload,
     check_message_queue_before_model,
 )
+from agent.utils.thread_ops import QueuedMessage
 
 
 class _QueuedItem:
@@ -61,7 +62,7 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
 
     with (
         patch(
-            "agent.middleware.check_message_queue.get_config",
+            "agent.run_config.get_config",
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
@@ -104,7 +105,7 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
 
     with (
         patch(
-            "agent.middleware.check_message_queue.get_config",
+            "agent.run_config.get_config",
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
@@ -125,29 +126,75 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
     assert (("autofix", "thread-1"), "pending_event") in store.deleted
 
 
+_REF = MediaRef(
+    path="/uploads/" + "a" * 64 + ".png",
+    mime_type="image/png",
+    sha256="a" * 64,
+    size=3,
+)
+
+
+async def _inject(store: _FakeStore) -> list[dict[str, Any]]:
+    with (
+        patch(
+            "agent.run_config.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+    ):
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}), MagicMock()
+        )
+    assert result is not None
+    return result["messages"]
+
+
 @pytest.mark.asyncio
-async def test_build_blocks_skips_images_for_text_only_model() -> None:
-    payload = {
-        "text": "see this screenshot",
-        "image_urls": ["https://files.slack.com/fake.png"],
-    }
-    blocks = await _build_blocks_from_payload(
-        payload, model_id="fireworks:accounts/fireworks/models/glm-5p2"
+async def test_queued_dashboard_message_carries_media_refs_in_its_envelope() -> None:
+    queued = QueuedMessage(
+        text="see this screenshot",
+        sender={"id": "github:octocat", "platform": "github"},  # type: ignore[arg-type]
+        media=[_REF],
     )
-    assert len(blocks) == 1
-    assert blocks[0]["type"] == "text"
-    assert "does not support image input" in blocks[0]["text"]
+    store = _FakeStore(
+        {(("queue", "thread-1"), "pending_messages"): {"messages": [{"content": queued.dump()}]}}
+    )
+
+    messages = await _inject(store)
+
+    user_message = messages[-1]
+    assert isinstance(user_message["content"], str)
+    assert ElementTree.fromstring(user_message["content"]).findtext("content") == (
+        "see this screenshot"
+    )
+    assert media_refs_from_content(user_message["content"]) == [_REF]
 
 
 @pytest.mark.asyncio
-async def test_build_blocks_includes_images_for_vision_model() -> None:
-    payload: dict[str, Any] = {"text": "see this", "image_urls": []}
-    blocks = await _build_blocks_from_payload(payload, model_id="openai:gpt-5.6-sol")
-    assert blocks == [{"type": "text", "text": "see this"}]
+async def test_unattributed_queued_messages_share_one_envelope_with_their_media() -> None:
+    store = _FakeStore(
+        {
+            (("queue", "thread-1"), "pending_messages"): {
+                "messages": [
+                    {"content": "first edit"},
+                    {"content": QueuedMessage(text="second edit", media=[_REF]).dump()},
+                ]
+            }
+        }
+    )
+
+    messages = await _inject(store)
+
+    notice = ElementTree.fromstring(_envelope(messages[-1]))
+    assert notice.attrib["sender"] == "system:thread-queue"
+    assert notice.findtext("content") == "first edit\n\nsecond edit"
+    assert media_refs_from_content(messages[-1]["content"]) == [_REF]
 
 
-@pytest.mark.asyncio
-async def test_build_blocks_no_model_check_fetches_images() -> None:
-    payload: dict[str, Any] = {"text": "see this", "image_urls": []}
-    blocks = await _build_blocks_from_payload(payload)
-    assert blocks == [{"type": "text", "text": "see this"}]
+def test_queued_message_parse_drops_unusable_payloads() -> None:
+    assert QueuedMessage.parse("") is None
+    assert QueuedMessage.parse(["legacy", "blocks"]) is None
+    assert QueuedMessage.parse({"text": "hi", "media": [{"path": "broken"}]}) is None
+    parsed = QueuedMessage.parse({"text": "hi", "images": [{"base64": "x"}]})
+    assert parsed is not None
+    assert (parsed.text, parsed.media, parsed.sender) == ("hi", [], None)

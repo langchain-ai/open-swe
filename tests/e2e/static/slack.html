@@ -68,6 +68,7 @@
             <button class="reset" id="reset">Reset</button>
           </div>
           <label class="hint"><input type="checkbox" id="mention" checked /> <span id="mention-label">Mention Open SWE</span></label>
+          <label class="hint"><input type="checkbox" id="attach-image" /> Attach gradient.png (64x48)</label>
         </div>
       </main>
     </div>
@@ -242,7 +243,13 @@
         await fetch("/mock/slack/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: $("text").value, mention_bot: $("mention").checked, user: $("user").value, channel: selectedChannel }),
+          body: JSON.stringify({
+            text: $("text").value,
+            mention_bot: $("mention").checked,
+            user: $("user").value,
+            channel: selectedChannel,
+            files: $("attach-image").checked ? ["gradient.png"] : [],
+          }),
         });
         await poll();
       });

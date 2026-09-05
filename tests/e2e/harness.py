@@ -258,17 +258,32 @@ async def slack_send(request: Request) -> JSONResponse:
     user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
     channel = str(form.get("channel") or ("D_DEMO" if channel_type == "im" else DEMO_CHANNEL))
 
+    # Image attachments: the mock UI names the files; the fake serves the bytes
+    # at ``url_private`` exactly as Slack would (minus auth, which the fetcher
+    # only adds for files.slack.com hosts).
+    files = [
+        {
+            "name": name,
+            "mimetype": "image/png",
+            "url_private": f"{BASE_URL}/fake-slack/files/{quote(name)}",
+        }
+        for name in form.get("files") or []
+        if isinstance(name, str) and name
+    ]
+
     # ``thread_ts`` replies into an existing thread (a distinct message ts under
     # the same thread); omitting it opens a fresh thread, as the mock UI does.
     reply_thread_ts = str(form.get("thread_ts") or "")
     if reply_thread_ts:
         thread_ts = reply_thread_ts
         event_ts = fakes.add_slack_message(
-            channel, thread_ts, user=user_id, text=text, is_bot=False
+            channel, thread_ts, user=user_id, text=text, is_bot=False, files=files
         )
     else:
         thread_ts = fakes.new_thread_ts()
-        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
+        fakes.add_slack_message(
+            channel, thread_ts, user=user_id, text=text, is_bot=False, files=files
+        )
         event_ts = thread_ts
     CURRENT_THREAD["channel"] = channel
     CURRENT_THREAD["thread_ts"] = thread_ts
@@ -814,11 +829,20 @@ async def slack_conversations_replies(channel: str = "", ts: str = "") -> JSONRe
                     "text": m["text"],
                     "ts": m["ts"],
                     "thread_ts": m["thread_ts"],
+                    **({"files": m["files"]} if m.get("files") else {}),
                 }
                 for m in msgs
             ]
         }
     )
+
+
+@app.get("/fake-slack/files/{name}")
+async def slack_file(name: str) -> Response:
+    """The bytes behind a fake attachment's ``url_private``."""
+    if not name.endswith(".png"):
+        raise HTTPException(status_code=404, detail="unknown file")
+    return Response(content=fakes.demo_image_png(), media_type="image/png")
 
 
 @app.get("/fake-slack/conversations.history")

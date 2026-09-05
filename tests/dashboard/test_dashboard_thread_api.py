@@ -13,6 +13,8 @@ from agent.dashboard import routes, thread_api
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 from agent.dashboard.ttft import AssistantTextObservation
+from agent.media import MediaRef, media_refs_from_content
+from agent.utils.thread_ops import QueuedMessage
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -45,20 +47,26 @@ def test_model_supports_images_marks_text_only_fireworks_models() -> None:
     assert model_supports_images(_VISION_MODEL)
 
 
-def test_user_message_content_rejects_images_for_text_only_model() -> None:
+def test_dashboard_media_uploads_rejects_images_for_text_only_model() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        thread_api._user_message_content("see attached", [_image()], model_id=_TEXT_ONLY_MODEL)
+        thread_api._dashboard_media_uploads([_image()], model_id=_TEXT_ONLY_MODEL)
 
     assert exc_info.value.status_code == 422
     assert "does not support image input" in exc_info.value.detail
 
 
-def test_user_message_content_allows_images_for_vision_model() -> None:
-    content = thread_api._user_message_content("see attached", [_image()], model_id=_VISION_MODEL)
+def test_dashboard_media_uploads_decodes_images_for_vision_model() -> None:
+    uploads = thread_api._dashboard_media_uploads([_image()], model_id=_VISION_MODEL)
 
-    assert isinstance(content, list)
-    assert content[-1] == {"type": "text", "text": "see attached"}
-    assert any(block.get("type") != "text" for block in content)
+    assert [(upload.data, upload.mime_type) for upload in uploads] == [(b"image", "image/png")]
+
+
+def test_dashboard_media_uploads_rejects_malformed_images() -> None:
+    bad = thread_api.DashboardImageBody(base64="not base64!", mimeType="image/png")
+    with pytest.raises(HTTPException) as exc_info:
+        thread_api._dashboard_media_uploads([bad], model_id=_VISION_MODEL)
+
+    assert exc_info.value.status_code == 422
 
 
 def test_langgraph_proxy_headers_include_api_key(monkeypatch) -> None:
@@ -274,6 +282,22 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
     )
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+    attached: dict[str, object] = {}
+
+    async def fake_attach(thread_id: str, uploads: list, *, environment_slug=None):
+        attached["thread_id"] = thread_id
+        attached["uploads"] = uploads
+        return [
+            MediaRef(
+                path=f"/uploads/{'b' * 64}.png",
+                mime_type="image/png",
+                sha256="b" * 64,
+                size=len(upload.data),
+            )
+            for upload in uploads
+        ]
+
+    monkeypatch.setattr(thread_api, "attach_thread_media", fake_attach)
 
     image = _image()
     command = {
@@ -315,6 +339,14 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
+    # The bytes go to the sandbox; the run input carries only the reference.
+    assert attached["thread_id"] == "new-tid"
+    assert [upload.data for upload in cast(list, attached["uploads"])] == [b"image"]
+    user_message = enriched["params"]["input"]["messages"][-1]["content"]
+    assert isinstance(user_message, str)
+    assert image.base64 not in user_message
+    assert ElementTree.fromstring(user_message).findtext("content") == "see attached"
+    assert [ref.sha256 for ref in media_refs_from_content(user_message)] == ["b" * 64]
 
 
 def _thread_with_metadata(metadata: dict) -> dict:
@@ -877,7 +909,8 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
     handoff = ElementTree.fromstring(messages[-2]["content"])
     content = messages[-1]["content"]
     assert "conversation has moved to Web" in (handoff.findtext("content") or "")
-    user_message = ElementTree.fromstring(content[0]["text"])
+    assert isinstance(content, str)
+    user_message = ElementTree.fromstring(content)
     assert user_message.attrib["sender"] == "github:teammate"
     assert user_message.findtext("content") == "continue here"
 
@@ -1541,7 +1574,7 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
     async def active(thread_id: str) -> bool:
         return True
 
-    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
+    async def fake_queue(thread_id: str, payload: QueuedMessage) -> bool:
         captured["payload"] = payload
         return True
 
@@ -1555,9 +1588,10 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
         thread_api.ThreadMessageBody(content="ship it"),
     )
 
-    payload = cast(dict[str, object], captured["payload"])
-    assert payload["text"] == "ship it"
-    assert cast(dict[str, object], payload["sender"])["id"] == "github:teammate"
+    payload = cast(QueuedMessage, captured["payload"])
+    assert payload.text == "ship it"
+    assert payload.sender is not None
+    assert payload.sender.id == "github:teammate"
 
 
 async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> None:
@@ -1579,7 +1613,7 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
     async def active(thread_id: str) -> bool:
         return True
 
-    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
+    async def fake_queue(thread_id: str, payload: QueuedMessage) -> bool:
         captured["payload"] = payload
         return True
 
@@ -1593,8 +1627,8 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
         thread_api.ThreadMessageBody(content="ship it"),
     )
 
-    payload = cast(dict[str, object], captured["payload"])
-    assert payload["text"] == "ship it"
+    payload = cast(QueuedMessage, captured["payload"])
+    assert payload.text == "ship it"
 
 
 async def test_thread_summary_exposes_resolved_state() -> None:

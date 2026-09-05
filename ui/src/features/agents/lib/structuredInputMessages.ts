@@ -16,8 +16,16 @@ export type ParsedStructuredInput =
       sender: string
       senderKind: StructuredSenderKind
       surface?: string
+      attachments?: Array<StructuredAttachment>
     }
   | { type: "legacy"; content: string }
+
+/** One `<media><item>…</item></media>` entry: a file stored in the thread's sandbox. */
+export interface StructuredAttachment {
+  name: string
+  mimeType: string
+  fileName?: string
+}
 
 export interface StructuredEntity {
   kind: string
@@ -137,6 +145,31 @@ function childText(body: string, tag: string): string | undefined {
   return match ? decodeXmlText(match[1] ?? "") : undefined
 }
 
+const MEDIA_ITEM_PATTERN = /<item>([\s\S]*?)<\/item>/g
+
+// Media items are escaped leaf elements, so a child lookup per field is enough.
+function parseAttachments(dataFields: string): Array<StructuredAttachment> {
+  const media = /<media>([\s\S]*?)<\/media>/.exec(dataFields)
+  if (!media) return []
+  const attachments: Array<StructuredAttachment> = []
+  MEDIA_ITEM_PATTERN.lastIndex = 0
+  for (
+    let match = MEDIA_ITEM_PATTERN.exec(media[1] ?? "");
+    match;
+    match = MEDIA_ITEM_PATTERN.exec(media[1] ?? "")
+  ) {
+    const item = match[1] ?? ""
+    const path = childText(item, "path")
+    const mimeType = childText(item, "mime_type")
+    if (!path || !mimeType) continue
+    const name = path.slice(path.lastIndexOf("/") + 1)
+    if (!name) continue
+    const fileName = childText(item, "file_name")
+    attachments.push({ name, mimeType, ...(fileName ? { fileName } : {}) })
+  }
+  return attachments
+}
+
 function senderKind(
   attributes: Record<string, string>,
   entities: ReadonlyMap<string, StructuredEntity>
@@ -177,12 +210,14 @@ export function parseStructuredInput(
     const attributes = parseAttributes(messageMatch[1] ?? "")
     const split = splitContent(messageMatch[2] ?? "")
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
+      const attachments = parseAttachments(split.remainder)
       return {
         type: "message",
         content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,
+        ...(attachments.length ? { attachments } : {}),
       }
     }
   }

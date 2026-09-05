@@ -8,9 +8,6 @@ import re
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import httpx
-from langchain_core.messages.content import create_text_block
-
 from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
 from agent.input_messages import (
     InputMessageContext,
@@ -24,15 +21,16 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.media import MediaRef, media_data
 from agent.slack import client as slack_utils
 from agent.slack.thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.thread_ops import QueuedMessage, queue_message_for_thread
 from agent.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
-from agent.utils.thread_ops import queue_message_for_thread
 from agent.utils.user_messages import warning
 from agent.webhooks import common
 
@@ -363,7 +361,7 @@ def _slack_context_input(
     event_ts: str,
     trigger_user_id: str = "",
     request_text: str,
-    request_blocks: list[dict[str, Any]],
+    request_media: list[MediaRef],
     operational_context: str,
 ) -> RunInput:
     channel_entity_id = f"slack:{channel_id}"
@@ -439,16 +437,15 @@ def _slack_context_input(
     _, separator, forwarded_context = rendered_request.partition("\n")
     if separator and forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
-    request_blocks[0] = {**request_blocks[0], "text": request_text}
     run_messages.append(
         human_input(
-            request_blocks,
+            request_text,
             {
                 "sender_id": trigger_person["id"],
                 "channel_id": channel_entity_id,
                 "surface": "slack",
                 "kind": "human",
-                "data": {"timestamp": event_ts},
+                "data": {"timestamp": event_ts, **media_data(request_media)},
             },
         )
     )
@@ -722,8 +719,6 @@ async def _process_slack_mention_impl(
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
         + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
     )
-    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
-
     image_urls = common.dedupe_urls(
         [url for msg in source_messages for url in common.extract_image_urls(msg.get("text", ""))]
         + [
@@ -741,26 +736,9 @@ async def _process_slack_mention_impl(
     if not mapped_login and user_email:
         mapped_login = await common.login_for_email(user_email)
 
-    image_model_override: tuple[str, str] | None = None
-    if image_urls:
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
-        if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
-            common.logger.info(
-                "Using vision fallback model %s for %d Slack image(s); configured model %s "
-                "does not support images",
-                fallback_model_id,
-                len(image_urls),
-                resolved_model_id,
-            )
-            resolved_model_id = fallback_model_id
-            image_model_override = (fallback_model_id, fallback_effort)
-        common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
-            for image_url in image_urls:
-                image_block = await common.fetch_image_block(image_url, http_client)
-                if image_block:
-                    content_blocks.append(cast(dict[str, Any], image_block))
+    image_model_override = (
+        await common.vision_model_override(mapped_login, len(image_urls)) if image_urls else None
+    )
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with
@@ -865,13 +843,23 @@ async def _process_slack_mention_impl(
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
     )
+    request_media = list(
+        (
+            await common.attach_linked_images(
+                thread_id, image_urls, environment_slug=thread_environment
+            )
+        ).values()
+    )
 
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits
     # for the next message.
     if message_update and await queue_message_for_thread(
-        thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE.strip()}, *content_blocks]
+        thread_id,
+        QueuedMessage(
+            text=f"{_MESSAGE_UPDATE_PREAMBLE.strip()}\n\n{clean_text}", media=request_media
+        ),
     ):
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return
@@ -893,7 +881,7 @@ async def _process_slack_mention_impl(
         event_ts=event_ts,
         trigger_user_id=user_id,
         request_text=clean_text,
-        request_blocks=content_blocks,
+        request_media=request_media,
         operational_context=operational_context,
     )
     if code_channel:

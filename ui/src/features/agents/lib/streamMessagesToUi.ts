@@ -400,6 +400,14 @@ export function streamMessagesToUi(
       // Our own replies reach the transcript twice: once forwarded as thread
       // context, once as the `slack_thread_reply` call that sent them.
       if (entity?.senderType === "self") return
+      if (parsed.type === "message") {
+        chunks.push(
+          ...(parsed.attachments ?? []).map((attachment): Chunk => ({
+            kind: "attachment",
+            ...attachment,
+          }))
+        )
+      }
       const text = parsed.content
       if (text.trim()) chunks.push({ kind: "text", text })
       if (!chunks.length) return
