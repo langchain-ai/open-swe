@@ -142,3 +142,24 @@ async def test_list_mappings_sorted(fake_store: _FakeStore) -> None:
     await um.upsert_mapping(github_login="alpha", work_email="a@x.com")
     listed = await um.list_mappings()
     assert [m["github_login"] for m in listed] == ["alpha", "zeta"]
+
+
+async def test_login_for_email_matches_a_dashboard_profile(fake_store: _FakeStore) -> None:
+    """No explicit mapping: the GitHub account email on the profile is the mapping."""
+    fake_store.items[(("profiles",), "octocat")] = {"login": "octocat", "email": "Octo@Example.com"}
+
+    assert await um.login_for_email("octo@example.com") == "octocat"
+    # Cached for the synchronous readers on hot paths.
+    assert um.cached_login_for_email("OCTO@example.com") == "octocat"
+    assert um.cached_login_for_email("nobody@example.com") is None
+
+
+async def test_explicit_mapping_wins_over_a_profile_email(fake_store: _FakeStore) -> None:
+    fake_store.items[(("profiles",), "octocat")] = {
+        "login": "octocat",
+        "email": "shared@example.com",
+    }
+    await um.upsert_mapping(github_login="mapped", work_email="shared@example.com")
+    um.clear_cache()
+
+    assert await um.login_for_email("shared@example.com") == "mapped"
