@@ -1,24 +1,12 @@
-"""Per-graph LangSmith tracing-project routing for langgraph.json entrypoints."""
+"""Where runs are traced: the LangSmith SDK's own ``LANGSMITH_PROJECT``."""
 
-import contextlib
-from collections.abc import AsyncIterator, Awaitable, Callable
-
-import langsmith as ls
-from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
-
-AGENT_TRACING_PROJECT = "open-swe-agent"
-REVIEW_TRACING_PROJECT = "open-swe-review"
+from agent.config import ENV
 
 
-def traced_graph_factory(
-    factory: Callable[[RunnableConfig], Awaitable[Pregel]],
-    project_name: str,
-) -> Callable[[RunnableConfig], contextlib.AbstractAsyncContextManager[Pregel]]:
-    @contextlib.asynccontextmanager
-    async def entrypoint(config: RunnableConfig) -> AsyncIterator[Pregel]:
-        graph = await factory(config)
-        with ls.tracing_context(project_name=project_name):
-            yield graph
+def tracing_project() -> str:
+    """LangSmith project every run traces into and trace links point at.
 
-    return entrypoint
+    The SDK reads the same variable, and LangGraph Platform sets it to the
+    deployment name, so each deployment's traces stay in its own project.
+    """
+    return ENV.LANGSMITH_PROJECT.get()

@@ -65,7 +65,6 @@ def test_summary_never_contains_secret_values() -> None:
         ("SLACK_REPO_NAME", "Team settings"),
         ("DEFAULT_REPO_OWNER", "Team settings"),
         ("DEFAULT_REPO_NAME", "Team settings"),
-        ("LANGSMITH_TRACING_PROJECT_ID_PROD", "LANGSMITH_TRACING_PROJECT_ID"),
         ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY"),
         ("LANGSMITH_API_KEY_PROD", "LANGSMITH_API_KEY"),
         ("LANGSMITH_ENDPOINT_PROD", "LANGSMITH_ENDPOINT"),

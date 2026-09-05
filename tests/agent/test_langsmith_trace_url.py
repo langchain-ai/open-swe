@@ -1,7 +1,6 @@
 import pytest
 
 from agent.utils import langsmith as ls_utils
-from agent.utils.tracing import AGENT_TRACING_PROJECT, REVIEW_TRACING_PROJECT
 
 _REAL_DISCOVER_TENANT_ID = ls_utils._discover_tenant_id
 
@@ -23,32 +22,38 @@ def _resolver(ids: dict[str, str], *, default: str | None = None):
 def _set_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
     monkeypatch.setenv("LANGSMITH_TENANT_ID", "tenant-1")
-    monkeypatch.delenv("LANGSMITH_TRACING_PROJECT_ID_PROD", raising=False)
+    monkeypatch.setenv("LANGSMITH_PROJECT", "my-deployment")
 
 
-async def test_trace_url_resolves_project_id_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_trace_url_uses_the_langsmith_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every link points at LANGSMITH_PROJECT: agent and review runs share the deployment's project."""
     _set_env(monkeypatch)
     monkeypatch.setattr(
-        ls_utils,
-        "_resolve_project_id_by_name",
-        _resolver({AGENT_TRACING_PROJECT: "agent-pid"}, default="review-pid"),
+        ls_utils, "_resolve_project_id_by_name", _resolver({"my-deployment": "deployment-pid"})
     )
 
-    agent_url = await ls_utils.get_langsmith_trace_url("t1")
-    review_url = await ls_utils.get_langsmith_trace_url("t2", project_name=REVIEW_TRACING_PROJECT)
-
-    assert agent_url == "https://smith.example/o/tenant-1/projects/p/agent-pid/t/t1"
-    assert review_url == "https://smith.example/o/tenant-1/projects/p/review-pid/t/t2"
+    assert await ls_utils.get_langsmith_trace_url("t1") == (
+        "https://smith.example/o/tenant-1/projects/p/deployment-pid/t/t1"
+    )
 
 
-async def test_trace_url_falls_back_to_env_project_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_trace_url_defaults_to_the_sdk_default_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _set_env(monkeypatch)
-    monkeypatch.setenv("LANGSMITH_TRACING_PROJECT_ID_PROD", "env-pid")
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}))
+    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+    seen: list[str] = []
 
-    url = await ls_utils.get_langsmith_trace_url("t3")
+    async def _resolve(name: str) -> str | None:
+        seen.append(name)
+        return "default-pid"
 
-    assert url == "https://smith.example/o/tenant-1/projects/p/env-pid/t/t3"
+    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolve)
+
+    assert await ls_utils.get_langsmith_trace_url("t3") == (
+        "https://smith.example/o/tenant-1/projects/p/default-pid/t/t3"
+    )
+    assert seen == ["default"]
 
 
 async def test_trace_url_none_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,12 +82,12 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
-    first = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
-    second = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
+    first = await ls_utils._resolve_project_id_by_name("my-deployment")
+    second = await ls_utils._resolve_project_id_by_name("my-deployment")
 
     assert first == "pid-123"
     assert second == "pid-123"
-    assert calls == [AGENT_TRACING_PROJECT]
+    assert calls == ["my-deployment"]
 
 
 async def test_resolve_project_id_retries_transient_failure(
@@ -103,15 +108,16 @@ async def test_resolve_project_id_retries_transient_failure(
 
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
-    assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
-    assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
-    assert calls == [AGENT_TRACING_PROJECT, AGENT_TRACING_PROJECT]
+    assert await ls_utils._resolve_project_id_by_name("my-deployment") is None
+    assert await ls_utils._resolve_project_id_by_name("my-deployment") is None
+    assert calls == ["my-deployment", "my-deployment"]
 
 
 async def test_create_thread_feedback_posts_thread_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setenv("LANGSMITH_PROJECT", "my-deployment")
 
     class _FakeClient:
         async def _arequest_with_retries(
@@ -123,7 +129,7 @@ async def test_create_thread_feedback_posts_thread_scope(
     monkeypatch.setattr(
         ls_utils,
         "_resolve_project_id_by_name",
-        _resolver({AGENT_TRACING_PROJECT: "project-id"}),
+        _resolver({"my-deployment": "project-id"}),
     )
 
     result = await ls_utils.create_langsmith_thread_feedback(

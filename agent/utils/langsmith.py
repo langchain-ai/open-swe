@@ -13,7 +13,7 @@ from langsmith import Client as LangSmithClient
 from langsmith.utils import LangSmithNotFoundError, get_host_url
 
 from agent.config import ENV
-from agent.utils.tracing import AGENT_TRACING_PROJECT
+from agent.utils.tracing import tracing_project
 
 logger = logging.getLogger(__name__)
 
@@ -133,24 +133,23 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     return resolved or None
 
 
-async def _compose_langsmith_project_url(project_name: str = AGENT_TRACING_PROJECT) -> str | None:
-    """Build the LangSmith project URL base, or None when tracing isn't configured
-    for the prod tenant."""
+async def _compose_langsmith_project_url(project_name: str | None = None) -> str | None:
+    """URL base of a LangSmith project, or None when tracing isn't configured.
+
+    Defaults to the project this deployment traces into; the review trace
+    context passes the team-configured project it searches for the reviewed
+    change's own traces.
+    """
     tenant_id = await resolve_tenant_id()
     if not tenant_id:
         return None
-    project_id = (
-        await _resolve_project_id_by_name(project_name)
-        or ENV.LANGSMITH_TRACING_PROJECT_ID.optional()
-    )
+    project_id = await _resolve_project_id_by_name(project_name or tracing_project())
     if not project_id:
         return None
     return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project_id}"
 
 
-async def get_langsmith_trace_url(
-    thread_id: str, project_name: str = AGENT_TRACING_PROJECT
-) -> str | None:
+async def get_langsmith_trace_url(thread_id: str, project_name: str | None = None) -> str | None:
     """Build the LangSmith thread URL for a given thread ID, or None if tracing
     isn't configured. This is a best-effort convenience link, not an error path."""
     project_url = await _compose_langsmith_project_url(project_name)
@@ -182,7 +181,6 @@ def _langsmith_metadata_filter(key: str, value: str) -> str:
 async def get_langsmith_thread_cost(
     thread_id: str,
     prepare_run_id: str,
-    project_name: str = AGENT_TRACING_PROJECT,
     *,
     run_only: bool = False,
 ) -> LangSmithThreadCost | None:
@@ -190,10 +188,7 @@ async def get_langsmith_thread_cost(
     client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
-    project_id = (
-        await _resolve_project_id_by_name(project_name)
-        or ENV.LANGSMITH_TRACING_PROJECT_ID.optional()
-    )
+    project_id = await _resolve_project_id_by_name(tracing_project())
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
@@ -281,16 +276,12 @@ async def create_langsmith_thread_feedback(
     score: float,
     comment: str | None = None,
     source_info: dict[str, Any] | None = None,
-    project_name: str = AGENT_TRACING_PROJECT,
 ) -> bool:
     client = _build_langsmith_client()
     if client is None:
         logger.warning("No LangSmith API key configured, skipping thread feedback")
         return False
-    project_id = (
-        await _resolve_project_id_by_name(project_name)
-        or ENV.LANGSMITH_TRACING_PROJECT_ID.optional()
-    )
+    project_id = await _resolve_project_id_by_name(tracing_project())
     if not project_id:
         logger.warning("LangSmith tracing project is unavailable, skipping thread feedback")
         return False
