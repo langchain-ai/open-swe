@@ -167,6 +167,7 @@ __all__ = [
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
     "DOCS_PLZ_SLACK_GATE_REPLY",
+    "default_repo_owner_hint",
     "FEEDBACK_REACTIONS",
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
@@ -411,7 +412,11 @@ def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
     """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
-    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME} if DEFAULT_REPO_NAME else {}
+    fallback = (
+        {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
+        if DEFAULT_REPO_OWNER and DEFAULT_REPO_NAME
+        else {}
+    )
 
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
         return fallback
@@ -845,6 +850,21 @@ async def upsert_agent_thread_metadata(
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)
 
 
+async def default_repo_owner_hint(env_owner: str = "") -> str:
+    """Owner assumed for ``repo:name`` shorthand.
+
+    The deprecated env default wins when set; otherwise the team default
+    repository's owner. Empty when neither is configured, in which case the
+    shorthand is ignored and a full ``owner/name`` is required.
+    """
+    owner = env_owner.strip()
+    if owner:
+        return owner
+    team_repo = await get_team_default_repo()
+    team_owner = (team_repo or {}).get("owner", "")
+    return team_owner.strip() if isinstance(team_owner, str) else ""
+
+
 async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
@@ -859,10 +879,10 @@ async def get_slack_repo_config(
         2. A ``repo:owner/name`` token in the channel's topic/purpose.
         3. The triggering user's dashboard ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
-        4. Team default repo.
-        5. ``SLACK_REPO_*`` env defaults.
+        4. Team default repo (Admin → Team settings).
+        5. Deprecated ``SLACK_REPO_*`` / ``DEFAULT_REPO_*`` env defaults.
     """
-    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
+    env_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
@@ -884,6 +904,7 @@ async def get_slack_repo_config(
             )
 
     if not repo_config:
+        default_owner = await default_repo_owner_hint(env_owner)
         try:
             if channel_context is not None:
                 channel_description = get_slack_channel_context_description(channel_context)
@@ -929,8 +950,8 @@ async def get_slack_repo_config(
     if not repo_config:
         repo_config = await get_team_default_repo()
 
-    if not repo_config and default_owner and default_name:
-        repo_config = {"owner": default_owner, "name": default_name}
+    if not repo_config and env_owner and default_name:
+        repo_config = {"owner": env_owner, "name": default_name}
 
     if not repo_config:
         raise HTTPException(400, "no default repository configured")
