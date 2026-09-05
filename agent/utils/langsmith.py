@@ -17,8 +17,11 @@ from agent.utils.tracing import tracing_project
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ID_CACHE: dict[str, str] = {}
-_TENANT_ID_CACHE: str | None = None
+# Both caches are keyed by the credentials that produced the ids, so a rotated
+# key or another endpoint (a different workspace) starts over instead of
+# building links with the previous workspace's tenant and project ids.
+_PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
+_TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
 _ASYNC_CLIENTS: dict[tuple[str, str], AsyncLangSmithClient] = {}
 _SYNC_CLIENTS: dict[tuple[str, str], LangSmithClient] = {}
 
@@ -76,10 +79,13 @@ def _build_langsmith_client() -> AsyncLangSmithClient | None:
     return async_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get())
 
 
+def _workspace_key() -> tuple[str, str]:
+    return (ENV.LANGSMITH_API_KEY.optional() or "", ENV.LANGSMITH_ENDPOINT.get())
+
+
 def _remember_tenant_id(value: Any) -> None:
-    global _TENANT_ID_CACHE
-    if value and _TENANT_ID_CACHE is None:
-        _TENANT_ID_CACHE = str(value)
+    if value:
+        _TENANT_ID_CACHE.setdefault(_workspace_key(), str(value))
 
 
 def _discover_tenant_id() -> str | None:
@@ -100,35 +106,38 @@ async def resolve_tenant_id() -> str | None:
     explicit = ENV.LANGSMITH_TENANT_ID.optional()
     if explicit:
         return explicit
-    if _TENANT_ID_CACHE:
-        return _TENANT_ID_CACHE
+    workspace = _workspace_key()
+    cached = _TENANT_ID_CACHE.get(workspace)
+    if cached:
+        return cached
     try:
         discovered = await asyncio.to_thread(_discover_tenant_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not discover the LangSmith tenant id", exc_info=True)
         return None
     _remember_tenant_id(discovered)
-    return _TENANT_ID_CACHE
+    return _TENANT_ID_CACHE.get(workspace)
 
 
 async def _resolve_project_id_by_name(project_name: str) -> str | None:
     """Resolve a LangSmith project id from its name, caching definitive results."""
-    if project_name in _PROJECT_ID_CACHE:
-        return _PROJECT_ID_CACHE[project_name] or None
+    cache_key = (_workspace_key(), project_name)
+    if cache_key in _PROJECT_ID_CACHE:
+        return _PROJECT_ID_CACHE[cache_key] or None
     client = _build_langsmith_client()
     if client is None:
         return None
     try:
         project = await client.read_project(project_name=project_name)
     except LangSmithNotFoundError:
-        _PROJECT_ID_CACHE[project_name] = ""
+        _PROJECT_ID_CACHE[cache_key] = ""
         return None
     except Exception:  # noqa: BLE001
         logger.debug("Could not resolve LangSmith project id for %s", project_name, exc_info=True)
         return None
     project_id = getattr(project, "id", None)
     resolved = str(project_id) if project_id else ""
-    _PROJECT_ID_CACHE[project_name] = resolved
+    _PROJECT_ID_CACHE[cache_key] = resolved
     _remember_tenant_id(getattr(project, "tenant_id", None))
     return resolved or None
 
