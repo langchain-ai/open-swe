@@ -163,3 +163,58 @@ async def test_explicit_mapping_wins_over_a_profile_email(fake_store: _FakeStore
     um.clear_cache()
 
     assert await um.login_for_email("shared@example.com") == "mapped"
+
+
+async def test_login_for_slack_id_resolves_through_slack_and_persists(
+    fake_store: _FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unmapped Slack user is looked up with users.info and matched to a profile."""
+    fake_store.items[(("profiles",), "octocat")] = {"login": "octocat", "email": "octo@example.com"}
+    calls: list[str] = []
+
+    async def fake_email(slack_user_id: str) -> str | None:
+        calls.append(slack_user_id)
+        return "Octo@Example.com"
+
+    monkeypatch.setattr(um, "_slack_user_email", fake_email)
+
+    assert await um.login_for_slack_id("U123") == "octocat"
+    mapping = await um.get_mapping("octocat")
+    assert mapping is not None
+    assert mapping["slack_user_id"] == "U123"
+    assert mapping["source"] == "slack_directory"
+    assert mapping["work_email"] == "octo@example.com"
+    # Cached and persisted: no second Slack call, and the email path resolves too.
+    assert await um.login_for_slack_id("U123") == "octocat"
+    assert await um.login_for_email("octo@example.com") == "octocat"
+    assert calls == ["U123"]
+
+
+async def test_login_for_slack_id_fills_the_slack_id_on_an_email_only_mapping(
+    fake_store: _FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await um.upsert_mapping(github_login="octocat", work_email="octo@example.com")
+    um.clear_cache()
+
+    async def fake_email(slack_user_id: str) -> str | None:
+        return "octo@example.com"
+
+    monkeypatch.setattr(um, "_slack_user_email", fake_email)
+
+    assert await um.login_for_slack_id("U777") == "octocat"
+    mapping = await um.get_mapping("octocat")
+    assert mapping is not None
+    assert mapping["slack_user_id"] == "U777"
+    assert mapping["source"] == "slack_oauth"
+
+
+async def test_login_for_slack_id_unknown_user_stays_unmapped(
+    fake_store: _FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_email(slack_user_id: str) -> str | None:
+        return "stranger@example.com"
+
+    monkeypatch.setattr(um, "_slack_user_email", fake_email)
+
+    assert await um.login_for_slack_id("U999") is None
+    assert await um.list_mappings() == []

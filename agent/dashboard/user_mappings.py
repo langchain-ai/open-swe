@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 USER_MAPPINGS_NAMESPACE: list[str] = ["user_mappings"]
 
-MappingSource = Literal["slack_oauth", "profile_email"]
+MappingSource = Literal["slack_oauth", "profile_email", "slack_directory"]
 MappingStatus = Literal["active", "pending"]
 
 
@@ -279,11 +279,63 @@ async def _login_from_profile_email(email: str | None) -> str | None:
 
 
 async def login_for_slack_id(slack_user_id: str | None) -> str | None:
+    """Async Slack id→login, resolving unmapped users through Slack itself.
+
+    The bot has ``users:read.email``, so an unknown Slack user is looked up with
+    ``users.info`` and matched to a dashboard profile by email. The match is
+    stored as a mapping so later lookups by id or email need no Slack call.
+    """
     cached = cached_login_for_slack_id(slack_user_id)
     if cached is not None:
         return cached
     await _ensure_cache_loaded()
-    return cached_login_for_slack_id(slack_user_id)
+    cached = cached_login_for_slack_id(slack_user_id)
+    if cached is not None:
+        return cached
+    return await _login_from_slack_directory(slack_user_id)
+
+
+async def _slack_user_email(slack_user_id: str) -> str | None:
+    from agent.slack.client import get_slack_user_info  # noqa: PLC0415
+
+    user = await get_slack_user_info(slack_user_id)
+    email = ((user or {}).get("profile") or {}).get("email") if isinstance(user, dict) else None
+    return email if isinstance(email, str) else None
+
+
+async def _login_from_slack_directory(slack_user_id: str | None) -> str | None:
+    """Resolve a Slack user via ``users.info`` and persist the resulting mapping."""
+    slack_id = _norm_slack_id(slack_user_id)
+    if not slack_id:
+        return None
+    try:
+        email = await _slack_user_email(slack_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Slack users.info failed for %s", slack_id, exc_info=True)
+        return None
+    login = await login_for_email(email)
+    if not login:
+        return None
+    norm_email = _norm_email(email)
+    existing = await get_mapping(login)
+    if existing is None and norm_email:
+        # Persisted so the Admin → User mappings page shows how the user was
+        # recognised and so id lookups on other workers skip the Slack call.
+        await upsert_mapping(
+            github_login=login,
+            work_email=norm_email,
+            slack_user_id=slack_id,
+            source="slack_directory",
+        )
+    elif existing is not None and not _norm_slack_id(existing.get("slack_user_id")):
+        await upsert_mapping(
+            github_login=login,
+            work_email=existing.get("work_email") or norm_email,
+            slack_user_id=slack_id,
+            source=existing.get("source") or "slack_directory",
+            status=existing.get("status") or "active",
+        )
+    return login
 
 
 async def upsert_mapping(
