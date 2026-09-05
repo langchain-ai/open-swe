@@ -8,8 +8,9 @@ Usage:
     uv run python scripts/purge_wakeup_crons.py --dry-run
     uv run python scripts/purge_wakeup_crons.py
 
-Resolves the deployment URL from ``--url`` or ``LANGGRAPH_URL``,
-and the API key from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``.
+Resolves the deployment URL from ``--url`` or ``LANGGRAPH_URL``, and the API key
+from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``. The deprecated ``_PROD`` aliases
+of both variables are still read through the registry.
 """
 
 import argparse
@@ -20,6 +21,7 @@ from datetime import UTC, datetime
 
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.tools.schedule_thread_wakeup import (
     find_expired_wakeup_cron_ids,
     purge_expired_wakeup_crons,
@@ -37,14 +39,14 @@ def _load_dotenv_if_available() -> None:
 
 
 def _resolve_url(arg_url: str | None) -> str:
-    url = arg_url or os.environ.get("LANGGRAPH_URL")
+    url = arg_url or ENV.LANGGRAPH_URL.optional()
     if not url:
         raise RuntimeError("Set --url or LANGGRAPH_URL")
     return url
 
 
 def _resolve_api_key() -> str | None:
-    return os.environ.get("LANGGRAPH_API_KEY") or os.environ.get("LANGSMITH_API_KEY")
+    return os.environ.get("LANGGRAPH_API_KEY") or ENV.LANGSMITH_API_KEY.optional()
 
 
 async def _run(url: str, api_key: str | None, dry_run: bool) -> None:
