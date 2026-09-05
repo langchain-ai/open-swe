@@ -347,10 +347,10 @@ def default_model_pair() -> tuple[str, str]:
     effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
     for model in SUPPORTED_MODELS:
         if model["id"] == model_id and model.get("can_be_default", True):
-            effort = effort or (
-                DEFAULT_MODEL_EFFORT
-                if DEFAULT_MODEL_EFFORT in model["efforts"]
-                else model["default_effort"]
+            effort = (
+                effort
+                or _fallback_effort_for(model, DEFAULT_MODEL_EFFORT)
+                or model["default_effort"]
             )
             if effort not in model["efforts"]:
                 raise ValueError(f"Unsupported LLM_REASONING_EFFORT {effort!r} for {model_id!r}")

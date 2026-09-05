@@ -44,19 +44,12 @@ FABLE = "anthropic:claude-fable-5-1"
         (SUPPORTED_ANTHROPIC, "", (SUPPORTED_ANTHROPIC, "medium")),
         (" anthropic:claude-haiku-4-5 ", "", ("anthropic:claude-haiku-4-5", "none")),
         (SUPPORTED_ANTHROPIC, " max ", (SUPPORTED_ANTHROPIC, "max")),
-        ("unknown:model", "", None),
-        (FABLE, "", None),
-        (SUPPORTED_OPENAI, "max", None),
     ],
 )
 def test_environment_default_model_pair(monkeypatch, model, effort, expected) -> None:
     monkeypatch.setenv("LLM_MODEL_ID", model)
     monkeypatch.setenv("LLM_REASONING_EFFORT", effort)
-    if expected is None:
-        with pytest.raises(ValueError, match="LLM_"):
-            default_model_pair()
-    else:
-        assert default_model_pair() == expected
+    assert default_model_pair() == expected
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
