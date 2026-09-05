@@ -26,6 +26,21 @@ async def test_missing_repository_is_explained_in_the_thread(
     channel_id, thread_ts, text = reply.await_args.args
     assert (channel_id, thread_ts) == ("C1", "123.45")
     assert "Team settings" in text and "repo:owner/name" in text
+    assert "Sign in with Slack" not in text
+
+
+def test_reply_points_at_sign_in_with_slack_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.slack import oauth as slack_oauth
+
+    monkeypatch.setattr(slack_oauth, "SLACK_CLIENT_ID", "123.456")
+    monkeypatch.setattr(slack_oauth, "SLACK_CLIENT_SECRET", "secret")
+
+    text = webhook_common.no_repository_slack_reply()
+
+    assert text.startswith(webhook_common.NO_REPOSITORY_SLACK_REPLY)
+    assert "My settings → Sign in with Slack" in text
 
 
 async def test_resolved_repository_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:

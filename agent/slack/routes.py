@@ -54,7 +54,7 @@ async def _repo_config_or_reply(
     except common.SlackRepositoryNotConfigured:
         common.logger.info("No repository for Slack channel=%s thread=%s", channel_id, thread_ts)
         await common.post_slack_thread_reply(
-            channel_id, thread_ts, common.NO_REPOSITORY_SLACK_REPLY
+            channel_id, thread_ts, common.no_repository_slack_reply()
         )
         return None
 
