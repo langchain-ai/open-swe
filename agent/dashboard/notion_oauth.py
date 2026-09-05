@@ -11,6 +11,7 @@ import httpx
 from agent.config import ENV
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
+from agent.utils.dashboard_links import dashboard_base_url
 
 NOTION_MCP_URL = "https://mcp.notion.com/mcp"
 NOTION_STATE_COOKIE_NAME = "osw_notion_oauth_state"
@@ -141,7 +142,7 @@ async def register_notion_oauth_client(
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
     }
-    client_uri = ENV.DASHBOARD_BASE_URL.get().strip()
+    client_uri = dashboard_base_url()
     if client_uri:
         body["client_uri"] = client_uri
 
