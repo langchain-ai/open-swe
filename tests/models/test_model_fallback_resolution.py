@@ -1,10 +1,11 @@
+import runpy
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.dashboard import options
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
-    DEFAULT_MODEL_ID,
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     SUPPORTED_MODELS,
@@ -245,9 +246,22 @@ def test_profile_unknown_provider_defers_to_team_default() -> None:
     assert normalize_profile_overrides(profile) == (None, None)
 
 
-def test_global_default_is_gpt_5_6_sol() -> None:
-    model, _ = default_model_pair()
-    assert model == DEFAULT_MODEL_ID == SUPPORTED_OPENAI
+@pytest.mark.parametrize(
+    ("anthropic_key", "openai_key", "expected"),
+    [
+        ("key", "", SUPPORTED_ANTHROPIC),
+        ("key", "key", SUPPORTED_OPENAI),
+        ("", "", SUPPORTED_OPENAI),
+    ],
+)
+def test_global_default_matches_available_credentials(
+    monkeypatch: pytest.MonkeyPatch, anthropic_key: str, openai_key: str, expected: str
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_key)
+    monkeypatch.setenv("OPENAI_API_KEY", openai_key)
+    defaults = runpy.run_path(options.__file__)
+    assert defaults["default_model_pair"]() == (expected, "medium")
+    assert defaults["default_vision_model_pair"]() == (expected, "medium")
 
 
 def test_gate_fable_passthrough_when_enabled() -> None:
