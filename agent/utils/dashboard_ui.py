@@ -5,7 +5,9 @@ hashed assets) mounted at ``/`` lets one LangGraph deployment serve both the API
 and the UI, so the browser reaches ``/dashboard/api/*`` with relative URLs and no
 cross-origin cookie or CORS setup. Paths the LangGraph server owns are left to
 it: the custom app's routes are matched ahead of the server's, so the catch-all
-declines them instead of shadowing them.
+declines them instead of shadowing them. Paths are taken relative to the mount,
+so a LangGraph ``http.mount_prefix`` serves the UI under that prefix as long as
+the build was made for it (``DASHBOARD_BASE_PATH``).
 """
 
 import logging
@@ -16,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from starlette.responses import FileResponse, Response
-from starlette.routing import Match, Route
+from starlette.routing import Match, Route, get_route_path
 from starlette.types import Scope
 
 from agent.config import ENV
@@ -117,14 +119,17 @@ class DashboardShellRoute(Route):
         return None
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
-        if scope["type"] != "http" or is_reserved_path(scope["path"]):
+        if scope["type"] != "http":
             return Match.NONE, {}
-        if self.file_for(scope["path"]) is None and not _accepts_html(scope):
+        path = get_route_path(scope)
+        if is_reserved_path(path):
+            return Match.NONE, {}
+        if self.file_for(path) is None and not _accepts_html(scope):
             return Match.NONE, {}
         return super().matches(scope)
 
     async def _serve(self, request: Request) -> Response:
-        file = self.file_for(request.url.path)
+        file = self.file_for(get_route_path(request.scope))
         if file is not None:
             return FileResponse(file)
         # The shell is the entry point for every UI route, so browsers must
