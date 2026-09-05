@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import re
 import time
 import uuid
@@ -20,6 +19,7 @@ import httpx
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 
+from agent.config import ENV
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -32,7 +32,7 @@ from agent.utils.user_messages import WARNING_ICON
 logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
@@ -42,9 +42,7 @@ _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 _SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
 SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10

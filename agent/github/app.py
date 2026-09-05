@@ -1,7 +1,6 @@
 """GitHub App installation token generation."""
 
 import logging
-import os
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -11,13 +10,14 @@ from urllib.parse import quote
 import httpx
 import jwt
 
+from agent.config import ENV
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
-GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
-GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
+GITHUB_APP_ID = ENV.GITHUB_APP_ID.get()
+GITHUB_APP_PRIVATE_KEY = ENV.GITHUB_APP_PRIVATE_KEY.get()
+GITHUB_APP_INSTALLATION_ID = ENV.GITHUB_APP_INSTALLATION_ID.get()
 
 # Installation tokens are valid for 1 hour. Reuse a minted token until it is
 # within this window of expiring so chat/review requests don't pay a fresh

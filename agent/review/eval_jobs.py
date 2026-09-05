@@ -9,10 +9,10 @@ was killed) to ``failed``.
 """
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict
 
+from agent.config import ENV
 from agent.review.eval_store import (
     _HEARTBEAT_STALE_SECONDS,
     DEFAULT_EVAL_PROJECT,
@@ -59,11 +59,11 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
 
 
 def _resolve_langgraph_url() -> str | None:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
+    return ENV.LANGGRAPH_URL.optional()
 
 
 def _eval_project() -> str:
-    return os.environ.get("EVAL_LANGSMITH_PROJECT") or DEFAULT_EVAL_PROJECT
+    return ENV.EVAL_LANGSMITH_PROJECT.optional() or DEFAULT_EVAL_PROJECT
 
 
 def _resolve_eval_config(config: ReviewerEvalConfig | None = None) -> ReviewerEvalConfig:

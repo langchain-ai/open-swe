@@ -201,7 +201,6 @@ def _apply_langsmith_project(project: str | None) -> None:
     """
     resolved = project or os.environ.get("LANGSMITH_PROJECT") or DEFAULT_LANGSMITH_PROJECT
     os.environ["LANGSMITH_PROJECT"] = resolved
-    os.environ["LANGCHAIN_PROJECT"] = resolved
     os.environ.setdefault("LANGSMITH_TRACING", "true")
 
 

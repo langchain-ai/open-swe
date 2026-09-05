@@ -6,12 +6,12 @@ configuration in one place. Per-repo style prompts live in
 """
 
 import logging
-import os
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
+from agent.config import ENV
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -262,8 +262,8 @@ def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, 
 
 
 def _env_default_repo() -> str | None:
-    owner = os.environ.get("DEFAULT_REPO_OWNER", "").strip()
-    name = os.environ.get("DEFAULT_REPO_NAME", "").strip()
+    owner = ENV.DEFAULT_REPO_OWNER.get("").strip()
+    name = ENV.DEFAULT_REPO_NAME.get().strip()
     return f"{owner}/{name}" if owner and name else None
 
 

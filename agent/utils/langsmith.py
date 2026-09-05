@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import math
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,8 +10,9 @@ from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
-from langsmith.utils import LangSmithNotFoundError
+from langsmith.utils import LangSmithNotFoundError, get_host_url
 
+from agent.config import ENV
 from agent.utils.tracing import AGENT_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
@@ -56,26 +56,27 @@ def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
     return client
 
 
-def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
-    """Build a LangSmith client scoped to the prod tenant for project lookups."""
-    api_key = (
-        os.environ.get("LANGSMITH_API_KEY_PROD")
-        or os.environ.get("LANGSMITH_API_KEY")
-        or os.environ.get("LANGCHAIN_API_KEY")
-    )
+def langsmith_host_url() -> str:
+    """Web host for trace links, derived from the API endpoint unless overridden."""
+    explicit = ENV.LANGSMITH_URL_PROD.optional()
+    if explicit:
+        return explicit.rstrip("/")
+    return str(get_host_url(None, ENV.LANGSMITH_ENDPOINT.get())).rstrip("/")
+
+
+def _build_langsmith_client() -> AsyncLangSmithClient | None:
+    """Build the LangSmith client used for project lookups, or None without a key."""
+    api_key = ENV.LANGSMITH_API_KEY.optional()
     if not api_key:
         return None
-    api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
-        "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
-    )
-    return async_langsmith_client(api_key, api_url)
+    return async_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get())
 
 
 async def _resolve_project_id_by_name(project_name: str) -> str | None:
     """Resolve a LangSmith project id from its name, caching definitive results."""
     if project_name in _PROJECT_ID_CACHE:
         return _PROJECT_ID_CACHE[project_name] or None
-    client = _build_prod_langsmith_client()
+    client = _build_langsmith_client()
     if client is None:
         return None
     try:
@@ -95,16 +96,16 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
 async def _compose_langsmith_project_url(project_name: str = AGENT_TRACING_PROJECT) -> str | None:
     """Build the LangSmith project URL base, or None when tracing isn't configured
     for the prod tenant. Bails before any API call when the tenant id is unset."""
-    tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")
+    tenant_id = ENV.LANGSMITH_TENANT_ID.optional()
     if not tenant_id:
         return None
-    host_url = os.environ.get("LANGSMITH_URL_PROD", "https://smith.langchain.com")
-    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
-        "LANGSMITH_TRACING_PROJECT_ID_PROD"
+    project_id = (
+        await _resolve_project_id_by_name(project_name)
+        or ENV.LANGSMITH_TRACING_PROJECT_ID.optional()
     )
     if not project_id:
         return None
-    return f"{host_url}/o/{tenant_id}/projects/p/{project_id}"
+    return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project_id}"
 
 
 async def get_langsmith_trace_url(
@@ -146,11 +147,12 @@ async def get_langsmith_thread_cost(
     run_only: bool = False,
 ) -> LangSmithThreadCost | None:
     """Return a fresh thread or run cost correlated to a completed agent run."""
-    client = _build_prod_langsmith_client()
+    client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
-    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
-        "LANGSMITH_TRACING_PROJECT_ID_PROD"
+    project_id = (
+        await _resolve_project_id_by_name(project_name)
+        or ENV.LANGSMITH_TRACING_PROJECT_ID.optional()
     )
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
@@ -214,17 +216,7 @@ def _build_langsmith_feedback_clients() -> tuple[tuple[str, str], ...]:
     configs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
-    api_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-    client_configs = (
-        (
-            os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY"),
-            api_endpoint,
-        ),
-        (
-            os.environ.get("LANGSMITH_API_KEY_PROD"),
-            os.environ.get("LANGSMITH_ENDPOINT_PROD", api_endpoint),
-        ),
-    )
+    client_configs = ((ENV.LANGSMITH_API_KEY.optional(), ENV.LANGSMITH_ENDPOINT.get()),)
 
     for api_key, api_url in client_configs:
         if not api_key or not api_url:
@@ -251,12 +243,13 @@ async def create_langsmith_thread_feedback(
     source_info: dict[str, Any] | None = None,
     project_name: str = AGENT_TRACING_PROJECT,
 ) -> bool:
-    client = _build_prod_langsmith_client()
+    client = _build_langsmith_client()
     if client is None:
         logger.warning("No LangSmith API key configured, skipping thread feedback")
         return False
-    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
-        "LANGSMITH_TRACING_PROJECT_ID_PROD"
+    project_id = (
+        await _resolve_project_id_by_name(project_name)
+        or ENV.LANGSMITH_TRACING_PROJECT_ID.optional()
     )
     if not project_id:
         logger.warning("LangSmith tracing project is unavailable, skipping thread feedback")
