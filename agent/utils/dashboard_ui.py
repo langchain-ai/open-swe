@@ -140,7 +140,10 @@ class DashboardShellRoute(Route):
 def mount_dashboard_ui(app: FastAPI) -> Path | None:
     """Serve the dashboard build at ``/`` when one exists; returns its directory.
 
-    Register after every API router: the catch-all must come last.
+    Register after every API router: the catch-all must come last. Code that adds
+    routes to the app afterwards calls ``keep_dashboard_ui_last`` when done. The
+    route must not look at the live route table instead: the LangGraph server
+    rewrites the app's routes to append its own catch-all after this one.
     """
     static_dir = dashboard_static_dir()
     if static_dir is None:
@@ -151,3 +154,12 @@ def mount_dashboard_ui(app: FastAPI) -> Path | None:
     app.router.routes.append(DashboardShellRoute(static_dir))
     logger.info("Serving the dashboard from %s", static_dir)
     return static_dir
+
+
+def keep_dashboard_ui_last(app: FastAPI) -> None:
+    """Move the UI catch-all behind routes registered since ``mount_dashboard_ui``."""
+    routes = app.router.routes
+    for index, route in enumerate(routes):
+        if isinstance(route, DashboardShellRoute):
+            routes.append(routes.pop(index))
+            return

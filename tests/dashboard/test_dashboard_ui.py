@@ -8,7 +8,11 @@ from starlette.routing import Match
 
 from agent.api import app as app_module
 from agent.utils import startup_config
-from agent.utils.dashboard_ui import DashboardShellRoute, dashboard_static_dir
+from agent.utils.dashboard_ui import (
+    DashboardShellRoute,
+    dashboard_static_dir,
+    keep_dashboard_ui_last,
+)
 
 HTML = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
 SHELL = "<!doctype html><div id=root>shell</div>"
@@ -98,6 +102,51 @@ def test_api_routes_keep_precedence_over_the_shell(build_dir: Path) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
+
+
+def test_routes_added_after_the_ui_win_once_it_is_moved_last(build_dir: Path) -> None:
+    """The e2e harness composes its fake-SaaS pages onto the built app."""
+    from fastapi.responses import HTMLResponse
+
+    app = app_module.create_app()
+
+    @app.get("/mock/slack", response_class=HTMLResponse)
+    async def mock_slack() -> str:
+        return "<button id=reset>reset</button>"
+
+    assert TestClient(app).get("/mock/slack", headers=HTML).text == SHELL
+
+    keep_dashboard_ui_last(app)
+    client = TestClient(app)
+
+    assert client.get("/mock/slack", headers=HTML).text == "<button id=reset>reset</button>"
+    assert client.get("/agents/t1", headers=HTML).text == SHELL
+    assert isinstance(app.router.routes[-1], DashboardShellRoute)
+
+
+def test_server_routes_appended_after_the_ui_do_not_hide_it(build_dir: Path) -> None:
+    """The LangGraph server rewrites the app's route list and appends its own catch-all."""
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+
+    async def health(_request) -> JSONResponse:
+        return JSONResponse({"ok": True})
+
+    async def protected(_request) -> JSONResponse:
+        return JSONResponse({"detail": "Missing authentication headers"}, status_code=403)
+
+    app = app_module.create_app()
+    app.router.routes = [
+        *app.router.routes,
+        Route("/", health),
+        Mount("", routes=[Route("/{path:path}", protected)]),
+    ]
+    client = TestClient(app)
+
+    assert client.get("/", headers=HTML).text == SHELL
+    assert client.get("/agents/t1", headers=HTML).text == SHELL
+    assert client.get("/").json() == {"ok": True}
+    assert client.get("/threads", headers=HTML).status_code == 403
 
 
 def test_unknown_paths_without_html_accept_fall_through(build_dir: Path) -> None:
