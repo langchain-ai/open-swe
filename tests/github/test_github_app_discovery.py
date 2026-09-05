@@ -103,6 +103,29 @@ async def test_single_installation_is_used_and_cached(monkeypatch: pytest.Monkey
     assert client.gets == ["https://api.github.com/app/installations?per_page=100&page=1"]
 
 
+async def test_single_installation_is_rechecked_after_the_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A removed or added installation is noticed without a restart."""
+    from datetime import UTC, datetime, timedelta
+
+    client = _client_factory({"/app/installations": [{"id": 42, "account": {"login": "acme"}}]})
+    monkeypatch.setattr(github_app.httpx, "AsyncClient", client)
+
+    assert await github_app.resolve_default_installation_id() == "42"
+    stale = datetime.now(UTC) - github_app._INSTALLATION_CACHE_TTL - timedelta(seconds=1)
+    github_app._SINGLE_INSTALLATION = ("42", stale)
+
+    assert await github_app.resolve_default_installation_id() == "42"
+    assert len(client.gets) == 2
+
+    # A failed re-check keeps the last known installation rather than dropping it.
+    github_app._SINGLE_INSTALLATION = ("42", stale)
+    monkeypatch.setattr(github_app.httpx, "AsyncClient", _client_factory({}))
+    assert await github_app.resolve_default_installation_id() == "42"
+    assert await github_app.resolve_default_installation_id() == "42"
+
+
 async def test_single_installation_mints_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client_factory({"/app/installations": [{"id": 42, "account": {"login": "acme"}}]})
     monkeypatch.setattr(github_app.httpx, "AsyncClient", client)
