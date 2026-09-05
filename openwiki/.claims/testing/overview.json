@@ -1,42 +1,28 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:0997e2ff2bd0da5e35246b592b2a466f937a6b5a711912368ad235bfdb3e1905",
+  "pageVersion": "sha256:85f90f809bccc492497ac3ab3fc209ceab4b39cd894b56541ae9c8c431dfe0e2",
   "claims": [
     {
       "id": "claim_9a77e9c5301a46b8bbd02832b9de5a90",
       "statement": "The pytest unit suite runs in asyncio auto mode (asyncio_mode = \"auto\"), so async test functions and fixtures are awaited without any per-test asyncio marker.",
       "evidence": [
         {
-          "resource": "repo://pyproject.toml#L91-L93",
-          "version": "repo-lines-v1:sha256:82982065fc69775e2e41ec5d44bcad76534a97392b066d20e9fdf64d31c2fa4c:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODY3NmU2NDE0NjVhNjU1MWU5ZTljZmZkN2ZhYTFlNmE0MmY5YjcyNDgwOTgxM2M5MDNkN2VkY2I1MmYzMDA2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDEwODVhZDA5MDQyNTcxMWFkYjRmMTVmMjhlMjVjMTcxMDc5MmMxZDQ1ZGE3Mzk0ZWU5MTJlMDM4MTkwNDU5MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGQzOTYxNWY5N2I3MjdkMGQzYjY0ZjMyMjllOTY5OGU5NTJmM2VjZjVmOThmNGQ5NzZkZjNlMjNkYWU2NWQ0YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTIyNWE3ZGY5NWExOTAyMzY4ZjVkNWVlMjg1OTc5NjQ5MTZkNDM2MjRlNzNkYjFhYjc3MzNiMWJmZGI0N2I3ZiJ9"
-        }
-      ]
-    },
-    {
-      "id": "claim_213a87f9dcdf4eee9ab6639bc7bc8858",
-      "statement": "Pytest collection is rooted at the tests/ directory via testpaths = [\"tests\"], so a bare pytest run discovers the entire unit suite there.",
-      "evidence": [
-        {
-          "resource": "repo://pyproject.toml#L91-L93",
-          "version": "repo-lines-v1:sha256:82982065fc69775e2e41ec5d44bcad76534a97392b066d20e9fdf64d31c2fa4c:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODY3NmU2NDE0NjVhNjU1MWU5ZTljZmZkN2ZhYTFlNmE0MmY5YjcyNDgwOTgxM2M5MDNkN2VkY2I1MmYzMDA2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDEwODVhZDA5MDQyNTcxMWFkYjRmMTVmMjhlMjVjMTcxMDc5MmMxZDQ1ZGE3Mzk0ZWU5MTJlMDM4MTkwNDU5MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGQzOTYxNWY5N2I3MjdkMGQzYjY0ZjMyMjllOTY5OGU5NTJmM2VjZjVmOThmNGQ5NzZkZjNlMjNkYWU2NWQ0YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTIyNWE3ZGY5NWExOTAyMzY4ZjVkNWVlMjg1OTc5NjQ5MTZkNDM2MjRlNzNkYjFhYjc3MzNiMWJmZGI0N2I3ZiJ9"
+          "resource": "repo://pyproject.toml",
+          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
         }
       ]
     },
     {
       "id": "claim_51ddbe6a89c1461d9c078e3e373030cf",
-      "statement": "Test tooling (pytest, pytest-asyncio, ruff, basedpyright, Pygments) is declared in the dev optional-dependency group and installed via `make install` which runs `uv sync --extra dev`.",
+      "statement": "Test tooling (pytest, pytest-asyncio, ty, ruff, Pygments) is declared in the dev optional-dependency group and installed via `make install` which runs `uv sync --extra dev`.",
       "evidence": [
         {
-          "resource": "repo://AGENTS.md#L15-L16",
-          "version": "repo-lines-v1:sha256:f5fb7f02232fbff444b479c032955821ba7998496a124e6c8cfbfc7570a5b805:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNWRlMmY1MzI4ZWU2ZTgwNTBlOGFhZmQ4ZGM4NjlhMDY5Y2Q5NTg0ZWRhYWY1NGZlNTg5ZDczYzNiN2RjZDc5OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTMxMDY2ZWEwZjdhMTEzODliZDNhZTk1MDkwNGMxMWNkN2I5NzYyMDQ0ZjVhMGQ0MDI5YzFmMzUzMWY3YTA5ZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmZiMWViZWI3N2ZiMWQwMTk5N2NkYmI2YTNkZTMwNDA5MGEzOTljZmMxZmI0Yjk2MTY1ZWZmZmQ5NWJjYWYxYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGFjZTcxZjg3MWFkMmI4YWU4MjdkNDFjZjI3NWQ0Y2RiYzgzMmUxZjAyMjM1ZWZjYWZiMDJkODY0ZTZhYjdkYyJ9"
+          "resource": "repo://Makefile",
+          "version": "repo-file-v1:sha256:3490dd2ca5509f79512af21387f6ff3e992248fd1be524f6204d230d66830e5c"
         },
         {
-          "resource": "repo://Makefile#L31-L32",
-          "version": "repo-lines-v1:sha256:4acc6a762f11eefc5086577d8339b55c7b8337df97164ffad72a7acd6aae3220:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzZjNTgwMTljOTcwZTNiMTczMmFlNjZjOTAwODU2NDM4MjQ2OTUzZjEyY2JhMjlkNjE5YjAwNTcyZmZmMjQ1NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNzZhYmIyYTMxZDhjZDE1OTA2ZjBkZDhlZmMzZDFmYjVhZjRlZGY4ZTZlZTY5YzQ2ZjAyMmIwNGRmN2NiYjQxZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjFmNzc1NjM2MTQ0YzU5YTlkMmMwOTM2Zjg3NzRkZWEzY2I5NTgxZmFiMzY5MjdhZjFlMTAyYzQyODgwZTY0NCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzI1ODRlMTQxZWJjNGI0ZDM5NWM2NDFjNjQyMDZmZGRkNzEyM2VlZWRkNGUzYjcyOWQyNzM1MTE5MGJmNzJhYiJ9"
-        },
-        {
-          "resource": "repo://pyproject.toml#L37-L44",
-          "version": "repo-lines-v1:sha256:2d40cc6a448c7950f9b50f161c68485c7dbb2f99d181f281fd92c3ea56a405ca:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTkyMThkYzRjZTk3MWNiZTNkMzhkNzc0MzBlNjM5OTE4ODg0ZGQ3N2Q3MTg0YzdiOTNkZmRjMmU5OTg2OTFiNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjk0MTZlMDlmNzhiYTMxNmMwMzI1NjgyMTNiODU1ZWU3NTZlNDE1NjVkOTE4ZjA5NTE5YzgxZmQ2MjBmNDA2MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2Q3NzgwMTg3ZjdhNjBjZGUzNjMxMGNjNGJiZmJhNzVlZDExZTMyMmVmNzUwNTJhNmNiYzMwOGVhYzAwMjdiNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzU2NWY1NzBkMDYwOGYyYjRhMTcxOWE1Y2VjYTM1OGE0ZTRhMDRkOThiYTY5ZGRlMTU0ZWRkYmFjYzcxMWQ0YiJ9"
+          "resource": "repo://pyproject.toml",
+          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
         }
       ]
     },
@@ -45,66 +31,22 @@
       "statement": "tests/conftest.py provides a fake_store fixture that routes every agent.store access to an in-memory FakeStore, which round-trips values through the real agent.store code path (model_dump/model_validate) the way production does.",
       "evidence": [
         {
-          "resource": "repo://tests/conftest.py#L14-L72",
-          "version": "repo-lines-v1:sha256:65500eb958d5010c5de5bab2ed522af6187ded41f26f8d0401d28e12dc4becf0:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3MzZjYmZhYjUxNjhkYzNhZmM3OTlkYzU3NTU5N2IwYzg5ZDQyODczZDM5Y2YxZGQxYmQ4Njg5YmEwYTk2NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc0MDg5ZmU5ZDM4NTc2ZGE0YjYyNTE4YjY5ZmI2M2VhNmM3ZWQyZWE2ODQ0OGVjNGU0MjZhZmY5OGU2NTIxZDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwMGQwZDE5OTI5MWRhMWUzOGNjMTMzMjg0NDg5OTg2NGIyOWJlZjRmMTI5M2JiOTI2NTA2ZTQ1NjRkOGJmNjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFlZjExYzliNzE2N2MwYWRjNDJmZWE4NTRhYjYzNDk5NzcwODE0YjBlNzE4MTAzYTllYzBmOWJlN2FmNjk5NzkifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_171bda1f715d4ff09eb92853149b0dfd",
-      "statement": "An autouse _reset_ttl_cache fixture clears the process-global TTL cache before and after each test so cached team settings do not leak between tests.",
-      "evidence": [
-        {
-          "resource": "repo://tests/conftest.py#L75-L80",
-          "version": "repo-lines-v1:sha256:46475da2dc79cc2a8e5aa70c1f98fce188c3b6daa99ac8823a299da6f0705089:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmYwODY2ZjQwMTFlNTg1ZmZjMDkwOTJlZGYwODMyZTE3YjUyZjRjOTBjNGNhMGI0MmRjZmEwNTBmYTM3NWI1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNWRiNTRlMDA5ZDIxNmNlN2RlOWIwZmIxZjJlYzA1OGI1ZDIxNmY5MWIyNmVjZmIyNjZmZWU1Nzg1YTM2NTAyMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNjYwYWJjN2I1MTY1NGM0MTA2MGZlNjVjNjAwMjM0NmU0YjkwYjJiY2VlM2RjZWMwZDVlNWFmNDIyNTEzZjQyNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWVmMTFjOWI3MTY3YzBhZGM0MmZlYTg1NGFiNjM0OTk3NzA4MTRiMGU3MTgxMDNhOWVjMGY5YmU3YWY2OTk3OSJ9"
-        }
-      ]
-    },
-    {
-      "id": "claim_8958306ba9874c0c81c3424035b4e4a2",
-      "statement": "An autouse _default_enable_auto_review fixture stubs is_review_repo_enabled to return True for every repo, because the dashboard opt-in list is empty without a live Store; tests targeting the auto-review gate must override it with a stricter stub.",
-      "evidence": [
-        {
-          "resource": "repo://tests/conftest.py#L83-L97",
-          "version": "repo-lines-v1:sha256:1f128d7f45ef826715ed480931a4588bf571b03b6f6a140ee20c98d94796b3dd:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmMDg2NmY0MDExZTU4NWZmYzA5MDkyZWRmMDgzMmUxN2I1MmY0YzkwYzRjYTBiNDJkY2ZhMDUwZmEzNzViNWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiMjg4MDNlMzYyYWJhOGM3MzIwMGNhOWRiZjc1ZTg2N2Q3ZTU2Y2JkNjU5MTcyNThkNTBhYmUwYzI2Y2I5YjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM4NTZlMWExY2E2ZjQ0ZTZiMDQ3ZTQ1OTZiNTA5OWRkNWQ3ZWMzYzdiMjkwYjYwNWIzY2I2OWMzMzk4MDFiNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_7e94c7f70e5e40e8aeb75ffaff2f38f7",
-      "statement": "Unit tests are run with `make test` (aliased `make tests`), which executes `uv run pytest -vvv $(TEST_FILE)` where TEST_FILE defaults to tests/ and a single file or single test can be targeted by overriding TEST_FILE or appending ::test_name.",
-      "evidence": [
-        {
-          "resource": "repo://AGENTS.md#L19-L21",
-          "version": "repo-lines-v1:sha256:8324729321237a0bffd111e8a78cfea84a18d8ed552fbc12cef39e661208d259:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTc3NWE2NGVhMWRiYjVjNDZhM2JjMTJjZTUxMjIwNzRlZGViMTgwZTM0N2UzZTZmMTEwODY1MDc1MjU5NmVjYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNzZiOWRmMGFjNGY4MDAyYTE1MDlkNzZiZDQzMTNmMWI0YzE1YTQzMzk4NTZjZTA3ZGM1MTE4YWM2YTExMzBiNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTZkMDkwYTFjNzVjZjNiMzVjMTlkNjk3N2M1YTQwZmVmNjQ1ZmU3ZmE0MDhkMDMxMjUxMzNlMzliYzAxOTNmYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWIwY2EwOGRjZWU3YzFmNTExMzY2ZDUyNzc1MjU2YzUzOWFlZmFmOTliYTE0ZTZkMjU3MjQwYjRjNDQwNjRkZSJ9"
-        },
-        {
-          "resource": "repo://Makefile#L38-L45",
-          "version": "repo-lines-v1:sha256:aaebaecc3e3417e5f3d455ec21a689ff8a776b139eb2bef6effaebc4e2299c9f:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmJlMDg2YmM3MTZlNDVmNWM3Y2QyMzAxMWRlODI2ODI1ZTZmMzk2Yjk0MGU5MzI0N2MzNjFmMmY5ZDlhY2M4ZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmVjYjM4MWFiNzkyZDgyM2YwMTNmODJjNzA2N2ZjZjA2MTQ1NmNjYjY4NTZlMmZhM2QzNmQ0MDY4NmJmOGViNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmIwYTEwYmJjMDIxNjkzZWQ2OGE5OWMyZGYyMmIzNGU4N2YyMjVjM2EyOTVkZWEzOGQ2MTY1MDE3NjA3ZTljNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDQwYzM1NzkyYzI2NTFlYjQwZDI3OGFiNzcyZWIzYTQzMDU0YWY1YWM1MmJhYzVlYTM3MWFiM2E2M2E5MTY2MSJ9"
-        }
-      ]
-    },
-    {
-      "id": "claim_eb8f646a570f4fb19cc5e61e9dc4a084",
-      "statement": "`make test` only invokes pytest when the TEST_FILE path exists and otherwise prints a skip message instead of failing.",
-      "evidence": [
-        {
-          "resource": "repo://Makefile#L40-L45",
-          "version": "repo-lines-v1:sha256:f9298df66df182fb066decd24bb41d5eaa611ccfba3ae8f1536423323799fdfc:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDliMzBjZTkzZjhkMmVlNmQ2NDdlYjNhN2RhYjQ0NjRiNWQ5Yjc5ZGExOTI4ZGE2MDY4MDQ3M2QyY2Y0ZTY4MSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmVjYjM4MWFiNzkyZDgyM2YwMTNmODJjNzA2N2ZjZjA2MTQ1NmNjYjY4NTZlMmZhM2QzNmQ0MDY4NmJmOGViNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWFlMDcxMGJmYzA0ODBlNjVlMGFiMjE1YTczMTY5YjFiOGY0Yjc0NGNiZWE2NmVhM2FiYzhkMjA5MDU2NGM2NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDQwYzM1NzkyYzI2NTFlYjQwZDI3OGFiNzcyZWIzYTQzMDU0YWY1YWM1MmJhYzVlYTM3MWFiM2E2M2E5MTY2MSJ9"
+          "resource": "repo://tests/conftest.py",
+          "version": "repo-file-v1:sha256:863630a5123deb3b3be4ba890204929038f15263862e6d414e0ceeb7bf8d1387"
         }
       ]
     },
     {
       "id": "claim_fe7eb017df4c4e74975555cce254dd5a",
-      "statement": "Lint, format, and type checks are separate gates from tests: `make lint` runs ruff check plus a ruff format --diff, `make format` fixes in place, and `make typecheck` runs basedpyright over agent/ and tests/.",
+      "statement": "Lint, format, and type checks are separate gates from tests: `make lint` runs ruff check plus a ruff format --diff, `make format` fixes in place, and `make typecheck` runs `ty check agent tests`.",
       "evidence": [
         {
-          "resource": "repo://Makefile#L60-L72",
-          "version": "repo-lines-v1:sha256:45c9b88dfe7ef19051b44e220698fb7f506ba9eb7b479ed1ae8b5c032b2c2daa:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiMDk1ZDI5MjU2MTViZDUzOTBmOTRiNjQ1MzYzY2I0ODE1YzJjOTU2YWZmNDdlNWFjYTFkODg1MTg3YjIwODMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyZmJjZDlhYjc2ZmQyNTMzNWI2MzQ3ZDZkMGI2ZjA4ODlkZmJlMjU4MzdlZDQ3YzAyZTU0Y2VjZTU3YmIxMmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ1N2JiMGE2ZmMxMGMxZTU1YjQ0MDVkZDc2NzlkMDVkZTgxNTJmZGM4YTY5NWUzMDdlZTM4OGYxNDU2ZTllZTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYWI5YzQ3MzQ2NGI2ZGQ3YThmMzBlMTNlYzYzMzlkNzk5MWFmNDNkNjc5NTZlM2NiYmQ4NTE4NjA5ZjJhZWEifQ"
+          "resource": "repo://Makefile",
+          "version": "repo-file-v1:sha256:3490dd2ca5509f79512af21387f6ff3e992248fd1be524f6204d230d66830e5c"
         },
         {
-          "resource": "repo://pyproject.toml#L95-L102",
-          "version": "repo-lines-v1:sha256:7c620cc1c326625fefffff9b22435dab84b60f7a7e01decd40b02d7de35070c9:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWI2MDI2NmE4N2RiNjkwNTM1Yzk3ZmI4YmQzZjMwY2EyYzgwZjFkZjhhYTRhOTBmNjM2OTg0NWY2ZGZhZWI4OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjU5Mjg1Y2MyMzA2YTI4OWQxMzExNjcxZjFmMDllYjFjNzNiYmVhOTc0N2RlMDdkYTZmZGY4MDM1ODA4ZjIwYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZmM3ZDlmMjU4N2EzYWE3YzM0YWJhN2Q4ZWUxMWNhOWVkMjY4NjgyNjM5MGQwYTY1NTQ5Y2I4NzhjY2RiNDlkOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+          "resource": "repo://pyproject.toml",
+          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
         }
       ]
     },
@@ -113,16 +55,16 @@
       "statement": "The Playwright end-to-end suite is invoked from the root package.json via pnpm: test:e2e runs the browser suite, test:e2e:desktop runs the Electron/dcode-ACP flow, and test:e2e:install runs `playwright install --with-deps chromium` and must precede the first run.",
       "evidence": [
         {
-          "resource": "repo://package.json#L13-L16",
-          "version": "repo-lines-v1:sha256:736bae5dc4be9aded3eee5177bdb19df18d53ca1632f2a843c5c47b6ce6f5585:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGE4MmJlMjcxNmYzZDNmZmM4NjgwNjhhYjBlMGYwZmU2ZjczNDc1ZGEyNWU3ZGEzZmVjNDNlOGU2MDVlODQ5YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWNjNDM0M2I0YjNhYWE0YWI1ZDUwMzljNWZkZGYyNjIwYTI1NDg5NmFmM2NmMjE4MWM0NzgxOGRhNzMzZDUzNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGYwNTgxNWQwZWZmYzczMjU2ODNkZGE0MTQ4NWNlZGIyNmYzZTdkYTAwNzYzNjE0MGNmM2NiNjQzMDVmMDM2ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGZiZGEwMmQyYTgxNDgwNWNhNDllYjY5NWFmZjA2ZGMxYTUxNWI5YTk0NWVkZTEzMDUzNDY0NzEzMzRhN2U0MCJ9"
+          "resource": "repo://package.json",
+          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
         },
         {
-          "resource": "repo://tests/e2e/README.md#L72-L78",
-          "version": "repo-lines-v1:sha256:abc21abc08021856bd9bb3361c1edf6be3905cd597a15f3ff8e54da6b11e288e:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDdjMDZjNTYxZDVjMzI3MzQzNjg1MjY4YTQ2YjMzOTFmMzk5OGVlZTg5MGQyYmU1MWYwZDIxY2M0YTUzYWU2ZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTY2MTdlOTI5YzdlNDllNzllMjA3Y2Q1MWRiYjk0MGJkMThjM2UyNWI5OGE4Y2JmODgwYzZiMTM0NmU1OTM2MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2UyZmE2NmRiYzJiY2YzNjNhOTNkYjEzN2NiYmM3MmIwYmE1MjU4YzZmNjVhYjA1ZGFjZWU2NjhmYjRkODE3ZiJ9"
+          "resource": "repo://tests/e2e/README.md",
+          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
         },
         {
-          "resource": "repo://tests/e2e/package.json#L5-L10",
-          "version": "repo-lines-v1:sha256:9f45c100d375aeb51ecf2bcab65d71aa3aa11d34d39289f8a4e2091ce9736211:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzQ4MzNkNTk0OWMwM2E0MGNhOTUyNDkxNjEwYTY2NTk2NDRiM2FhNDY2MzYyZjc5OTAyMGRiZjE5ODE1NDdkYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDNiMTEzODAzNDk1ZDZjMjUwMTY3ODUyOGFjOGU3NDI2MWNmZTdkM2ZhNTg1YTc1OTE3MGMwOTcxYzU2ZDdmYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZWM3MzYyNGUyMjRiMGNiODBhYThmMzkwODhkMzNmYmZmOGNjZmU0MDNjMjQ5OTY5ZTg5ZmVjZDA5ZmFiMzNhNCJ9"
+          "resource": "repo://tests/e2e/package.json",
+          "version": "repo-file-v1:sha256:981b65f11401a69f73d6a16aa41f841d66e909351724e7f8235c53c6e2443117"
         }
       ]
     },
@@ -131,8 +73,8 @@
       "statement": "The e2e suite drives the whole happy path end to end: a user mentions Open SWE in a mock Slack thread, the real agent runs via langgraph dev, implements the change in a local temp-dir sandbox, pushes a branch, opens a PR on a fake GitHub, and posts the PR link back to the same Slack thread.",
       "evidence": [
         {
-          "resource": "repo://tests/e2e/README.md#L1-L9",
-          "version": "repo-lines-v1:sha256:b88e7e8d7ba4500ab6b9fd8144c2bd5d03608460182e1ab750c546ff6ab4f415:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGQyNzI0MGFmYjM3OWJkZTg1ODcyY2ZiZjZkYTk3ZWZjYzIyNDJlNmE2ZGUxZWMxOWIyZGMzYzVlZGRmNThmNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDFkODE1ZjNkN2Y3MTcxYTM2MTFjMDE0NTZiODJjZmNjODkwM2JiMjcyNzRmZjg3NDdjOTM1ZWY2MTkxNTBkNCJ9"
+          "resource": "repo://tests/e2e/README.md",
+          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
         },
         {
           "resource": "repo://tests/e2e/tests/full_flow.spec.ts",
@@ -145,12 +87,12 @@
       "statement": "In the e2e suite only the LLM and external SaaS HTTP boundaries are faked while all agent code runs for real: fake_llm.py is a scripted BaseChatModel, patches.py monkeypatches the boundaries, and fakes.py holds in-memory PR/Slack stores plus git seeding of a local bare remote that the mock UIs render as the single source of truth.",
       "evidence": [
         {
-          "resource": "repo://tests/e2e/README.md#L10-L33",
-          "version": "repo-lines-v1:sha256:a72962bb1de0a764e368e3b3961e9820cdad4e311445500badb6d4d23063de5b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzMTIyMDc0ZWEwZjJmYmVlNTdkMjI3N2U1ZDI0ZmM2YjliNjU1Mjk2ZDI4MjNhYjc3YTJlZTM3OGYyZWQ0MDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4YmRkZWE2MjhkY2QwNzI3YTNmOTBhMjkxYzEwZDRmYWJjZjExMmMyYjQyNzBiNTE5YjMzNDU5OWJiNDBmMTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhlMzk2OGQzZDBkMDY5NTllNTBmNmVjZmMxYmZhYTE4N2ZlMDA3NWYwMDYyNDQ0NjAwZDljYWE5ZTg5N2Y2YjkifQ"
+          "resource": "repo://tests/e2e/README.md",
+          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
         },
         {
           "resource": "repo://tests/e2e/fake_llm.py",
-          "version": "repo-file-v1:sha256:4dd649e2bf7f7879bb270ce11108d215c2de9e7a2f4f6ef2181562bdd8dfa763"
+          "version": "repo-file-v1:sha256:8a386531e01339f5eabebb20046d277fa65463800b4c86156ee627064b8a7bb5"
         },
         {
           "resource": "repo://tests/e2e/fakes.py",
@@ -158,7 +100,7 @@
         },
         {
           "resource": "repo://tests/e2e/patches.py",
-          "version": "repo-file-v1:sha256:c0e0652b9a1e1e21e45923025546dec342d66618dc2de7140541d0ebba53bb70"
+          "version": "repo-file-v1:sha256:4435a4f3db5704112880f22751e8b6db788a4816c3ca45d10626295e6e63eb72"
         }
       ]
     },
@@ -167,22 +109,8 @@
       "statement": "The e2e harness serves the real built ui/ dashboard app rather than a mock, so server rendering, the session gate, and /dashboard/api/* calls are exercised for real with a genuine signed session cookie.",
       "evidence": [
         {
-          "resource": "repo://tests/e2e/README.md#L52-L69",
-          "version": "repo-lines-v1:sha256:cb85c14cbedb6960417a5efb0a05e79398a055c18709b1e6e2ddc663a6917fed:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0YjFlMjY5N2UyZmFlN2I2NGIzOGUyZmI4M2U1YjM5M2E3ZTFhZTNkMzRkZTliNTM5MDZhNTBkNjIzMzFhMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxYjk4MGI0YjRhZDFjODgzMWYwOGQ2NmI0MWUxMjU2YTcxY2NhMjVlMjU2Njc4ZDgwYzg3ZjdkODI4NmFhMDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlkNDNkMWJjNmI1NjFkNzgxYTlmNGMzN2FjYzY2MDkxMzI4YWRjOWNjODEwOTcxOTczNmUyMDE0NDM3Y2VmZjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ3ZmM0NjM2NjcwYmE4ODE4ZDE2OTJiNjllMThjYjYzNDQxMTQyZDQxODMwNWQ1MDYwOWViMTQ5YjcyNWJlYWMifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_4f3e741fd05043b4ac499d926c71ea4b",
-      "statement": "Browser Playwright runs retain trace and video on failed attempts locally and on the first retry in CI, with screenshots on failure; E2E_ARTIFACTS=1 records trace and video for every attempt under test-results/ and playwright-report/.",
-      "evidence": [
-        {
-          "resource": "repo://tests/e2e/README.md#L93-L111",
-          "version": "repo-lines-v1:sha256:17cfaac571852ad6579c653d0caa66e4a59ab7a1214229a4af1e001386148fc1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwNGZlNGM1MTJlM2YyZDk0YTc3ZTcyY2VkMGJmYTI3OTEyNWQ1ZjcyNmQxNDM1MzU0YTk3N2NjMWRkM2E5ZDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkMDUzOWQ1Mzk0ZGMyZmQwZmUxMTI0Yjc4NTE5YTljNzViNjNlNzUyYWJjMzdjYzRmMzg4ZWZiNGRhZGRmN2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlNDZkMzI3MzQ3YzIyYzMwNjdiODAxMjJhMjQ2ZDQyMmJjYjExZmQwNzE2NTVjMGM1NjYxMjA3ZWJkZjc0ZmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2OGVkMTUyZTc5NjM1MDJhY2IyNDcxNTk4MmVmOTY1ZmVlMDZlZTE3ZDc0NTJlODE5YTVhODViYjMyMjg4ZjAifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/playwright.config.ts#L23-L44",
-          "version": "repo-lines-v1:sha256:770267e2dab34658b73d8ff77c2aaf39f8e92e5656041568fd00204d221d52df:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjNDQyZDgyNzY5NmVhMjk3MzIwNThlY2EzYWY4MmExNjUyNDAzZDZkZTQ2YWI2ZTA1NzMzZjUzZjkxMzUwMWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkNWNkMmZiNGYzZGY4ODQ1MTUyNTViMzk1MjNmMmY4YjU0NzJiZWVhOWY1NjZmZmNhMjA0ZGI4MDI1NjEwNDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNiNTMyNGY5YmU4ZTdjY2Y0NmYxZDVhNWVhNWVmZmI4YWY0M2NlMjgxYWYwMTUwMWRkZDc0ZDBkZTgxNWM3Y2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJmZGI1ZDI3YWNhOTQ2NTk0OGJmZjUzMmEwNjU2Y2M3YzY1YjdjYWY3ZjUzMDViNTlmYzdkZGZjYmMzOWNjNGMifQ"
+          "resource": "repo://tests/e2e/README.md",
+          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
         }
       ]
     },
@@ -191,20 +119,20 @@
       "statement": "The dashboard package runs its component and client unit suite with `vitest run`; the desktop package builds its main bundle and runs Node tests via `node --test test/*.test.cjs`, while root `pnpm test` delegates to Turbo's workspace test task.",
       "evidence": [
         {
-          "resource": "repo://desktop/package.json#L7-L15",
-          "version": "repo-lines-v1:sha256:e408f868d8a502430f26302f4782f4058082144c2988aec0016b5ea19da4c914:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzQ4MzNkNTk0OWMwM2E0MGNhOTUyNDkxNjEwYTY2NTk2NDRiM2FhNDY2MzYyZjc5OTAyMGRiZjE5ODE1NDdkYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDY3ZDlmOTI2ZjJhMTEwZGZkMDVlYjU0Yjc3ZjJlMDI3MmJlN2RmMjkwZDUzYTMyZjZiYmNiOWYxMmQzM2RhYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjI5Mzk4N2NlZTM5M2QzYTdlNzY2NWJkYjRlNTllMDBjYmI2YzQ2NmQzNTgxMmJiYjlmZmU2NzZlMzk1NzhiYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYmRkYTZkOGU2ODUyZDZiYzcyOGI3MmViYTJmNTYzNjI2OGE1MDhlYTcyNmYxODJkMjg0YzRkNDdmODE4MDM3MyJ9"
+          "resource": "repo://desktop/package.json",
+          "version": "repo-file-v1:sha256:9e32829ce8dbe938b0183b27f62da576f1a6103de152a69997ff1f87027a9c38"
         },
         {
-          "resource": "repo://package.json#L9-L17",
-          "version": "repo-lines-v1:sha256:92a5fc6dbe6e9f92044896d0e4deb20154e2e0c3e71e23cd66c78b52be2ff925:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjgyYjcwZTg3NTU3NWY3NGMwYjJhZTdiZmQ2Mjg3MzI4YzY1OTc5ZDUxMmE5N2YzODg1MTNhNjk4NDE5YmFjMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWI1NTY3YWQ1M2ViZTBlZDBmMzFjYzY5MmJkYWE1OTFlY2Y2MDI4MmE3YmQ5ZTY3NTMyNGRkOTE0M2Q5YWVlYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYWFmM2RkMTAxY2UwOWY4OTA1ZmM4NjdmMzllNzhlODNjZDM1Yjc3YjE4ZGNiZmQxY2Q1ZGNhNTY2M2ZiMjllNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGQ1YmYzMDdiM2M5YTExZWZkNWYyYzE0NTJjODI0MmJlYTRhOWU4YzcxZjI5MjI4YmIxZTg4YzFhYTBmNGI4MyJ9"
+          "resource": "repo://package.json",
+          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
         },
         {
-          "resource": "repo://turbo.json#L21-L24",
-          "version": "repo-lines-v1:sha256:5a5299ebab8e7df1ecca506d1093b2b091ecd932ac9094f34876e2f21979f5b4:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjZiZmZkNDlkOGNiM2YxNmU0MzM3ZWMwYjZjYTYyYzg4ODhkNDQxMTkzYmEwOTlmM2E2YzIzMDAyNzcxZGM0NCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTllNjY3NjIyYzM4ODE2MGI3MjdiZmQwZTBjYWQzNmQ5ZmEwNWYyNWE4ZDU5ZDk3MzIwOGQxNjFlNTIyNGExNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTUxZTNiYjkzYWNhOGI0Nzc5ZmRlYmY5OTkyMTNmMjg4MTQzYzM1ZGM3MWM5MWZmNTU1ZTkzNzJlNDUwNDllMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGUwZjcyOTNkMTU2YTZkMTI1MjhkYjEyOTMzNzllNTJhNWY4MzY3MDQ0Mjk3YjIyODJiOTdmZjJjODYwNDM4ZCJ9"
+          "resource": "repo://turbo.json",
+          "version": "repo-file-v1:sha256:2baddedda518d07ffac1f38d843cdb9bf2cb068b0cd2a241a571a718f8462878"
         },
         {
-          "resource": "repo://ui/package.json#L5-L10",
-          "version": "repo-lines-v1:sha256:d9bff0a8ee85e8ca2b4f6e1ea70cfcfe4a1ac4cfe65e3160b3f0d5386fa749d5:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzQ4MzNkNTk0OWMwM2E0MGNhOTUyNDkxNjEwYTY2NTk2NDRiM2FhNDY2MzYyZjc5OTAyMGRiZjE5ODE1NDdkYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNWI2YjI0YTYyMzk0YWUyNmFiNjU1YjdiNmY1NGQ2YTRmM2UyYWNlY2MwNzNjN2E2ZmU5YjRhZjRiYjY0ODIyMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGI3OWU4NTBhOGIwMzZkZWY3NGFhMjAyYjU5YWU2YmZlOTIxZDNmMjRhM2RmZjEwODg5ZWI5N2VhNzk1YTdmOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjg0ODA4M2YwNzY3YTg4NjFhZGQwOWI4MWJlNzJmMmJjMjQwYmVmMzkxNGE4MmJlODU1NTI0Nzc4ZTA0NTA0MyJ9"
+          "resource": "repo://ui/package.json",
+          "version": "repo-file-v1:sha256:e4e49c57a3bac3dfef845fb941624dee2e6fd47ec028be55c5b0074804afbb59"
         }
       ]
     },
@@ -214,7 +142,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/playwright.config.ts",
-          "version": "repo-file-v1:sha256:4c8192587d1bd86a846b8e34bbbcd909f1c50a2f0d889b5b5e9280ccd2d20760"
+          "version": "repo-file-v1:sha256:a141ed1837003e8633b25762bd1bd59c6a006d2046ac3de40804a0526b7e0a4c"
         },
         {
           "resource": "repo://tests/e2e/playwright.desktop.config.ts",
@@ -228,7 +156,7 @@
       "evidence": [
         {
           "resource": "repo://tests/dashboard/test_dashboard_thread_api.py",
-          "version": "repo-file-v1:sha256:b172ea76d64a83ad7375e250a1492e9c2b98795ae0c7ba89ced9c44772beb0e4"
+          "version": "repo-file-v1:sha256:3a7448c466a05c92ed5470bfe269a00677dff407d560aeecf9b5b08e736b3dcd"
         },
         {
           "resource": "repo://tests/dashboard/test_dashboard_thread_api_activity.py",
@@ -237,30 +165,12 @@
       ]
     },
     {
-      "id": "claim_b67c373f1ab543a386834ef562b748c2",
-      "statement": "The Electron e2e test resets shared harness state, clones the seeded local bare remote into an isolated temporary project, injects a harness-issued osw_session cookie, runs a local-agent request, and verifies both the local project edit and fake-GitHub PR fields.",
-      "evidence": [
-        {
-          "resource": "repo://tests/e2e/tests/desktop.spec.ts#L176-L235",
-          "version": "repo-lines-v1:sha256:a5d58b748c9804e010f528d55ee79b2795a5fdb672da7c95cd837d81cee0c030:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczYzYyZTk5N2VkZmYyYTBiNDkyNDMxNjIyNWRjNGE0MzcwMzg5NzRjMDk4ODE4MDA5OGRlZGVkZWUwOTdiZTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFlNTFhZDk1MzcwNGU0ODU3NTE2YmNkODY5OGM4MTQ0NmU4ZjZjYmQ2YWYzZDBjYjhhY2QwZjhiMTE4ODNhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/desktop.spec.ts#L43-L105",
-          "version": "repo-lines-v1:sha256:2cae5a873878ecbfdefad2bad19213c71dd14b08477f01af372d4a02c72a2338:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5ZGM0NmYxNjlhODZkM2JlYWI4ZWIxODQyZjZmMzU2YmRkNmIwYWUzNWZiNWVlYmY0Y2M1YzJkNThjYjE2MGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJmOTk5YWYyNDFlYjdmODE0OTNiMjUzYTc3Mjg2ODZjZDVmMGE3ZmMzNzc1NGRiNzM0OWRlOTkxZWQ5MWRhZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRjMjYzOTU3Yjc2MjI2MzY0OGRkMDAzY2U3YzJkOTg0MzQ0NTUyNTRkNzRhN2VmNjllMGI2N2VmYzVjMzZhYWEifQ"
-        }
-      ]
-    },
-    {
       "id": "claim_97f3f46391214249b20ac986244af018",
-      "statement": "Browser e2e builds and starts the real dashboard UI with its API bases directed to the harness; `E2E_FORCE_UI_BUILD=1` forces a rebuild after UI or port changes.",
+      "statement": "Browser e2e builds and starts the real dashboard UI with its server API directed to the harness; `E2E_FORCE_UI_BUILD=1` forces a rebuild after UI or port changes.",
       "evidence": [
         {
-          "resource": "repo://tests/e2e/global-setup.ts#L18-L50",
-          "version": "repo-lines-v1:sha256:92f770c40a39b1720664c60b7444cb4c45d2e56b05c2f41443133ea3ef0d4d67:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2ZWRiNmJjMzdhMjdhZTU0ZGM0MmYyMGU0NGRmZjc3NGQzMjgyMzVkYmE2NmJiYWQ2ZGU0NDU3NmRhYjdjNzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMGNkYjk3MmE3YmZiN2VkMjQ2ZjlmZjY3MjM4NWU1NWY0OTY4ZmMxMTA0M2RjNWI2ODRkNTFkZmEzMWRiY2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZWUwNmFhMTg0MTQ3OTFmNmNkZWQ1NzFiZjBhMmRlOTcxNTY0NDhjYTBjMWEwMTBiYmY5MjU4MGU2NDQ4MzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUwNThiN2Q3MDRhMGMzZGVmYzRlNTg0Yjc3NzU1YjY0NmQ3M2IxYjI2ZDdjNTBkOWEyY2NhYTBjZDRmMjcxN2UifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/global-setup.ts#L5-L9",
-          "version": "repo-lines-v1:sha256:a8c0823f981eeace3b2bd3fb6418aa39af67b731622181f254fadfe56bdb9047:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzg3ODMxNWI0NDQ1Mjc4MWZiODdjMjc2MWRmYmY2NzY5MWIxNjc1YTY0NzdmOTgyYzFhNzA1YzdmMzVhZGQ3NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDgwNmNjMmE5ZjNmMzA0ZTYyYjcwOWM3ODU1ZTQzMjE2MmY4ZTAwNmNhMjljNTY2YjdhOTQ1Y2QzZjBmZmQ3ZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjMxNGFmZDdhMTNlNDE1MjgzOTU3NTVjYTc4NzJkMWQzYzUzMTk3NjMxZGRmY2ExMzFmZDc5NGE3M2JiZWJkYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTU2MDgxNzk5NTJlNTg5NDczZTM0YWZlNWQzMDA5NDQ1MWZkYTVkZDk2MGFlMDE0Y2EyZGEwMTEzYjQwMWZhNiJ9"
+          "resource": "repo://tests/e2e/global-setup.ts",
+          "version": "repo-file-v1:sha256:b3429b3f7ddba631f1876a12fd8066521601c5c8d181c5e0e2abf51ea633f4c6"
         }
       ]
     },
@@ -269,38 +179,8 @@
       "statement": "Sandbox-state tests require the backend proxy to remain BaseSandbox-compatible for capture offload, delegate or safely fall back from offload, share one concurrent reconnect, survive waiter cancellation, retry failed startup, and recover a sandbox ID from live thread metadata.",
       "evidence": [
         {
-          "resource": "repo://tests/sandbox/test_sandbox_state.py#L120-L190",
-          "version": "repo-lines-v1:sha256:b98c932cb795c0ad56eb3fc861b7b49e4d963e496a71b49fd88300065f24e3c5:eyJzZWxlY3RlZExpbmVDb3VudCI6NzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2NjA4ZDE1ZDk5NzU2NzNjNmVlZjk5ZWViODU4NWY2ZmJjMzFhMjNkNDFjOGIwMmEyN2Y1ZWRiNjNkYjdmMWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVmYWRjYzY2ODRkNDFjMDZjZDdmMWI0MzExNjc3NmVkNDk1ZjVjNjJmMjRhZDVkMTM5MjYwYzdmZGMzNzVmNTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
-        },
-        {
-          "resource": "repo://tests/sandbox/test_sandbox_state.py#L239-L292",
-          "version": "repo-lines-v1:sha256:eccf16c9fd04503e7c33a408c58f45223d436f057e6b1826e873af250683e5c3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyODRkNDU2NjExYmE2OTgwZDdiNGZiM2UyOTk5MWQ2MDBmYTRhZTg3ODVlZmYxODExZTgyMDE1ZmMyMjViNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYwNTNmMjhlM2NiZGIzODgyY2ViOWUzMmZmMDJjZDYyMTIwMzNmZDkxOTU1MTY4MTA1YmMxMzQ2M2IxNzAyMjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
-        },
-        {
-          "resource": "repo://tests/sandbox/test_sandbox_state.py#L334-L352",
-          "version": "repo-lines-v1:sha256:29ad66215ef45fd79b1f7de816fc553564eb948f4b76ed44cbf358c93e6bb7da:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyNzg5MzNiZjJhZDBhZWNkY2Q3YzNlNjg0MmNiMzhjMzRlYTNkNGYxZTViMmJmODc2NzcxYmNhNjUwYzlhYzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZlOThkMjUyYjZmODY3M2Q3ZjMzNzI5MDg2NWY0MGI3N2I0OWJhMDI4ODZiM2JjNjM3Mzg4NjMxMDliZTNiMjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        },
-        {
-          "resource": "repo://tests/sandbox/test_sandbox_state.py#L79-L117",
-          "version": "repo-lines-v1:sha256:be2d92f781f350924c734fa9e8113a6632d6347467df434a0b1706110c1855ea:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJjNTBhYWM1N2U5OTYwNDNiYzI4MzY1YjI2M2UyZjU3MWZkZDA4MDc0YTZmZTA0YTcyMjNkMTE5YWVmMzQ5ZTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhNTJiNzIzZjRkMTgwN2E5M2E2NDJmNjg4MzVhOTNjYjgyNTc0ZmZiYTUwYTk3YWQ4MDdhMzZmNmM3NzQwYTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_d20a9582f71e4507a52c6b6067a58410",
-      "statement": "The Electron e2e spec explicitly traces its Electron context, attaches screenshots for unified and completed local-agent views, and removes temporary desktop state unless E2E_KEEP_TMP is set.",
-      "evidence": [
-        {
-          "resource": "repo://tests/e2e/tests/desktop.spec.ts#L100-L105",
-          "version": "repo-lines-v1:sha256:5dd280f91c8ca29f9626fcae402de23e05ebed1c3dcb585ba235da6b750b8357:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2RlMjVkOThjYTIyMjcxNjZkMDc0YTkwMzYzNGY2OGQ0NDg2MjEwZjYzMmY3Y2RkZmY3ZGIzNGNkMzIwNjgxZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2EzZTQ2Zjk0Mjc2YjZmNmY0ZWQxZjAyYWY3OGJlZjZhMmVlMWM0MzlkZDU1ODRiOTczOTQ4MzEzMjE0ZDJiNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDljZDMzYTQ5Y2NjYWNhZDI3ZWYxYjQxYzIyZDYyYzIyOWJjYjc0YzQ3YzI3NzQ5MmRiODM0NWNkZGRiOGEyOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGMyNjM5NTdiNzYyMjYzNjQ4ZGQwMDNjZTdjMmQ5ODQzNDQ1NTI1NGQ3NGE3ZWY2OWUwYjY3ZWZjNWMzNmFhYSJ9"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/desktop.spec.ts#L167-L174",
-          "version": "repo-lines-v1:sha256:60180e46ea5bd4d58b4ea897780b1fe92d9316fccad77ccc8a4cf7779bc6ca9e:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGRlNTZiYTM4ZjM3ZTZkMDlkMTcwZjdhMjMzODhiNDY4ODQ4Njc3ZjYwOWNmZGNlZmFhNWY0NTgxNTY5YTQ1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjJkMTFjYWY0M2U5N2VmMzY5ZTZiZWVkMWEyNjhiZDA1ODM4ZjI5YjlkZDI1NGJmNjliYTY0ODg0MTQ3MjM0YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzY5OGQ0YWZhMGEzYTk5OWM5OWQzZDEwNWQwMDRiYTAzN2I4ZjY3YWRjNTg5NzI1OTU3N2E3Zjg3MTE1YmQwNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTY5YjU1ODZjZGFhMmZiYTVlM2M0MmI2MjBiNzJjMjk1NDlkMWM2ZTI4OGM0ODUwYjkyMDUxODIxOWU3YjYzOSJ9"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/desktop.spec.ts#L218-L235",
-          "version": "repo-lines-v1:sha256:3f967e3cc482353e82c7a29044e4faaf83690cf8257b88f743b0dcf4f68fcb43:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjZDc3MjFjZThhMmM2MTE4NDkwNTZkZTIyZDg0Yjc3N2UwODYxYzQ4YzdlZTcxMzBmZTI5YjhjMjE0ZGQyN2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NGQzNmRhZjE1ODg4ZTNiOGMxNmI5MDdiNTc4MzJlYWM0ZjI1NTg0YzgzNTcxZmM3NzI2ZmQxNGZiMDYwYzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
+          "resource": "repo://tests/sandbox/test_sandbox_state.py",
+          "version": "repo-file-v1:sha256:704700326ac575264e748a198dc1aef627d6cfc9fbe3e51d0728548a44e1e46e"
         }
       ]
     },
@@ -309,64 +189,8 @@
       "statement": "The e2e harness overlays the real agent API with fake GitHub/Slack endpoints, mock UIs, and control endpoints, and signs the simulated Slack Events API delivery before posting it to the real webhook route.",
       "evidence": [
         {
-          "resource": "repo://tests/e2e/harness.py#L1-L10",
-          "version": "repo-lines-v1:sha256:db5803815575a4739d5e44cfb3b870c45f5349c414138886607f25458eee4fe5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhZTVkOTg0MzFhMDYzODE4NzA5YWQ2MjM0YjA0ZGNlZThjMDFhMzIwODU5ZGRlOTJmMzA5MWVhN2E4M2YyNzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmNzg3NGQ4YzQ5MTlhYTYwYTU5OGQzZDYyYTRiYjNlYjhhOTFjZjk0NDE1YmE4ZTgxMjJlZmI3NGU0MTFmZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk4MWQ1ZDY4OTMzYzZiMDYzOTg0OGNiY2UzMTgxYTExMWIyZDdjYzcyOWY2OTFiZjMzMTFkMWQ1NTE0ODhkMGIifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/harness.py#L171-L203",
-          "version": "repo-lines-v1:sha256:cd928ed75bcfa6fad136a75c20fb18f3d4279a1ed9462ad0385ebf2d04294c56:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4N2NiZmZkZDI2NjIxN2RiYWY2Y2NhMjVhNmFiZmJkNDIxOWZiYjVhMjBhNTA5NjI3ODUyNTA2OGVlYTliYWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiNWMyM2EwNGU0ZGRjMDM3MWFjYjZjM2FjMjE2OGQ3YzUxYjE2ZjI3YWIzN2JmYTc5NjNhZDU2MzliY2FkZTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMzNjA1NGZlODEzMzYzZmMzZjAxOWY5OTA2Nzc4NWM5OTEyYTY4MTdjMGY2NjAzNDcxNTdlMjdhYTFkYTgyM2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3MDgxNDJkNDk3Yjc4ZGUwMmFjNzM1NDQ3NmUzYWQ3ZjgxMTMyM2IyNDcwMGRhM2VjNzU5NmZmNmUzOGM2NTYifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/harness.py#L237-L260",
-          "version": "repo-lines-v1:sha256:1c569ec2001d6e25f3d2430499e564e00d0cc239d7d7c1da40b012b05b04e349:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwOWI3NWIwNTJjNzM1M2MwMjM5NWQ4YmU3MzRiZDY1NTljODU4YWU1MjJiNzU4OWQzZjVmZTA1OGZjMjE3YzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3MDFmNjEwNmJjYmMxZWI4NTI4ZDFhY2ZiMzNjYmI0OWRiZGM0ZDg4NWNmMjJhNmMwZjE2MjJhYmQ3YmY1ZjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY5YTQxOTJiNDViZDY2NjdjNjFhYmJjZWZhM2EzY2NjZGRlMTAwY2FlZDIwYjZmNTU1NDZjYmYyMDY5YjAzZjkifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_cd3916dc8a624441a4a6ec9760d8fadd",
-      "statement": "Beyond the basic Slack-to-PR flow, browser e2e tests cover Slack-to-web continuation, plan approval, environment authorization and propagation, Slack redelivery and busy-thread queueing, raw SSR authentication behavior, PR health presentation, and thread-tool changes reflected in the dashboard.",
-      "evidence": [
-        {
-          "resource": "repo://tests/e2e/tests/dashboard.spec.ts#L17-L114",
-          "version": "repo-lines-v1:sha256:59c3777aa7ed5cadba0000a0c9fb318ad733a0f171e724e1299debabc40f6c39:eyJzZWxlY3RlZExpbmVDb3VudCI6OTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmNmUwNDJjMWM4NmFlMTAxOWQyYmM3YTIyMmQxNDkxNDg0MjQ3Zjk4NjhkNDQ5MDUxNWUyYWUwZDRkY2M5YjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkzMjkxMDgxZGJkOGQ4MzI5NTk5MjczMTExM2E3MDdhMzY0MDBiZTA5YzFiZDQ2MmQyNDkzNjE2MzFmM2M4NWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM1NjE5NWQ3MmEyNTQ4YjViYTVmMzc4NTY3ZWMxMDg3ZjM2ZmJhM2RjOWM2ODJkMzIxMWVjMzRlYjAzZDgxOTIifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/dashboard_pull_requests.spec.ts#L15-L100",
-          "version": "repo-lines-v1:sha256:7b2164fc9fbf133d0fe1b89eef26347d524d207a8c727e60fa056131f7967252:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzNTczMzlkMzFkZjdlZmZkNDE4Y2RmMzRhOTVlY2QyZDZiMzkxNGU1NWI5OWFmYTdjOTlhNDgwZGRjNDEyMWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyNzJlYzkxM2U0NTE5YzY1OTQ4OWU1MjVjODI4ZWI5MWJhMWRiZjhhMDE1ODc5N2ZhNWQ0NzYwMjhhNzA5MDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2MWVhOTc1NTNlNDMyZjE5Yzk1YjQ5YWQ5ZDg3ZjJhMzg3NzllMWIzYzVmNWM0MWYwYzFhODU2MWVkNjZlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEzMDNkYmUwMzMzMDMxNjU2YzYwYWQ5N2ZhOWMwMzdjMmNhNGQwYjYzMTFmMzlhN2FlMzdjZmQwMjFkYzUwMWUifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/environments.spec.ts#L133-L254",
-          "version": "repo-lines-v1:sha256:bd01593f17dbddf37616c5851287ec3f8db3ddc5fe050f7ace1a789472fa3ae7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJjMjBlNzNkOWY3YjUyOWY0MTVmZTVmMGY5Mjg3ZGRmNmU2MzJkYmQ3ZDRiMTlkYTFlODE5MmYwZTVjZDBhNGU3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI2YmZjMzU2ZDk1ZWQ0NTJmMTM0ZmQ0ZWI0NDVhYzI5MzQ0YTExYmIxZGQ5YzYzZjM0ZjhkMzU4MmFkM2RmN2NiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiZjk5OWFmMjQxZWI3ZjgxNDkzYjI1M2E3NzI4Njg2Y2Q1ZjBhN2ZjMzc3NTRkYjczNDlkZTk5MWVkOTFkYWZjIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJkZTI3ZmFlNjkyMDgyZTBjMmNmNGQ5N2Q2MWUyMGNhZmUxOWQ2N2YwMWJiNGI1NjZmZDYzMTYyNTFkNDljY2RjIn0"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/plan_review.spec.ts#L8-L15",
-          "version": "repo-lines-v1:sha256:cb3e64030ae61300ddd81d43269b84bfef822c489f0bd4775d2b67be4b920ef5:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmFlNWMwZmUzYTk3MDQ2OWRiZmJiZjM5OGVmMGUyYjVhYmRlNjU1NjU0YWFlYjU5MjQyY2EzMWY1MDU1NDczYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDhkNTVmNjg3YmQwMTNkMDAyNDM0NjQ2YThhMDhhY2U5M2Y2Y2Y4NGU3NjRlZjg0MTllNjA5MGIyM2M1ODgyOSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODM0YmI1NjExYWQzNDRhNGNiNjYxODgyZWQ5MGJjYzFhZDM1YWQzMzQ5NTY0YmIzNjE0MjMxNjExODRjMzNmNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDEzOTdlNTQ3MTY3MjFjNTQ5ODIyOTNkMTk0ZmUyZTc0NTI4ZTA0ZmJlZTNhZmE0M2NjYTg5Yjg0MmU0YjAzNSJ9"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/slack_debounce.spec.ts#L3-L85",
-          "version": "repo-lines-v1:sha256:e2b795bb9cba9a58a0e9a54f573ef6dd5e56fad92e2897b876104834f6737b26:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYwNDJjOTMzYjNiNmMwNDYzNDVkOTJjZGNjY2I0MzM2YzhhMzBmNzgxYmNiM2Q5YTEzZDQ1MjJiYmNkMjc3NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNkNTQyNzFhNGFmMzk5Nzk3NjQ2YTI1ZjEzMjE5NTg0NzA3NDczNjM1MzUyMjc1MGQzNDhmZTM3YjEzMWExYmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/slack_event_dedupe.spec.ts#L3-L80",
-          "version": "repo-lines-v1:sha256:9ae1b3083da0d07755a53112d093849ce39542f32b29f2cd80a2728640492aa3:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YzE2OGZkOGJlOGRiNGI1ZjdjYTUzZWE1YWNlODgwYTgyZWI1YTc1MTMxYmFkNjEwNDAxMTRiZTljMjg0YTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNkNTQyNzFhNGFmMzk5Nzk3NjQ2YTI1ZjEzMjE5NTg0NzA3NDczNjM1MzUyMjc1MGQzNDhmZTM3YjEzMWExYmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/ssr.spec.ts#L3-L33",
-          "version": "repo-lines-v1:sha256:74d677e03da16202799461f5c3f5d0d1c64cfef9f0c61442660b71a2e14060bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1MTkwNGJiYTk3YzMxMDllNzJiZDk3M2I2OWUwNDE1ZjNiOTJlM2FhMmVlMTRkNDhjMWYyMTE4NzA4NWYwMDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJiNDk4NjA2YjlkNjYyMDMzM2I5YWZhZjQwMzM2YzhlZGRjODg5YzM3ZGRkNzE5MDIyMjVkYTE4ZDM4MmUxYmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIifQ"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/thread_tools.spec.ts#L160-L228",
-          "version": "repo-lines-v1:sha256:3824dcbf662b301fd810c6f8e41db8e43d7403af463d087e5141e702a01d2843:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5OWQyZDM3YWFjMThjMTFiMmNjNjBhMzA0NTdkYWM1MTVjNDAwZDQxOTFmODcxOWRiZDJlODgwZjdmYTk3MWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjViNmRjOTU0NTkyZGExYTBiZWRhMTI1YTExYjg4MjQ1NzRmOGE2NWIwZTVlMWM1YTQ2ZDhiMGIyMmI3ZDNmZDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_8c8b7d077a904cf499ca74ba70b54e9e",
-      "statement": "Dashboard CSRF tests require configured cookie-authenticated mutations to use an allowed Origin or Referer, reject malformed, null, missing, and prefix-bypass origins, permit the desktop origin, and reject non-JSON command payloads while reads skip the mutation origin check.",
-      "evidence": [
-        {
-          "resource": "repo://tests/dashboard/test_dashboard_csrf.py#L43-L220",
-          "version": "repo-lines-v1:sha256:131fcd91596e144fbd1db90b2a24dd0f952a2b0ad0ef98c6b48af698f3fd4170:eyJzZWxlY3RlZExpbmVDb3VudCI6MTc4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyNWNmYTI0ZmYwYjA5OGMzOTA4NzI3NTI4NTcwYWJlNzA3ZDFlOThlMzBmNGRmZDI3ZGU0NjZkZjlhMWYzMjhjIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MDcwNzlmYTFmYjg0YzgzNWQ4NjMzOTU2YWZlYzljYTI2Mzc0YjNiNzMyN2FkZWM5ODU2ZTBhZWFlNzkxYTg2In0"
+          "resource": "repo://tests/e2e/harness.py",
+          "version": "repo-file-v1:sha256:32d8d7d56fca7d7de6707f27998ea0f2567c2f304a9be345c8533ec182158b48"
         }
       ]
     },
@@ -375,36 +199,44 @@
       "statement": "Agent assembly tests require the main agent to receive an initialized sandbox-backed composite backend, preserving deepagents context eviction and summarization support, and verify source-sensitive skills/tools plus middleware and parent-tool boundaries.",
       "evidence": [
         {
-          "resource": "repo://tests/agent/test_agent_assembly_context.py#L1-L8",
-          "version": "repo-lines-v1:sha256:c55b4ad6f06ec9e7fad45b0d69c0d3ed0dae9109933d79ae5d54f184ab4f99ab:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWRhNjY2OTFkNWM3OTQ5YjM3NDAzOTJjYzJmODRlY2MxZWFmMGJhNzExNjI3NTk3Yjc1NGRhZmNlMjU5NTRmNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWEzNGI1ZjEyNzFmNDdiMGIxNzAxNDZkMTM3MjM1MjM0NGI4MzU5MDRiMWNlNGRiZmY0M2ZhNjhkZDg3NjMyMCJ9"
-        },
-        {
-          "resource": "repo://tests/agent/test_agent_assembly_context.py#L120-L246",
-          "version": "repo-lines-v1:sha256:6300a6fc948f2fd62ccf0c5ed0685f8ef10169d063db914bd38847795255005d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTI3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI1Njc5ZjU3MDdjNDdiMWZjYjZlZWQzYzZkZGYxNzA4MjU5YzRhYTQ5NGMwMGY1ODYxOTc2NDAzMDFkZTljN2YzIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJjNDU0ZjYyMzU3ODBlYzcwZDBhMTM3Njc1YTY5N2JmNTMyMGZjNjIxZmM0MWU2MjAzYjJjMmYxOTBkMDQzMWE0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5In0"
-        },
-        {
-          "resource": "repo://tests/agent/test_agent_assembly_context.py#L260-L285",
-          "version": "repo-lines-v1:sha256:aa45ab421122c5cc533a92a9a47240ca60350e378ba119f2724d4b9d99569319:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzOGQxZmQ3N2M5MzY1MDMwMmNhNjA0MWYyNGQxNTVmYWJjMGE1ZDY1NWRjNmUyZjY5ZjZmZDQ0M2MxNTVhMzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhNjBlMmNkZGY4OTkyODI5ZDczMjA2NzBkNzczOTY2ZWEwMzk3NDE2ZmFmNGExNjJlNWU3NzUyOWI4OTJlOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
-        },
-        {
-          "resource": "repo://tests/agent/test_agent_assembly_context.py#L367-L421",
-          "version": "repo-lines-v1:sha256:432d3619b505ce8b6369c84e27d72fbd90beae1f4eb9cd628a9348c3f16b05b6:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwYmY0Yzk5MjAzYmM3NjAxMDM2MTIzZjFjMjYwZDg2YWIzMTRlYjNjMTBmYzcwNGYzNGVhNjU5Njg4MzgwYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+          "resource": "repo://tests/agent/test_agent_assembly_context.py",
+          "version": "repo-file-v1:sha256:bfeff45520c04fdb29ba2ede88628408452260339610448ac9541ffc286467ff"
         }
       ]
     },
     {
-      "id": "claim_cca68070fb25416fbdeb424b523419c8",
-      "statement": "Dashboard activity tests refresh completed run status in listings and mark a finished thread viewed on read, but do not mark a running thread viewed; a surfaced Slack thread can be marked viewed by any authenticated user.",
+      "id": "claim_68ee6133f3cc407ba9905295cde28ace",
+      "statement": "Completion webhook tests require an errored Slack run to post a failure reply with an Open SWE Web link and persist the run ID, while an errored reviewer run settles its tracked check neutrally unless a pending review result is present.",
       "evidence": [
         {
-          "resource": "repo://tests/dashboard/test_dashboard_thread_api_activity.py#L47-L139",
-          "version": "repo-lines-v1:sha256:4887333b6b8077d0588c6b42ce569ad6a8a722587ed609786902674649678616:eyJzZWxlY3RlZExpbmVDb3VudCI6OTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyNzY3ZmNkMmZkYzNhYjU1NTEzYWIzNGVhZDAxOTBjMDhjYjFkMDJmYzA1ODMxZWQ3NTFhZDM4YWM3ZGRjZTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2YzM5NzA4MmQ4YjFhMDUwNGFmZjY5MjcwZjc3N2E5NDA0ZTk2YTE0MzNlYWZmMzBiYmY2ZDg4ZGZjYjA4YTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg2NzVjYzNmOWE2ZmJhNmNkMTRkMWZiODU1NWViM2ZiNmUzY2UyZGJhYWQxODJkMTJhNmZkMjAzMjdmNjU1NTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://tests/webhooks/test_completion_webhook.py",
+          "version": "repo-file-v1:sha256:70779e22596916b0bfbd9b3415925b57bb2060c9825030ad46e3bb46d5c5bee4"
+        }
+      ]
+    },
+    {
+      "id": "claim_71e5230fcf3c41a98c23a97936dfb820",
+      "statement": "Analyzer cron tests require continual-learning cron creation to carry the analyzer assistant, continual mode, an explicit thread ID, and the learning skill, persist the cron ID, remain idempotent, and clear the ID on removal.",
+      "evidence": [
+        {
+          "resource": "repo://tests/analyzer/test_analyzer_cron.py",
+          "version": "repo-file-v1:sha256:e19beffaf1c2b0c8ce996f9566a734951450c9737ffe7b2d7d40876c6e3fd76f"
+        }
+      ]
+    },
+    {
+      "id": "claim_227bd10b279b42fc8a0ac3fa3eb92588",
+      "statement": "The Vitest configuration preserves TanStack Start client rewrites while avoiding Nitro's server module runner, defaults tests to Node, and permits per-file jsdom with a non-opaque localhost URL.",
+      "evidence": [
+        {
+          "resource": "repo://ui/vitest.config.ts",
+          "version": "repo-file-v1:sha256:ff794b1a950adf0bfa7259dcd2d09144d64b16088d7d07844942e31c1f620df6"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-02T08:15:43.727Z"
+    "at": "2026-09-05T08:12:56.060Z"
   }
 }
