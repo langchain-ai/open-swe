@@ -26,7 +26,13 @@ interface Environment {
   repos: Array<string>;
   snapshot_id: string | null;
   snapshot_name: string | null;
+  init_script?: string;
   snapshot_status: string;
+  snapshot_tag?: string | null;
+  validated_init_script?: string;
+  refresh_status?: string;
+  refresh_error?: string | null;
+  refresh_log?: string | null;
 }
 
 async function loginAs(page: Page, user: { login: string; email: string }) {
@@ -79,9 +85,14 @@ async function saveDefaultModel(page: Page) {
   expect(res.ok()).toBeTruthy();
 }
 
-async function capturedSnapshots(
-  page: Page,
-): Promise<Array<{ snapshot_id: string; name: string; sandbox_id: string }>> {
+async function capturedSnapshots(page: Page): Promise<
+  Array<{
+    snapshot_id: string;
+    name: string;
+    tag: string | null;
+    sandbox_id: string;
+  }>
+> {
   const res = await page.request.get("/control/snapshots");
   expect(res.ok()).toBeTruthy();
   return (
@@ -89,6 +100,7 @@ async function capturedSnapshots(
       captured: Array<{
         snapshot_id: string;
         name: string;
+        tag: string | null;
         sandbox_id: string;
       }>;
     }
@@ -138,9 +150,9 @@ test.describe("Environments", () => {
     await deleteEnvironment(page, DRAFT_SLUG);
     await createEnvironment(page, DRAFT_NAME, "");
 
-    await page.goto("/my-settings");
+    await page.goto("/environments");
     const section = page
-      .getByRole("heading", { name: "Environments" })
+      .getByRole("heading", { name: "Environments", level: 2 })
       .locator("xpath=ancestor::section");
     await expect(section).toBeVisible();
     await expect(section.getByText(DRAFT_NAME)).toBeVisible();
@@ -163,9 +175,9 @@ test.describe("Environments", () => {
     expect(res.status()).toBe(403);
 
     await page.goto("/agents/environments");
-    await expect(page).toHaveURL(/\/my-settings/);
+    await expect(page).toHaveURL(/\/environments$/);
     await expect(
-      page.getByRole("heading", { name: "Environments" }),
+      page.getByRole("heading", { name: "Environments", level: 2 }),
     ).toBeVisible();
     await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
 
@@ -294,16 +306,27 @@ test.describe("Environments", () => {
     expect(record?.snapshot_status).toBe("ready");
     expect(record?.snapshot_name).toBe(EXPECTED_SNAPSHOT_NAME);
 
-    // The capture went to the platform against this thread's own sandbox.
+    // The scripts ran and the whole refresh is recorded, log and all.
+    expect(record?.refresh_status).toBe("success");
+    expect(record?.refresh_error).toBeNull();
+    expect(record?.refresh_log).toContain("--- setup script ---");
+    expect(record?.refresh_log).toContain(".provisioned");
+    expect(record?.refresh_log).toContain("--- init script ---");
+    // Only a script that passed here is allowed to run on later sandboxes.
+    expect(record?.validated_init_script).toBe(record?.init_script);
+
+    // Published as name:latest, and captured from the refresh's own builder
+    // sandbox rather than this thread's.
     const captures = await capturedSnapshots(page);
     expect(captures.map((c) => c.name)).toEqual([EXPECTED_SNAPSHOT_NAME]);
+    expect(captures.map((c) => c.tag)).toEqual(["latest"]);
     expect(captures[0]?.snapshot_id).toBe(record?.snapshot_id);
     const threadRes = await page.request.get(
       `/dashboard/api/threads/${threadId}?mark_viewed=false`,
     );
     expect(threadRes.ok()).toBeTruthy();
     const thread = (await threadRes.json()) as { sandboxId?: string | null };
-    expect(captures[0]?.sandbox_id).toBe(thread.sandboxId);
+    expect(captures[0]?.sandbox_id).not.toBe(thread.sandboxId);
 
     // A later run is told about the environment: the prompt is appended verbatim.
     await typeIntoComposer(page, "Thanks — anything else needed?");
@@ -316,9 +339,13 @@ test.describe("Environments", () => {
     // Admin threads also carry the environment-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
-    await page.goto("/my-settings");
+    await page.goto("/environments");
     await expect(page.getByText("Default environment")).toBeVisible();
-    await expect(page.getByText("Snapshot ready")).toBeVisible();
+    await expect(
+      page.getByText("Default environment · Snapshot ready"),
+    ).toBeVisible();
+    await expect(page.getByText(/^Refreshed /)).toBeVisible();
+    await expect(page.getByText("Refresh log")).toBeVisible();
     await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     // Leave no default behind: later specs' runs would boot from it.

@@ -1,17 +1,23 @@
-"""Named environments: a custom prompt plus a sandbox snapshot.
+"""Named environments: a prompt plus the scripts that build and boot their sandboxes.
 
-An environment bundles the two things a team needs to make runs start warm: a
-prompt appended to the agent's system prompt, and a LangSmith snapshot new
-sandboxes boot from. It may cover several repositories — the snapshot is captured
-from a live sandbox after the agent has cloned and provisioned whatever the
-environment needs, so its contents are whatever was set up in that sandbox.
+An environment is a definition, not a frozen image. It holds a prompt appended to
+the agent's system prompt, a ``setup_script`` that provisions a sandbox from the
+base snapshot (clone the repos, install toolchains, warm caches), and an optional
+``init_script`` run on every new sandbox booted from the resulting snapshot to
+freshen what goes stale in an image.
 
-Snapshots are captured (not built from a Dockerfile) so the setup steps are
-ordinary sandbox commands an admin can iterate on in an admin thread. Each
-capture is named ``<prefix>-environment-<slug>`` (prefix from
-``ENVIRONMENT_SNAPSHOT_PREFIX``); the platform appends its own ``:latest`` tag and
-rejects a name that carries one. The previous snapshot is deleted once the new one
-is ready, so an environment resolves to exactly one live snapshot.
+:mod:`agent.dashboard.environment_refresh` runs both scripts in a throwaway
+sandbox and captures the result, nightly on a cron and on demand. Because the
+scripts are the definition, the snapshot can always be rebuilt, and the refresh
+outcome — status, timestamps, and a capped log — rides on the record for the
+dashboard to show.
+
+Snapshots are Docker-style: an environment owns a name (its own, or
+``<prefix>-environment-<slug>`` from ``ENVIRONMENT_SNAPSHOT_PREFIX``) and each
+refresh publishes under ``name:latest``, moving the tag to the new content. Runs
+boot from the immutable snapshot id on the record, not from the tag, so a refresh
+mid-run cannot change what a reconnecting sandbox comes back to. The superseded
+snapshot is deleted once the new one is ready, so one environment costs one image.
 
 A run uses the environment it selected — from the dashboard picker, or an
 ``env:<name>`` tag on the Slack message that opened the thread — and otherwise
@@ -19,10 +25,12 @@ the one named ``default``. Nothing here is required: with no environment, or one
 whose snapshot is not ready, runs fall back to the configured base snapshot.
 """
 
+import base64
 import json
 import logging
 import os
 import re
+import shlex
 from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
@@ -36,6 +44,7 @@ ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
 DEFAULT_ENVIRONMENT_SLUG = "default"
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
+RefreshStatus = Literal["never", "refreshing", "success", "failed"]
 
 
 class SandboxResources(TypedDict, total=False):
@@ -48,7 +57,15 @@ NAME_MAX_CHARS = 80
 PROMPT_MAX_CHARS = 20_000
 MAX_REPOS = 50
 CREATE_PARAMS_MAX_CHARS = 20_000
-CAPTURE_NAME_ATTEMPTS = 5
+SCRIPT_MAX_CHARS = 20_000
+REFRESH_LOG_MAX_CHARS = 40_000
+SNAPSHOT_NAME_MAX_CHARS = 128
+LOG_EXCERPT_LINES = 10
+SNAPSHOT_TAG = "latest"
+
+SETUP_SCRIPT_PATH = "/tmp/openswe-environment-setup.sh"  # noqa: S108
+INIT_SCRIPT_PATH = "/tmp/openswe-environment-init.sh"  # noqa: S108
+DEFAULT_INIT_SCRIPT_TIMEOUT_SECONDS = 2 * 60 * 60
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_CREATE_PARAM_KEYS = frozenset(
@@ -123,16 +140,44 @@ def snapshot_name_prefix() -> str:
     return prefix or "openswe"
 
 
-def snapshot_name_for(slug: str, attempt: int = 1) -> str:
-    """``<prefix>-environment-<slug>``, with ``-2``, ``-3``, … past the first attempt.
+def default_snapshot_name_for(slug: str) -> str:
+    """``<prefix>-environment-<slug>``: the name an environment publishes under."""
+    return f"{snapshot_name_prefix()}-environment-{slug}"
 
-    No tag: the platform rejects a colon in the name and appends ``:latest``
-    itself. The numeric suffix exists because a capture can collide with a name
-    the platform still holds (a prior snapshot mid-delete, a concurrent capture);
-    the record stores whichever name won.
+
+def script_command(script: str, path: str) -> str:
+    """Shell command that writes one of an environment's scripts and runs it.
+
+    Base64 so nothing in the script body — quotes, heredocs, newlines — can break
+    out of the command carrying it. Output is merged so the caller gets one log.
     """
-    stem = f"{snapshot_name_prefix()}-environment-{slug}"
-    return stem if attempt == 1 else f"{stem}-{attempt}"
+    encoded = base64.b64encode(script.encode()).decode()
+    return f"printf %s {shlex.quote(encoded)} | base64 -d > {path} && bash {path} 2>&1"
+
+
+def init_script_timeout() -> int:
+    """Deadline for the per-sandbox init script, which blocks the first model call."""
+    raw = os.environ.get("ENVIRONMENT_INIT_SCRIPT_TIMEOUT_SECONDS", "").strip()
+    try:
+        value = int(raw) if raw else 0
+    except ValueError:
+        value = 0
+    return value if value > 0 else DEFAULT_INIT_SCRIPT_TIMEOUT_SECONDS
+
+
+def log_excerpt(log: str | None, *, lines: int = LOG_EXCERPT_LINES) -> str | None:
+    """Head and tail of a refresh log, for readers who should not see all of it.
+
+    A setup script prints whatever it prints, so the middle — dependency
+    resolution, compiler chatter — is both the bulk and the least useful part.
+    """
+    if not log or not log.strip():
+        return None
+    entries = log.strip().splitlines()
+    if len(entries) <= lines * 2:
+        return "\n".join(entries)
+    omitted = len(entries) - lines * 2
+    return "\n".join([*entries[:lines], f"… {omitted} lines omitted …", *entries[-lines:]])
 
 
 def _validate_name(value: str) -> str:
@@ -149,6 +194,25 @@ def _validate_prompt(value: str | None) -> str:
     text = (value or "").strip()
     if len(text) > PROMPT_MAX_CHARS:
         raise ValueError(f"prompt must be at most {PROMPT_MAX_CHARS} characters")
+    return text
+
+
+def _validate_script(value: str | None) -> str:
+    text = (value or "").strip()
+    if len(text) > SCRIPT_MAX_CHARS:
+        raise ValueError(f"script must be at most {SCRIPT_MAX_CHARS} characters")
+    return text
+
+
+def _validate_snapshot_name(value: str | None) -> str | None:
+    """A colon would be read as the ``name:tag`` separator, so the name may not carry one."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    if ":" in text:
+        raise ValueError("snapshot_name must not contain a colon")
+    if len(text) > SNAPSHOT_NAME_MAX_CHARS:
+        raise ValueError(f"snapshot_name must be at most {SNAPSHOT_NAME_MAX_CHARS} characters")
     return text
 
 
@@ -215,6 +279,10 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
 class EnvironmentCreate(BaseModel):
     name: str
     prompt: str = ""
+    setup_script: str = ""
+    init_script: str = ""
+    base_snapshot_id: str | None = None
+    snapshot_name: str | None = None
     repos: list[str] = Field(default_factory=list)
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
@@ -230,6 +298,21 @@ class EnvironmentCreate(BaseModel):
     @classmethod
     def _check_prompt(cls, v: str) -> str:
         return _validate_prompt(v)
+
+    @field_validator("setup_script", "init_script")
+    @classmethod
+    def _check_script(cls, v: str) -> str:
+        return _validate_script(v)
+
+    @field_validator("base_snapshot_id")
+    @classmethod
+    def _check_base_snapshot_id(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
+
+    @field_validator("snapshot_name")
+    @classmethod
+    def _check_snapshot_name(cls, v: str | None) -> str | None:
+        return _validate_snapshot_name(v)
 
     @field_validator("repos")
     @classmethod
@@ -247,6 +330,10 @@ class EnvironmentUpdate(BaseModel):
 
     name: str | None = None
     prompt: str | None = None
+    setup_script: str | None = None
+    init_script: str | None = None
+    base_snapshot_id: str | None = None
+    snapshot_name: str | None = None
     repos: list[str] | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
@@ -262,6 +349,16 @@ class EnvironmentUpdate(BaseModel):
     @classmethod
     def _check_prompt(cls, v: str | None) -> str | None:
         return None if v is None else _validate_prompt(v)
+
+    @field_validator("setup_script", "init_script")
+    @classmethod
+    def _check_script(cls, v: str | None) -> str | None:
+        return None if v is None else _validate_script(v)
+
+    @field_validator("snapshot_name")
+    @classmethod
+    def _check_snapshot_name(cls, v: str | None) -> str | None:
+        return _validate_snapshot_name(v)
 
     @field_validator("repos")
     @classmethod
@@ -283,6 +380,9 @@ class Environment(BaseModel):
     slug: str
     name: str = ""
     prompt: str = ""
+    setup_script: str = ""
+    init_script: str = ""
+    base_snapshot_id: str | None = None
     repos: list[str] = Field(default_factory=list)
     mem_bytes: int | None = None
     vcpus: int | None = None
@@ -292,8 +392,18 @@ class Environment(BaseModel):
     snapshot_name: str | None = None
     snapshot_status: SnapshotStatus = "none"
     status_message: str | None = None
+    snapshot_tag: str | None = None
+    # The init script as it stood when the live snapshot was captured. `init_script`
+    # is the desired one and may be unvalidated; this is the one that shipped.
+    validated_init_script: str = ""
     source_sandbox_id: str | None = None
     last_captured_at: str | None = None
+    refresh_status: RefreshStatus = "never"
+    refresh_started_at: str | None = None
+    refresh_finished_at: str | None = None
+    refresh_log: str | None = None
+    refresh_error: str | None = None
+    refresh_cron_id: str | None = None
     created_by: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -304,6 +414,12 @@ class Environment(BaseModel):
         """``EnvironmentUpdate`` clears create params with an explicit null."""
         return {} if v is None else v
 
+    @field_validator("setup_script", "init_script", mode="before")
+    @classmethod
+    def _scripts_are_stripped(cls, v: Any) -> Any:
+        """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
+        return v.strip() if isinstance(v, str) else ("" if v is None else v)
+
     @classmethod
     def seed(cls, create: EnvironmentCreate, created_by: str) -> Environment:
         now = now_iso()
@@ -311,6 +427,10 @@ class Environment(BaseModel):
             slug=slugify(create.name),
             name=create.name.strip(),
             prompt=create.prompt,
+            setup_script=create.setup_script,
+            init_script=create.init_script,
+            base_snapshot_id=create.base_snapshot_id,
+            snapshot_name=create.snapshot_name or default_snapshot_name_for(slugify(create.name)),
             repos=create.repos,
             mem_bytes=create.mem_bytes,
             vcpus=create.vcpus,
@@ -323,14 +443,29 @@ class Environment(BaseModel):
 
     @property
     def ready_snapshot_id(self) -> str | None:
-        """The snapshot new sandboxes boot from, or ``None`` when not captured yet."""
-        if self.snapshot_status != "ready":
+        """The snapshot new sandboxes boot from, or ``None`` when not captured yet.
+
+        A capture in flight still serves the previous snapshot: the new id is
+        written only once the capture succeeds, so the old one stays valid
+        throughout. Dropping it here would send every run started during a
+        nightly refresh to the bare base image.
+        """
+        if self.snapshot_status not in ("ready", "capturing"):
             return None
         return self.snapshot_id or None
 
     @property
     def instructions(self) -> str | None:
         return self.prompt.strip() or None
+
+    @property
+    def published_snapshot_name(self) -> str:
+        """The name this environment publishes under, stored or derived.
+
+        Stable for the life of the environment: every refresh re-captures under
+        it and moves the tag, so the name is an address callers can hold.
+        """
+        return self.snapshot_name or default_snapshot_name_for(self.slug)
 
     def sandbox_resources(self) -> SandboxResources:
         """VM sizing as sandbox-create kwargs, omitting anything unset."""
@@ -360,6 +495,10 @@ class Environment(BaseModel):
             "slug": self.slug,
             "name": self.name,
             "has_snapshot": self.snapshot_status == "ready",
+            "refresh_status": self.refresh_status,
+            "refresh_finished_at": self.refresh_finished_at,
+            "refresh_error": self.refresh_error,
+            "refresh_log_excerpt": log_excerpt(self.refresh_log),
         }
 
 
@@ -396,7 +535,18 @@ class EnvironmentStore(TypedStore[Environment]):
             record.prompt = update.prompt
         if update.repos is not None:
             record.repos = update.repos
-        for field in ("mem_bytes", "vcpus", "fs_capacity_bytes", "create_params"):
+        if update.setup_script is not None:
+            record.setup_script = update.setup_script
+        if update.init_script is not None:
+            record.init_script = update.init_script
+        for field in (
+            "mem_bytes",
+            "vcpus",
+            "fs_capacity_bytes",
+            "create_params",
+            "base_snapshot_id",
+            "snapshot_name",
+        ):
             if field in update.model_fields_set:
                 setattr(record, field, getattr(update, field))
         return await self.save(record)
@@ -406,6 +556,9 @@ class EnvironmentStore(TypedStore[Environment]):
         if record is None:
             return False
         await self.delete(slug)
+        from agent.dashboard.environment_refresh import remove_refresh_cron
+
+        await remove_refresh_cron(record)
         await _delete_snapshot(record.snapshot_id)
         return True
 
@@ -429,7 +582,13 @@ class EnvironmentStore(TypedStore[Environment]):
         return await self.save(record)
 
     async def mark_captured(
-        self, slug: str, *, snapshot_id: str, snapshot_name: str, source_sandbox_id: str
+        self,
+        slug: str,
+        *,
+        snapshot_id: str,
+        snapshot_name: str,
+        source_sandbox_id: str,
+        snapshot_tag: str = SNAPSHOT_TAG,
     ) -> Environment | None:
         record = await self.get(slug)
         if record is None:
@@ -438,8 +597,44 @@ class EnvironmentStore(TypedStore[Environment]):
         record.status_message = None
         record.snapshot_id = snapshot_id
         record.snapshot_name = snapshot_name
+        record.snapshot_tag = snapshot_tag
+        record.validated_init_script = record.init_script
         record.source_sandbox_id = source_sandbox_id
         record.last_captured_at = now_iso()
+        return await self.save(record)
+
+    async def mark_refreshing(self, slug: str) -> Environment | None:
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.refresh_status = "refreshing"
+        record.refresh_started_at = now_iso()
+        record.refresh_finished_at = None
+        record.refresh_log = None
+        record.refresh_error = None
+        return await self.save(record)
+
+    async def mark_refresh_settled(
+        self,
+        slug: str,
+        status: RefreshStatus,
+        *,
+        log: str | None = None,
+        error: str | None = None,
+    ) -> Environment | None:
+        """Record how the last rebuild went, without touching snapshot state.
+
+        Snapshot state answers "is there something to boot from"; this answers
+        "did the last rebuild work". A failed refresh leaves the previous
+        snapshot ``ready``, so the two must not share a field.
+        """
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.refresh_status = status
+        record.refresh_finished_at = now_iso()
+        record.refresh_log = (log or "")[-REFRESH_LOG_MAX_CHARS:] or None
+        record.refresh_error = error[:1000] if error else None
         return await self.save(record)
 
 
@@ -506,7 +701,7 @@ def parse_environment_tag(text: str) -> tuple[str | None, str]:
     return slug, f"{before} {after}".strip() if before and after else f"{before}{after}".strip()
 
 
-def _require_capture_support() -> None:
+def require_capture_support() -> None:
     """Only the langsmith provider has a snapshot API to capture into."""
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type != "langsmith":
@@ -528,42 +723,17 @@ async def _delete_snapshot(snapshot_id: object) -> None:
         logger.warning("failed to delete superseded snapshot %s", snapshot_id, exc_info=True)
 
 
-def _is_name_conflict(exc: BaseException) -> bool:
-    if exc.__class__.__name__ in {"ResourceAlreadyExistsError", "ResourceNameConflictError"}:
-        return True
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
-    return status_code == 409
-
-
-async def _capture_with_name_retry(
-    client: Any, sandbox_id: str, slug: str, timeout: int
-) -> tuple[Any, str]:
-    """Capture, walking the name suffix forward past whatever the platform still holds."""
-    for attempt in range(1, CAPTURE_NAME_ATTEMPTS + 1):
-        snapshot_name = snapshot_name_for(slug, attempt)
-        try:
-            snapshot = await client.capture_snapshot(sandbox_id, snapshot_name, timeout=timeout)
-        except Exception as exc:
-            if attempt == CAPTURE_NAME_ATTEMPTS or not _is_name_conflict(exc):
-                raise
-            logger.info(
-                "Snapshot name %s is taken; retrying environment %s with the next suffix",
-                snapshot_name,
-                slug,
-            )
-            continue
-        return snapshot, snapshot_name
-    raise RuntimeError("unreachable snapshot capture retry state")
-
-
 async def capture_environment_snapshot(
     slug: str,
     sandbox_id: str,
     *,
     timeout: int = 600,
 ) -> Environment:
-    """Capture ``sandbox_id``'s filesystem as this environment's snapshot.
+    """Capture ``sandbox_id``'s filesystem as this environment's ``name:tag``.
+
+    The name belongs to the environment and never moves; each capture publishes
+    new content under it and the tag is repointed, which is why nothing here
+    handles a name collision — re-using a tag is the documented way to move it.
 
     The previous snapshot survives a failed capture, in both senses: it is deleted
     only once the new one is ready, and the record stays ``ready`` so runs keep
@@ -572,21 +742,25 @@ async def capture_environment_snapshot(
     Only the langsmith provider can capture; other providers have no snapshot API
     to capture into, so this raises rather than failing deep in the SDK.
     """
-    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+    from agent.sandboxes.providers.langsmith import (
+        capture_snapshot_with_tag,
+        get_async_sandbox_client,
+    )
 
-    _require_capture_support()
+    require_capture_support()
 
     record = await ENVIRONMENTS.get(slug)
     if record is None:
         raise ValueError(f"no environment named {slug!r}")
 
+    snapshot_name = record.published_snapshot_name
     previous_snapshot_id = record.snapshot_id
     previous_was_ready = record.ready_snapshot_id is not None
     await ENVIRONMENTS.mark_capturing(slug)
     try:
         async with get_async_sandbox_client() as client:
-            snapshot, snapshot_name = await _capture_with_name_retry(
-                client, sandbox_id, slug, timeout
+            snapshot = await capture_snapshot_with_tag(
+                client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout
             )
     except Exception as exc:
         logger.warning("snapshot capture failed for environment %s", slug, exc_info=True)
@@ -601,9 +775,23 @@ async def capture_environment_snapshot(
         slug,
         snapshot_id=snapshot.id,
         snapshot_name=snapshot_name,
+        snapshot_tag=SNAPSHOT_TAG,
         source_sandbox_id=sandbox_id,
     )
-    if previous_snapshot_id != snapshot.id:
+    # Re-read before deleting: a concurrent refresh may have captured and pointed
+    # the record at its own snapshot, and deleting ours would strand it.
+    current = await ENVIRONMENTS.get(slug)
+    if (
+        previous_snapshot_id != snapshot.id
+        and current is not None
+        and current.snapshot_id == snapshot.id
+    ):
         await _delete_snapshot(previous_snapshot_id)
-    logger.info("Captured snapshot %s (%s) for environment %s", snapshot.id, snapshot_name, slug)
+    logger.info(
+        "Captured snapshot %s as %s:%s for environment %s",
+        snapshot.id,
+        snapshot_name,
+        SNAPSHOT_TAG,
+        slug,
+    )
     return updated or record

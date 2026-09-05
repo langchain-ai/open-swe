@@ -1,8 +1,83 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import {
+  api,
+  type EnvironmentOption,
+  type EnvironmentRefreshStatus,
+} from "@/lib/api"
+import { formatRelativeTime } from "@/lib/utils"
+
+const REFRESH_LABEL: Record<EnvironmentRefreshStatus, string> = {
+  never: "Never refreshed",
+  refreshing: "Refreshing…",
+  success: "Refreshed",
+  failed: "Refresh failed",
+}
+
+const REFRESH_CLASS: Record<EnvironmentRefreshStatus, string> = {
+  never: "text-muted-foreground",
+  refreshing: "text-muted-foreground",
+  success: "text-muted-foreground",
+  failed: "text-destructive",
+}
+
+function refreshedAt(timestamp: string | null | undefined): string | null {
+  if (!timestamp) return null
+  const parsed = Date.parse(timestamp)
+  return Number.isNaN(parsed) ? null : formatRelativeTime(parsed)
+}
+
+function EnvironmentRow({
+  environment,
+  isDefault,
+}: {
+  environment: EnvironmentOption
+  isDefault: boolean
+}) {
+  const status = environment.refresh_status ?? "never"
+  const when = refreshedAt(environment.refresh_finished_at)
+  const log = environment.refresh_log_excerpt
+  const detail = [
+    isDefault ? "Default environment" : null,
+    environment.has_snapshot ? "Snapshot ready" : "No snapshot",
+  ]
+    .filter(Boolean)
+    .join(" · ")
+
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3.5">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm/none font-medium text-foreground">
+            {environment.name}
+          </span>
+          <span className="text-xs/relaxed text-muted-foreground">
+            {detail}
+          </span>
+        </div>
+        <span className={`text-xs sm:shrink-0 ${REFRESH_CLASS[status]}`}>
+          {REFRESH_LABEL[status]}
+          {status !== "refreshing" && when ? ` ${when}` : ""}
+        </span>
+      </div>
+      {environment.refresh_error && (
+        <p className="text-xs/relaxed text-destructive">
+          {environment.refresh_error}
+        </p>
+      )}
+      {log && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">Refresh log</summary>
+          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
+            {log}
+          </pre>
+        </details>
+      )}
+    </div>
+  )
+}
 
 export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
   const environments = useQuery({
@@ -18,8 +93,8 @@ export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
       title="Environments"
       description={
         isAdmin
-          ? "View the environments available to new agent threads. To create or edit one, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
-          : "View the environments available to new agent threads. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
+          ? "Each environment is rebuilt nightly from its setup script. To create or edit one, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
+          : "Each environment is rebuilt nightly from its setup script. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
       }
     >
       {environments.isLoading ? (
@@ -36,19 +111,10 @@ export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
         </p>
       ) : (
         options.environments.map((environment) => (
-          <SettingsRow
+          <EnvironmentRow
             key={environment.slug}
-            label={environment.name}
-            description={
-              environment.slug === options.default_slug
-                ? "Default environment"
-                : undefined
-            }
-            control={
-              <span className="text-xs text-muted-foreground">
-                {environment.has_snapshot ? "Snapshot ready" : "No snapshot"}
-              </span>
-            }
+            environment={environment}
+            isDefault={environment.slug === options.default_slug}
           />
         ))
       )}

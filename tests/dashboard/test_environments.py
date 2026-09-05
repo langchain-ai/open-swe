@@ -11,8 +11,9 @@ from agent.dashboard.environments import (
     Environment,
     EnvironmentCreate,
     EnvironmentUpdate,
+    default_snapshot_name_for,
+    log_excerpt,
     slugify,
-    snapshot_name_for,
 )
 from tests.conftest import FakeStore
 
@@ -62,23 +63,46 @@ def test_slugify_rejects_names_without_alphanumerics() -> None:
         slugify("---")
 
 
-def test_snapshot_name_carries_no_tag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The platform rejects a colon and appends its own `:latest`."""
+def test_snapshot_name_defaults_to_the_prefixed_slug(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ENVIRONMENT_SNAPSHOT_PREFIX", raising=False)
-    assert snapshot_name_for("monorepo") == "openswe-environment-monorepo"
-    assert snapshot_name_for("monorepo", 3) == "openswe-environment-monorepo-3"
+    assert default_snapshot_name_for("monorepo") == "openswe-environment-monorepo"
 
 
 def test_snapshot_name_prefix_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENVIRONMENT_SNAPSHOT_PREFIX", "acme")
-    assert snapshot_name_for("default") == "acme-environment-default"
+    assert default_snapshot_name_for("default") == "acme-environment-default"
 
 
 def test_no_generated_snapshot_name_contains_a_colon(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A colon anywhere in the name is rejected by the platform, so never emit one."""
+    """A colon separates name from tag, so a name carrying one is unaddressable."""
     monkeypatch.setenv("ENVIRONMENT_SNAPSHOT_PREFIX", "acme:v2")
-    for attempt in range(1, env_store.CAPTURE_NAME_ATTEMPTS + 1):
-        assert ":" not in snapshot_name_for("default", attempt)
+    assert ":" not in default_snapshot_name_for("default")
+
+
+def test_a_stored_snapshot_name_wins_over_the_derived_one() -> None:
+    assert (
+        Environment(slug="base", snapshot_name="acme-monorepo").published_snapshot_name
+        == "acme-monorepo"
+    )
+    assert Environment(slug="base").published_snapshot_name == "openswe-environment-base"
+
+
+def test_snapshot_name_rejects_a_tag_separator() -> None:
+    with pytest.raises(ValidationError, match="must not contain a colon"):
+        EnvironmentCreate(name="env", snapshot_name="acme-monorepo:v2")
+
+
+def test_scripts_are_stripped_on_the_way_in() -> None:
+    record = Environment(slug="base", setup_script="  make setup  ", init_script="   ")
+    assert record.setup_script == "make setup"
+    assert not record.init_script
+
+
+def test_log_excerpt_keeps_the_head_and_the_tail() -> None:
+    excerpt = log_excerpt("\n".join(str(n) for n in range(50)), lines=2)
+    assert excerpt == "0\n1\n… 46 lines omitted …\n48\n49"
+    assert log_excerpt("one\ntwo", lines=2) == "one\ntwo"
+    assert log_excerpt("   ") is None
 
 
 def test_create_validates_repo_full_names() -> None:
@@ -169,15 +193,43 @@ def test_create_params_enforce_serialized_size_limit() -> None:
         )
 
 
-def test_snapshot_id_only_resolves_when_ready() -> None:
-    assert (
-        Environment(slug="e", snapshot_status="capturing", snapshot_id="s-1").ready_snapshot_id
-        is None
-    )
+def test_snapshot_id_only_resolves_when_there_is_one() -> None:
     assert (
         Environment(slug="e", snapshot_status="ready", snapshot_id="s-1").ready_snapshot_id == "s-1"
     )
     assert Environment(slug="e", snapshot_status="ready").ready_snapshot_id is None
+    assert (
+        Environment(slug="e", snapshot_status="failed", snapshot_id="s-1").ready_snapshot_id is None
+    )
+
+
+def test_a_capture_in_flight_keeps_serving_the_previous_snapshot() -> None:
+    """The new id lands only on success, so the old one is still what runs want."""
+    capturing = Environment(slug="e", snapshot_status="capturing", snapshot_id="s-1")
+    assert capturing.ready_snapshot_id == "s-1"
+    # Nothing captured yet: a first capture in flight has nothing to fall back to.
+    assert Environment(slug="e", snapshot_status="capturing").ready_snapshot_id is None
+
+
+@pytest.mark.asyncio
+async def test_capture_records_the_init_script_that_shipped(fake_store: FakeStore) -> None:
+    """The snapshot and the init script validated against it move together."""
+    await ENVIRONMENTS.create(
+        EnvironmentCreate(name="base", setup_script="make setup", init_script="git pull"), "ramon"
+    )
+    record = await ENVIRONMENTS.get("base")
+    assert record is not None
+    assert record.validated_init_script == ""
+
+    captured = await ENVIRONMENTS.mark_captured(
+        "base",
+        snapshot_id="snap-1",
+        snapshot_name="openswe-environment-base",
+        source_sandbox_id="sb-1",
+    )
+
+    assert captured is not None
+    assert captured.validated_init_script == "git pull"
 
 
 def test_environment_prompt_blank_is_none() -> None:
@@ -302,10 +354,12 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
         ),
     ):
         await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
+        # A prior capture published under the environment's own name, as any real
+        # one would: the name is the address, and only the tag moves.
         await ENVIRONMENTS.mark_captured(
             "base",
             snapshot_id="snap-1",
-            snapshot_name="prior",
+            snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-prior",
         )
 
@@ -313,6 +367,7 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
 
     assert capture.await_args is not None
     assert capture.await_args.args == ("sb-123", "openswe-environment-base")
+    assert record.snapshot_tag == "latest"
     assert record.snapshot_status == "ready"
     assert record.snapshot_id == "snap-2"
     assert record.snapshot_name == "openswe-environment-base"
@@ -320,16 +375,10 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
     delete_snapshot.assert_awaited_once_with("snap-1")
 
 
-class _NameConflict(Exception):
-    """Stands in for the SDK's ResourceAlreadyExistsError (matched by class name)."""
-
-
-_NameConflict.__name__ = "ResourceAlreadyExistsError"
-
-
 @pytest.mark.asyncio
-async def test_capture_walks_the_name_suffix_past_a_conflict(fake_store: FakeStore) -> None:
-    capture = AsyncMock(side_effect=[_NameConflict("taken"), _FakeSnapshot("snap-2")])
+async def test_capture_publishes_under_the_environments_own_name(fake_store: FakeStore) -> None:
+    """A stored name is the address; the tag is what each refresh moves."""
+    capture = AsyncMock(return_value=_FakeSnapshot("snap-2"))
     with (
         patch.object(env_store, "_delete_snapshot", AsyncMock()),
         patch(
@@ -337,15 +386,15 @@ async def test_capture_walks_the_name_suffix_past_a_conflict(fake_store: FakeSto
             return_value=_sandbox_client(capture),
         ),
     ):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="default"), "ramon")
-        record = await env_store.capture_environment_snapshot("default", "sb-123")
+        await ENVIRONMENTS.create(
+            EnvironmentCreate(name="base", snapshot_name="acme-monorepo"), "ramon"
+        )
+        record = await env_store.capture_environment_snapshot("base", "sb-123")
 
-    assert [call.args[1] for call in capture.await_args_list] == [
-        "openswe-environment-default",
-        "openswe-environment-default-2",
-    ]
-    assert record.snapshot_status == "ready"
-    assert record.snapshot_name == "openswe-environment-default-2"
+    assert capture.await_args is not None
+    assert capture.await_args.args == ("sb-123", "acme-monorepo")
+    assert record.snapshot_name == "acme-monorepo"
+    assert record.snapshot_tag == "latest"
 
 
 @pytest.mark.asyncio
@@ -526,4 +575,14 @@ async def test_environment_options_omit_admin_only_settings(fake_store: FakeStor
     )
     options = await env_store.list_environment_options()
 
-    assert options == [{"slug": "default", "name": "default", "has_snapshot": True}]
+    assert options == [
+        {
+            "slug": "default",
+            "name": "default",
+            "has_snapshot": True,
+            "refresh_status": "never",
+            "refresh_finished_at": None,
+            "refresh_error": None,
+            "refresh_log_excerpt": None,
+        }
+    ]

@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
+import { Route as EnvironmentsRouteImport } from './routes/environments'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
@@ -55,6 +56,11 @@ const AgentsRoute = AgentsRouteImport.update({
 const CloudAgentsRoute = CloudAgentsRouteImport.update({
   id: '/cloud-agents',
   path: '/cloud-agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EnvironmentsRoute = EnvironmentsRouteImport.update({
+  id: '/environments',
+  path: '/environments',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
@@ -180,6 +186,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/environments': typeof EnvironmentsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
@@ -208,6 +215,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/cloud-agents': typeof CloudAgentsRoute
+  '/environments': typeof EnvironmentsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
@@ -238,6 +246,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/environments': typeof EnvironmentsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
@@ -269,6 +278,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/agents'
     | '/cloud-agents'
+    | '/environments'
     | '/integrations'
     | '/login'
     | '/my-settings'
@@ -297,6 +307,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/cloud-agents'
+    | '/environments'
     | '/integrations'
     | '/login'
     | '/my-settings'
@@ -326,6 +337,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/agents'
     | '/cloud-agents'
+    | '/environments'
     | '/integrations'
     | '/login'
     | '/my-settings'
@@ -356,6 +368,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AgentsRoute: typeof AgentsRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
+  EnvironmentsRoute: typeof EnvironmentsRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
@@ -398,6 +411,13 @@ declare module '@tanstack/react-router' {
       path: '/cloud-agents'
       fullPath: '/cloud-agents'
       preLoaderRoute: typeof CloudAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/environments': {
+      id: '/environments'
+      path: '/environments'
+      fullPath: '/environments'
+      preLoaderRoute: typeof EnvironmentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations': {
@@ -600,6 +620,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AgentsRoute: AgentsRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
+  EnvironmentsRoute: EnvironmentsRoute,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,

@@ -219,6 +219,38 @@ def _langsmith_proxy_rule(credentials: LangSmithCredentials) -> dict[str, Any]:
     }
 
 
+async def capture_snapshot_with_tag(
+    client: AsyncSandboxClient,
+    sandbox_id: str,
+    name: str,
+    tag: str,
+    *,
+    timeout: int,
+) -> Any:
+    """Capture ``sandbox_id`` as ``name:tag``.
+
+    Snapshots are Docker-style: ``name:tag`` is a mutable pointer at immutable
+    content, so re-capturing a tag moves it rather than colliding. The Python SDK
+    has no ``tag`` parameter yet, so the field is injected into the capture body
+    the same way ``_install_create_extra_fields`` injects sandbox-create fields.
+    Drop this for a plain ``capture_snapshot(..., tag=...)`` once
+    langchain-ai/langsmith-sdk#3447 ships.
+    """
+    original_post = client._http.post
+
+    async def post_with_tag(url: Any, *args: Any, **kwargs: Any) -> Any:
+        payload = kwargs.get("json")
+        if str(url).endswith("/snapshot") and isinstance(payload, dict):
+            kwargs["json"] = {**payload, "tag": tag}
+        return await original_post(url, *args, **kwargs)
+
+    client._http.post = post_with_tag  # ty: ignore[invalid-assignment]
+    try:
+        return await client.capture_snapshot(sandbox_id, name, timeout=timeout)
+    finally:
+        client._http.post = original_post  # ty: ignore[invalid-assignment]
+
+
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     return [

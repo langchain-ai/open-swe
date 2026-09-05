@@ -394,10 +394,20 @@ export interface SandboxSettings {
 }
 
 /** What a non-admin needs to pick an environment for a new thread. */
+export type EnvironmentRefreshStatus =
+  | "never"
+  | "refreshing"
+  | "success"
+  | "failed"
+
 export interface EnvironmentOption {
   slug: string
   name: string
   has_snapshot: boolean
+  refresh_status?: EnvironmentRefreshStatus
+  refresh_finished_at?: string | null
+  refresh_error?: string | null
+  refresh_log_excerpt?: string | null
 }
 
 export interface EnvironmentOptionList {

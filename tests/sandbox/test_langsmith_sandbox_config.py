@@ -21,6 +21,7 @@ from agent.sandboxes.providers.langsmith import (
     _install_create_extra_fields,
     _merge_sandbox_create_extra_fields,
     _reuse_existing_sandbox,
+    capture_snapshot_with_tag,
     create_langsmith_sandbox,
     create_langsmith_sandbox_from_params,
 )
@@ -398,6 +399,62 @@ async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
 
     assert calls[0][1] == {"snapshot_id": "s", "_internal_runtime": "v2"}
     assert calls[1][1] == {"foo": "bar"}
+
+
+@pytest.mark.asyncio
+async def test_capture_snapshot_sends_the_tag_and_restores_the_client() -> None:
+    """The SDK has no `tag` parameter yet, so it rides in on the capture body."""
+    calls: list[tuple[str, dict]] = []
+
+    class _FakeHttp:
+        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+            payload = kwargs.get("json")
+            assert isinstance(payload, dict)
+            calls.append((url, payload))
+            return "ok"
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+            self.original_post = self._http.post
+
+        async def capture_snapshot(self, sandbox_id: str, name: str, *, timeout: int) -> str:
+            await self._http.post(
+                f"https://api/v2/sandboxes/boxes/{sandbox_id}/snapshot", json={"name": name}
+            )
+            return "snap-1"
+
+    client = _FakeClient()
+    snapshot = await capture_snapshot_with_tag(
+        cast(AsyncSandboxClient, client), "sb-1", "acme-monorepo", "latest", timeout=60
+    )
+
+    assert snapshot == "snap-1"
+    assert calls[0][1] == {"name": "acme-monorepo", "tag": "latest"}
+    assert client._http.post == client.original_post
+
+
+@pytest.mark.asyncio
+async def test_capture_snapshot_restores_the_client_after_a_failure() -> None:
+    class _FakeHttp:
+        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+            raise RuntimeError("capture exploded")
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+            self.original_post = self._http.post
+
+        async def capture_snapshot(self, sandbox_id: str, name: str, *, timeout: int) -> str:
+            return await self._http.post("https://api/v2/sandboxes/boxes/x/snapshot", json={})
+
+    client = _FakeClient()
+    with pytest.raises(RuntimeError, match="capture exploded"):
+        await capture_snapshot_with_tag(
+            cast(AsyncSandboxClient, client), "sb-1", "acme-monorepo", "latest", timeout=60
+        )
+
+    assert client._http.post == client.original_post
 
 
 @pytest.mark.asyncio

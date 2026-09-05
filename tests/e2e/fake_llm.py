@@ -532,7 +532,10 @@ ENVIRONMENT_NAME = "default"
 ENVIRONMENT_PROMPT = (
     "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
 )
-ENVIRONMENT_PROVISION_SCRIPT = "mkdir -p repos && echo provisioned > repos/.provisioned && ls repos"
+ENVIRONMENT_SETUP_SCRIPT = (
+    "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls -a repos"
+)
+ENVIRONMENT_INIT_SCRIPT = "echo refreshed >> repos/.provisioned"
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
@@ -941,26 +944,16 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     ),
     "environment": (
         _tool_step(
-            "Provisioning this sandbox before capturing it.",
-            "execute",
-            {"command": ENVIRONMENT_PROVISION_SCRIPT},
-            "call-env-provision",
-        ),
-        _tool_step(
-            "Saving the environment record.",
+            "Saving the environment definition; this runs its scripts.",
             "save_environment",
             {
                 "name": ENVIRONMENT_NAME,
                 "prompt": ENVIRONMENT_PROMPT,
+                "setup_script": ENVIRONMENT_SETUP_SCRIPT,
+                "init_script": ENVIRONMENT_INIT_SCRIPT,
                 "repos": [f"{OWNER}/{REPO}"],
             },
             "call-env-save",
-        ),
-        _tool_step(
-            "Capturing this sandbox as the environment snapshot.",
-            "capture_environment_snapshot",
-            {"name": ENVIRONMENT_NAME},
-            "call-env-capture",
         ),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),

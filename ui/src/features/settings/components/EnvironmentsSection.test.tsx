@@ -28,23 +28,52 @@ function renderSection(isAdmin: boolean) {
 }
 
 describe("EnvironmentsSection", () => {
-  it("shows environment status without edit controls", async () => {
+  it("shows refresh outcomes without edit controls", async () => {
     vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
       default_slug: "default",
       environments: [
-        { slug: "default", name: "Default", has_snapshot: true },
-        { slug: "preview", name: "Preview", has_snapshot: false },
+        {
+          slug: "default",
+          name: "Default",
+          has_snapshot: true,
+          refresh_status: "success",
+          refresh_finished_at: new Date(Date.now() - 3_600_000).toISOString(),
+          refresh_log_excerpt: "cloning acme/repo\ndone",
+        },
+        {
+          slug: "preview",
+          name: "Preview",
+          has_snapshot: false,
+          refresh_status: "failed",
+          refresh_finished_at: new Date(Date.now() - 60_000).toISOString(),
+          refresh_error: "setup script exited 1",
+        },
       ],
     })
 
     const view = renderSection(true)
 
     expect(await screen.findByText("Preview")).toBeTruthy()
-    expect(screen.getByText("Default environment")).toBeTruthy()
-    expect(screen.getByText("Snapshot ready")).toBeTruthy()
-    expect(screen.getByText("No snapshot")).toBeTruthy()
-    expect(screen.getByText(/enable admin mode/)).toBeTruthy()
+    expect(
+      screen.getByText("Default environment · Snapshot ready")
+    ).toBeTruthy()
+    expect(screen.getByText(/Refreshed 1 hour ago/)).toBeTruthy()
+    expect(screen.getByText(/Refresh failed/)).toBeTruthy()
+    expect(screen.getByText("setup script exited 1")).toBeTruthy()
+    expect(screen.getByText("Refresh log")).toBeTruthy()
     expect(view.container.querySelector("button, input, textarea")).toBeNull()
+  })
+
+  it("says so when an environment has never been refreshed", async () => {
+    vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
+      default_slug: "default",
+      environments: [{ slug: "default", name: "Default", has_snapshot: false }],
+    })
+
+    renderSection(true)
+
+    expect(await screen.findByText("Never refreshed")).toBeTruthy()
+    expect(screen.getByText("Default environment · No snapshot")).toBeTruthy()
   })
 
   it("directs non-admins to a workspace admin", async () => {
