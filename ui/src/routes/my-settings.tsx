@@ -3,7 +3,6 @@ import { useEffect, useState } from "react"
 
 import { AccountSection } from "@/features/settings/components/AccountSection"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
-import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
 import { EnvironmentsSection } from "@/features/settings/components/EnvironmentsSection"
 import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
 import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
@@ -54,13 +53,12 @@ function MySettingsPage() {
     <AppShell
       user={session.data}
       title="Settings"
-      description="Personal preferences, connected accounts, and instructions that apply to every run you trigger."
+      description="Personal preferences and instructions that apply to every run you trigger."
     >
       <AccountSection user={session.data} />
       <PreferencesSection />
       <PullRequestsSection />
       <EnvironmentsSection isAdmin={session.data.is_admin} />
-      <ConnectionsSection user={session.data} />
       <PersonalInstructionsSection />
       <DesktopVersionSection />
     </AppShell>

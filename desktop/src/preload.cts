@@ -13,6 +13,10 @@ function isDesktopCommandId(value) {
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
+  getMcpServers: () => ipcRenderer.invoke("desktop:mcp-servers"),
+  saveMcpServer: (server) =>
+    ipcRenderer.invoke("desktop:mcp-save", { ...server }),
+  deleteMcpServer: (name) => ipcRenderer.invoke("desktop:mcp-delete", name),
   onCommand: (callback) => {
     const listener = (_event, commandId) => {
       if (isDesktopCommandId(commandId)) callback(commandId);

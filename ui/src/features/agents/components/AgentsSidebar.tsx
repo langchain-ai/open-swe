@@ -120,7 +120,7 @@ const NAV = [
     icon: Kanban,
     badge: "Experimental",
   },
-  { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
+  { to: "/plugins", label: "Plugins", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const

@@ -47,6 +47,9 @@ const {
 } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
+const { DesktopMcp, resolveLoginEnvironment } = require("./mcp.cjs");
+const os = require("node:os");
+let desktopMcp = null;
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
   APP_ORIGIN,
@@ -382,6 +385,18 @@ async function discardThreadWorktree(thread) {
 }
 
 function configureDesktopIpc() {
+  ipcMain.handle("desktop:mcp-servers", (event) => {
+    requireTrustedDesktopIpc(event);
+    return desktopMcp.servers();
+  });
+  ipcMain.handle("desktop:mcp-save", (event, server) => {
+    requireTrustedDesktopIpc(event);
+    return desktopMcp.save(server);
+  });
+  ipcMain.handle("desktop:mcp-delete", (event, name) => {
+    requireTrustedDesktopIpc(event);
+    return desktopMcp.delete(name);
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
@@ -402,6 +417,7 @@ function configureDesktopIpc() {
         closeAllTerminals(),
         backendSupervisor?.close(),
         openAiOAuth?.close(),
+        desktopMcp?.close(),
       ]);
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -1066,7 +1082,7 @@ async function startExternalLogin() {
 }
 
 /**
- * Link a Slack or Notion account from the desktop app.
+ * Link a Slack account from the desktop app.
  *
  * The consent leg has to run in the user's own browser, which carries neither
  * the app's session cookie nor the flow's state cookie — that mismatch is why
@@ -1382,6 +1398,51 @@ if (!hasSingleInstanceLock) {
     await openAiOAuth.startBroker().catch((error) => {
       console.warn("Could not start the local OpenAI credential broker", error);
     });
+    let loginEnv;
+    try {
+      loginEnv = await resolveLoginEnvironment();
+    } catch {
+      dialog.showErrorBox(
+        "Could not read the login-shell environment",
+        "Check your login-shell startup files, then restart Open SWE.",
+      );
+      app.quit();
+      return;
+    }
+    desktopMcp = new DesktopMcp({
+      configPath: path.join(os.homedir(), ".open-swe", "mcp.json"),
+      togglesPath: path.join(app.getPath("userData"), "mcp-enabled.json"),
+      credentialsDir: path.join(app.getPath("userData"), "mcp-credentials"),
+      loginEnv,
+      encryptString: (value) => {
+        if (
+          !safeStorage.isEncryptionAvailable() ||
+          (process.platform === "linux" &&
+            safeStorage.getSelectedStorageBackend() === "basic_text")
+        ) {
+          throw new Error("OS keychain storage is unavailable for MCP OAuth");
+        }
+        return safeStorage.encryptString(value);
+      },
+      decryptString: (value) => safeStorage.decryptString(value),
+      openExternal: (url) => shell.openExternal(url),
+      cloudRuntime: async () => {
+        if (!backendUrl) return null;
+        const cookies = await session.defaultSession.cookies.get({
+          url: backendUrl,
+          name: SESSION_COOKIE_NAME,
+        });
+        const token = cookies[0]?.value;
+        return token
+          ? {
+              backend_url: backendUrl,
+              cookie_name: SESSION_COOKIE_NAME,
+              session_token: token,
+            }
+          : null;
+      },
+    });
+    await desktopMcp.start();
     backendSupervisor = new BackendSupervisor({
       isPackaged: app.isPackaged,
       repoRoot: path.resolve(__dirname, "../.."),
@@ -1389,7 +1450,11 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
-      providerEnv: () => openAiOAuth?.backendEnv() || {},
+      env: loginEnv,
+      providerEnv: () => ({
+        ...openAiOAuth?.backendEnv(),
+        ...desktopMcp.backendEnv(),
+      }),
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
@@ -1426,6 +1491,7 @@ if (!hasSingleInstanceLock) {
       closeAllTerminals(),
       backendSupervisor?.close(),
       openAiOAuth?.close(),
+      desktopMcp?.close(),
     ]).finally(() => {
       app.quit();
     });

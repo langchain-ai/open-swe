@@ -78,7 +78,7 @@ async def test_tool_loaders_run_concurrently() -> None:
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
         patch("agent.server._observability_tools_for", side_effect=rendezvous([])),
-        patch("agent.server._load_integration_tools", side_effect=rendezvous(([], []))),
+        patch("agent.server._load_integration_tools", side_effect=rendezvous(([], {}))),
     ):
         await get_agent(_config())
 

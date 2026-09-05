@@ -5,6 +5,11 @@
  * cookie set by the OAuth callback rides along on cross-origin calls.
  */
 
+import type {
+  McpConnection,
+  McpConnectionInput,
+  McpConnectionsPayload,
+} from "./mcp"
 import { dashboardApiBase } from "./api-base"
 import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
 
@@ -205,14 +210,7 @@ export interface ProviderCredentialStatus {
 }
 
 export interface TeamCredentialsStatus {
-  datadog: ProviderCredentialStatus
   langsmith: ProviderCredentialStatus
-}
-
-export interface DatadogConnectBody {
-  site: string
-  api_key: string
-  app_key: string
 }
 
 export interface LangSmithConnectBody {
@@ -230,12 +228,6 @@ export type CurrentsCredentialStatus = ApiKeyCredentialStatus
 
 export interface CurrentsConnectBody {
   api_key: string
-}
-
-export interface NotionCredentialStatus {
-  connected: boolean
-  token_expires_at?: string | null
-  updated_at?: string | null
 }
 
 export interface UserMapping {
@@ -640,6 +632,20 @@ export interface ReviewerEvalStatus {
 }
 
 export const api = {
+  mcpConnections: () => request<McpConnectionsPayload>("/mcp-connections"),
+  saveMcpConnection: (body: McpConnectionInput) =>
+    request<McpConnection>("/mcp-connections", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteMcpConnection: (id: string) =>
+    request<void>(`/mcp-connections/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  testMcpConnection: (id: string) =>
+    request<McpConnection>(`/mcp-connections/${encodeURIComponent(id)}/test`, {
+      method: "POST",
+    }),
   me: () => request<SessionUser>("/me"),
   options: () => request<OptionsPayload>("/options"),
   profile: () => request<Profile>("/profile"),
@@ -763,15 +769,6 @@ export const api = {
       body: JSON.stringify({ transcription_model }),
     }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
-  connectDatadog: (body: DatadogConnectBody) =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectDatadog: () =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
-      method: "DELETE",
-    }),
   connectLangSmith: (body: LangSmithConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/langsmith", {
       method: "PUT",
@@ -801,12 +798,6 @@ export const api = {
     }),
   disconnectMyLangSmith: () =>
     request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
-  getMyNotionStatus: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion"),
-  disconnectNotion: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion", {
       method: "DELETE",
     }),
   listAutoReviewRepos: () =>
@@ -920,7 +911,7 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
-export function connectService(provider: "slack" | "notion") {
+export function connectService(provider: "slack") {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
     window.location.assign(`${API_BASE}/dashboard/api/${provider}/login`)

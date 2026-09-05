@@ -41,9 +41,19 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             return_value={"instructions": "Be concise."},
         ),
         patch(
-            "agent.tools.read_user_settings.get_notion_status",
+            "agent.tools.read_user_settings.list_connections",
             new_callable=AsyncMock,
-            return_value={"notion": {"connected": True}},
+            return_value=[
+                {
+                    "id": "connection-1",
+                    "name": "Workspace",
+                    "enabled": True,
+                    "auth_type": "oauth",
+                    "status": "connected",
+                    "url": "https://private.example/mcp?token=secret",
+                    "updated_at": "2026-08-16T00:00:00Z",
+                }
+            ],
         ),
         patch(
             "agent.tools.read_user_settings.get_langsmith_status",
@@ -69,7 +79,15 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
                 },
                 "instructions": "Be concise.",
                 "connections": {
-                    "notion": {"connected": True},
+                    "mcp": [
+                        {
+                            "id": "connection-1",
+                            "name": "Workspace",
+                            "enabled": True,
+                            "auth_type": "oauth",
+                            "status": "connected",
+                        }
+                    ],
                     "langsmith": {"connected": True, "api_key_last4": "1234"},
                     "currents": {"connected": False},
                 },

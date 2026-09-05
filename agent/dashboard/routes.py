@@ -7,9 +7,10 @@ import logging
 import os
 import posixpath
 import shlex
+from collections.abc import Awaitable
 from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
-from urllib.parse import quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import (
@@ -24,6 +25,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from agent.dashboard import mcp_connections
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
@@ -45,13 +47,7 @@ from agent.dashboard.environments import (
     list_environment_options,
     slugify,
 )
-from agent.dashboard.notion_oauth import (
-    NOTION_STATE_COOKIE_NAME,
-    NotionOAuthError,
-    exchange_notion_code,
-    pop_notion_oauth_flow,
-    store_notion_oauth_flow,
-)
+from agent.dashboard.mcp_http import MCPConnectionError
 from agent.dashboard.oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
@@ -149,11 +145,8 @@ from agent.dashboard.skills import (
     update_skill,
 )
 from agent.dashboard.team_credentials import (
-    DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
-    connect_datadog,
     connect_langsmith,
-    disconnect_datadog,
     disconnect_langsmith,
     get_team_credentials_status,
 )
@@ -200,11 +193,8 @@ from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,
     UserLangSmithCredentialsUpdate,
     connect_currents,
-    connect_notion,
     disconnect_currents,
-    disconnect_notion,
     get_currents_status,
-    get_notion_status,
 )
 from agent.dashboard.user_credentials import (
     connect_langsmith as connect_user_langsmith,
@@ -430,26 +420,6 @@ def _clear_slack_state_cookie(response: Response) -> None:
     secure, _ = _cookie_security()
     response.delete_cookie(
         SLACK_STATE_COOKIE_NAME, path="/dashboard/api/slack", samesite="lax", secure=secure
-    )
-
-
-def _set_notion_state_cookie(response: Response, nonce: str) -> None:
-    secure, _ = _cookie_security()
-    response.set_cookie(
-        key=NOTION_STATE_COOKIE_NAME,
-        value=nonce,
-        max_age=STATE_TTL_SECONDS,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-        path="/dashboard/api/notion",
-    )
-
-
-def _clear_notion_state_cookie(response: Response) -> None:
-    secure, _ = _cookie_security()
-    response.delete_cookie(
-        NOTION_STATE_COOKIE_NAME, path="/dashboard/api/notion", samesite="lax", secure=secure
     )
 
 
@@ -708,20 +678,116 @@ async def disconnect_my_langsmith(
     return status.get("langsmith", {"connected": False})
 
 
-@router.get("/my-credentials/notion")
-async def get_my_notion_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_notion_status(session["sub"])
-    return status.get("notion", {"connected": False})
+async def _mcp_result[T](operation: Awaitable[T]) -> T:
+    try:
+        return await operation
+    except MCPConnectionError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
+    except Exception:
+        logger.warning("MCP connection operation failed")
+        raise HTTPException(502, "MCP connection operation failed; retry or reconnect") from None
 
 
-@router.delete("/my-credentials/notion")
-async def disconnect_my_notion(
-    session: dict[str, Any] = _SESSION_DEP,
+@router.get("/mcp-connections")
+async def get_mcp_connections(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    return {
+        "connections": await _mcp_result(mcp_connections.list_connections(session["sub"])),
+        "presets": mcp_connections.MCP_PRESETS,
+    }
+
+
+@router.get("/mcp-connections/presets")
+async def get_mcp_presets(_session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    return {"presets": mcp_connections.MCP_PRESETS}
+
+
+@router.post("/mcp-connections")
+async def save_mcp_connection(
+    body: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    status = await disconnect_notion(session["sub"])
-    return status.get("notion", {"connected": False})
+    return await _mcp_result(mcp_connections.save_connection(session["sub"], body))
+
+
+@router.patch("/mcp-connections/{id}")
+@router.put("/mcp-connections/{id}")
+async def update_mcp_connection(
+    id: str, body: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    if "id" in body and body["id"] != id:
+        raise HTTPException(400, "MCP connection ID mismatch")
+    return await _mcp_result(mcp_connections.save_connection(session["sub"], {**body, "id": id}))
+
+
+@router.delete("/mcp-connections/{id}", status_code=204)
+async def delete_mcp_connection(id: str, session: dict[str, Any] = _SESSION_DEP) -> Response:
+    await _mcp_result(mcp_connections.delete_connection(session["sub"], id))
+    return Response(status_code=204)
+
+
+@router.post("/mcp-connections/{id}/test")
+async def test_mcp_connection(id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    return await _mcp_result(mcp_connections.discover_connection(session["sub"], id))
+
+
+_MCP_STATE_COOKIE = "osw_mcp_oauth_state"
+_MCP_OAUTH_PATH = "/dashboard/api/mcp-connections"
+
+
+@router.get("/mcp-connections/{id}/oauth/login")
+async def mcp_oauth_login(id: str, session: dict[str, Any] = _SESSION_DEP) -> RedirectResponse:
+    url = await _mcp_result(
+        mcp_connections.start_oauth(
+            session["sub"], id, f"{_api_base_url()}{_MCP_OAUTH_PATH}/oauth/callback"
+        )
+    )
+    states = parse_qs(urlsplit(url).query).get("state", [])
+    if len(states) != 1 or not states[0]:
+        raise HTTPException(502, "MCP OAuth state is missing")
+    response = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+    secure, _ = _cookie_security()
+    response.set_cookie(
+        _MCP_STATE_COOKIE,
+        hash_state_nonce(f"{session['sub']}:{states[0]}"),
+        max_age=600,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path=_MCP_OAUTH_PATH,
+    )
+    return response
+
+
+@router.get("/mcp-connections/oauth/callback")
+async def mcp_oauth_callback(
+    request: Request,
+    state: str,
+    code: str | None = None,
+    error: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    expected = hash_state_nonce(f"{session['sub']}:{state}")
+    supplied = request.cookies.get(_MCP_STATE_COOKIE, "")
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(400, "OAuth state mismatch; restart the connection")
+    try:
+        if error or not code:
+            raise HTTPException(400, "MCP OAuth authorization denied or code missing")
+        await _mcp_result(mcp_connections.finish_oauth(state, code))
+        response: Response = RedirectResponse(f"{_frontend_base_url()}/plugins", status_code=302)
+    except HTTPException as exc:
+        response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    secure, _ = _cookie_security()
+    response.delete_cookie(_MCP_STATE_COOKIE, path=_MCP_OAUTH_PATH, secure=secure, samesite="lax")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@router.api_route("/mcp-connections/{id}/proxy", methods=["GET", "POST", "DELETE"])
+async def proxy_mcp_connection(
+    request: Request, id: str, session: dict[str, Any] = _SESSION_DEP
+) -> Response:
+    return await _mcp_result(mcp_connections.proxy_connection(request, session["sub"], id))
 
 
 class DesktopConnectExchange(BaseModel):
@@ -729,110 +795,6 @@ class DesktopConnectExchange(BaseModel):
 
     code: str
     verifier: str
-
-
-@router.get("/notion/login")
-async def notion_login(
-    desktop_handoff: str | None = None,
-    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
-    session: dict[str, Any] = _SESSION_DEP,
-) -> RedirectResponse:
-    redirect_uri = f"{_api_base_url()}/dashboard/api/notion/callback"
-    nonce = new_state_nonce()
-    nonce_hash = hash_state_nonce(nonce)
-    state = issue_state(
-        redirect_to=f"{_frontend_base_url()}/my-settings",
-        nonce_hash=nonce_hash,
-        handoff_challenge=valid_handoff_challenge(desktop_handoff),
-        handoff_port=desktop_port,
-    )
-    try:
-        url = await store_notion_oauth_flow(
-            session["sub"],
-            nonce_hash,
-            redirect_uri=redirect_uri,
-            state=state,
-        )
-    except NotionOAuthError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
-    response = RedirectResponse(url, status_code=302)
-    _set_notion_state_cookie(response, nonce)
-    return response
-
-
-@router.get("/notion/callback")
-async def notion_callback(
-    request: Request,
-    state: str,
-    code: str | None = None,
-    error: str | None = None,
-    error_description: str | None = None,
-) -> RedirectResponse:
-    state_payload = decode_state(state)
-    nonce_hash = state_payload.get("nonce_hash")
-    handoff = desktop_handoff_from_state(state_payload)
-    if not isinstance(nonce_hash, str):
-        raise HTTPException(400, "oauth state mismatch — please retry")
-    if error:
-        detail = error_description or error
-        raise HTTPException(400, f"Notion OAuth failed: {detail}")
-    if not code:
-        raise HTTPException(400, "Notion OAuth callback missing code")
-
-    if handoff is not None:
-        # This browser can't prove it is the login the pending flow is stored
-        # under, so carry the code back over the loopback port and exchange it
-        # under the session the desktop app already holds.
-        challenge, port = handoff
-        handoff_code = issue_connect_handoff(
-            provider="notion",
-            challenge=challenge,
-            claims={"nonce_hash": nonce_hash, "code": code},
-        )
-        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
-        _clear_notion_state_cookie(response)
-        return response
-
-    session = require_session(request)
-    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
-    if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
-        raise HTTPException(400, "oauth state mismatch — please retry")
-
-    await _complete_notion_connection(session["sub"], nonce_hash, code)
-
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
-    response = RedirectResponse(redirect_to, status_code=302)
-    _clear_notion_state_cookie(response)
-    return response
-
-
-async def _complete_notion_connection(login: str, nonce_hash: str, code: str) -> None:
-    flow = await pop_notion_oauth_flow(login, nonce_hash)
-    if flow is None:
-        raise HTTPException(400, "oauth flow expired — please retry")
-    try:
-        token_data = await exchange_notion_code(code, flow)
-        await connect_notion(login, token_data, flow)
-    except NotionOAuthError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@router.post("/notion/desktop/exchange")
-async def notion_desktop_exchange(
-    body: DesktopConnectExchange,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    """Finish a desktop Notion connection with the app's own session."""
-    claims = redeem_connect_handoff(provider="notion", code=body.code, verifier=body.verifier)
-    nonce_hash = claims.get("nonce_hash")
-    notion_code = claims.get("code")
-    if not isinstance(nonce_hash, str) or not isinstance(notion_code, str):
-        raise HTTPException(400, "malformed handoff code")
-
-    await _complete_notion_connection(session["sub"], nonce_hash, notion_code)
-    return {"connected": True}
 
 
 @router.get("/slack/login")
@@ -874,8 +836,6 @@ async def slack_callback(
     handoff = desktop_handoff_from_state(state_payload)
 
     if handoff is not None:
-        # Same as the Notion flow: hand the verified identity back over the
-        # loopback port, for the app to redeem under the session it holds.
         challenge, port = handoff
         slack_user_id, work_email = await _verified_slack_identity(code)
         handoff_code = issue_connect_handoff(
@@ -972,21 +932,6 @@ async def api_get_team_credentials(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await get_team_credentials_status()
-
-
-@router.put("/team-credentials/datadog")
-async def api_connect_datadog(
-    update: DatadogCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_datadog(update)
-
-
-@router.delete("/team-credentials/datadog")
-async def api_disconnect_datadog(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_datadog()
 
 
 @router.put("/team-credentials/langsmith")

@@ -11,6 +11,7 @@ const {
   connectExchangeUrl,
   connectLoginUrl,
   isAppLoginUrl,
+  isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
@@ -163,6 +164,13 @@ test("sends login to the user's browser instead of the app window", () => {
   );
 });
 
+test("only accepts Slack for the desktop service handoff", () => {
+  assert.equal(isConnectProvider("slack"), true);
+  for (const provider of ["notion", "mcp", "", null, undefined]) {
+    assert.equal(isConnectProvider(provider), false);
+  }
+});
+
 test("carries the loopback port and PKCE challenge into the browser login", () => {
   assert.equal(
     desktopLoginUrl("https://backend.example", {
@@ -183,8 +191,8 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
     "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
-    connectExchangeUrl("https://backend.example", "notion"),
-    "https://backend.example/dashboard/api/notion/desktop/exchange",
+    connectExchangeUrl("https://backend.example", "slack"),
+    "https://backend.example/dashboard/api/slack/desktop/exchange",
   );
 });
 
@@ -212,6 +220,20 @@ test("localizes backend OAuth callbacks and post-login redirects", () => {
       "https://backend.example",
     ),
     `${APP_URL}dashboard/api/auth/callback?code=123&state=456`,
+  );
+  assert.equal(
+    localCallbackUrl(
+      "https://backend.example/dashboard/api/slack/callback?code=123&state=456",
+      "https://backend.example",
+    ),
+    `${APP_URL}dashboard/api/slack/callback?code=123&state=456`,
+  );
+  assert.equal(
+    localCallbackUrl(
+      "https://backend.example/dashboard/api/notion/callback?code=123&state=456",
+      "https://backend.example",
+    ),
+    null,
   );
   assert.equal(
     localCallbackUrl(

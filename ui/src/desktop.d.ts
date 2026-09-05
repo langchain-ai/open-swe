@@ -1,6 +1,7 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
 import type { Skill } from "@/lib/api"
+import type { McpDesktopBridge } from "@/lib/mcp"
 
 export type DesktopCommandId =
   | "new-thread"
@@ -156,6 +157,9 @@ export interface DesktopTerminalBridge {
 declare global {
   interface Window {
     openSweDesktop?: {
+      getMcpServers?: McpDesktopBridge["getMcpServers"]
+      saveMcpServer?: McpDesktopBridge["saveMcpServer"]
+      deleteMcpServer?: McpDesktopBridge["deleteMcpServer"]
       isDesktop: true
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
@@ -183,7 +187,7 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      connectService: (provider: "slack" | "notion") => Promise<boolean>
+      connectService: (provider: "slack") => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string

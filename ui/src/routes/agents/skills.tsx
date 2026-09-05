@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { SkillsPage } from "@/features/agents/components/SkillsPage"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/agents/skills")({
-  component: SkillsPage,
+  beforeLoad: () => {
+    throw redirect({ to: "/plugins", search: { tab: "skills" } })
+  },
 })

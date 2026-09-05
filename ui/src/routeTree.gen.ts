@@ -16,6 +16,7 @@ import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
+import { Route as PluginsRouteImport } from './routes/plugins'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
@@ -70,6 +71,11 @@ const LoginRoute = LoginRouteImport.update({
 const MySettingsRoute = MySettingsRouteImport.update({
   id: '/my-settings',
   path: '/my-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PluginsRoute = PluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReviewRoute = ReviewRouteImport.update({
@@ -183,6 +189,7 @@ export interface FileRoutesByFullPath {
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
+  '/plugins': typeof PluginsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/admin/evals': typeof AdminEvalsRoute
@@ -211,6 +218,7 @@ export interface FileRoutesByTo {
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
+  '/plugins': typeof PluginsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/admin/evals': typeof AdminEvalsRoute
@@ -241,6 +249,7 @@ export interface FileRoutesById {
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
+  '/plugins': typeof PluginsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/admin_/evals': typeof AdminEvalsRoute
@@ -272,6 +281,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/login'
     | '/my-settings'
+    | '/plugins'
     | '/review'
     | '/usage'
     | '/admin/evals'
@@ -300,6 +310,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/login'
     | '/my-settings'
+    | '/plugins'
     | '/review'
     | '/usage'
     | '/admin/evals'
@@ -329,6 +340,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/login'
     | '/my-settings'
+    | '/plugins'
     | '/review'
     | '/usage'
     | '/admin_/evals'
@@ -359,6 +371,7 @@ export interface RootRouteChildren {
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
+  PluginsRoute: typeof PluginsRoute
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
@@ -419,6 +432,13 @@ declare module '@tanstack/react-router' {
       path: '/my-settings'
       fullPath: '/my-settings'
       preLoaderRoute: typeof MySettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plugins': {
+      id: '/plugins'
+      path: '/plugins'
+      fullPath: '/plugins'
+      preLoaderRoute: typeof PluginsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/review': {
@@ -603,6 +623,7 @@ const rootRouteChildren: RootRouteChildren = {
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
+  PluginsRoute: PluginsRoute,
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
   AdminEvalsRoute: AdminEvalsRoute,

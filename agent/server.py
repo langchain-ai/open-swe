@@ -12,7 +12,8 @@ import hashlib
 import logging
 import os
 import warnings
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -22,6 +23,8 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
+
+from agent.desktop_mcp import local_mcp_tools
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -144,9 +147,8 @@ from agent.tool_loaders.corridor_mcp import (
     load_corridor_tools,
 )
 from agent.tool_loaders.currents import load_currents_tools
-from agent.tool_loaders.datadog_mcp import load_datadog_tools
 from agent.tool_loaders.langsmith import load_langsmith_tools
-from agent.tool_loaders.notion_mcp import load_notion_tools
+from agent.tool_loaders.mcp import desktop_tool_groups, load_mcp_groups
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
@@ -445,7 +447,7 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     """Whether the triggering user may use the team observability tools.
 
     Gates on admin / explicitly-authorized emails so prompt-injected runs from
-    untrusted contributors cannot reach the team's Datadog/LangSmith data.
+    untrusted contributors cannot reach the team's LangSmith data.
     """
     cfg = RunConfig.from_config(config)
     candidate_login = profile_login or cfg.github_login
@@ -566,11 +568,7 @@ async def _load_observability_tools(authorized: bool, profile_login: str | None)
     """Load team observability tools for an authorized triggering user."""
     if not authorized:
         return []
-    datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
-        _cached_langsmith_tools(profile_login, allow_team=True),
-    )
-    return [*datadog_tools, *langsmith_tools]
+    return await _cached_langsmith_tools(profile_login, allow_team=True)
 
 
 async def _observability_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
@@ -586,22 +584,20 @@ async def _observability_tools_for(config: RunnableConfig, profile_login: str | 
     return await _cached_langsmith_tools(profile_login, allow_team=False)
 
 
-async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any], list[Any]]:
+async def _load_integration_tools(
+    profile_login: str | None,
+) -> tuple[list[Any], dict[str, IntegrationGroup]]:
     if not profile_login:
-        return [], []
-    currents_tools, notion_tools = await asyncio.gather(
+        return [], {}
+    currents_tools, mcp_groups = await asyncio.gather(
         _cached_tool_loader(
             f"tools:currents:{profile_login}",
             300,
             lambda: load_currents_tools(profile_login),
         ),
-        _cached_tool_loader(
-            f"tools:notion:{profile_login}",
-            300,
-            lambda: load_notion_tools(profile_login),
-        ),
+        load_mcp_groups(profile_login),
     )
-    return currents_tools, notion_tools
+    return currents_tools, mcp_groups
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -904,7 +900,7 @@ class DesktopAgentState(FilesystemState, DeepAgentState):
     """Desktop agent state including snapshotted skill files."""
 
 
-async def get_agent(config: RunnableConfig) -> Pregel:
+async def get_agent(config: RunnableConfig, *, local_tools: Sequence[Any] = ()) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
@@ -1133,9 +1129,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     observability_tools: list[Any] = []
     currents_tools: list[Any] = []
-    notion_tools: list[Any] = []
+    mcp_groups: dict[str, IntegrationGroup] = {}
     if not stop_summary_mode and not local_run:
-        observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
+        observability_tools, (currents_tools, mcp_groups) = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.observability_tools",
@@ -1213,8 +1209,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Observability": observability_tools,
         "Currents": currents_tools,
-        "Notion": notion_tools,
+        **mcp_groups,
     }
+    if local_run and not stop_summary_mode:
+        integration_tool_groups.update(desktop_tool_groups(local_tools))
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
         if browser_tools:
@@ -1354,4 +1352,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ).with_config(config)
 
 
-traced_agent = traced_graph_factory(get_agent, AGENT_TRACING_PROJECT)
+@asynccontextmanager
+async def traced_agent(config: RunnableConfig) -> AsyncIterator[Pregel]:
+    cfg = RunConfig.parse(config.get("configurable") or {})
+    async with AsyncExitStack() as stack:
+        local_tools: Sequence[Any] = ()
+        if (
+            cfg.thread_id
+            and graph_loaded_for_execution(config)
+            and is_desktop_run(cfg)
+            and not cfg.stop_summary
+        ):
+            try:
+                local_tools = await stack.enter_async_context(local_mcp_tools())
+            except Exception:
+                logger.warning("Desktop MCP connections unavailable; continuing without them")
+
+        async def factory(run_config: RunnableConfig) -> Pregel:
+            return await get_agent(run_config, local_tools=local_tools)
+
+        async with traced_graph_factory(factory, AGENT_TRACING_PROJECT)(config) as graph:
+            yield graph
