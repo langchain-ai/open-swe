@@ -54,8 +54,16 @@ def gateway_base_url() -> str:
 
 
 def gateway_env_default() -> bool:
-    """Deployment-level default for gateway routing (``LANGSMITH_GATEWAY_ENABLED``)."""
-    return _env_bool(ENV.LANGSMITH_GATEWAY_ENABLED.optional())
+    """Deployment-level default for gateway routing.
+
+    ``LANGSMITH_GATEWAY_ENABLED`` decides when set. Otherwise a dedicated
+    ``LANGSMITH_GATEWAY_API_KEY`` is the signal: that key exists for nothing
+    else, so configuring it means routing through the gateway.
+    """
+    explicit = ENV.LANGSMITH_GATEWAY_ENABLED.optional()
+    if explicit is not None:
+        return _env_bool(explicit)
+    return bool(ENV.LANGSMITH_GATEWAY_API_KEY.optional())
 
 
 def gateway_openai_use_responses() -> bool:
