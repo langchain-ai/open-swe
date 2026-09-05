@@ -201,21 +201,27 @@ def _installation_account(installation: Mapping[str, Any]) -> str:
 async def _discover_single_installation() -> str | None:
     """The app's only installation, or ``None`` when there are zero or several.
 
-    Failures and ambiguous results are remembered for a few minutes so a busy
-    webhook path does not re-list installations on every token mint.
+    A found installation is re-checked after ``_INSTALLATION_CACHE_TTL`` so a
+    removed, replaced, or newly added installation is noticed without a restart;
+    failures and ambiguous results are remembered for a few minutes so a busy
+    webhook path does not re-list installations on every token mint. When the
+    re-check itself fails, the last known installation stays in use.
     """
     global _SINGLE_INSTALLATION
     now = datetime.now(UTC)
+    last_known: str | None = None
     if _SINGLE_INSTALLATION is not None:
         cached_id, checked_at = _SINGLE_INSTALLATION
-        if cached_id is not None or now - checked_at < _DISCOVERY_RETRY_INTERVAL:
+        ttl = _INSTALLATION_CACHE_TTL if cached_id is not None else _DISCOVERY_RETRY_INTERVAL
+        if now - checked_at < ttl:
             return cached_id
+        last_known = cached_id
     try:
         installations = await list_app_installations()
     except Exception:
         logger.warning("Failed to list GitHub App installations", exc_info=True)
-        _SINGLE_INSTALLATION = (None, now)
-        return None
+        _SINGLE_INSTALLATION = (last_known, now)
+        return last_known
     ids = [
         str(item["id"])
         for item in installations
