@@ -4,6 +4,7 @@ import {
   IoCloudOutline,
   IoGitPullRequestOutline,
   IoOptionsOutline,
+  IoExtensionPuzzleOutline,
   IoSettingsOutline,
   IoStatsChartOutline,
 } from "react-icons/io5"
@@ -32,6 +33,7 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
     heading: "User settings",
     items: [
       { to: "/my-settings", label: "Profile", icon: IoOptionsOutline },
+      { to: "/plugins", label: "Plugins", icon: IoExtensionPuzzleOutline },
       { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
       { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
     ],

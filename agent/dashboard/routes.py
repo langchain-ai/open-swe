@@ -7,9 +7,10 @@ import logging
 import os
 import posixpath
 import shlex
+from collections.abc import Awaitable
 from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
-from urllib.parse import quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import (
@@ -24,6 +25,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from agent.dashboard import mcp_connections
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
@@ -45,6 +47,7 @@ from agent.dashboard.environments import (
     list_environment_options,
     slugify,
 )
+from agent.dashboard.mcp_http import MCPConnectionError
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -706,6 +709,118 @@ async def disconnect_my_langsmith(
 ) -> dict[str, Any]:
     status = await disconnect_user_langsmith(session["sub"])
     return status.get("langsmith", {"connected": False})
+
+
+async def _mcp_result[T](operation: Awaitable[T]) -> T:
+    try:
+        return await operation
+    except MCPConnectionError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
+    except Exception:
+        logger.warning("MCP connection operation failed")
+        raise HTTPException(502, "MCP connection operation failed; retry or reconnect") from None
+
+
+@router.get("/mcp-connections")
+async def get_mcp_connections(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    return {
+        "connections": await _mcp_result(mcp_connections.list_connections(session["sub"])),
+        "presets": mcp_connections.MCP_PRESETS,
+    }
+
+
+@router.get("/mcp-connections/presets")
+async def get_mcp_presets(_session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    return {"presets": mcp_connections.MCP_PRESETS}
+
+
+@router.post("/mcp-connections")
+async def save_mcp_connection(
+    body: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    return await _mcp_result(mcp_connections.save_connection(session["sub"], body))
+
+
+@router.patch("/mcp-connections/{id}")
+@router.put("/mcp-connections/{id}")
+async def update_mcp_connection(
+    id: str, body: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    if "id" in body and body["id"] != id:
+        raise HTTPException(400, "MCP connection ID mismatch")
+    return await _mcp_result(mcp_connections.save_connection(session["sub"], {**body, "id": id}))
+
+
+@router.delete("/mcp-connections/{id}", status_code=204)
+async def delete_mcp_connection(id: str, session: dict[str, Any] = _SESSION_DEP) -> Response:
+    await _mcp_result(mcp_connections.delete_connection(session["sub"], id))
+    return Response(status_code=204)
+
+
+@router.post("/mcp-connections/{id}/test")
+async def test_mcp_connection(id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    return await _mcp_result(mcp_connections.discover_connection(session["sub"], id))
+
+
+_MCP_STATE_COOKIE = "osw_mcp_oauth_state"
+_MCP_OAUTH_PATH = "/dashboard/api/mcp-connections"
+
+
+@router.get("/mcp-connections/{id}/oauth/login")
+async def mcp_oauth_login(id: str, session: dict[str, Any] = _SESSION_DEP) -> RedirectResponse:
+    url = await _mcp_result(
+        mcp_connections.start_oauth(
+            session["sub"], id, f"{_api_base_url()}{_MCP_OAUTH_PATH}/oauth/callback"
+        )
+    )
+    states = parse_qs(urlsplit(url).query).get("state", [])
+    if len(states) != 1 or not states[0]:
+        raise HTTPException(502, "MCP OAuth state is missing")
+    response = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+    secure, _ = _cookie_security()
+    response.set_cookie(
+        _MCP_STATE_COOKIE,
+        hash_state_nonce(f"{session['sub']}:{states[0]}"),
+        max_age=600,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path=_MCP_OAUTH_PATH,
+    )
+    return response
+
+
+@router.get("/mcp-connections/oauth/callback")
+async def mcp_oauth_callback(
+    request: Request,
+    state: str,
+    code: str | None = None,
+    error: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    expected = hash_state_nonce(f"{session['sub']}:{state}")
+    supplied = request.cookies.get(_MCP_STATE_COOKIE, "")
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(400, "OAuth state mismatch; restart the connection")
+    try:
+        if error or not code:
+            raise HTTPException(400, "MCP OAuth authorization denied or code missing")
+        await _mcp_result(mcp_connections.finish_oauth(state, code))
+        response: Response = RedirectResponse(f"{_frontend_base_url()}/plugins", status_code=302)
+    except HTTPException as exc:
+        response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    secure, _ = _cookie_security()
+    response.delete_cookie(_MCP_STATE_COOKIE, path=_MCP_OAUTH_PATH, secure=secure, samesite="lax")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@router.api_route("/mcp-connections/{id}/proxy", methods=["GET", "POST", "DELETE"])
+async def proxy_mcp_connection(
+    request: Request, id: str, session: dict[str, Any] = _SESSION_DEP
+) -> Response:
+    return await _mcp_result(mcp_connections.proxy_connection(request, session["sub"], id))
 
 
 @router.get("/my-credentials/notion")

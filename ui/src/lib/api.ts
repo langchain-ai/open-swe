@@ -5,6 +5,11 @@
  * cookie set by the OAuth callback rides along on cross-origin calls.
  */
 
+import type {
+  McpConnection,
+  McpConnectionInput,
+  McpConnectionsPayload,
+} from "./mcp"
 import { dashboardApiBase } from "./api-base"
 import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
 
@@ -640,6 +645,20 @@ export interface ReviewerEvalStatus {
 }
 
 export const api = {
+  mcpConnections: () => request<McpConnectionsPayload>("/mcp-connections"),
+  saveMcpConnection: (body: McpConnectionInput) =>
+    request<McpConnection>("/mcp-connections", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteMcpConnection: (id: string) =>
+    request<void>(`/mcp-connections/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  testMcpConnection: (id: string) =>
+    request<McpConnection>(`/mcp-connections/${encodeURIComponent(id)}/test`, {
+      method: "POST",
+    }),
   me: () => request<SessionUser>("/me"),
   options: () => request<OptionsPayload>("/options"),
   profile: () => request<Profile>("/profile"),

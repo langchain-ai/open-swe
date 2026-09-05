@@ -123,10 +123,17 @@ export function AppCommandProvider({
           }),
       },
       {
+        id: "open-plugins",
+        label: "Open plugins",
+        aliases: ["MCP", "connections", "servers"],
+        group: "Navigation",
+        run: () => void navigate({ to: "/plugins", search: { tab: "mcps" } }),
+      },
+      {
         id: "open-skills",
         label: "Open skills",
         group: "Navigation",
-        run: () => void navigate({ to: "/agents/skills" }),
+        run: () => void navigate({ to: "/plugins", search: { tab: "skills" } }),
       },
       {
         id: "open-automations",

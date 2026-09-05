@@ -173,10 +173,12 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
             try:
                 tools = await self._groups[group].load()
             except Exception:
-                logger.warning("Failed to load %s integration tools", group, exc_info=True)
-                tools = []
-            resolved.tools = {tool.name: tool for tool in tools}
-            resolved.done = True
+                logger.warning("Failed to load integration tools", extra={"integration": group})
+                return {}
+            resolved.tools = {
+                tool.name: tool for tool in tools if self._group_of.get(tool.name) == group
+            }
+            resolved.done = bool(resolved.tools)
         return resolved.tools
 
     async def _build(self, names: Sequence[str]) -> list[str]:

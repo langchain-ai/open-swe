@@ -5,6 +5,7 @@ const Module = require("node:module");
 test("preload command subscriptions validate IDs and unsubscribe", () => {
   let exposed;
   const listeners = new Map();
+  const invocations = [];
   const electron = {
     contextBridge: {
       exposeInMainWorld: (_name, bridge) => {
@@ -12,7 +13,10 @@ test("preload command subscriptions validate IDs and unsubscribe", () => {
       },
     },
     ipcRenderer: {
-      invoke: () => undefined,
+      invoke: (...args) => {
+        invocations.push(args);
+        return Promise.resolve();
+      },
       on: (channel, listener) => listeners.set(channel, listener),
       removeListener: (channel, listener) => {
         if (listeners.get(channel) === listener) listeners.delete(channel);
@@ -32,6 +36,14 @@ test("preload command subscriptions validate IDs and unsubscribe", () => {
     delete require.cache[preloadPath];
     require(preloadPath);
 
+    exposed.getMcpServers();
+    exposed.saveMcpServer({ name: "test", command: "node" });
+    exposed.deleteMcpServer("test");
+    assert.deepEqual(invocations, [
+      ["desktop:mcp-servers"],
+      ["desktop:mcp-save", { name: "test", command: "node" }],
+      ["desktop:mcp-delete", "test"],
+    ]);
     const received = [];
     const unsubscribe = exposed.onCommand((commandId) =>
       received.push(commandId),

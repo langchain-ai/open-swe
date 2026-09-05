@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
-import { SiNotion } from "react-icons/si"
 
 import type { ApiKeyCredentialStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -75,65 +74,6 @@ function SlackRow({ user }: { user: SessionUser }) {
             <span className="text-[10px] text-muted-foreground">
               Sign in with Slack unavailable
             </span>
-          )}
-        </div>
-      }
-    />
-  )
-}
-
-function NotionRow({ setError }: { setError: SetError }) {
-  const qc = useQueryClient()
-  const creds = useQuery({
-    queryKey: ["myNotion"],
-    queryFn: api.getMyNotionStatus,
-  })
-  const [connecting, setConnecting] = useState(false)
-
-  const disconnect = useMutation({
-    mutationFn: () => api.disconnectNotion(),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["myNotion"] })
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
-  })
-
-  const connected = !!creds.data?.connected
-  const connect = () => {
-    setConnecting(true)
-    void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    void connectService("notion")?.finally(() => {
-      setConnecting(false)
-      void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    })
-  }
-
-  return (
-    <SettingsRow
-      label="Notion"
-      description="Let agent runs use Notion MCP tools with your workspace permissions. OAuth tokens are encrypted at rest and scoped to your account."
-      control={
-        <div className="flex items-center gap-2">
-          <StatusPill connected={connected} />
-          {connected ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => disconnect.mutate()}
-              disabled={disconnect.isPending}
-            >
-              Disconnect
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              onClick={connect}
-              disabled={connecting || creds.isLoading}
-            >
-              <SiNotion className="size-4" />
-              {connecting ? "Redirecting…" : "Connect"}
-            </Button>
           )}
         </div>
       }
@@ -234,7 +174,6 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
       description="Accounts and credentials Open SWE can use on your behalf."
     >
       <SlackRow user={user} />
-      <NotionRow setError={setError} />
       <ApiKeyRow
         queryKey="myLangSmith"
         label="LangSmith"
