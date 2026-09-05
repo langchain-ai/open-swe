@@ -943,15 +943,7 @@ async def get_slack_repo_config(
 
     if not repo_config and slack_user_id:
         try:
-            slack_user = await get_slack_user_info(slack_user_id)
-            slack_email = (
-                (slack_user or {}).get("profile", {}).get("email")
-                if isinstance(slack_user, dict)
-                else None
-            )
-            profile_repo = await get_profile_default_repo(
-                await resolve_login_from_email_async(slack_email)
-            )
+            profile_repo = await get_profile_default_repo(await login_for_slack_id(slack_user_id))
             if profile_repo:
                 logger.info(
                     "Applying dashboard default_repo for Slack user %s: %s/%s",
