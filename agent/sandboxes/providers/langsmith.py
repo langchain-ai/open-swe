@@ -322,7 +322,7 @@ async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -
 async def _create_sandbox_with_retry(
     client: AsyncSandboxClient,
     *,
-    snapshot_id: str,
+    snapshot_id: str | None,
     fs_capacity_bytes: int | None,
     vcpus: int | None,
     mem_bytes: int | None,
@@ -332,15 +332,17 @@ async def _create_sandbox_with_retry(
 ) -> Any:
     for attempt in range(SANDBOX_CREATE_MAX_ATTEMPTS):
         try:
-            return await client.create_sandbox(
-                snapshot_id=snapshot_id,
-                fs_capacity_bytes=fs_capacity_bytes,
-                vcpus=vcpus,
-                mem_bytes=mem_bytes,
-                idle_ttl_seconds=idle_ttl_seconds,
-                delete_after_stop_seconds=delete_after_stop_seconds,
-                timeout=timeout,
-            )
+            create_kwargs: dict[str, Any] = {
+                "fs_capacity_bytes": fs_capacity_bytes,
+                "vcpus": vcpus,
+                "mem_bytes": mem_bytes,
+                "idle_ttl_seconds": idle_ttl_seconds,
+                "delete_after_stop_seconds": delete_after_stop_seconds,
+                "timeout": timeout,
+            }
+            if snapshot_id:
+                create_kwargs["snapshot_id"] = snapshot_id
+            return await client.create_sandbox(**create_kwargs)
         except Exception as exc:
             if attempt == SANDBOX_CREATE_MAX_ATTEMPTS - 1 or not _is_retryable_sandbox_create_error(
                 exc
@@ -586,7 +588,7 @@ async def create_langsmith_sandbox(
         delete_after_stop_seconds,
     ) = _get_sandbox_snapshot_config()
 
-    effective_snapshot_id = snapshot_id or default_snapshot_id or ""
+    effective_snapshot_id = snapshot_id or default_snapshot_id or None
     if mem_bytes is None and vcpus is None:
         effective_mem_bytes = default_mem_bytes
         effective_vcpus = default_vcpus
@@ -811,9 +813,9 @@ class LangSmithProvider(SandboxProvider):
                 sandbox = await _reuse_existing_sandbox(client, sandbox_id)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
-            effective_snapshot_id = snapshot_id or ""
+            effective_snapshot_id = (snapshot_id or "").strip() or None
             extra_fields = _merge_sandbox_create_extra_fields(create_params)
-            # The API boots its default root snapshot only when the key is absent:
+            # Omit both the explicit keyword and extra field when snapshot_id is empty:
             # `snapshot_id` is a UUID server-side, so "" is rejected with a 422.
             if not extra_fields.get("snapshot_id"):
                 extra_fields.pop("snapshot_id", None)
@@ -831,7 +833,10 @@ class LangSmithProvider(SandboxProvider):
                     timeout=timeout,
                 )
             except Exception as e:
-                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
+                msg = (
+                    f"Failed to create sandbox from snapshot "
+                    f"'{snapshot_id or '<default root snapshot>'}': {e}"
+                )
                 raise RuntimeError(msg) from e
 
             return TimeoutLangSmithSandbox(sandbox.to_sync())

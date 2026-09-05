@@ -134,7 +134,7 @@ async def test_create_langsmith_sandbox_uses_root_snapshot_when_unset() -> None:
         await create_langsmith_sandbox()
 
     assert provider.get_or_create.await_args is not None
-    assert provider.get_or_create.await_args.kwargs["snapshot_id"] == ""
+    assert provider.get_or_create.await_args.kwargs["snapshot_id"] is None
 
 
 @pytest.mark.asyncio
@@ -242,11 +242,19 @@ class _FakeSandboxClient:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("snapshot_id", "create_params"),
-    [(None, None), ("", None), (None, {"snapshot_id": ""})],
+    ("snapshot_id", "create_params", "expected_snapshot_id"),
+    [
+        (None, None, None),
+        ("", None, None),
+        ("  ", None, None),
+        (None, {"snapshot_id": ""}, None),
+        ("snap-1", None, "snap-1"),
+    ],
 )
 async def test_provider_omits_snapshot_id_when_unset(
-    snapshot_id: str | None, create_params: dict[str, str] | None
+    snapshot_id: str | None,
+    create_params: dict[str, str] | None,
+    expected_snapshot_id: str | None,
 ) -> None:
     """No usable snapshot must send no `snapshot_id` key at all.
 
@@ -267,7 +275,10 @@ async def test_provider_omits_snapshot_id_when_unset(
         )
 
     assert post.await_args is not None
-    assert "snapshot_id" not in post.await_args.kwargs["json"]
+    if expected_snapshot_id is None:
+        assert "snapshot_id" not in post.await_args.kwargs["json"]
+    else:
+        assert post.await_args.kwargs["json"]["snapshot_id"] == expected_snapshot_id
 
 
 @pytest.mark.asyncio
