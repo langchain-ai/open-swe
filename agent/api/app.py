@@ -17,6 +17,7 @@ from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.utils.event_loop import pin_single_event_loop
+from agent.utils.startup_config import log_startup_configuration
 from agent.webhooks.common import ensure_slack_bot_identity
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     pin_single_event_loop()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    log_startup_configuration()
     try:
         await ensure_slack_bot_identity()
     except Exception:  # noqa: BLE001
