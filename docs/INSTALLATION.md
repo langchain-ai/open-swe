@@ -117,7 +117,7 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for tracing and for the 
 That is the whole LangSmith setup:
 
 - **Sandboxes** boot from the LangSmith default snapshot, which ships `git`, `gh`, Python, `uv`, and Node. Build your own image only when your repos need more — see [Custom sandbox snapshot and environments](#custom-sandbox-snapshot-and-environments).
-- **Trace links** ("View trace" in Slack and GitHub) find your workspace and the `open-swe-agent` / `open-swe-review` projects by name, so no tenant or project ids are required.
+- **Traces** go to the LangSmith project named by `LANGSMITH_PROJECT`, the SDK's own variable (`default` when unset; LangGraph Platform sets it to the deployment name). "View trace" links in Slack and GitHub point there and find your workspace on their own, so no tenant or project ids are required.
 - **Tracing** is on automatically, locally and on LangGraph Platform: this is the same variable the LangSmith SDK and `langgraph dev` read, and the platform injects it for you.
 
 ## 5. Create the Slack app
@@ -272,7 +272,7 @@ make dev          # uv run langgraph dev --no-browser --port 2024
 
 1. Go to any issue in a repository where the app is installed
 2. Create or comment on an issue with: `@openswe what files are in this repo?`
-3. You should see a 👀 reaction within a few seconds, a new run in the `open-swe-agent` LangSmith project, and a reply comment on the issue
+3. You should see a 👀 reaction within a few seconds, a new run in your `LANGSMITH_PROJECT` LangSmith project, and a reply comment on the issue
 
 ### Slack
 
@@ -642,7 +642,6 @@ Every variable Open SWE reads is declared once in `agent/config.py` with its def
 | `SLACK_REPO_OWNER`, `SLACK_REPO_NAME` | Deprecated | Slack-only fallback repository; the team default repository replaces it. |
 | `LANGSMITH_API_KEY_PROD`, `LANGSMITH_ENDPOINT_PROD`, `LANGGRAPH_URL_PROD` | Deprecated | Aliases from when a deployment talked to a second LangSmith workspace. Read only when the standard name is unset; use `LANGSMITH_API_KEY`, `LANGSMITH_ENDPOINT`, `LANGGRAPH_URL`. |
 | `LANGSMITH_TENANT_ID_PROD`, `LANGSMITH_URL_PROD` | Deprecated | Set `LANGSMITH_TENANT_ID` only if the discovered workspace must be overridden; the web host is derived from `LANGSMITH_ENDPOINT`. |
-| `LANGSMITH_TRACING_PROJECT_ID_PROD` | Deprecated | Trace links resolve the `open-swe-agent` / `open-swe-review` projects by name. |
 | `LANGCHAIN_API_KEY`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_PROJECT` | Deprecated | Legacy SDK aliases, ignored by Open SWE. Use `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and per-graph projects. |
 
 ## Troubleshooting
