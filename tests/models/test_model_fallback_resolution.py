@@ -53,6 +53,30 @@ def test_environment_default_model_pair(monkeypatch, model, effort, expected) ->
     assert default_model_pair() == expected
 
 
+def test_environment_stale_same_provider_model_falls_back(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", STALE_ANTHROPIC)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "high")
+    assert default_model_pair() == (SUPPORTED_ANTHROPIC, "high")
+
+
+def test_environment_unknown_provider_model_falls_back(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", "mystery:model")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "high")
+    assert default_model_pair() == (SUPPORTED_OPENAI, "high")
+
+
+def test_environment_unsupported_effort_uses_model_default(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", SUPPORTED_ANTHROPIC)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "bogus")
+    assert default_model_pair() == (SUPPORTED_ANTHROPIC, "high")
+
+
+def test_environment_non_default_model_falls_back(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", FABLE)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "high")
+    assert default_model_pair() == (SUPPORTED_OPENAI, "high")
+
+
 def test_provider_fallback_preserves_provider_and_effort() -> None:
     assert provider_fallback_pair(STALE_ANTHROPIC, "xhigh") == (SUPPORTED_ANTHROPIC, "xhigh")
 

@@ -1,10 +1,13 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
+import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
 from typing import NotRequired, TypedDict, cast
+
+logger = logging.getLogger(__name__)
 
 
 class ModelOption(TypedDict):
@@ -349,17 +352,49 @@ def default_model_pair() -> tuple[str, str]:
     """Deployment fallback used when no team default is set."""
     model_id = os.environ.get("LLM_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
     effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
+    selected_model: ModelOption | None = None
     for model in SUPPORTED_MODELS:
         if model["id"] == model_id and model.get("can_be_default", True):
-            effort = (
-                effort
-                or _fallback_effort_for(model, DEFAULT_MODEL_EFFORT)
-                or model["default_effort"]
+            selected_model = model
+            break
+
+    if selected_model is None:
+        logger.warning(
+            "unsupported default model id; resolving a supported default",
+            extra={"rejected_model_id": model_id},
+        )
+        fallback = provider_fallback_pair(model_id, effort)
+        if fallback is not None:
+            fallback_model_id, fallback_effort = fallback
+            for model in SUPPORTED_MODELS:
+                if model["id"] == fallback_model_id and model.get("can_be_default", True):
+                    selected_model = model
+                    if not effort or model_supports_effort(model["id"], effort):
+                        effort = fallback_effort
+                    break
+        if selected_model is None:
+            selected_model = next(
+                (
+                    model
+                    for model in SUPPORTED_MODELS
+                    if model["id"] == DEFAULT_MODEL_ID and model.get("can_be_default", True)
+                ),
+                None,
             )
-            if effort not in model["efforts"]:
-                raise ValueError(f"Unsupported LLM_REASONING_EFFORT {effort!r} for {model_id!r}")
-            return model_id, effort
-    raise ValueError(f"Unsupported default LLM_MODEL_ID: {model_id!r}")
+        if selected_model is None:
+            selected_model = next(
+                model for model in SUPPORTED_MODELS if model.get("can_be_default", True)
+            )
+
+    if not effort:
+        effort = _fallback_effort_for(selected_model, DEFAULT_MODEL_EFFORT)
+    if effort not in selected_model["efforts"]:
+        logger.warning(
+            "unsupported reasoning effort; using model default",
+            extra={"model_id": selected_model["id"], "rejected_reasoning_effort": effort},
+        )
+        effort = selected_model["default_effort"]
+    return selected_model["id"], effort
 
 
 def default_vision_model_pair() -> tuple[str, str]:

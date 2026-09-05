@@ -17,6 +17,7 @@ from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
+    SUPPORTED_MODELS,
     canonical_model_pair,
     default_model_pair,
     gate_fable_model,
@@ -278,6 +279,10 @@ def _parse_repo(value: object) -> dict[str, str] | None:
 
 def _default_settings() -> dict[str, Any]:
     fallback_model, fallback_effort = default_model_pair()
+    return _default_settings_for_pair(fallback_model, fallback_effort)
+
+
+def _default_settings_for_pair(fallback_model: str, fallback_effort: str) -> dict[str, Any]:
     return {
         "review_draft_prs": False,
         "pr_summaries": True,
@@ -316,7 +321,14 @@ async def get_team_settings() -> dict[str, Any]:
     to pick a model, so an unreachable store must degrade to the defaults
     rather than fail every run at once.
     """
-    defaults = _default_settings()
+    try:
+        defaults = _default_settings()
+    except Exception:
+        logger.warning(
+            "default team settings construction failed; using safe defaults", exc_info=True
+        )
+        fallback = next(model for model in SUPPORTED_MODELS if model.get("can_be_default", True))
+        defaults = _default_settings_for_pair(fallback["id"], fallback["default_effort"])
     try:
         value = await get_value(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY)
     except Exception:
