@@ -37,6 +37,22 @@ SUPPORTED_GLM = "fireworks:accounts/fireworks/models/glm-5p3"
 FABLE = "anthropic:claude-fable-5-1"
 
 
+@pytest.mark.parametrize(
+    ("model", "effort", "expected"),
+    [
+        ("", "", (SUPPORTED_OPENAI, "medium")),
+        ("", "high", (SUPPORTED_OPENAI, "high")),
+        (SUPPORTED_ANTHROPIC, "", (SUPPORTED_ANTHROPIC, "medium")),
+        (" anthropic:claude-haiku-4-5 ", "", ("anthropic:claude-haiku-4-5", "none")),
+        (SUPPORTED_ANTHROPIC, " max ", (SUPPORTED_ANTHROPIC, "max")),
+    ],
+)
+def test_environment_default_model_pair(monkeypatch, model, effort, expected) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", model)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", effort)
+    assert default_model_pair() == expected
+
+
 def test_provider_fallback_preserves_provider_and_effort() -> None:
     assert provider_fallback_pair(STALE_ANTHROPIC, "xhigh") == (SUPPORTED_ANTHROPIC, "xhigh")
 

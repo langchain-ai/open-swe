@@ -136,14 +136,18 @@ See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsm
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.6-sol` with medium reasoning effort. An Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—uses `anthropic:claude-opus-5` instead. When both keys are set, OpenAI takes precedence. You can override the model with the `LLM_MODEL_ID` environment variable:
+Set optional deployment defaults with `LLM_MODEL_ID` and `LLM_REASONING_EFFORT`:
 
 ```bash
-# Set the model via environment variable (uses provider:model format)
 LLM_MODEL_ID="anthropic:claude-sonnet-5"
+LLM_REASONING_EFFORT="high"
 ```
 
-If `LLM_MODEL_ID` is not set, the credential-based default described above is used.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+
+Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
+
+These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
