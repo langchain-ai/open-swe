@@ -38,9 +38,19 @@ export const Route = createRootRouteWithContext<{
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "manifest", href: "/manifest.webmanifest" },
-      { rel: "icon", type: "image/png", href: "/favicon.png" },
-      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      {
+        rel: "manifest",
+        href: `${import.meta.env.BASE_URL}manifest.webmanifest`,
+      },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: `${import.meta.env.BASE_URL}favicon.png`,
+      },
+      {
+        rel: "apple-touch-icon",
+        href: `${import.meta.env.BASE_URL}apple-touch-icon.png`,
+      },
     ],
   }),
   notFoundComponent: () => (
