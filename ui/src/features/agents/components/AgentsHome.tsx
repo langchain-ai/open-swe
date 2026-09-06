@@ -129,6 +129,11 @@ export function AgentsHome() {
   >([])
   const [localWorkspaceMode, setLocalWorkspaceMode] =
     useState<DesktopWorkspaceMode>("local")
+  const localWorkspaceModeRef = useRef(localWorkspaceMode)
+  useEffect(() => {
+    localWorkspaceModeRef.current = localWorkspaceMode
+  }, [localWorkspaceMode])
+  const branchRefreshId = useRef(0)
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
@@ -179,13 +184,19 @@ export function AgentsHome() {
 
   const refreshLocalProjectBranch = useCallback(async () => {
     const cwd = localProjectPathRef.current
+    const refreshId = ++branchRefreshId.current
     const result = cwd
       ? await window.openSweDesktop?.getProjectBranches(cwd)
       : undefined
-    if (localProjectPathRef.current === cwd) {
+    if (
+      localProjectPathRef.current === cwd &&
+      branchRefreshId.current === refreshId
+    ) {
       const branches = result?.branches ?? []
       setLocalProjectBranch((selected) =>
-        selected && branches.some((ref) => ref.name === selected)
+        localWorkspaceModeRef.current === "worktree" &&
+        selected &&
+        branches.some((ref) => ref.name === selected)
           ? selected
           : (result?.current ?? null)
       )
@@ -210,6 +221,7 @@ export function AgentsHome() {
         (candidate) => candidate.name === branch
       )
       if (ref?.worktreePath) {
+        localWorkspaceModeRef.current = "worktree"
         setLocalWorkspaceMode("worktree")
         setLocalProjectBranch(branch)
         return
@@ -237,6 +249,7 @@ export function AgentsHome() {
   // the project's own checkout has to fall back to whatever it is really on.
   const selectLocalWorkspaceMode = useCallback(
     (next: DesktopWorkspaceMode) => {
+      localWorkspaceModeRef.current = next
       setLocalWorkspaceMode(next)
       setLocalError(null)
       if (next === "local") setLocalProjectBranch(null)
@@ -246,7 +259,22 @@ export function AgentsHome() {
   )
 
   useEffect(() => {
+    const desktop = window.openSweDesktop
+    const refreshSequence = branchRefreshId
+    let disposed = false
+    const unsubscribe = desktop?.onProjectHeadChanged((cwd) => {
+      if (cwd === localProjectPath) void refreshLocalProjectBranch()
+    })
+    void desktop?.watchProjectHead(localProjectPath).then(() => {
+      if (!disposed) void refreshLocalProjectBranch()
+    })
     void refreshLocalProjectBranch()
+    return () => {
+      disposed = true
+      refreshSequence.current++
+      unsubscribe?.()
+      void desktop?.watchProjectHead(null)
+    }
   }, [localProjectPath, refreshLocalProjectBranch])
 
   useEffect(() => {

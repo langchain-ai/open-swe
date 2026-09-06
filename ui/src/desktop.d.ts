@@ -163,6 +163,8 @@ declare global {
         current: string | null
         branches: Array<DesktopProjectRef>
       }>
+      watchProjectHead: (cwd: string | null) => Promise<void>
+      onProjectHeadChanged: (callback: (cwd: string) => void) => () => void
       checkoutProjectBranch: (input: {
         cwd: string
         branch: string
