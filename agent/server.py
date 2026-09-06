@@ -127,7 +127,7 @@ from agent.runtime.constants import (
 from agent.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
-from agent.runtime.execution import graph_loaded_for_execution
+from agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -915,7 +915,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         return create_deep_agent(
             system_prompt="",
             tools=[],
-        ).with_config(config)
+        ).with_config(bindable_config(config))
 
     profile_login = resolve_github_login(as_json_object(config))
 
@@ -1349,7 +1349,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ModelCallTimeoutMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.

@@ -95,6 +95,7 @@ from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
+    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
@@ -1309,7 +1310,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     if cfg.reviewer_model_id:
         model_id = cfg.reviewer_model_id
@@ -1410,7 +1411,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 settle_review_check_on_exit,
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.

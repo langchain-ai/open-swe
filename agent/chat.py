@@ -59,6 +59,7 @@ from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
+    bindable_config,
     graph_loaded_for_execution,
 )
 from agent.tools import (
@@ -212,7 +213,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     cfg = RunConfig.parse(configurable)
 
     if cfg.thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     model_id, effort = await _resolve_chat_model(cfg)
     model_id, effort = gate_fable_model(
@@ -251,7 +252,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 ModelCallTimeoutMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.

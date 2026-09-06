@@ -47,6 +47,7 @@ from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
     DEFAULT_RECURSION_LIMIT,
+    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
@@ -163,7 +164,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     async def reconnect_backend(_thread_id: str = thread_id):
         return await ensure_sandbox_for_thread(_thread_id)
@@ -200,7 +201,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
