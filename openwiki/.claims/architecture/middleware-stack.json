@@ -1,28 +1,32 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:7ffebd63e377a9bd0504a101dfaa82f999b80aa2439301c160f7634c47a0b0bb",
+  "pageVersion": "sha256:1d0faf2b6eba85fa613762f8b8f826766eb8d2509f5ee031539a55f56bc2bdb5",
   "claims": [
     {
       "id": "claim_5f37c6f3fd0d4b7daf65acc42b1cb6c1",
-      "statement": "The assembled agent middleware order (outer to inner) is PrepareAgentRunMiddleware, DynamicToolMiddleware (conditional), SanitizeToolInputsMiddleware, ModelCallLimitMiddleware, ToolErrorMiddleware, ExcludeToolsMiddleware, SubdirAgentsReadMiddleware, ToolRetryMiddleware, PullRequestCreationGuardMiddleware (non-local), WorkflowPushGuardMiddleware, refresh_github_proxy_before_model, check_message_queue_before_model, TimeoutWrapupMiddleware, notify_step_limit_reached, ModelFallbackMiddleware (conditional), PlanModeMiddleware, three message sanitizers, StableToolResultOrderMiddleware, and ModelCallTimeoutMiddleware.",
+      "statement": "The assembled coding-agent middleware order (outer to inner) is PrepareAgentRunMiddleware, DynamicToolMiddleware (conditional), SanitizeToolInputsMiddleware, ModelCallLimitMiddleware, ToolErrorMiddleware, ExcludeToolsMiddleware, SubdirAgentsReadMiddleware, ToolRetryMiddleware, PullRequestCreationGuardMiddleware (non-local), WorkflowPushGuardMiddleware, refresh_github_proxy_before_model, check_message_queue_before_model (except stop-summary mode), TimeoutWrapupMiddleware, notify_step_limit_reached, record_run_usage, ModelFallbackMiddleware (conditional), PlanModeMiddleware, three message sanitizers, StableToolResultOrderMiddleware, ModelErrorMiddleware, and ModelCallTimeoutMiddleware.",
       "evidence": [
         {
-          "resource": "repo://agent/server.py#L1762-L1835",
-          "version": "repo-lines-v1:sha256:888736499cae96c22a14edcc09003ba4cf4d2974b1ae36e5fcf06a359a22b3fa:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjM2M0ZDU0NzQyMzM0MDQ2MWYxNjE5OWIxZDAxN2ZiNmYwNTY3MTMyZjI1Mjc5NzBhYjQzOWU1ODA2Nzc2NzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ3NjJmMWEyM2UzMmNhMGQ2YjYyNWI5MDE2NmExYTNlOTVjNTZjM2YyNzBkMTdkYzk2NmQ4MDcwYTVkYTUxM2MifQ"
+          "resource": "repo://agent/server.py#L1294-L1353",
+          "version": "repo-lines-v1:sha256:d107a1b953929ddcdb38e3f0f47932390cad11718cae3ba11674c696034fbc03:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyMmNlYjcwYzk0ZTNiYjA4NDFmOTBiZjdjOWU0NGVhMmEzODY1ZDUzNzk0NGVjNzQ1ZDM3MzVjYjkwNzJmYjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdkZDUxNjIyMTQ1MDI4ZmE2YzkwY2NhY2E4MWZiOWUwZTVjM2MwMzM2ZjQ5ZjNmOGRjMTU1NjliNWJmZmQ0ZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ3NjJmMWEyM2UzMmNhMGQ2YjYyNWI5MDE2NmExYTNlOTVjNTZjM2YyNzBkMTdkYzk2NmQ4MDcwYTVkYTUxM2MifQ"
         }
       ]
     },
     {
       "id": "claim_4eb9b2a86e1e4f08a610e13c0e319c00",
-      "statement": "ModelCallTimeoutMiddleware is installed innermost so its deadline covers the provider call itself, and a resulting timeout escalates outward to ModelFallbackMiddleware, which treats TimeoutError as a retryable transient error.",
+      "statement": "ModelCallTimeoutMiddleware is installed innermost in the coding graph so its deadline covers the provider call itself, and its ModelCallTimeoutError propagates outward to ModelFallbackMiddleware, which treats TimeoutError as a retryable transient error.",
       "evidence": [
         {
-          "resource": "repo://agent/middleware/model_fallback.py#L44-L59",
-          "version": "repo-lines-v1:sha256:4e07d10911ac8acfdfa73accca39a0bc7b2013564bf517be4b8edc1b9a4cc837:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM1NTVjMzEwMzc2MzQ1Nzk4MGM1OGVlNzI4OGE0ZTMyMjJjYjViOGQ1MTRkNzkyZjdjZmUyOTA1MDNkOWU2MDIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0YzBkOTllNTQ0ODkwNGRhYmZmODNjYzVmYWYyMTZjOTVkOTIxYzJlNDBlZDI5MDdjZTBlZDhmZDZkZDc4NGUifQ"
+          "resource": "repo://agent/middleware/model_call_timeout.py#L28-L61",
+          "version": "repo-lines-v1:sha256:1f5ed8b581f6f71319759f205e1d0aedb09b5c88bcef59027b8848edacbab06e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzNTZhNjQ3YzI1ZGE0ZGRlMDhmZWVhZmQzN2Y3ODc1NTNiNTEwMWNkOWM5ZDRiYmQzYWQzNDJkMTY3OTYwMjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhMzcwMjU3YzllZDdlYTIxODI2Y2U4YWU1MjU0OWQxODVlZGE3Y2U1ZTJjMzdkMGM3YjJiMGNjZTUxYjY1ODEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVjMmZiZWJlNzY4MGJmOGQ1Y2IwYzY1Mzk5YmI2NWIzZGM0ZWVjMzQ3MjY3MWYwMTBiMTQxODI2YTU1OGQwOTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://agent/server.py#L1824-L1832",
-          "version": "repo-lines-v1:sha256:7d08690159a2581159c4aa5a45fac120ce52bcab1157f8be69d3166319b00d7b:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmJhNWJjY2JjMjhkZjU3MWM0MjE1NjVmNDAwNWE2NDliYTJkZjcwMjI3YTg5NGJhNWQ0OTkxOGEyMzkwNjI1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjE5YzY5NDIyMjA0Y2MxMGUzY2NjMzE5MzkxYzlmMTdlOGU0ZTU0YzM4NjVkNzA0NTZmNWVkZDQyOWM0ODgwZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTBiZjMxNmIyYjYxMjUxYzY4YTA2ZDgyOGQ2YTM4ZGRmOTE2ZWY4ZjIzOWM4NTUwZGQxOTk3YjQxMjVlMWZjMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDJmZWE4NTJlY2UyYmZiNTMwNDk0ZmM0OGY0NWI1YTliZjU0NTJhZTQwOTQzZGU1ZmRhMWRkNTExN2FiMzk4MyJ9"
+          "resource": "repo://agent/middleware/model_fallback.py#L46-L60",
+          "version": "repo-lines-v1:sha256:0dfa06e3f6a391fc844166ae5ee0f4b48586d0cb818ebc1f1f4ce8e17861d76f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM1NTVjMzEwMzc2MzQ1Nzk4MGM1OGVlNzI4OGE0ZTMyMjJjYjViOGQ1MTRkNzkyZjdjZmUyOTA1MDNkOWU2MDIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjMWQ3MTM3NTgzYzRhN2M4YWUxODEyYTJlZDJmNDU3ZTE1NDdlZDNmYTgxMjMwOWYzZTU0OTk3NmVjMmNlNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJmZmE2ZTMxMDk1ZmQ5ODVjMWQ2MmI2NzNlMTc0MGMyZjJlYWFhYWZkNjUwZDc2NzZlNDhhNGQwZmIzOWQ4YjcifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1341-L1350",
+          "version": "repo-lines-v1:sha256:6f5f7c50f51fa6c19074d1ba20280adbbe908adaab489c1c14237f70a9ab5398:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiYTViY2NiYzI4ZGY1NzFjNDIxNTY1ZjQwMDVhNjQ5YmEyZGY3MDIyN2E4OTRiYTVkNDk5MThhMjM5MDYyNWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYxOWM2OTQyMjIwNGNjMTBlM2NjYzMxOTM5MWM5ZjE3ZThlNGU1NGMzODY1ZDcwNDU2ZjVlZGQ0MjljNDg4MGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY3OWM5OWQzMzEwYTMzODY2NGNiMDFkZTI3ZWRkMDIxYjNlYWEzODE0YmZiMjc2OWZiYjFiYmJiZGYzMzAxZDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyZmVhODUyZWNlMmJmYjUzMDQ5NGZjNDhmNDViNWE5YmY1NDUyYWU0MDk0M2RlNWZkYTFkZDUxMTdhYjM5ODMifQ"
         }
       ]
     },
@@ -31,8 +35,8 @@
       "statement": "The reviewer graph installs a leaner middleware chain with no model fallback, plan mode, PR guard, workflow push guard, or subdir-agents read hook, and it uniquely adds RepairOrphanedToolCallsMiddleware plus settle_review_check_on_exit.",
       "evidence": [
         {
-          "resource": "repo://agent/reviewer.py#L1400-L1440",
-          "version": "repo-lines-v1:sha256:59c6970c77849ca3a60c565aacd59b12579dbb43566ad02145465f74a1f28c25:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3ZGZiNmIzMWE0YzViMzMwNmZlZmU0MDI4YWM5YTIxMzg0YjgxYTUxMjQyOWEwZjVjOTVmNzk5Y2JhNWRmM2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjZTY1ODE3MDc4YjI3ZTc2ZDY2ZjQ1NDdlYjI0OTc5ODZiZTE5MTIzYTQxNDQyYjNkODY5YmNkMjk4NTQxMmUifQ"
+          "resource": "repo://agent/reviewer.py#L1390-L1414",
+          "version": "repo-lines-v1:sha256:27621f42f2ef794334668cd00d2ef109f89e80e155e83cd9b2b8d4f1123b63e1:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyMmNlYjcwYzk0ZTNiYjA4NDFmOTBiZjdjOWU0NGVhMmEzODY1ZDUzNzk0NGVjNzQ1ZDM3MzVjYjkwNzJmYjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5ZTdkOWI5MmJiY2M5NDZiZDcxZWUyYTdhMDZmMGYzOTUxOThjYzYzMGNhNDdjNTI5YTcxYmY2NTU5OTMxNGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjZTY1ODE3MDc4YjI3ZTc2ZDY2ZjQ1NDdlYjI0OTc5ODZiZTE5MTIzYTQxNDQyYjNkODY5YmNkMjk4NTQxMmUifQ"
         }
       ]
     },
@@ -52,7 +56,7 @@
       "evidence": [
         {
           "resource": "repo://agent/middleware/model_fallback.py#L129-L214",
-          "version": "repo-lines-v1:sha256:4a8016a6856e3af88d5c434ddf685469763d7c65c2bb547a6e2586568a0129f8:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzOTBmNGQ5MGIwNmFlZTM4MzlkN2NmMjRjZTFkMGU3NTU0MjEzNTAzNGVhYjQzYWVlYzQyYzY1OGE4ZGRmYWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmZGE5NTk0MDRkMmM3OTg0OWRjNGQxYWI3MTNmNWNlNmY5MWEwNmY1ZDNmODBhZTE2YjQ4ZmMyZDNlN2QwYmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "version": "repo-lines-v1:sha256:554a0141051ba223770e83c69312e877782560edff5bae8ff1eaf919312d4000:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIwMzkwZjRkOTBiMDZhZWUzODM5ZDdjZjI0Y2UxZDBlNzU1NDIxMzUwMzRlYWI0M2FlZWM0MmM2NThhOGRkZmFhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJhZmRhOTU5NDA0ZDJjNzk4NDlkYzRkMWFiNzEzZjVjZTZmOTFhMDZmNWQzZjgwYWUxNmI0OGZjMmQzZTdkMGJmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkNzAxNDllMDY5YWQ2N2VjY2Y0NzM2NDZmZjFjNzUwMDUwZDMyOWQxMTAwMThkYzU3NjY4NzhlYWZhMWQ2MDdkIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
         },
         {
           "resource": "repo://agent/middleware/model_fallback.py#L44-L67",
@@ -70,7 +74,7 @@
         },
         {
           "resource": "repo://agent/middleware/model_fallback.py#L180-L214",
-          "version": "repo-lines-v1:sha256:5b1df2d6c40aa0a3f741ac7c2613b4591fb9c81f69800acc2ab89d5e76a36224:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzNmZhMjNiNjA5ZGJjYmI0MzQ4ODM0ZmY3YjE0Njg1YzhmZjNiNWQzYmM5MWYxYWQzZGQzNDExMDAyNjliZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmZGE5NTk0MDRkMmM3OTg0OWRjNGQxYWI3MTNmNWNlNmY5MWEwNmY1ZDNmODBhZTE2YjQ4ZmMyZDNlN2QwYmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyNjE3YWQ5MDBlYTU4YmY5OTMxNTExODI1NWQ0ODM5M2YxN2MwNjcxYTA3Y2ZjN2VmNDA2YWExNGI2ODU5ZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "version": "repo-lines-v1:sha256:b48e7be77db6805e85a777449516076c48b5aeeb1303e27a052a45f95d7b1094:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhMTE3ZjFkYzNhNmEzODA4ODE4MmMwYzhiNDQyYWI1OGIyNzFhZDU2Y2I1MDYxOTI1NWVkOTAyZDZiNjlkOTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmZGE5NTk0MDRkMmM3OTg0OWRjNGQxYWI3MTNmNWNlNmY5MWEwNmY1ZDNmODBhZTE2YjQ4ZmMyZDNlN2QwYmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyNjE3YWQ5MDBlYTU4YmY5OTMxNTExODI1NWQ0ODM5M2YxN2MwNjcxYTA3Y2ZjN2VmNDA2YWExNGI2ODU5ZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
@@ -83,8 +87,8 @@
           "version": "repo-lines-v1:sha256:347f8d1e70218d62ecedb68b561bc68cadd995ea65443432bbf24fb5bf212205:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjNzgwYTZlYmFmYjkwMjliN2VhODA2Y2MzYzcwZWM4NjIyMTFkMjU5NzhiODQ0OTQ5MzUzZjQ3OWJkNGQ3YjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMzc0Mzc3NWYxMjkzNzI0OTk1OTBmOTc3ZWNiZTU5NzNkZGI3YjAwNzBiNDZkOGM5ZTA2ZjQ2NzU1OWE2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5YzEwZGEzMmY3NzY0ZDdkOTI0NjM4ZTZlNjJhNDhhOGEzNjBlMTc3OTNkY2EwOTAwNGMyODgzNGE0ZDJiN2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://agent/server.py#L1599-L1610",
-          "version": "repo-lines-v1:sha256:4ea7c26198d03ad3a5964845a2359e148c3655b4c6e799e698baecc057fcf85f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxOWM1OTRkOWNkNGNkODE2N2Q1YmRjYjRjODY0NWJhZmE3OGIzNTgxODRjZmI5NzE3MmI5NmYzYjA2YjQxYjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjZTI1YjA4YTNhMzY3ZjI3ZDA3YjQyZTUyYThmYTc5Y2QwNGVjMGI1NmY0YmQwOGU2NzRiZTcwMDFjZDgwODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjYzIyNDgzMTRmODNlYjE0NjcxZGYwNDc1YmNjZjRmMDk0OThlYzRjY2Y4NDYzMGE2YjI1NWM0MTBiYjVlNDcifQ"
+          "resource": "repo://agent/server.py#L1097-L1124",
+          "version": "repo-lines-v1:sha256:9abcc71ae9c460ff7429ccbe3e332ebfd24a60337d976ec1a1a8b0dcd53a1a3d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhYWY2MmFkM2VkZWIzODUxZjg0OTU5N2ZkOWUyYmZiMDhiOGRlMjMwMDkxM2M2YjVhY2M4MTg0NGYyY2MxNTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwOWQyYTRiNDEzNTgzMjk1NDNjZjk3YTlmZDQyZDg3YjE4MjUzNWQxMjJlM2RjNzgyMTJlNjYyOTk2NDRjNTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjYzIyNDgzMTRmODNlYjE0NjcxZGYwNDc1YmNjZjRmMDk0OThlYzRjY2Y4NDYzMGE2YjI1NWM0MTBiYjVlNDcifQ"
         }
       ]
     },
@@ -93,7 +97,7 @@
       "statement": "ToolErrorMiddleware converts ordinary unhandled tool exceptions into status=error ToolMessages, but treats an unreachable sandbox as terminal: it notifies the user and re-raises the error to end the run.",
       "evidence": [
         {
-          "resource": "repo://agent/middleware/tool_error_handler.py#L160-L205",
+          "resource": "repo://agent/middleware/tool_error_handler.py#L156-L201",
           "version": "repo-lines-v1:sha256:64bf08d90acdb47d94808e987b200fc53c395dadb0cf81eeb4851dc297a8e2fb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4MmRkOTg2MmQ0YjY1YTRjNGMyZTEyMTRiNTliZThkNjUyZGE5OGNkNGM1MDZiN2YxZTBjYmEyMzliZmUwOTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyOWM1MjQ0MzRjMDA5YWFmMGQ3ZmU5ZTJmZmU3MjJiMTcwY2Y4ZWIxYzhjMTU3NWU0ZTNiZDUxZTkyNmM3MWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
@@ -103,15 +107,15 @@
       "statement": "ToolErrorMiddleware converts SandboxRetryableConnectionError into a sandbox_transient error ToolMessage because the SDK guarantees the command never started; SandboxConnectionError except SandboxServerReloadError, and ResourceNotFoundError for the sandbox resource, are unreachable and are notified then re-raised.",
       "evidence": [
         {
-          "resource": "repo://agent/middleware/tool_error_handler.py#L179-L205",
-          "version": "repo-lines-v1:sha256:d138c3c5da78d774e0450a4281700da9867caaabe80ca9beb08bbf9f7e84be64:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI1NjljYjA5MjgwZWUwNzgxOTQ1ZTQ4ZDQwNDFiZDJkZmFhZTY5MWFkMmVhYmY1ZDNjYmEwODQ2YzcyMTZjYWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyOWM1MjQ0MzRjMDA5YWFmMGQ3ZmU5ZTJmZmU3MjJiMTcwY2Y4ZWIxYzhjMTU3NWU0ZTNiZDUxZTkyNmM3MWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRlZWM0NGFkYTVjZWZiYjA5NWFiYmMzYzQwZWZhYWI4YmViMDE0MjZhYjYzZTU4ZWYyOGY3ZjA0MjllZTY3ZTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://agent/middleware/tool_error_handler.py#L170-L201",
+          "version": "repo-lines-v1:sha256:c334b8415c7632d4382fbaf1a1457567e4574f1ce6aabde6e8bc2a74c07d93ae:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkzMmNhYzcxY2Y0MWQ0MjIzYzBkZmYxMDU1YjNiYTUyZGFlNTdjOWIwNDJiNDkwMmU2NTAyMTMwMjVmNDVjYjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyOWM1MjQ0MzRjMDA5YWFmMGQ3ZmU5ZTJmZmU3MjJiMTcwY2Y4ZWIxYzhjMTU3NWU0ZTNiZDUxZTkyNmM3MWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNiNzIxYjQ0ZTk0NDJkM2I5MjYwODMwZTgyZTdiNTMwZmY4MjljOWMzYzc2ZjliYjBjYjI0M2ZlMzQ5YzE3OTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
           "resource": "repo://agent/middleware/tool_error_handler.py#L74-L107",
           "version": "repo-lines-v1:sha256:b25ad563a738134142f2b1c030ffb2ae721590258f20f6ad7e7a38447ba0c80c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE1ZjYwYjg3OWY5OGVlNDIwM2NjNTg1NDMxYWUzNWUzMGUzMDM0OTZhNDhhNzU4ZjkyMzc0ZTE2ODgwNTRlNDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzYTNiYzA0M2I5MTFkZjUwMTk5OGEzOTU2ZTY0NjE4ODg2NDdkZDVlMGZkM2Q3N2ZkMmYxMzU3NmI2NWMyYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ3NTE1NzZhMjc3NDdlYWMxZWZlYWU4MzNmMTA5YzE4Y2M3NjRjYjNhNDZiMzc3NDE2OTAyNmQ3NjE1YmJiMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyZmVmNTVjZDNhNGZkYTc2OWUwMDJiOTY3ZjhkZDExNzZhNjExNGYyNjZkNjM2Y2U3NWJmNTQwZGRiZmI4MDQifQ"
         },
         {
-          "resource": "repo://agent/utils/sandbox_retry.py#L21-L28",
+          "resource": "repo://agent/sandboxes/retry.py#L21-L28",
           "version": "repo-lines-v1:sha256:7dbc7039616704de450b2ad1edfd964207989750ee923d410c0a7085d3a5a3e5:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDM4MDY4ODVlYjhlODg3NDUyOTkxNDBlZmUxMzdiOGQwYWM1MGZmMmVlYWM4ZGFjYWYwMmQ5YzJhMDU5MmZlYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjU1OGIwOTExY2I4NDQ0ZDU0NzBiYWYxMGMyYmZiNzIwNjFkN2Q4NGY5MTU3OWQxYTkyNTNhOTI3ZDczY2E0NyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2FjMzk4Mjk0YjQ3NjM2ZGFjOWY1MzUzYWJhMGY3MjIwYjk3NjEwMmIyZWQ3NmU3ZTlmNGZlMGUyYmIzMWNkZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzFiYzVlN2IzMzk5MDQ4NGZlZDkxMWQ0NmJiZmVjOGNiNzdlOTZjMGM4NThlZjBkZTA3NzVlN2QwOTgwYTliZSJ9"
         }
       ]
@@ -125,8 +129,8 @@
           "version": "repo-lines-v1:sha256:5fd3707bf8f921a96c989dd9d073054042d76c128d7255cbdd93a45ebf278f6a:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzN2ZiZmIwMmExZjVkNmExYTk1MmNlMDY4NTM3N2Q1MTViYTE0MjZiNjVjZWExNzQwMmM5OGQwZDBiNGNkOWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4MDg3ZGFjZjRjNzBhZDI0NjE0NDRiODNkMzJkMWYzODc5NTk2Y2ExMzUzMTRkNTEwNThiMzAzZjFiOTE1NmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://agent/server.py#L1810-L1817",
-          "version": "repo-lines-v1:sha256:dd41638cdff8bab00cecb529006c3ac4196d43fee429e651c1546cd12aa1ed20:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjlhNGQyZGJlNGQzN2IyMzkzMzQ1MjRjM2Y4NWZhYjIwZTBiMGEwOTE1MDhkMTIwMzU1MzNhMTVhMjUyYmVhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjBkOWY3MzRiZTVhYTAzOTM1YzQ5OWI3MTQxMTM1NWNlZmFjMmEyYmY1Nzk4OWUxMjQ2ZDM1YTczNTJjN2U5YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTVjNDI2MzBlNjA3MjcyZjYyYmNiN2JjNjY4ZmExOWM5OGMyMzkzODM1MDlkMDQ3MmRmMGRjMGRmMDNkNTg1ZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTE5MzhhZDJmYmUyNDI5YTEwMDBmNDNjZGVlZDQ3YTJjYmE1MGI0OTFjMGQ2ZDY5YWIzNjcwNTg0YzRiZDg1MiJ9"
+          "resource": "repo://agent/server.py#L1325-L1333",
+          "version": "repo-lines-v1:sha256:e96a72c05f4d49d20d1c3dc644f97196a5f66e06e5ed024cab680636a911c278:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzAwMWYwN2ZhNTA1NTgxNGY4ZTYyNGRhZGIwZTA0NWQzYTc2MTE0NmU4MDk0ODRiZjI0ZjUyMDMzOGIzODg3OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjBkOWY3MzRiZTVhYTAzOTM1YzQ5OWI3MTQxMTM1NWNlZmFjMmEyYmY1Nzk4OWUxMjQ2ZDM1YTczNTJjN2U5YSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzU0YzExZWU0NzQzMmVjZDEyZmNhMDA5NTY2MzMwMjkxMjcyNzM1YTdjNjM2ZDdmNmQzNmUzYzE4NmNhNmExYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTE5MzhhZDJmYmUyNDI5YTEwMDBmNDNjZGVlZDQ3YTJjYmE1MGI0OTFjMGQ2ZDY5YWIzNjcwNTg0YzRiZDg1MiJ9"
         }
       ]
     },
@@ -135,12 +139,12 @@
       "statement": "retry_transient_sandbox_errors retries only SDK-marked SandboxRetryableConnectionError failures before a command starts, with at most four attempts and jittered bounded exponential backoff; terminal sandbox errors are not retried.",
       "evidence": [
         {
-          "resource": "repo://agent/utils/sandbox_retry.py#L13-L61",
-          "version": "repo-lines-v1:sha256:b8d088f800734d4aea1fdf4c3a07a974faf37c5e42dbc98056a091e22ddb261c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ5MGE0YWJjODc4MzhkNzc1MjhhZjBkZmQ4ZGQ0YWQxNjcxMTZkZTNiODg3YjJhZTkxMGNiOTJmMzc3ZjgxODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0NjBhYjY1MzNjMDU4N2ZjOTNmOTBlMzIyYTA4M2U2MzI5ZDZiYTUyYTVmNzYwZTczNDhkMmQzZDQ0MTk5NmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://agent/sandboxes/retry.py#L13-L61",
+          "version": "repo-lines-v1:sha256:aee3bbf37ba28ba36e0fb8cf317065cf7ac9956effa1b1d221ccad4082201a91:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ5MGE0YWJjODc4MzhkNzc1MjhhZjBkZmQ4ZGQ0YWQxNjcxMTZkZTNiODg3YjJhZTkxMGNiOTJmMzc3ZjgxODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0NjBhYjY1MzNjMDU4N2ZjOTNmOTBlMzIyYTA4M2U2MzI5ZDZiYTUyYTVmNzYwZTczNDhkMmQzZDQ0MTk5NmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
           "resource": "repo://tests/sandbox/test_sandbox_retry.py#L19-L66",
-          "version": "repo-lines-v1:sha256:3b754b2e87f0d88a521b09c172bf4c7a43817738b5f2a23d51db33a4597dbb21:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YzgxMGYzOWFhYjRmMmFmYWE4YTAyYmZiZDk3ODA5N2E1ODQ5ZGMxZDAzMWQwZWM0Y2YxYjViMWM5N2VkMzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YmMxNGVlOGE0Y2E1MDk1OWE5OTBiNWUwN2MzYzQxNzZkMTQ5ZDMxMDQwNjNhY2NjM2Y0ZjkzMmRkY2U4OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "version": "repo-lines-v1:sha256:e641e9ba139da3f370239ae3c766667effcc4886eaa5c9517180514cead8fe2d:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YzgxMGYzOWFhYjRmMmFmYWE4YTAyYmZiZDk3ODA5N2E1ODQ5ZGMxZDAzMWQwZWM0Y2YxYjViMWM5N2VkMzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YmMxNGVlOGE0Y2E1MDk1OWE5OTBiNWUwN2MzYzQxNzZkMTQ5ZDMxMDQwNjNhY2NjM2Y0ZjkzMmRkY2U4OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
@@ -149,12 +153,12 @@
       "statement": "Sandbox-unreachable notification targets an active Slack thread first, then Linear, then a configured GitHub issue or pull request when a token is available; the coding-agent message avoids automatic replacement because it could discard uncommitted work.",
       "evidence": [
         {
-          "resource": "repo://agent/middleware/sandbox_circuit_breaker.py#L135-L181",
-          "version": "repo-lines-v1:sha256:9a35650a8a0fa81530b6bbde86ffbf363fb28ff2d1f297cd4aa582e339aefda8:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExMmNmMTI5YjU1ZTE5ZjAwM2Y5NDVlMDgyNDgwM2I0NjIyMjE5OWZhODNkOTZjMmNlMTc4MDYxYzQzOGI2NTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1NTFjZDRjOTFmYmIyNTc5ZDU5MzJkZmE0MWZiYmFjYmRkMDg0YTViN2RlODk3YTYwZTAxMTEwYTdiMzQ5YmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://agent/middleware/sandbox_circuit_breaker.py#L112-L156",
+          "version": "repo-lines-v1:sha256:217e65f5275867653aba318c45c07c04ea000b7ffbbcdb0528a426115c188ce0:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExMmNmMTI5YjU1ZTE5ZjAwM2Y5NDVlMDgyNDgwM2I0NjIyMjE5OWZhODNkOTZjMmNlMTc4MDYxYzQzOGI2NTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1NTFjZDRjOTFmYmIyNTc5ZDU5MzJkZmE0MWZiYmFjYmRkMDg0YTViN2RlODk3YTYwZTAxMTEwYTdiMzQ5YmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://agent/middleware/sandbox_circuit_breaker.py#L20-L55",
-          "version": "repo-lines-v1:sha256:4b1bf6bd1adcdba334db790d717ac81005a4b116cce7f7465bf76dc0e7bc4ba1:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjMmFmZWRmZDBjY2IyMDA5NDY3OGJiNjI5YTEwMGY0NDQ1NDg4ODllOTE0YWIxNWQ1M2RhZmNiYzNjMTg2Y2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRjMTNhODE5NDI1NjQ2NDNiMWNhMDZlNTVmNWU5ZjIxZGY4NGEwOTE4MmNlMWZkYWVhMzFjM2E5MTNmZWU3ZmIifQ"
+          "resource": "repo://agent/middleware/sandbox_circuit_breaker.py#L25-L59",
+          "version": "repo-lines-v1:sha256:73f05bb9162e19dc62b2289fc6bac9d7578785ef84be91ff6fc52c12282ebb0f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjMmFmZWRmZDBjY2IyMDA5NDY3OGJiNjI5YTEwMGY0NDQ1NDg4ODllOTE0YWIxNWQ1M2RhZmNiYzNjMTg2Y2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxOTY3MTM2NzMxNDYwMmU0YTA4YzljOTczYjBjZDFjNjM2ODM3ZjVmNDdkMDRjZmJhNDY4N2EzZjJiNzdmMTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkifQ"
         }
       ]
     },
@@ -163,52 +167,130 @@
       "statement": "Reviewer sandbox setup permits replacement because its checkout is re-derived, whereas the default coding-agent sandbox setup does not; a failed replacement remains a typed SandboxUnreachableError.",
       "evidence": [
         {
-          "resource": "repo://tests/sandbox/test_reviewer_sandbox_recovery.py#L1-L6",
-          "version": "repo-lines-v1:sha256:f31191f447ed977ef2c719bda6501921f3c0f4853cf688c61bb137c05a864ffc:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTViM2ZhZjZlNTkxNjBhNGZmMDhiZDllOGE5NGViZDAzMjdjZGU4ODU3MzJlNjRmOTA2N2ZlYjIwYjA3Y2Y3NSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTAyZWUzYThjMTU4NjVlZWQ2YmFkNmFlMGRkMzQ3ZjNlM2NkOTY0MDQ5YjNlYjEzNmEwNGRjMTE2NWJkMDIxNiJ9"
+          "resource": "repo://agent/reviewer.py#L950-L1010",
+          "version": "repo-lines-v1:sha256:ffc9acbd3cb01eae7d86e44b0e011f11f713a9552e0733e269518d1a5dfe1f4a:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzZjc5NDg2ZGNjNWE5OGFhYjdhOWUwNWUwY2UyMjk3YmQwMWM5NTk3Y2I1NjFhMzNhMjVmOGJiNTI5NWE5MGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyOWM1MjQ0MzRjMDA5YWFmMGQ3ZmU5ZTJmZmU3MjJiMTcwY2Y4ZWIxYzhjMTU3NWU0ZTNiZDUxZTkyNmM3MWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU2N2M1MTg2YjMyZWJkYWE5M2QzNjM5ODE4ODIzYmJmNzg4MzJjZTI1Njk1NjUwNzU2YWM4MDRjMzU1YTYzOGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM3YjlhOTBjMDE1OWM2NjgzZjk0ZGU5NzEwM2M5NjdlMDNiMmVjMjNlMWI2OGQ2ZTFlNDUyNzNkMTZhODdhOTUifQ"
         },
         {
-          "resource": "repo://tests/sandbox/test_reviewer_sandbox_recovery.py#L107-L166",
-          "version": "repo-lines-v1:sha256:c6e41dfae93bf21a611aa8adb7ab6bc8c8ed5b8764ac66dfdb3ebd7203a0ff56:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1NWNjOGFkMmI0ZTBhM2RmN2QzODU3MmI3ZTAyZmQwMGI4NjY4M2IwMzgyODk2MjAwOTQ0ZGZmYzI1OTkyMDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+          "resource": "repo://agent/sandboxes/lifecycle.py#L296-L395",
+          "version": "repo-lines-v1:sha256:1459f8ceca20dbf0524c65294eea64c77acf56da7bb95e8264282cf2c61d400f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiMzgxZmFjN2JhYjM0NzU0ZjZkODQ3MTJiMTkyZTg2MDczOGRmOWMzYzg4MzdhZDY0MmY3YWU4MWRiOTM5Y2M5IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1NzM5NDU2OTdjYmM0NWFkZmZmNTU0YzUzYjJhMmQ2YWFiMTk5ZDMxNDVhYzZmZjI2OTEzOWI4NzYxYjdjOTJiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkNWE4MTRiZjAxN2NhYWM1YmZlY2JhODBhZWI0ZTA5MTEwYmM5ZTI5NjhhNThkMGViMTQ1MTE5ZmRlY2RjYjg5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlYWY4N2I3OTQ4ZDYyM2NhYjQxODAxN2IxZDgxZmFiZDJiYmNlNzkwZjJlZmViNzlkMTY0Nzg3YTUxZDlkNGI4In0"
         }
       ]
     },
     {
-      "id": "claim_3eb50944fdd54c23b76fe96dd0fc3326",
-      "statement": "The guard and utility layers repair malformed tool inputs, enforce PR and workflow-push policy, refresh the GitHub proxy, inject wrap-up and step-limit notices, and repair reviewer orphaned tool calls.",
+      "id": "claim_f71b50412d374cfb9cefc9d1679e93fb",
+      "statement": "BasePrepareRunMiddleware makes per-run preparation checkpoint-aware: a fingerprint of middleware, latest message, and preparation configuration skips matching resumed setup, but preparation must remain idempotent because a pre-checkpoint failure can re-run it; the base wrapper injects the prepared system prompt into model requests.",
       "evidence": [
         {
-          "resource": "repo://agent/middleware/notify_step_limit.py#L17-L79",
-          "version": "repo-lines-v1:sha256:24d83be1654e88b5bd8d0bfa33b4b9492c4ad83271d4c5e86f4d59b55788a0d4:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjYTIyYWMxNmI5Nzc4Y2MyODdlM2ZlN2RkNmFiODI4MDU3ZjY1YzExMDYyZmY4M2RiMmQ1NWQ5MjlmMDI1OGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4MTQ2ZTJkMjZkYjQ2YWNmZGMzNjJjMjFiM2YwNDAyN2NkZmFiODg3MDk4Y2Q3MjZmMTA0NTY0NzJkN2I5YTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ4NmUxNjVkYTY4ZTE0NjFkMTNjYTFjMmJkYTk4NDM2YzA4MWIyZmVlMjFkMzc5OWUzZWZhODUzZjJjMjU1ZjUifQ"
+          "resource": "repo://agent/middleware/prepare_run.py#L19-L109",
+          "version": "repo-lines-v1:sha256:888fbe28046ae2f3b7ce20c45782af4220d0d59f219bce60f171b2065770e411:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI2MjI2Mzk0NTdmMzQwMWQwZjAzYjdjY2U0ZGU3YmI2Y2VlMmJhM2RiMjk4Mzc3ZGZmY2M0MTUyM2VlMDg3MWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxZWE2M2E2MmY5MjFhY2ZlOTFhMTcyMzExMDkyMjljNTkzZGU3ODMxZjAxYWZkYWZkNjA1MWM1MjYxNTRjZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY5MjgzMzgxYjkyNzdjZjNkNWJkM2VlMzk4MjliODg2YjlhOGEwNTYzYzcxMmY0NTI4ZjNiYjQwZDM3N2Q4OWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://agent/middleware/pr_creation_guard.py#L118-L266",
-          "version": "repo-lines-v1:sha256:a9958d25c8deda121a9a18ef753989262a02259f7ac75506cd8cbab68caa014c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIzNjUyZWM2ZjA1MzIxZjM4YTcwZjY1MjdiZTcxMzVlNmIxOTI5ZmJlOTU0NzQwZDA2YzNkMTM0NTQxZmM3OWMzIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwZmUyOTk0ZjExNTY2MzBhNjZjYTM1YTc1MWU3MTQ5YTMyMDI1MzQ3NWIyNDI4ZWRhNWZkNTkwMjAwMTVkNzZmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIzOWNiM2E0MGIwYmY2MDEzNDk4MDY2MjdkODA0NDFkM2VhZmZmNTgyOGNkZjBmYTcyMGJlOTk5NjdlZTMzMTNmIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0NWY3ZWIzNzdjNDkxYjFhZGQ5NDYzY2U4MzExNmY0OTJkN2QzYzIxNGZjOWQxNjE0MmE2ODMzZjI0MzI4NTUxIn0"
+          "resource": "repo://tests/middleware/test_prepare_run_middleware.py#L19-L103",
+          "version": "repo-lines-v1:sha256:dddd2e00789a9674c211e91d653839cb8068bd4fe15fa51e6463dd7fba635eb4:eyJzZWxlY3RlZExpbmVDb3VudCI6ODUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiM2M4OGVkOTk1YTQ5ZDk3MmRkMWUyMjA0MjE2Zjg0MWE5NGFhMDY2MWEwMWEzYWJhZGU5OTcwM2EzOWQyNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOWQ3YzljOGUyM2Q3ZWQ5ODQ5YjM2NWY3ZmMyZDkzNTRiMjE2NzQ2MmFhOWRkYmQ3ZWI1OWVmYThkODZlZWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAxMzhiNGE4ZmYyY2VkMDBhMzM5YTA1YmQwMDE2MDk0Mjk3NTM0YWViYmMyNGFhZDQ4NTc2ZjJhZmUyNmFlMzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyNmY4NTg1YjdjNGYyOWZlYzBkN2U3MDk2ZWRmZTA1NWMwNzM4OTBlYTZkYTY4NGM1NzNmMmFmMDNjYTk1OTIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_282d7f25004347be8c252668bac8e760",
+      "statement": "ModelErrorMiddleware is immediately outside the coding and reviewer model-call deadlines; it logs and classifies escaping model exceptions, records a classifiable error on thread metadata when context is available, and re-raises the original exception.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/model_errors.py#L53-L95",
+          "version": "repo-lines-v1:sha256:a758d63da2b11e988b199935fd61f1a18ae2397617d4bbf8ec93f986fbcb0221:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhN2UzMzBjNmRlNjI4ZmQ1MmE2YjhkOWFlNzJiZTlkOWY5ZjhjZWRiMDEwZWFiYTBiYmIwMGQzMThkNmUxOWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmY2NiNDNjMDY1NzhhYzE3NmY3Mjg4OGE3ZmM3MjhmZmQxNzY0NmM3YmVjY2MyNjIxNjlmMWE3MjE5NzVmY2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://agent/middleware/refresh_github_proxy.py#L1-L45",
-          "version": "repo-lines-v1:sha256:d6546112bf62e612879d55a0001e246e92eb994234498bf0189a52fee73c3d2a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxNzE4ZDc3NTdiMmU3OGU3MTlkYjJhMWVlMmZlMzhhMGFmNDhmZWNmOGIyYzBiNmUwODI2N2NhYmE4NmI2NTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://agent/reviewer.py#L1404-L1411",
+          "version": "repo-lines-v1:sha256:b9de5d5f9e07785236136518378dfe82e18b90ccfd2c8abbb81ec228ae6732a9:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiY2NmNjU3Njk5ZDBhNWFkYmY5MjMwNzVkNDJhMTljM2FjZjMyNjdjOTlhNDYxMzk2MTNjNDQ3MGY5YTlmZjY3MiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjI5Njg2OTM5OWEzMWNlMzgwOWZlNTAxMGFmMDgxZmQ0ZTEwNTY1NGVkZDRkMzJjNDNhMzUyMmU2YjI1YzY1ZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTcwZThmZmFjN2MzMmEwMTdmNjYyZDcyNjQzZjcwMDc4Zjk5MTliYTE4ZTNlOTUxZGM0NTM0NWQ4OWJhNmQ4ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDJmZWE4NTJlY2UyYmZiNTMwNDk0ZmM0OGY0NWI1YTliZjU0NTJhZTQwOTQzZGU1ZmRhMWRkNTExN2FiMzk4MyJ9"
         },
         {
-          "resource": "repo://agent/middleware/repair_orphaned_tool_calls.py#L1-L107",
-          "version": "repo-lines-v1:sha256:4b8939b7ad050b1bf2a0e845829955cd329dba270f1632febd6956e9bc6bee0c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJlN2EzZWFjMDhlOTkyMzdjZGRkNGFjMTFhNzhlNzJiYjNlY2VmMzhkODY2NDQ0OWZhMjIzMTA1NjgwZGJlMjU2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MWVhNjNhNjJmOTIxYWNmZTkxYTE3MjMxMTA5MjI5YzU5M2RlNzgzMWYwMWFmZGFmZDYwNTFjNTI2MTU0Y2U5IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+          "resource": "repo://agent/server.py#L1343-L1350",
+          "version": "repo-lines-v1:sha256:0ca00976e570a977d591ac2376738db71a82b951bc312c92bcc493ef942ce56c:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiY2NmNjU3Njk5ZDBhNWFkYmY5MjMwNzVkNDJhMTljM2FjZjMyNjdjOTlhNDYxMzk2MTNjNDQ3MGY5YTlmZjY3MiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjE5YzY5NDIyMjA0Y2MxMGUzY2NjMzE5MzkxYzlmMTdlOGU0ZTU0YzM4NjVkNzA0NTZmNWVkZDQyOWM0ODgwZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzNiYjNkOGEyNmUyODM3NDI1OGIyOGE1MDRiNzZhYTEwMjkxMmI3MDBjOGI3MWFlYjU2YzMzMTFlZDAzZDM1MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDJmZWE4NTJlY2UyYmZiNTMwNDk0ZmM0OGY0NWI1YTliZjU0NTJhZTQwOTQzZGU1ZmRhMWRkNTExN2FiMzk4MyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_630efd826b254657a762c62579051b5e",
+      "statement": "The reviewer repair middleware inserts an error ToolMessage for each AI tool call lacking a matching result before the next model call, while its after-agent hook closes an uncompleted review check as neutral unless a pending published conclusion is available.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/repair_orphaned_tool_calls.py",
+          "version": "repo-file-v1:sha256:4b8939b7ad050b1bf2a0e845829955cd329dba270f1632febd6956e9bc6bee0c"
         },
         {
-          "resource": "repo://agent/middleware/sanitize_tool_inputs.py#L1-L50",
-          "version": "repo-lines-v1:sha256:a14493102c17b3b20ceb9016d91baf6854474891db23794cd91dfb209889bd89:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlMDhjNzA1Yjg5ZGE4MzQxOGI1MDQ0OWU4MDNhNzlmMWUyOWU4NGFmYWUyNDk1YTIwODg1ODBjN2NkNzczYzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyNmViMGRkMGUwZjA4YmJmN2ExNzRhOGU5Nzk4NjIzZmI1MzNjNTBmZTczMzcyMmVhZjkzMjc5ZGExZTdkY2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBkNGIyZjQxM2MxNTM4MTcyMGE0NzE0MWFjYTE3ZDQ1OTBiMGY3NmZhYmQ5ODU3NmEwNmY4ZDE3ZTIyOWJkMWIifQ"
+          "resource": "repo://agent/middleware/settle_review_check.py",
+          "version": "repo-file-v1:sha256:13299e5eccf19060d224e2f1cc1410bbcaa26d13c1aed2b347be72fdc1662654"
         },
         {
-          "resource": "repo://agent/middleware/timeout_wrapup.py#L11-L67",
-          "version": "repo-lines-v1:sha256:8192002afabf849e88e87cf8da2832250ad7599cb7a5fc58586f42230d3967c3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdhNTFjMjZhYjRjZTc4YzZiMGFlZWIzNWNiYTMxMGVmNTMyNDRkNGNiMjYzZGUyYjYzYjAxODExMzk0ZDA3NmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5YjFiYzVkZjliZWIyMzAxNzc0OWNhMTc3YmJiZjEwNzc5MmQ0YTQ4NGYzMmNlYTI4MzYxNTFmM2Y1NjliYTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwM2FhYWIzOTBjZWZlY2RmOTBhMWU2Y2IyYjFlOGFjZGZjNTk3NTQ1NDY0NzM4OTk0NWU4Nzk0YjdiMThjY2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyMzc1NjhmMzcxYzY2NGZhNzM5ZmU2ZGYzNzAyZTc2MjUzZTA3NDMyOGQwMjU2YTRhYWQzZGVkOTlkN2Y4YTQifQ"
+          "resource": "repo://tests/middleware/test_repair_orphaned_tool_calls.py",
+          "version": "repo-file-v1:sha256:0cdfd12cc8e5c28b6f0924f7bfe2b22931438144f37617724558c624b0ee9580"
+        }
+      ]
+    },
+    {
+      "id": "claim_c4c33e0e4cc84184a9023ecf34de3b6e",
+      "statement": "The analyzer graph uses PrepareAnalyzerRunMiddleware, SanitizeToolInputsMiddleware, ModelCallLimitMiddleware, ToolErrorMiddleware, TimeoutWrapupMiddleware, and SanitizeOpenAIResponsesMiddleware; unlike the coding, reviewer, and chat top-level lists, it has no ModelCallTimeoutMiddleware.",
+      "evidence": [
+        {
+          "resource": "repo://agent/analyzer.py#L184-L204",
+          "version": "repo-lines-v1:sha256:0b4fac9a2c2f668208b804ed7f646056fdae34f1f702761b6959ae59a146c503:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBkZDdjM2UyMTA1MjZhZjZlZjlkNDMzNjJiMTg0MzZiM2Q1YjljYmU3ZmIwZTdhNTQ1NzYyM2VlM2M4ZGIzN2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMxZTVhZjI5YmFlN2IxYzAyM2JkMzM2M2ZiYzc0ZWZkZjJjZjQ1NjQxMWIzNWU3NzM1MDNjYzYzZTI2Yjc5YjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_36beecf3b64f4792bb2530af983d93db",
+      "statement": "The read-only PR chat graph uses preparation, input sanitization, a model-call limit, tool error handling, excluded mutation tools, three provider-message sanitizers, and ModelCallTimeoutMiddleware; its compiled general-purpose subagent separately has a read-only filesystem allowlist, OpenAI sanitizer, and deadline.",
+      "evidence": [
+        {
+          "resource": "repo://agent/chat.py#L230-L255",
+          "version": "repo-lines-v1:sha256:b733ef2900bfce7a03383004defbdeb3df44fe3c65c681034084967e33b23ee5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlYjkyYTdkODYxY2FjOTA0MjViZDRlMzFmZmQwYmExMWFmNTY5NzllYTE4ZmNkOTkxYzY5MjVmNzQ2Y2NlMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODdmOWY0M2FkM2JlZGJhZWIyN2VhYjljOTAwNzg2MmFlOTNjNTEwZGM1ZTg2YTZkZDMzMWY4MDNiMzAwYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBkZDdjM2UyMTA1MjZhZjZlZjlkNDMzNjJiMTg0MzZiM2Q1YjljYmU3ZmIwZTdhNTQ1NzYyM2VlM2M4ZGIzN2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlOGMyNWVhNTRlYWFjOGU4ZTViZGI5NDQwOTZlYmVhNTY5YWRjZjkzOGY0NGQ1NDFmN2I0NDFlYmI3YmZlZDIifQ"
         },
         {
-          "resource": "repo://agent/middleware/workflow_push_guard.py#L526-L573",
-          "version": "repo-lines-v1:sha256:f4645457b1ca939358f5c91d7eede13bdf23d1d4b7ddf40034a164942227b244:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzZjhkMWJhMTQzY2UxNmVhYjg3OGU0YzIwODU4OTdiN2U4ZmYwOWU4NjRmZDQyNDE5OWNjMWJjMGI2YTFhODciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjOGI4ZTNkYTQ2YTZlNDc1YTQ1NTY3Y2Y3NDdkOWYwNDMyMmU2NDExZWM3YTRiODY4ZDVkNmZhODUyNjAxNTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVlNGYwYzRlM2IzYzg4OWY5YWViMWJkN2FhYjZjMzAwZjM2OGM1MTZkMTM1OTQzOTYwZTNhNDU4ZDRmMDgyNGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://agent/chat.py#L80-L103",
+          "version": "repo-lines-v1:sha256:58625c8d05f0c015f292176f04e3e49a164cc3a3d98e887a0cfe0f06c9306ae5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkOGYzYzFiZjcxMGZiMjMwNTg4ZmM3MmZhMjMyOWJmNWNiODQ2NDU1ZjljYzg5MTIwZGM3Nzg0M2U4NTM1YTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQyMDY1MTY1ZjJkYzI2MjA2YzA3ZTMxZWM2Y2I0YjAzNDQ2ODUxOTZmNTVmNWYwNDlmZWVhNjJjOWVjNGYyMTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjNTI2YjdjZjhhODhkOTZjMTMwYjhhZTA0YjBlMWJjZDk3Y2QxNjhjODYwYTI3MjgwZDc0Mzk1ZTdmYjIxYWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a38353dbafc54885871f616dec9a58a6",
+      "statement": "The middleware package publishes its supported middleware and hook names through a lazy export map and __all__, so a new public middleware must be added there before factories can import it from agent.middleware.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/__init__.py#L5-L63",
+          "version": "repo-lines-v1:sha256:8be2cce935f126316770f4ab69846b7736acb398a06b501e12eac322b18649bc:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhMWU5OWRhMTcxZWQzZjRjY2FmYWQ5MTk0NGFlY2Q3NzgwY2EzNzZkMTc0OTZlY2IyOGZiNjk2NGExNTc0MjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5NDE2ZTA5Zjc4YmEzMTZjMDMyNTY4MjEzYjg1NWVlNzU2ZTQxNTY1ZDkxOGYwOTUxOWM4MWZkNjIwZjQwNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1M2IyNjgwOWU3ZDY4YjI0Yjg5YmMxOWFkOWIyYjgwYThiMjQ3ODk5MDIyM2M1N2Q5M2I3ZDY2ZTk5ZjYyMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE1YTBlNTc1NWQ3ODgzMjZhZDcwM2NmOGM2NzQwMDY0MjMwNmU4Mjg2OGMwNTQ0MzcwOTk0ZDk1NjgzYjY2OWEifQ"
+        },
+        {
+          "resource": "repo://agent/middleware/__init__.py#L92-L118",
+          "version": "repo-lines-v1:sha256:7aeeee0c4a5cdd5f8057db73189cc94d4f10e140d16318730df658ef14963f7c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc0ZTFiNmZiNDBlOGNiZDFkZWRiODVhY2NlODAyODc0NDcyMzU3ZGQyNGU0OGRlOGNhMzRiNzQ4Zjg0MWEwNWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJmZWQ2MjYxZDc4NzA5MGI2MWNiNDMxZDEwMGQ4NWJiZjI2OTBkNWQzMWFkZTkxN2I5YzFlODRmNDQ4YjY1YzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU0ZThhMTVmYzU0MTIyODUxY2Q3MzRmMzZlZmQ5NDA4MmZiMTA5YTg5NmViNzdkM2ZkNDA1Y2I3YWFhMDUyNjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_185438b04b6e4b3898f56e9e25704839",
+      "statement": "TimeoutWrapupMiddleware begins a monotonic run clock lazily and, once OPEN_SWE_WRAPUP_TIMEOUT_SECONDS expires, adds a system instruction to finish current work; its default is 45 minutes and invalid or nonpositive settings fall back to that default.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/timeout_wrapup.py",
+          "version": "repo-file-v1:sha256:24846e35a1fccc32ac03b46e0b136fb7feb42b294b2a7b38e9c859cb31d444a4"
+        }
+      ]
+    },
+    {
+      "id": "claim_4267aa72b40f46c39c1deca4f8730066",
+      "statement": "The coding graph's record_run_usage after-agent hook best-effort records completed-run token usage for a prepared run and schedules deferred cost enrichment only when persistence succeeds.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/record_run_usage.py#L1-L39",
+          "version": "repo-lines-v1:sha256:71c5d4890729046a717d40b7799c775607d212224bca058c02f5c7ce4633bdc3:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI1N2RmNjFjOTE5Yzk4NjY5MTc4OThhMDFhOGQxYWE1OTI5ZGVmMzk5NzJhNzAwMzRjM2JhZjE0ZTM3NDZmODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://agent/server.py#L1336-L1342",
+          "version": "repo-lines-v1:sha256:8bd97385f2cbdf632d8c15584faaac4ca10555620791edb6142cfdfdb5002576:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDkwYTE3ZTM5ZmU4ZDFjYWVmMmY5NzY5Zjc1MWNkZTQyN2FmM2I3ODNkMDI3MmRjOGViMzJiMGVmYmUyNzJhMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZWE0MjBmZWNjZDBkZjQyMWFmMWE1MDAyZDM2MDQ0ZGJlYjdhZGZmMTBiNGE0Yzc2YmI3MmI4MDk0MWY0N2ViMiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTg1NzVjOGQ5NDM1ODI4NTViODI4YTFhYmJiOGUwOWFkYjA2MWE1NWE4Yjc0YzQ2MjI5OWJkNWIyZDUyMjczZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTFlZmRiNjE3YzlmMDkxZTFlYmMzNTA0Y2I5OWM3OTA1ZDQyODA2MmRiNjhhZTcxYTc3NGVjY2ZiYzIyZDk3YSJ9"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-08-31T08:17:06.525Z"
+    "at": "2026-09-06T08:13:04.096Z"
   }
 }

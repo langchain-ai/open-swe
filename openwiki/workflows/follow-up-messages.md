@@ -1,16 +1,9 @@
 ---
 type: workflow
-title: Mid-Run Follow-Up Messages
-description: How messages that arrive while the agent is already working are handled — either by interrupting and resuming the active run, or by enqueuing them onto the thread's store queue so a before-model middleware injects them as user messages before the next LLM call.
-tags: [follow-up, message-queue, middleware, interrupt, multitask-strategy, slack-stop, webhooks, langgraph]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-08-27T06:27:22.313Z
+title: Follow-up, interruption, and stop handling
+description: How product-surface replies resolve an Open SWE thread, either preempt or serialize runs, inject a live dashboard or edit follow-up, and safely stop work without crossing Slack thread boundaries.
+tags: [follow-up, interruption, message-queue, slack, dashboard, thread-state, stop-handling]
 sources:
-  - id: openwiki-source-d87936e6d54eab24f7479af1
-    resource: repo://agent/baby_sit.py
-  - id: openwiki-source-26c2c4725a171eaf524f2ad7
-    resource: repo://agent/background_tasks.py
   - id: openwiki-source-dc33a233b67bb1d08952543c
     resource: repo://agent/dashboard/thread_api.py
   - id: openwiki-source-c48b309c5ca416cf623f0866
@@ -21,217 +14,143 @@ sources:
     resource: repo://agent/middleware/check_message_queue.py
   - id: openwiki-source-276ab38291eb5741b4c2141c
     resource: repo://agent/reviewer.py
+  - id: openwiki-source-6fd11c8bb15f5eb94b765440
+    resource: repo://agent/sandboxes/lifecycle.py
   - id: openwiki-source-856ade03ef31ac38e1347f7c
     resource: repo://agent/server.py
-  - id: openwiki-source-8b97ebf23a7d6b08aa1161d4
-    resource: repo://agent/utils/slack_stop.py
+  - id: openwiki-source-e0785b4f2497c26e024d92fc
+    resource: repo://agent/slack/routes.py
+  - id: openwiki-source-a26c1e1c3e9e7df7de591923
+    resource: repo://agent/slack/stop.py
+  - id: openwiki-source-4ffd3d31ffb2d798faaaad59
+    resource: repo://agent/slack/webhook.py
   - id: openwiki-source-79be4c606a697afbf6efb749
     resource: repo://agent/utils/thread_ops.py
-  - id: openwiki-source-e8033e29419d205e5ac2fbb1
-    resource: repo://agent/webhooks/slack.py
-generated: { by: "openwiki/0.4.2", at: "2026-08-27T06:27:22.313Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-09-06T08:13:04.096Z
+generated: { by: "openwiki/0.4.2", at: "2026-09-06T08:13:04.096Z" }
 ---
 
-# Mid-Run Follow-Up Messages
+# Follow-up, interruption, and stop handling
 
-A "follow-up" is any input that arrives for a thread that is already running: a
-second Linear comment while the first is being worked, a Slack reply, a
-dashboard message typed into a live run, or a background PR-babysitting event.
-Open SWE handles these along two distinct paths depending on who sent the
-follow-up and how urgent it is:
+A follow-up is input associated with an existing agent thread: a new Slack turn, a Slack edit, or a dashboard message while that thread is working. The system deliberately distinguishes **run scheduling** from **mid-run state injection**:
 
-- **Interrupt-and-resume** — explicit user requests halt the active run and
-  restart the agent with full history plus the new message.
-- **Enqueue** — non-urgent or background follow-ups are appended to a per-thread
-  store queue and injected by a before-model middleware ahead of the next model
-  call, without disturbing the run that is already in flight.
+- A product trigger creates a durable run on its resolved thread. Its multitask strategy says whether it preempts the active run or waits behind it.
+- The store-backed queue injects a message into the currently executing graph before its next model call. It is used by the dashboard for a live handoff and by Slack message edits; it is not the normal scheduling mechanism for an untagged Slack reply.
+- A stop cancels live work for one verified Slack thread and removes deferred records. A `:x:` reaction then creates a constrained summary turn; a code-channel session-stop does not.
 
-These paths, and the stop/cancel path that discards pending work, are described
-below. For how runs are created in general see
-[workflows/invocation](invocation.md); for where the queue-draining middleware
-sits in the model loop see
-[architecture/middleware-stack](../architecture/middleware-stack.md); and for
-the thread and store state these mechanisms read and write see
-[concepts/threads-and-state](../concepts/threads-and-state.md).
+This page covers the boundary between surfaces and the graph. See [threads and state](../concepts/threads-and-state.md) for thread ownership, [invocation](invocation.md) for ordinary run creation, [context engineering](context-engineering.md) for the input envelope, and [sandbox lifecycle](../architecture/sandbox-lifecycle.md) for sandbox reuse.
 
-## Two dispatch strategies
+## Resolve the originating thread before acting
 
-Every Slack, Linear, GitHub, and dashboard trigger routes through the single
-durable dispatch contract `dispatch_agent_run`, which forwards a
-`multitask_strategy` to `create_durable_run` and ultimately to
-`client.runs.create`. The default is `"interrupt"`.
+Slack’s webhook route validates the signed request, rejects ineligible channels and bot-originated messages, and deduplicates accepted Event API deliveries. For ordinary follow-ups it resolves the `(channel_id, thread_ts)` mapping to an agent `thread_id`; a conflicting mapping is an error rather than a guess. A Slack edit takes a stricter route: the route retries locating the delivered-message mapping and accepts it only when its Slack thread timestamp, triggering user, and agent thread ID agree, and the agent thread still exists. It also rejects identity-changing edits and attachment-only link-unfurl edits.
 
-With `multitask_strategy="interrupt"`, a new run on a busy thread halts the
-active run and resumes the agent with the full conversation history plus the new
-message. Because dispatch also sets `durability="sync"` (a checkpoint before
-each step), the interrupted run's progress is preserved rather than lost. On an
-idle thread the same call simply starts a run. This is why the older in-process
-busy-check and lock were removed: interrupt makes them unnecessary, and it also
-guarantees a thread never provisions two sandboxes concurrently.
+The asynchronous Slack service refreshes source metadata and constructs a structured `RunInput` from the Slack context. Each message is attributed to a person or system identity and carries Slack channel and timestamp context. This is what keeps a later reply attached to the intended conversation rather than treating raw Slack text as global input.
 
-Background and low-priority follow-ups opt out of interruption by passing
-`multitask_strategy="enqueue"`, letting the current run finish before the queued
-run starts. `/baby-sit` terminal and progress updates dispatch with `enqueue`,
-as do the periodic background-task runs.
+## Durable run scheduling: interrupt or enqueue
+
+`dispatch_agent_run` is the common contract for Slack, Linear, GitHub, and dashboard triggers. It builds or accepts a structured input and delegates to `create_durable_run`, which calls `client.runs.create`. The defaults are `multitask_strategy="interrupt"` and `durability="sync"`; the latter checkpoints before each step. Thus an interrupt on a busy thread stops the active run at a durable boundary and the new run has the thread’s conversation state, whereas an idle thread just starts. `stream_resumable=True` and the Protocol v2 streaming configuration make externally-triggered runs replayable to later dashboard clients.
+
+`enqueue` is a platform run-scheduling alternative, not the store message queue below: the active run is allowed to finish and the new run begins afterwards. Background work such as babysitting can choose it. Slack chooses it for a non-explicit follow-up; an explicit bot tag, direct/code-channel directed request, or other explicit request chooses `interrupt`.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User
-    participant Webhook as Webhook Handler
-    participant Dispatch as dispatch_agent_run
-    participant Platform as LangGraph Platform
-    participant Agent as Agent Run
+    participant Slack
+    participant Route as Slack route
+    participant Service as Slack service
+    participant Dispatch
+    participant Platform
+    participant Active as Active run
 
-    Note over Agent: run already in flight
-    User->>Webhook: follow-up (comment / reply)
-    Webhook->>Dispatch: multitask_strategy interrupt or enqueue
-    Dispatch->>Platform: runs.create durable sync
-    alt interrupt
-        Platform-->>Agent: halt at last checkpoint
-        Platform->>Agent: resume with full history plus new message
-    else enqueue
-        Platform-->>Agent: let active run finish
-        Platform->>Agent: start queued run afterward
+    Slack->>Route: signed reply or mention
+    Route->>Route: resolve and validate Slack thread mapping
+    Route->>Service: accepted event in background
+    Service->>Dispatch: structured input and strategy
+    Dispatch->>Platform: create durable sync run
+    alt explicit request
+        Platform-->>Active: interrupt at checkpoint
+        Platform->>Platform: start replacement on same thread
+    else non-explicit reply
+        Platform-->>Active: finish current run
+        Platform->>Platform: start queued run
     end
 ```
-Follow-up dispatch chooses between halting the active run and waiting for it to finish.
+The platform serializes work per resolved thread: an explicit request preempts, while a non-explicit Slack follow-up is scheduled behind the active run.
 
-### Slack: explicit tag interrupts, else enqueue
+This serialization is also an important sandbox invariant. `ensure_sandbox_for_thread` relies on interrupt scheduling so two runs for one thread do not provision sandboxes concurrently; it reuses a cached or persisted sandbox ID, recreates a deleted sandbox, but normally refuses to replace an unreachable one because replacement could silently discard uncommitted work.
 
-Slack applies this choice per message: `_dispatch_or_queue_slack_run` dispatches
-with `multitask_strategy="interrupt"` when the message explicitly tagged the
-bot, and `"enqueue"` otherwise. An untagged reply in a channel the agent is
-already working therefore lands behind the current run rather than derailing it,
-while an explicit `@open-swe ...` request takes precedence immediately.
+## Live-message queue and context injection
 
-## The store-backed message queue
+### Dashboard handoff
 
-Separately from run multitasking, Open SWE keeps a first-in-first-out queue in
-the LangGraph store under the namespace `("queue", <thread_id>)`, key
-`pending_messages`. `queue_message_for_thread` reads the existing list, appends
-`{"content": ...}`, caps the list at `MAX_QUEUED_MESSAGES` (100, dropping the
-oldest on overflow), and writes it back. This queue is used for the dashboard's
-deliberate "inject a follow-up into a run that's already in flight" path
-(`send_dashboard_message`), which requires the thread to be active (busy) and
-otherwise returns HTTP 409/502.
+`send_dashboard_message` first authorizes posting against thread metadata and requires the thread status to be `busy`. An idle thread receives HTTP 409 and must start through the stream command endpoint; inability to determine activity returns HTTP 502. For a live thread it updates handoff metadata (including participants, selected model/effort, and unresolved PR state where appropriate), then appends a structured payload to `("queue", thread_id)`, key `pending_messages`. The payload preserves text, `source: "dashboard"`, `surface: "web"`, the sender identity, and image blocks. When the prior source is Slack, a best-effort trace-reply update marks the web handoff.
 
-The dashboard enqueues a structured payload — the follow-up text, a `source` of
-`dashboard`, a `web` surface, the sender's identity (`github:<login>`), and any
-image blocks — rather than a bare string, so the middleware can rebuild it into
-a properly attributed input message.
+`queue_message_for_thread` appends `{"content": ...}` in FIFO order and caps the stored list at 100 entries, dropping the oldest when over capacity. This record is scoped by the agent `thread_id`, so neither a queue read nor a stop cleanup can affect another thread.
 
-### Draining the queue before each model call
+### Before-model drain
 
-`check_message_queue_before_model` is a `@before_model` middleware installed in
-both the agent and reviewer graphs. It runs before every LLM call (except in
-stop-summary mode, where it is omitted). On each invocation it:
+`check_message_queue_before_model` is installed in the agent and reviewer middleware stacks and runs before every model call. It obtains `thread_id` from the run configuration and the graph store; absent either, it does nothing. It also consumes the per-thread `("autofix", thread_id) / "pending_event"` record and turns batched PR-babysitting feedback into an instruction to re-check CI and review comments rather than create another run.
 
-1. Reads `thread_id` from the run config and obtains the store; if either is
-   missing it does nothing.
-2. Consumes any batched PR-babysitting event from `("autofix", <thread_id>)`
-   (`_consume_pending_autofix_event`), turning it into a system instruction that
-   tells the agent to re-check CI and review comments before finishing rather
-   than starting a separate run.
-3. Reads `pending_messages` from `("queue", <thread_id>)` and **deletes the key
-   immediately** — before processing — so that if the middleware runs again the
-   same messages are not injected twice.
-4. Converts each queued entry into structured input messages and returns them as
-   a `{"messages": [...]}` state update, which appends them to the conversation
-   as new user/system messages the model then sees.
+For `pending_messages`, the middleware reads the record and deletes it **before** processing its contents. It then returns a `{"messages": [...]}` state update, so the next model call sees the injected messages as part of conversation state. Deleting early prevents a subsequent middleware invocation from injecting the same batch twice, at the cost that an error after deletion can lose that batch; the outer error handler logs and allows the model call to continue instead of aborting the run.
 
-Because the queue is drained at the before-model boundary, an enqueued dashboard
-follow-up is surfaced to the model at the next step of the *current* run,
-without interrupting it.
+Queued dashboard messages produce a dashboard-handoff system message plus a human message attributed to the sender on the web surface. Other queued strings or blocks use the `system:thread-queue` identity. `build_input_messages` emits dynamic identity introductions only when their hashes are not already visible to the model; visibility respects the summarization cutoff, so context hidden behind a summary is reintroduced. Each structured input envelope stays in its own message because the transcript parser expects one envelope per message. Text blocks may be merged, but envelopes cannot be packed together. If queued content has images, the middleware resolves the thread model; unsupported URL images are omitted and a vision-support warning is appended instead.
 
 ```mermaid
 sequenceDiagram
-    autonumber
     participant Dashboard
-    participant Queue as Store queue namespace
-    participant MW as check_message_queue_before_model
-    participant Model as LLM
+    participant Store
+    participant Middleware
+    participant Graph as Active graph
+    participant Model
 
-    Dashboard->>Queue: queue_message_for_thread appends payload
-    Note over MW: before every model call
-    MW->>Queue: aget pending_messages
-    MW->>Queue: adelete pending_messages
-    MW->>MW: build structured input messages
-    MW-->>Model: inject as new user messages
+    Dashboard->>Store: append payload in queue namespace
+    Graph->>Middleware: before next model call
+    Middleware->>Store: read pending messages for thread
+    Middleware->>Store: delete pending messages
+    Middleware->>Middleware: build attributed envelopes
+    Middleware-->>Graph: messages state update
+    Graph->>Model: call with injected context
 ```
-The before-model middleware pulls and clears the queue, then injects the messages ahead of the next LLM call.
+The live queue is drained only at a before-model boundary, allowing the current run to incorporate a dashboard handoff without creating a competing run.
 
-### Structuring and attributing queued messages
+### Slack edits are deferred corrections
 
-Queued payloads are rebuilt into the application's structured input-message
-envelopes via `build_input_messages` (from `agent/input_messages.py`), not
-appended as raw text. The middleware:
+An accepted Slack message edit is routed only after delivered-message identity checks. The service labels it with an “updated message” instruction and queues its text/blocks instead of making a new run. If the thread is busy, the before-model middleware can incorporate it during the current run. If the thread is idle, nothing drains this queue until a later run; the edit intentionally does not itself restart finished work.
 
-- Wraps a queued Linear/Slack/system message in the `system:thread-queue`
-  system identity so the transcript shows it came from the queue.
-- Rebuilds a dashboard payload that carries a `sender` into a `human` input
-  message attributed to that person, on the `web` surface.
-- Translates a dashboard-source marker (`source == "dashboard"`) into a
-  dedicated dashboard-handoff system message.
-- Emits each serialized envelope as its own message, because the transcript
-  parser expects exactly one `<input-message>` envelope per message; packing
-  several envelopes into one message's content blocks would render as raw XML.
-  Plain text blocks are merged, but structured envelopes are flushed separately.
+## Stop paths and their safety boundary
 
-Queued image handling is model-aware: if any queued payload carries images the
-middleware resolves the thread's model, and when that model cannot accept images
-it skips the image blocks and appends a "vision not supported" note to the text
-instead of failing.
+A Slack `reaction_added` event with `reaction == "x"` is handed to the stop handler in background. It resolves the reacted message through its run mapping (or treats a root message as the thread timestamp), resolves the Slack-thread mapping, fetches the agent thread, and verifies that `SourceContext` says the metadata belongs to the same channel and Slack thread. Only then does it claim the event for deduplication. These checks make an unknown mapping, a conflicting association, or a mismatched metadata record a no-op rather than a cross-thread cancellation.
 
-The middleware also avoids re-introducing dynamic-context (person/channel/system
-identity) blocks the model can still see: it seeds the set of already-injected
-context hashes from `visible_dynamic_context_hashes(state)`, which accounts for
-summarization cutoffs so a context block hidden behind a summary is treated as
-absent and reintroduced.
+The reaction stop lists all `pending` and `running` run IDs, cancels them with `action="interrupt"`, deletes both deferred records (`pending_messages` and `pending_event`) for that thread, and marks metadata as interrupted with `stop_requested_at_ms`. It then dispatches a stop-summary run with `stop_summary=True`. Its prompt forbids resuming work and all mutating actions, and requires one concise Slack summary. The normal agent graph omits queue-draining middleware in stop-summary mode, so a summary cannot consume new deferred input.
 
-### Failure isolation
+A Slack `agent_session_stopped` event applies the same verified-thread cancellation, deferred-work cleanup, and interrupted metadata update to the code-channel session thread, then returns that session to `active`. Unlike a `:x:` reaction, it does **not** dispatch a summary run.
 
-The whole middleware body is wrapped so that any error — a store read failure, a
-malformed payload — is logged and results in the model call proceeding with no
-injected messages rather than aborting the run. A failed `pending_messages`
-read still flushes whatever autofix/content blocks were already assembled.
+```mermaid
+stateDiagram-v2
+    [*] --> Working
+    Working --> ReplacementRun: explicit follow-up interrupt
+    Working --> WaitingRun: non-explicit follow-up enqueue
+    Working --> LiveQueue: dashboard message or Slack edit
+    LiveQueue --> Working: next before-model drain
+    Working --> Cancelled: verified Slack stop
+    WaitingRun --> Cancelled: verified Slack stop
+    Cancelled --> StopSummary: x reaction
+    StopSummary --> [*]
+    Cancelled --> SessionActive: session-stop event
+    SessionActive --> [*]
+```
+A verified stop interrupts all live work and clears deferred state; only the reaction path follows it with a read-only summary.
 
-## Stop and cancel handling
+## Operations and focused tests
 
-A Slack `:x:` reaction (or a Slack code-channel session-stop event) is an
-emergency stop, handled in `agent/utils/slack_stop.py`. Processing a stop:
+Run creation can safely omit the completion webhook when its secret is unset or its configured URL is relative/loopback; dispatch logs the condition rather than letting webhook validation prevent every run. When enabled, the URL must be an absolute non-loopback HTTP(S) deployment URL and includes the secret token for completion verification.
 
-1. Resolves the reacted-to message back to its Open SWE thread and verifies the
-   thread metadata matches the Slack channel/thread, ignoring reactions that do
-   not map to a known, matching thread. The Slack event is claimed
-   (deduplicated) before acting.
-2. Lists the thread's `pending` and `running` runs and cancels them all with
-   `runs.cancel_many(..., action="interrupt")`.
-3. **Clears deferred work**: `_clear_deferred_work` deletes both the
-   `pending_messages` record in the `queue` namespace and the `pending_event`
-   record in the `autofix` namespace, so a stop also discards queued follow-ups
-   and batched babysitting events that would otherwise be injected on a later
-   run.
-4. Marks the thread metadata `latest_run_status="interrupted"` with a
-   `stop_requested_at_ms` timestamp.
-5. Dispatches a read-only **stop-summary** run whose prompt forbids resuming the
-   task or taking any mutating action, and directs the agent to post a single
-   concise summary of what was done, what was interrupted, and what remains.
+Focused regression coverage lives in:
 
-The stop-summary run is dispatched through the normal `dispatch_agent_run`
-contract (interrupt strategy). In stop-summary mode the queue-draining
-middleware is intentionally excluded from the middleware stack, so the summary
-turn does not pick up newly queued messages.
+- `tests/middleware/test_check_message_queue.py`, which checks dashboard handoff attribution/envelope separation, autofix consumption, and text-only versus vision-capable image handling.
+- `tests/dashboard/test_dashboard_web_handoff.py`, which checks idle rejection, structured busy-thread handoff queuing, and Slack trace-reply handoff behavior.
+- `tests/slack/test_slack_stop.py`, which checks cancellation of both pending and running runs, record cleanup, summary dispatch, unknown/mismatched mapping rejection, and the no-summary session-stop path.
 
-## Invariants and operational notes
-
-- The `pending_messages` key is deleted before its contents are processed;
-  duplicate middleware runs cannot re-inject the same batch.
-- The queue is FIFO and capped at 100 messages; overflow silently drops the
-  oldest entries.
-- Interrupt preserves in-progress work through `durability="sync"`; a stop
-  discards both the run and any deferred queue/autofix records.
-- The queue and the run-multitasking strategies are complementary: webhook
-  triggers generally rely on interrupt/enqueue at run creation, while the
-  store queue exists for injecting a follow-up into a run that is already
-  running (the dashboard path).
+When changing this flow, preserve the resolution and metadata-match checks before cancellation, the delete-before-inject duplicate-prevention rule, and the distinction between platform `enqueue` scheduling and store-queue injection.

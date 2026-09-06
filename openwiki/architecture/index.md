@@ -1,7 +1,7 @@
 # Files
 
-- [Agent Graph & get_agent Factory](agent-graph.md) - How Open SWE compiles the main coding-agent graph for an executable thread run, including prompt preparation, thread-scoped resources, tool surfaces, subagents, and middleware ordering.
-- [Middleware Stack](middleware-stack.md) - The ordered LangChain and Deep Agents middleware chain around Open SWE agent and reviewer model and tool calls, including failure boundaries, retries, and guardrails.
-- [System Architecture Overview](overview.md)
-- [Reviewer & Review-Style Analyzer Graphs](reviewer-and-analyzer.md) - How the read-only reviewer graph reviews one PR through a durable findings model and how the analyzer graph learns a per-repo review style in bootstrap and nightly continual modes.
-- [Sandbox Lifecycle & Providers](sandbox-lifecycle.md) - How each thread is bound to a per-thread sandbox through a get-or-create-then-reconnect lifecycle, how the SANDBOX_TYPE provider is selected, how the LangSmith GitHub proxy is configured, and how unreachable versus deleted sandboxes are handled.
+- [Coding agent assembly](agent-graph.md) - How the main Deep Agents coding graph is constructed for an executable thread and how each run prepares sandbox, context, tools, skills, and model behavior.
+- [Agent middleware stack](middleware-stack.md) - Intentional middleware ordering for the coding, reviewer, analyzer, and PR chat agent graphs, including preparation, policy, model and tool failure boundaries, timeouts, fallback, and completion hooks.
+- [Runtime architecture and service composition](overview.md) - LangGraph deployment architecture, FastAPI ingress, graph entrypoints, durable execution, and dashboard and desktop boundaries.
+- [Review and review-style graphs](reviewer-and-analyzer.md) - The read-only reviewer prepares a regenerated PR checkout, manages durable findings, and publishes GitHub review comments. A separate analyzer learns repository-specific review guidance, while PR chat answers questions without a sandbox or code-mutation capability.
+- [Sandbox binding and recovery lifecycle](sandbox-lifecycle.md) - How Open SWE binds one durable sandbox identity to a thread, lazily reconnects async backends, selects creation configuration, and recovers safely. It also covers proxy credential refresh, explicit rebinding, and the crucial distinction between deleted and unreachable sandboxes.

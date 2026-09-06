@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Quickstart & Wiki Map](quickstart.md) - Entry point for selecting the Open SWE runtime, workflow, integration, operations, or testing guide. It provides the supported local commands, validation entrypoints, and ownership map for contributors.
+- [Open SWE change map](quickstart.md) - Task-oriented starting point for making a focused Open SWE change. Use it to locate runtime entrypoints, owning design guides, operational configuration, and the narrowest relevant validation.
 
 # Directories
 

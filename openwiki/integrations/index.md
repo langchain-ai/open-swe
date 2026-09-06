@@ -1,5 +1,5 @@
 # Files
 
-- [Dashboard API & Web/Desktop UI](dashboard-ui.md) - How the dashboard FastAPI surface exposes authenticated thread discovery, project grouping, pinning, and thread operations to the TanStack Start UI while preserving proxy and Electron local-execution boundaries.
-- [Observability & MCP Integrations](observability-and-mcp.md) - Optional server-side integrations — Datadog and LangSmith observability tools, Corridor and Notion MCP, Currents, and the Stagehand browser — and the security model that gates them and keeps credentials out of the sandbox.
-- [Sandbox Provider Integrations](sandbox-providers.md) - How Open SWE selects, creates, reconnects to, and operates sandbox backends. Includes the LangSmith async execution deadline and fallback behavior, provider-specific configuration, and extension guidance.
+- [Dashboard, web UI, and desktop clients](dashboard-ui.md) - The dashboard FastAPI API, same-origin Vite and Nitro proxy boundary, review and thread product APIs, and Electron's supervised local-agent boundary. It explains the authorization and filesystem invariants needed to safely change these clients.
+- [Observability, MCP, browser, and connected tools](observability-and-mcp.md) - Optional connected-tool architecture for observability, hosted MCP services, Currents, Notion OAuth, LangSmith gateway-backed models, and sandbox-local Stagehand browser automation. Explains credential boundaries, authorization, lazy loading, and fail-soft behavior.
+- [Sandbox provider abstraction](sandbox-providers.md) - How Open SWE selects, provisions, reconnects to, and safely recovers sandbox backends. Covers the provider extension contract, LangSmith-specific snapshots and proxy authentication, and operating limits for every built-in provider.

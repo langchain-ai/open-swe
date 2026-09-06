@@ -1,14 +1,22 @@
 ---
-type: operations-guide
-title: Local Dev, Build & Deployment
-description: Run Open SWE locally, build its backend and dashboard artifacts, and operate supported desktop, snapshot, and deployment workflows. The backend image, local manifest, and cloud manifest use explicitly documented runtime versions.
-tags: [deployment, local-development, docker, langgraph, fastapi, turborepo, desktop, operations]
+type: operations guide
+title: Development, deployment, and runtime operations
+description: Operate Open SWE's local LangGraph backend, dashboard, desktop client, and production containers. Covers serving boundaries, startup validation, health checks, deployment prerequisites, focused validation, and maintenance helpers.
+tags: [deployment, operations, local-development, langgraph, dashboard, docker, desktop]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-02T08:15:43.727Z
+    at: 2026-09-06T08:13:04.096Z
 sources:
   - id: openwiki-source-328bde9e94017848bb09ba23
     resource: repo://agent/api/app.py
+  - id: openwiki-source-4817379f332cdbc419964b44
+    resource: repo://agent/api/health.py
+  - id: openwiki-source-b05c9910677cf23a9325276c
+    resource: repo://agent/config.py
+  - id: openwiki-source-49bfbb811c25e99235121924
+    resource: repo://agent/sandboxes/providers/registry.py
+  - id: openwiki-source-56ade344fdbe7d47c84f008f
+    resource: repo://agent/utils/model.py
   - id: openwiki-source-bb1ebe868e35e9e500714501
     resource: repo://Dockerfile
   - id: openwiki-source-bb241754e70259fd67d23952
@@ -39,109 +47,125 @@ sources:
     resource: repo://ui/Dockerfile
   - id: openwiki-source-cee8c9d42a08db69733a075f
     resource: repo://ui/server/backend-proxy.ts
-generated: { by: "openwiki/0.4.2", at: "2026-09-02T08:15:43.727Z" }
+  - id: openwiki-source-3b0d59e2570cb537382d8c12
+    resource: repo://ui/src/lib/dashboard-fetch.ts
+  - id: openwiki-source-a741d432f952c0dbfb4fb35d
+    resource: repo://ui/vite.config.ts
+generated: { by: "openwiki/0.4.2", at: "2026-09-06T08:13:04.096Z" }
 ---
 
-# Local Dev, Build & Deployment
+# Development, deployment, and runtime operations
 
-Open SWE is deployed as two independently runnable services:
+Open SWE runs a LangGraph backend and dashboard as separately deployable processes. The backend registers five graphs—`agent`, `reviewer`, `analyzer`, `chat`, and `scheduler`—and mounts `agent.webapp:app` for dashboard, webhook, plan, workflow-approval, and health HTTP routes. The dashboard is a server-rendered UI that fronts backend paths; it is not embedded in the backend image.
 
-- The **backend** is a LangGraph application exposing the `agent`, `reviewer`, `analyzer`, `chat`, and `scheduler` graphs, alongside the FastAPI app `agent.webapp:app`. The HTTP app provides webhook, dashboard, and health routes.
-- The **dashboard** is the `ui/` TanStack Start/Nitro application. It proxies selected requests to the backend rather than embedding one backend address in its production build.
-
-See [Configuration](configuration.md) for the complete environment contract, [Dashboard UI](../integrations/dashboard-ui.md) for UI behavior, and [Testing](../testing/overview.md) for broader test guidance.
+Use this page for process boundaries and operator checks. See [Configuration](configuration.md) for the full environment contract, [Dashboard UI](../integrations/dashboard-ui.md) for product and desktop behavior, and [Testing](../testing/overview.md) for test-layer selection.
 
 ## Local backend
 
-Install Python dependencies and development tools with:
+Install the Python environment and development extras:
 
 ```bash
 make install
 ```
 
-This runs `uv sync --extra dev`. The primary entrypoint is:
+This runs `uv sync --extra dev`. The normal end-to-end entrypoint is:
 
 ```bash
 make dev
 ```
 
-It runs `uv run langgraph dev --no-browser --port 2024`. `langgraph.json` supplies the five graph imports, `agent.webapp:app`, a `.env` file, and a deleting checkpointer TTL: a 60-minute sweep removes checkpoints after the 43,200-minute default TTL. Thus one local process at `http://localhost:2024` serves both LangGraph and FastAPI routes.
+It runs `uv run langgraph dev --no-browser --port 2024`. `langgraph.json` supplies the five graph registrations, the `agent.webapp:app` HTTP app, `.env`, and a deleting checkpointer TTL: it sweeps every 60 minutes and defaults checkpoints to 43,200 minutes. One process at `http://localhost:2024` therefore serves both the LangGraph runtime and the FastAPI routes.
 
-`make run` is deliberately narrower: it runs `uv run uvicorn agent.webapp:app --reload --port 8000`. It is useful for the HTTP app, but it does not start the LangGraph runtime, so it cannot support dashboard Agents chat features that invoke LangGraph. Use `make dev` for end-to-end development.
+`make run` is intentionally narrower:
+
+```bash
+make run
+```
+
+It starts `uv run uvicorn agent.webapp:app --reload --port 8000`, without the LangGraph runtime. Use it for an HTTP-only route change, not an end-to-end dashboard Agents-chat or graph-run change; those require `make dev` on port 2024.
 
 ```mermaid
 flowchart TD
-  Dev["make dev"] --> Runtime["langgraph dev on port 2024"]
+  Dev["make dev"] --> Runtime["LangGraph dev on port 2024"]
   Runtime --> Graphs["agent reviewer analyzer chat scheduler"]
-  Runtime --> App["FastAPI app agent.webapp:app"]
-  App --> Hooks["webhook routes"]
-  App --> Dashboard["dashboard API routes"]
-  Direct["make run"] --> Uvicorn["uvicorn on port 8000"]
-  Uvicorn --> HttpOnly["FastAPI only"]
+  Runtime --> App["FastAPI app"]
+  App --> Http["dashboard webhook plan workflow health routes"]
+  Run["make run"] --> Uvicorn["Uvicorn on port 8000"]
+  Uvicorn --> FastAPI["FastAPI routes only"]
 ```
 
-Local entrypoints: `make dev` joins graph and HTTP serving; `make run` serves only FastAPI.
+This shows the local serving boundary: `make dev` joins graph and HTTP serving, while `make run` does not start graph execution.
+
+### Startup and health checks
+
+Creating the FastAPI app pins a single event loop before queue workers initialize. Its lifespan repeats that pin, validates the selected sandbox provider and local-development default-model credentials, then closes cached model clients on shutdown. Invalid active LangSmith sandbox configuration fails at boot rather than at first sandbox creation. Local model credential validation applies only when `DASHBOARD_BASE_URL` starts with `http://localhost`; it checks the configured default model and raises for its missing provider key, not later team, profile, or thread selections.
+
+Use `GET /health` as a basic process health probe; it returns `{"status":"healthy"}`. It is a liveness-style route, not a dependency-readiness check. Also treat lifespan failures in logs as startup configuration failures before sending webhook traffic.
+
+The FastAPI composition rejects `DASHBOARD_ALLOWED_ORIGINS=*`, then enables credentialed CORS only when configured origins are nonempty. This protects the browser boundary but is not a substitute for dashboard authentication or mutation authorization.
 
 ### Runtime-version boundary
 
-Do **not** treat every manifest and image as the same LangGraph API runtime:
+Local development and the cloud manifest use Python 3.14 and LangGraph API `0.13.3`. `pyproject.toml` constrains the local `langgraph-api` resolution to `>=0.13.3,<0.14`, avoiding an end-of-life resolver outcome and aligning `langgraph dev` with `langgraph.json`. The standalone backend image uses the matching `langchain/langgraph-api:0.13.3-py3.14` base.
 
-| Context | Python | LangGraph API version source |
-|---|---:|---|
-| Local `langgraph dev` and cloud manifest | 3.12 | `langgraph.json` declares `api_version` `0.12.6`; `pyproject.toml` constrains local resolution to `>=0.12.6,<0.13`. |
-| Standalone root backend image | 3.12 | `Dockerfile` is based on `langchain/langgraph-api:0.13.2-py3.12`. |
-| Desktop manifest | 3.12 | `langgraph.desktop.json` declares `api_version` `0.12.6`. |
+`langgraph.desktop.json` is a distinct trimmed manifest: it exposes only `agent`, disables the built-in UI, and configures `agent.local_auth:auth` with Studio authentication disabled. Do not use it as a replacement for the normal multi-graph service.
 
-The `pyproject.toml` constraint prevents uv from selecting the end-of-life `langgraph-api` 0.10.3 due to pre-release peer bounds. It aligns local development with `langgraph.json`, **not** with the root image's 0.13.2 base. Before changing graphs, checkpointer behavior, or runtime-specific behavior, test the intended deployment path; the graph and HTTP registrations are currently duplicated between `langgraph.json` and Docker `LANGSERVE_GRAPHS`/`LANGGRAPH_HTTP`.
+### Focused local validation
 
-`langgraph.desktop.json` is intentionally trimmed: it exposes only `agent`, disables the built-in UI, and uses `agent.local_auth:auth` with Studio auth disabled.
+Do **not** run the full Python suite locally. Select the smallest relevant target, for example:
 
-### Focused backend checks
+```bash
+make test TEST_FILE=tests/github/test_open_pull_request.py
+make lint
+make typecheck
+```
 
-The Makefile wrappers keep backend checks in the uv environment:
+`make test` (or `make tests`) runs `uv run pytest -vvv` for `TEST_FILE` and skips a missing requested path; the default is `tests/`, so always set a narrow path locally. `make integration_tests` targets `tests/integration_tests/` when present. `make lint` runs Ruff checks and formatting diff, `make format` applies formatting and fixes, `make format-check` verifies formatting, and `make typecheck` runs `ty check agent tests`.
 
-- `make test` or `make tests` runs verbose pytest for `TEST_FILE` (default `tests/`); a missing requested path is skipped.
-- `make integration_tests` runs `tests/integration_tests/` when present.
-- `make lint` runs `ruff check` plus formatter diff; `make format` applies Ruff formatting and fixes; `make format-check` verifies formatting.
-- `make typecheck` runs `basedpyright agent tests`.
+For an operational smoke check, start the intended server, request `/health`, and exercise the exact proxied or webhook route changed. A dashboard-proxy check such as `curl -i http://localhost:3000/dashboard/api/me` should return the backend response (commonly `401` when unauthenticated), not dashboard HTML.
 
 ## Dashboard workspace and local UI
 
-The pnpm workspace contains `ui`, `desktop`, and `tests/e2e`; Turborepo coordinates package `dev`, `build`, `typecheck`, `test`, and `check` tasks. After `pnpm install` at the repository root, run:
+The pnpm workspace contains `ui`, `desktop`, and `tests/e2e`; Turborepo coordinates package `dev`, `build`, `typecheck`, `test`, and `check` tasks. Install workspace dependencies from the repository root, then start the dashboard:
 
 ```bash
+pnpm install
 make web
 ```
 
-This invokes `pnpm run dev`, or `turbo run dev --filter=open-swe-dashboard`, and starts Vite at `http://localhost:3000`. In development, Vite proxies backend-owned paths to `DASHBOARD_API_URL`, defaulting to `http://localhost:2024`; this includes `/dashboard/api`, `/webhooks`, and mock-harness paths. Set `DASHBOARD_API_URL` before starting the command to use another backend.
+`make web` calls `pnpm run dev`, which scopes `turbo run dev` to `open-swe-dashboard`. In development, Vite/Nitro proxies backend prefixes to `DASHBOARD_API_URL`, defaulting to `http://localhost:2024`; set that variable before startup to front another backend. The production-only handler deliberately has no fallback, but the local dev proxy does.
 
-For the normal local dashboard/login flow, configure `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` and set `DASHBOARD_API_BASE_URL="http://localhost:3000"` with the GitHub App callback at `http://localhost:3000/dashboard/api/auth/callback`. The origin allowlist is also the backend's credentialed CORS/CSRF boundary: it rejects `*`, and missing the UI origin causes non-GET dashboard writes to fail CSRF validation even though reads can work.
+For the normal local dashboard login flow, set `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"`, set `DASHBOARD_API_BASE_URL="http://localhost:3000"`, and register `http://localhost:3000/dashboard/api/auth/callback` with the GitHub App. The origin allowlist is also the backend's mutation CSRF gate: without the dashboard origin, reads can work while cookie-authenticated writes fail.
 
-`pnpm run build`, `pnpm run typecheck`, and `pnpm run test` fan out through Turborepo; use `pnpm --filter open-swe-dashboard run <script>` to scope a package task. Root `pnpm run lint` (oxlint) and `pnpm run format`/`pnpm run format:check` (oxfmt) are not Turbo tasks and operate once across JS/TS files. Turbo caches build outputs in `.output/**`, `.vercel/output/**`, and `build/**`; `DASHBOARD_API_URL`, `VERCEL`, `E2E_HARNESS`, and `VITE_*` are cache inputs. `VITE_*` values become browser-visible build data, so never put a secret in them.
+`pnpm run build`, `pnpm run typecheck`, and `pnpm run test` fan out through Turborepo; scope a package task with `pnpm --filter open-swe-dashboard run <script>`. Root `pnpm run lint` uses oxlint, and `pnpm run format`/`pnpm run format:check` use oxfmt once across repository JS/TS files rather than as Turbo tasks. Turbo caches `.output/**`, `.vercel/output/**`, and `build/**`; `DASHBOARD_API_URL`, `VERCEL`, `E2E_HARNESS`, and `VITE_*` are build cache inputs. `VITE_*` values are browser-visible and must not contain secrets.
 
-## Desktop packaging
+## Desktop development and packaging
 
-The experimental Electron app in `desktop/` bundles the compiled dashboard UI. `make desktop` runs `pnpm run dev:desktop`; normally start `make dev` as its backend first. Development defaults to `http://localhost:2024`; use `pnpm --dir desktop run start -- --backend-url=https://your-backend.example.com` or `OPEN_SWE_BACKEND_URL` for a hosted backend.
+The experimental Electron application packages the compiled dashboard UI. Start its development wrapper with:
 
-Package with `pnpm --dir desktop run pack` for an unpacked app or `pnpm --dir desktop run dist` for an installer. Packaged apps ask for and store an organization backend URL on first launch; they do not default to a maintainer deployment. Permit `<backend-url>/dashboard/api/auth/callback` in the GitHub App for desktop login.
+```bash
+make desktop
+```
 
-On macOS, `make install-desktop` requires a clean checkout, switches and fast-forwards `main`, then calls `scripts/install_desktop.sh`; `make install-checkout` calls the script without changing Git state. The script rejects non-macOS hosts, verifies Node, `ditto`, uv, and pnpm or corepack, installs from a frozen lockfile, packages the app, and swaps it into `/Applications` or `~/Applications`.
+This calls `pnpm run dev:desktop`; start `make dev` first for the normal backend. Development uses `http://localhost:2024` by default. To use a hosted backend, pass `--backend-url` through `pnpm --dir desktop run start -- --backend-url=https://your-backend.example.com` or set `OPEN_SWE_BACKEND_URL`.
+
+Package an unpacked app with `pnpm --dir desktop run pack`, or an installer with `pnpm --dir desktop run dist`. Packaged builds prompt for and locally store the organization backend URL at first launch; they do not default to a hosted maintainer deployment. Permit `<backend-url>/dashboard/api/auth/callback` in the GitHub App for desktop login.
+
+On macOS, `make install-desktop` refuses a dirty checkout, switches and fast-forwards `main`, then invokes `scripts/install_desktop.sh`; `make install-checkout` invokes the script without changing Git state. The script is macOS-only, requires Node, `ditto`, uv, and pnpm or corepack, installs with a frozen lockfile, packs the app, and stages then swaps it into `/Applications` or `~/Applications`.
 
 ## Production backend
 
-The root `Dockerfile` is the production **LangGraph API server** image, not a sandbox image:
+Build the standalone backend image from the repository root:
 
 ```bash
 docker build -t open-swe .
 ```
 
-It installs the repository into `langchain/langgraph-api:0.13.2-py3.12` under that image's API constraints, registers `agent.webapp:app`, the five graphs, and the same checkpointer TTL through environment variables, removes package-management tooling, and exposes port `8000`. This wiring mirrors the active cloud manifest's graphs and TTL, but the base API version differs as described above.
+The root `Dockerfile` is a production LangGraph API server image, not a sandbox image. It starts from `langchain/langgraph-api:0.13.3-py3.14`, installs this repository under the image constraints, and sets `LANGSERVE_GRAPHS`, `LANGGRAPH_HTTP`, and `LANGGRAPH_CHECKPOINTER` for the five graphs, FastAPI app, and deleting TTL. It exposes port 8000.
 
-A standalone deployment needs the full application environment plus Agent Server services: `DATABASE_URI` for Postgres, `REDIS_URI` for Redis, `LANGSMITH_API_KEY` unless tracing is disabled, and `LANGGRAPH_CLOUD_LICENSE_KEY`. Publish port 8000 through ingress and set `LANGGRAPH_URL` to its public backend URL. Do not use scale-to-zero hosting: background runs require Redis/Postgres-backed workers to remain available. If built-in LangGraph API routes are publicly reachable, do not rely on `LANGGRAPH_AUTH_TYPE=noop`; put the service behind private networking, a gateway, or custom LangGraph authentication.
+A standalone deployment needs the application environment plus Agent Server backing services: `DATABASE_URI` for Postgres, `REDIS_URI` for Redis, `LANGSMITH_API_KEY` unless tracing is disabled, and `LANGGRAPH_CLOUD_LICENSE_KEY`. Expose port 8000 through ingress and set `LANGGRAPH_URL` to the public backend URL. Do not deploy it on scale-to-zero infrastructure: background runs rely on Redis/Postgres-backed workers remaining available. If built-in LangGraph API routes are publicly reachable, place the service behind private networking, an API gateway, or custom LangGraph authentication before using `LANGGRAPH_AUTH_TYPE=noop`.
 
-Update GitHub, Linear, and Slack webhook targets and OAuth callbacks when the public URLs change. `DASHBOARD_API_BASE_URL` is the browser-facing dashboard API/callback origin: set it to the dashboard origin for same-origin proxying, or the backend origin for direct cross-origin calls. The GitHub callback is `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/callback`.
-
-Alternatively connect the repository to LangGraph Cloud / Platform, configure the same application environment there, and use the hosted deployment URL for `LANGGRAPH_URL` and callbacks. That path uses `langgraph.json` and its 0.12.6 API declaration, rather than the standalone Docker base tag.
+Set `DASHBOARD_API_BASE_URL` to the URL browsers use for dashboard API requests and OAuth callbacks, and update GitHub, Linear, and Slack webhook targets plus OAuth callbacks after a public URL change. The dashboard callback is `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/callback`. LangGraph Cloud / Platform is an alternative backend deployment path: connect the repository, configure the same environment there, and use the hosted deployment URL for `LANGGRAPH_URL` and callbacks.
 
 ## Dashboard production topology
 
@@ -151,26 +175,33 @@ Build the dashboard image from the repository root:
 docker build -f ui/Dockerfile .
 ```
 
-`ui/Dockerfile` uses multi-stage `node:24-alpine`, installs the dashboard workspace with the frozen lockfile, copies only `.output` to the final image, runs as the `node` user, and exposes its Nitro server on port 8080. In a production dashboard deployment, `DASHBOARD_API_URL` is required and read per request; an unset value fails rather than silently choosing a hosted backend. Consequently one image can front different backend deployments.
+`ui/Dockerfile` is a multi-stage Node 24 Alpine build. It installs the dashboard workspace with the frozen lockfile, builds `open-swe-dashboard`, copies its Nitro `.output` server to the final image, runs as `node`, and exposes port 8080. Set `DASHBOARD_API_URL` in the running deployment: the proxy reads it per request and throws when it is absent, so one image can front different backends without a dangerous default.
 
-The deployed Nitro handler proxies `/dashboard/api/**` and `/webhooks/**` to that backend and preserves OAuth redirects. Server-side calls can use the request session cookie. The recommended arrangement is same-origin: dashboard browser traffic and the OAuth callback use the dashboard origin, letting `osw_session` remain on that host. For direct cross-origin traffic, set `VITE_DASHBOARD_API_BASE_URL` and `DASHBOARD_API_BASE_URL` to the backend, keep `DASHBOARD_API_URL` at that backend for SSR/proxying, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`. In that alternative, the session cookie belongs to the backend, pages initially render unauthenticated and hydrate client-side.
+In a deployed build, Nitro sends `/dashboard/api/**` and `/webhooks/**` to the backend proxy. It preserves the path, query, method, request body, and OAuth redirects; it filters hop-by-hop/reframed headers and preserves separate `Set-Cookie` headers. Server-rendered dashboard calls go directly to the backend and explicitly forward the incoming `osw_session` cookie.
 
 ```mermaid
-flowchart TD
-  Browser["Browser"] --> Dashboard["Dashboard Nitro server"]
-  Dashboard -->|"dashboard API and webhook proxy"| Backend["LangGraph API backend"]
-  Dashboard -->|"server request with session"| Backend
-  Backend --> Postgres["Postgres"]
-  Backend --> Redis["Redis"]
-  Backend --> LangSmith["LangSmith"]
+sequenceDiagram
+  participant Browser
+  participant UI as Dashboard Nitro
+  participant Backend as LangGraph backend
+  participant Postgres
+  participant Redis
+  Browser->>UI: dashboard API request or webhook path
+  UI->>Backend: proxy path query and request data
+  Backend->>Postgres: persistent state
+  Backend->>Redis: workers and queue state
+  Backend-->>UI: response or OAuth redirect
+  UI-->>Browser: response and cookies
 ```
 
-Production topology: the dashboard fronts the backend, while backend workers depend on Postgres, Redis, and LangSmith services.
+This shows the production proxy boundary and the backend services that must remain available for background work.
 
-## Snapshots and operational helpers
+The recommended topology is same-origin: point `DASHBOARD_API_BASE_URL` and the GitHub App callback at the dashboard origin, so browser `/dashboard/api/*` requests and `osw_session` stay on that host. For direct cross-origin browser calls, set `VITE_DASHBOARD_API_BASE_URL` and `DASHBOARD_API_BASE_URL` to the backend, retain `DASHBOARD_API_URL` for SSR and webhook proxying, and add the dashboard origin to `DASHBOARD_ALLOWED_ORIGINS`. In that mode the cookie belongs to the backend, initial dashboard pages render unauthenticated, and the client resolves the session after hydration.
 
-Run `scripts/create_sandbox_snapshot.py` with `uv run python`. It uses `SandboxClient` to create a LangSmith sandbox snapshot from an image (by default `johanneslangchain/open-swe-sandbox:gh-cli-amd64`) with a default 32 GiB filesystem, then prints the snapshot UUID and `DEFAULT_SANDBOX_SNAPSHOT_ID` assignment. It requires `--api-key` or `LANGSMITH_API_KEY`/`LANGSMITH_API_KEY_PROD`.
+## Snapshots and maintenance helpers
 
-`scripts/purge_wakeup_crons.py` is a one-time cleanup for expired one-shot `thread_wakeup` cron rows; the regular scheduling tool now purges them opportunistically. Start with `--dry-run`, then run without it to delete. It obtains the deployment from `--url`, `LANGGRAPH_URL`, or `LANGGRAPH_URL_PROD`, and its API key from `LANGGRAPH_API_KEY`, `LANGSMITH_API_KEY`, or `LANGSMITH_API_KEY_PROD`.
+Create a LangSmith sandbox snapshot with `uv run python scripts/create_sandbox_snapshot.py`. The script creates a snapshot from a Docker image using `SandboxClient`, defaults to `johanneslangchain/open-swe-sandbox:gh-cli-amd64` and a 32 GiB filesystem, requires `--api-key` or `LANGSMITH_API_KEY`, and prints the UUID to assign to `DEFAULT_SANDBOX_SNAPSHOT_ID`.
 
-`examples/github-actions/set-base-snapshot.yml` is a reference workflow, not an active workflow. It PUTs a snapshot ID to `/dashboard/api/sandbox-settings` using a GitHub Actions OIDC bearer token. Enable `id-token: write` and allowlist the workflow with `ADMIN_OIDC_SUBJECTS`; `owner/repo` entries match the token repository claim, while entries containing `:` match its full subject. `ADMIN_OIDC_AUDIENCE` defaults to `open-swe` and must match the requested audience. A personal access token is an alternative only when its owner is in `CONFIGURED_ADMINS`; `secrets.GITHUB_TOKEN` is neither an OIDC credential nor a user identity for this endpoint.
+`scripts/purge_wakeup_crons.py` is a one-time backfill for expired one-shot `thread_wakeup` crons; regular scheduling now purges them opportunistically. Run its `--dry-run` first, then run without it to delete. It resolves the deployment from `--url` or `LANGGRAPH_URL` and an API key from `LANGGRAPH_API_KEY` or `LANGSMITH_API_KEY` (including registry-supported deprecated aliases).
+
+`examples/github-actions/set-base-snapshot.yml` is a copy-ready reference workflow, not an active workflow. It PUTs a snapshot ID to `/dashboard/api/sandbox-settings` using a short-lived GitHub Actions OIDC bearer token. Enable `id-token: write`; allowlist its repository or full subject via `ADMIN_OIDC_SUBJECTS`, and keep `ADMIN_OIDC_AUDIENCE` aligned with the requested audience (default `open-swe`). An administrator-owned personal access token is an alternative; `secrets.GITHUB_TOKEN` is neither an OIDC credential nor a user identity accepted for this operation.
