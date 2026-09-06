@@ -121,10 +121,9 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
 3. Save it as `LANGSMITH_API_KEY_PROD`
-4. Get your **Tenant ID**: Visit LangSmith, login, then copy the UUID in the URL. Example: if your URL is `https://smith.langchain.com/o/72184268-01ea-4d29-98cc-6cfcf0f2abb0/agents/chat` -> the tenant ID would be `72184268-01ea-4d29-98cc-6cfcf0f2abb0`. Save it as `LANGSMITH_TENANT_ID_PROD`.
-5. Get your **Project ID**: open your tracing project in LangSmith, then click on the **ID** button in the top left, directly next to the project name. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
+4. Optionally pick a **tracing project**: every run traces into the LangSmith project named by `LANGSMITH_PROJECT` (`default` when unset; LangGraph Platform sets it to the deployment name), and "View trace" links point there.
 
-> **Note on per-graph tracing projects.** The graphs trace into separate projects by name — `open-swe-agent` (main agent) and `open-swe-review` (reviewer/analyzer). "View trace" links resolve the correct project ID from these names automatically (via the `LANGSMITH_API_KEY_PROD` client), so make sure projects with these names exist in your tenant. If a name can't be resolved, links fall back to `LANGSMITH_TRACING_PROJECT_ID_PROD`, so set it to whichever project you want links to point at by default.
+> **Tenant and project ids are discovered.** Trace links find your workspace through the API key and the project by name, so nothing else needs to be copied. `LANGSMITH_TENANT_ID` remains an explicit override.
 
 ### 4b. Sandbox snapshots
 
@@ -413,8 +412,8 @@ Create a `.env` file in the project root. Below is the full list — only fill i
 LANGSMITH_API_KEY_PROD=""              # From step 4a
 LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
-LANGSMITH_TENANT_ID_PROD=""           
-LANGSMITH_TRACING_PROJECT_ID_PROD=""   # Fallback project ID for "View trace" links; graphs trace into the open-swe-agent / open-swe-review projects by name
+LANGSMITH_PROJECT=""                  # LangSmith project every run traces into (default: "default"; LangGraph Platform sets the deployment name)
+LANGSMITH_TENANT_ID=""                # Optional override; discovered from the workspace when unset
 LANGSMITH_URL_PROD="https://smith.langchain.com"                 
 
 # === LLM ===
