@@ -1,4 +1,4 @@
 # Files
 
-- [Configuration & Environment Variables](configuration.md) - Central reference for Open SWE's runtime configuration and environment variables across sandbox provisioning, model selection, auth/webhooks, and third-party integrations, plus the langgraph.json runtime config and admin runtime overrides.
-- [Local Dev, Build & Deployment](deployment.md) - Run Open SWE locally, build its backend and dashboard artifacts, and operate supported desktop, snapshot, and deployment workflows. The backend image, local manifest, and cloud manifest use explicitly documented runtime versions.
+- [Configuration and settings operations](configuration.md) - How Open SWE declares, resolves, validates, and consumes deployment environment variables and dashboard-managed settings for models, sandboxes, credentials, and integrations.
+- [Development, deployment, and runtime operations](deployment.md) - Operate Open SWE's local LangGraph backend, dashboard, desktop client, and production containers. Covers serving boundaries, startup validation, health checks, deployment prerequisites, focused validation, and maintenance helpers.
