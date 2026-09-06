@@ -11,6 +11,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -35,6 +36,11 @@ from agent.sandboxes.retry import is_transient_sandbox_error
 logger = logging.getLogger(__name__)
 
 SANDBOX_TRANSIENT = "sandbox_transient"
+LARGE_TOOL_RESULTS_PREFIX = "/large_tool_results/"
+OFFLOAD_PATH_GUIDANCE = (
+    "Offload files are scoped to the current run's sandbox. Do not reuse this path "
+    "from another run's transcript; re-fetch the underlying payload instead."
+)
 
 
 def _get_name(candidate: object) -> str | None:
@@ -153,6 +159,90 @@ def _generic_error_tool_message(e: Exception, request: ToolCallRequest) -> ToolM
     )
 
 
+def _tool_call_strings(request: ToolCallRequest) -> list[str]:
+    tool_call = request.tool_call
+    if not isinstance(tool_call, dict):
+        return []
+    args = tool_call.get("args")
+    if not isinstance(args, Mapping):
+        return []
+    return [value for value in args.values() if isinstance(value, str)]
+
+
+def _offload_path(
+    request: ToolCallRequest, error: Exception | ToolMessage | None = None
+) -> str | None:
+    candidates = _tool_call_strings(request)
+    for candidate in candidates:
+        start = candidate.find(LARGE_TOOL_RESULTS_PREFIX)
+        if start >= 0:
+            return candidate[start:].split()[0].rstrip("'\"")
+    if isinstance(error, Exception):
+        candidates.append(str(error))
+    elif isinstance(error, ToolMessage) and isinstance(error.content, str):
+        candidates.append(error.content)
+    for candidate in candidates:
+        start = candidate.find(LARGE_TOOL_RESULTS_PREFIX)
+        if start >= 0:
+            return candidate[start:].split()[0].rstrip("'\"")
+    return None
+
+
+def _is_not_found(error: Exception | ToolMessage | None) -> bool:
+    if error is None:
+        return False
+    if isinstance(error, ToolMessage):
+        if error.status != "error":
+            return False
+        content = error.content
+    else:
+        content = str(error)
+    text = content if isinstance(content, str) else json.dumps(content)
+    normalized = text.lower().replace("-", "_")
+    return any(
+        marker in normalized
+        for marker in (
+            "file_not_found",
+            "path_not_found",
+            "file not found",
+            "path not found",
+            "no such file",
+            "filenotfounderror",
+        )
+    )
+
+
+def _error_payload(message: ToolMessage) -> dict[str, Any] | None:
+    if not isinstance(message.content, str):
+        return None
+    try:
+        payload = json.loads(message.content)
+    except json.JSONDecodeError:
+        payload = {"error": message.content}
+    return payload if isinstance(payload, dict) else {"error": message.content}
+
+
+async def _offload_listing(backend: BackendProtocol | None) -> list[str]:
+    if backend is None:
+        return []
+    try:
+        result = await backend.als(LARGE_TOOL_RESULTS_PREFIX)
+    except Exception:
+        logger.exception("Failed to list current offload files")
+        return []
+    entries = result.entries or []
+    return [entry["path"] for entry in entries if entry.get("path")]
+
+
+async def _augment_offload_error(
+    payload: dict[str, Any],
+    backend: BackendProtocol | None,
+) -> dict[str, Any]:
+    payload["guidance"] = OFFLOAD_PATH_GUIDANCE
+    payload["available_offload_files"] = await _offload_listing(backend)
+    return payload
+
+
 class ToolErrorMiddleware(AgentMiddleware):
     """Normalize tool execution errors into predictable payloads.
 
@@ -167,13 +257,31 @@ class ToolErrorMiddleware(AgentMiddleware):
 
     state_schema = AgentState
 
+    def __init__(self, backend: BackendProtocol | None = None) -> None:
+        self.backend = backend
+
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         try:
-            return await handler(request)
+            result = await handler(request)
+            if (
+                isinstance(result, ToolMessage)
+                and _is_not_found(result)
+                and _offload_path(request, result)
+            ):
+                payload = _error_payload(result)
+                if payload is not None:
+                    return result.model_copy(
+                        update={
+                            "content": json.dumps(
+                                await _augment_offload_error(payload, self.backend)
+                            )
+                        }
+                    )
+            return result
         except Exception as e:
             # The command never started, so nothing is known to be wrong with the
             # sandbox: ending the run here would turn a gateway blip into an
@@ -185,6 +293,12 @@ class ToolErrorMiddleware(AgentMiddleware):
                 return _transient_sandbox_tool_message(e, request)
             if not _is_sandbox_unreachable(e):
                 logger.exception("Error during tool call handling; request=%r", request)
+                if _is_not_found(e) and _offload_path(request, e):
+                    message = _generic_error_tool_message(e, request)
+                    payload = await _augment_offload_error(
+                        _error_payload(message) or {}, self.backend
+                    )
+                    return message.model_copy(update={"content": json.dumps(payload)})
                 return _generic_error_tool_message(e, request)
             logger.exception("Sandbox error during tool call handling; request=%r", request)
             thread_id = _get_thread_id(request)

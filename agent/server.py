@@ -1314,7 +1314,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
+                ToolErrorMiddleware(backend=agent_backend),
                 ExcludeToolsMiddleware(
                     excluded=(
                         STOP_SUMMARY_EXCLUDED_TOOLS

@@ -1397,7 +1397,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 ),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
+                ToolErrorMiddleware(backend=backend),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
                 TimeoutWrapupMiddleware(),

@@ -196,7 +196,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                     run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,
                     exit_behavior="end",
                 ),
-                ToolErrorMiddleware(),
+                ToolErrorMiddleware(backend=backend),
                 TimeoutWrapupMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
             ],
