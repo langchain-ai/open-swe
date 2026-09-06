@@ -121,7 +121,7 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
 3. Save it as `LANGSMITH_API_KEY_PROD`
-4. Optionally pick a **tracing project**: every run traces into the LangSmith project named by `LANGSMITH_PROJECT` (`default` when unset; LangGraph Platform sets it to the deployment name), and "View trace" links point there.
+4. Optionally pick a **tracing project**: every run traces into the LangSmith project named by `LANGSMITH_PROJECT` (`default` when unset; the legacy `LANGCHAIN_PROJECT` is honored too, and LangGraph Platform sets both to the deployment name), and "View trace" links point there.
 
 > **Tenant and project ids are discovered.** Trace links find your workspace through the API key and the project by name, so nothing else needs to be copied. `LANGSMITH_TENANT_ID` remains an explicit override.
 

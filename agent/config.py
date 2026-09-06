@@ -168,6 +168,7 @@ ENV.var(
     "LangSmith project every run traces into and trace links point at; the SDK reads it and "
     "LangGraph Platform sets it to the deployment name.",
     default="default",
+    aliases=("LANGCHAIN_PROJECT",),
 )
 ENV.var(
     "LANGSMITH_URL_PROD",
@@ -232,12 +233,6 @@ ENV.var(
     deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
     replaced_by="LANGSMITH_TRACING",
 )
-ENV.var(
-    "LANGCHAIN_PROJECT",
-    "Legacy SDK alias, ignored: graphs pin their own tracing projects. LangGraph Platform "
-    "injects it.",
-)
-
 # --- GitHub ------------------------------------------------------------------------------
 ENV.var("GITHUB_APP_ID", "Numeric GitHub App id used as the JWT issuer.")
 ENV.var("GITHUB_APP_CLIENT_ID", "GitHub App client id for the dashboard OAuth flow.")
