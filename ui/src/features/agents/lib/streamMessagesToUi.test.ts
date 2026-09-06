@@ -126,6 +126,25 @@ describe("streamMessagesToUi", () => {
     ).toEqual(["user-1", "user-2"])
   })
 
+  it("hides internal todo updates", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "write_todos",
+            args: { todos: [{ content: "Fix the bug", status: "pending" }] },
+            type: "tool_call",
+          },
+        ],
+      }),
+    ])
+
+    expect(messages).toEqual([])
+  })
+
   it("identifies local task calls as subagents", () => {
     const messages = streamMessagesToUi([
       new AIMessage({

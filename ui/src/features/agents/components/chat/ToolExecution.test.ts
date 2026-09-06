@@ -55,12 +55,6 @@ describe("formatToolDisplay", () => {
     ).toBe('Search "tool_calls"')
   })
 
-  it("normalizes write_todos", () => {
-    expect(formatToolDisplay("write todos", "other", {}, projectPath)).toBe(
-      "Update todos"
-    )
-  })
-
   it("sentence-cases raw tool names", () => {
     expect(formatToolDisplay("enter_plan_mode", "other", {}, projectPath)).toBe(
       "Enter plan mode"

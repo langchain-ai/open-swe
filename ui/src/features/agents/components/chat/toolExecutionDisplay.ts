@@ -118,12 +118,6 @@ export function formatToolDisplayParts(
     case "think":
       return plain("Thinking...")
     default: {
-      if (
-        toolName === "write_todos" ||
-        title.toLowerCase().startsWith("write todos")
-      ) {
-        return plain("Update todos")
-      }
       if (toolName === "ls" && path) {
         return formatPathDisplayParts("List", path)
       }
