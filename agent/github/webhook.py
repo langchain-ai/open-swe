@@ -243,7 +243,9 @@ async def trigger_pr_review_from_ref(
 
     # Full token to read PR metadata (privacy/id aren't in the trigger ref);
     # re-scoped below once we know whether the repo is public.
-    app_token, app_token_expires_at = await common.get_github_app_installation_token_with_expiry()
+    app_token, app_token_expires_at = await common.get_github_app_installation_token_with_expiry(
+        owner=pr_ref.owner, repo=pr_ref.repo
+    )
     if not app_token:
         common.logger.warning("No GitHub App token available for PR reviewer request")
         return {"success": False, "error": "No GitHub App token available"}
@@ -1111,7 +1113,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     thread_id = github_issue_thread_id(issue_id)
     existing_thread = await common._thread_exists(thread_id)
     github_token = await common._get_or_resolve_thread_github_token(thread_id, email)
-    app_token = await common.get_github_app_installation_token()
+    app_token = await common.get_github_app_installation_token(
+        owner=repo_config.get("owner") or None, repo=repo_config.get("name") or None
+    )
     reaction_token = github_token or app_token
     comment = payload.get("comment", {})
     comment_id = comment.get("id")

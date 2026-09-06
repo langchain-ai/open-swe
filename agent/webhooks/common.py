@@ -1210,13 +1210,18 @@ async def _reviewer_token_for_repo(
     repo_private: bool | None,
     repo_id: int | None = None,
 ) -> tuple[str | None, str | None]:
+    owner = repo_config.get("owner")
+    repo_name = repo_config.get("name")
     if repo_private is False:
         if repo_id is not None:
-            return await get_github_app_installation_token_with_expiry(repository_ids=[repo_id])
-        repo_name = repo_config.get("name")
+            return await get_github_app_installation_token_with_expiry(
+                repository_ids=[repo_id], owner=owner, repo=repo_name
+            )
         if repo_name:
-            return await get_github_app_installation_token_with_expiry(repositories=[repo_name])
-    return await get_github_app_installation_token_with_expiry()
+            return await get_github_app_installation_token_with_expiry(
+                repositories=[repo_name], owner=owner, repo=repo_name
+            )
+    return await get_github_app_installation_token_with_expiry(owner=owner, repo=repo_name)
 
 
 async def _store_current_reviewer_run_id(thread_id: str, run: Any) -> None:

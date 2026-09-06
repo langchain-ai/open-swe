@@ -935,11 +935,14 @@ async def _ensure_reviewer_sandbox_for_thread(
     thread_id: str,
     cfg: RunConfig,
 ) -> tuple[SandboxBackendProtocol, str | None]:
+    repo_owner = cfg.repo.owner if cfg.repo else ""
     repo_name = cfg.repo.name if cfg.repo else ""
     github_token: str | None = None
     if cfg.source:
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
-            repositories=[repo_name] if repo_name else None
+            repositories=[repo_name] if repo_name else None,
+            owner=repo_owner or None,
+            repo=repo_name or None,
         )
         if not github_token:
             raise RuntimeError(
