@@ -87,10 +87,18 @@ def test_deprecated_names_the_platform_injects_next_to_current_ones_stay_quiet()
         "LANGCHAIN_API_KEY": "k",
         "LANGSMITH_TRACING": "true",
         "LANGCHAIN_TRACING_V2": "true",
+        "LANGSMITH_PROJECT": "p",
         "LANGCHAIN_PROJECT": "p",
     }
 
     assert ENV.deprecated_in_use(env) == []
+
+
+def test_legacy_project_name_alone_is_read_and_flagged() -> None:
+    env = {"LANGCHAIN_PROJECT": "p"}
+
+    assert ENV.LANGSMITH_PROJECT.get(environ=env) == "p"
+    assert ("LANGCHAIN_PROJECT", "use LANGSMITH_PROJECT instead.") in ENV.deprecated_in_use(env)
 
 
 def test_deprecated_in_use_is_quiet_for_current_names() -> None:

@@ -267,7 +267,7 @@ def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None
     assert gateway.gateway_overrides("openai:gpt-5.6-sol") is None
 
 
-def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deprecated_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
     overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
@@ -505,3 +505,21 @@ def test_make_model_gateway_without_key_falls_back_direct(
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
     assert "api_key" not in captured
+
+
+def test_gateway_default_follows_the_dedicated_key(monkeypatch) -> None:
+    from agent.utils import gateway
+
+    for name in ("LANGSMITH_GATEWAY_ENABLED", "LANGSMITH_GATEWAY_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    assert gateway.gateway_env_default() is False
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2_sk_gateway")
+    assert gateway.gateway_env_default() is True
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "false")
+    assert gateway.gateway_env_default() is False
+
+    monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
+    assert gateway.gateway_env_default() is True

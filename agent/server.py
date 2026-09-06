@@ -228,7 +228,6 @@ from agent.utils.thread_settings import (
     normalize_thread_settings,
     store_thread_settings,
 )
-from agent.utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
 
@@ -1353,4 +1352,5 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ).with_config(config)
 
 
-traced_agent = traced_graph_factory(get_agent, AGENT_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_agent = get_agent

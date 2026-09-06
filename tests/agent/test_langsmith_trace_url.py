@@ -1,12 +1,15 @@
 import pytest
 
 from agent.utils import langsmith as ls_utils
-from agent.utils.tracing import AGENT_TRACING_PROJECT, REVIEW_TRACING_PROJECT
+
+_REAL_DISCOVER_TENANT_ID = ls_utils._discover_tenant_id
 
 
 @pytest.fixture(autouse=True)
-def _clear_cache() -> None:
+def _clear_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     ls_utils._PROJECT_ID_CACHE.clear()
+    ls_utils._TENANT_ID_CACHE.clear()
+    monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: None)
 
 
 def _resolver(ids: dict[str, str], *, default: str | None = None):
@@ -18,33 +21,46 @@ def _resolver(ids: dict[str, str], *, default: str | None = None):
 
 def _set_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
-    monkeypatch.setenv("LANGSMITH_TENANT_ID_PROD", "tenant-1")
-    monkeypatch.delenv("LANGSMITH_TRACING_PROJECT_ID_PROD", raising=False)
+    monkeypatch.setenv("LANGSMITH_TENANT_ID", "tenant-1")
+    monkeypatch.setenv("LANGSMITH_PROJECT", "my-deployment")
 
 
-async def test_trace_url_resolves_project_id_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_trace_url_uses_the_langsmith_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every link points at LANGSMITH_PROJECT: agent and review runs share the deployment's project."""
     _set_env(monkeypatch)
     monkeypatch.setattr(
-        ls_utils,
-        "_resolve_project_id_by_name",
-        _resolver({AGENT_TRACING_PROJECT: "agent-pid"}, default="review-pid"),
+        ls_utils, "_resolve_project_id_by_name", _resolver({"my-deployment": "deployment-pid"})
     )
 
-    agent_url = await ls_utils.get_langsmith_trace_url("t1")
-    review_url = await ls_utils.get_langsmith_trace_url("t2", project_name=REVIEW_TRACING_PROJECT)
-
-    assert agent_url == "https://smith.example/o/tenant-1/projects/p/agent-pid/t/t1"
-    assert review_url == "https://smith.example/o/tenant-1/projects/p/review-pid/t/t2"
+    assert await ls_utils.get_langsmith_trace_url("t1") == (
+        "https://smith.example/o/tenant-1/projects/p/deployment-pid/t/t1"
+    )
 
 
-async def test_trace_url_falls_back_to_env_project_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_trace_url_defaults_to_the_sdk_default_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _set_env(monkeypatch)
-    monkeypatch.setenv("LANGSMITH_TRACING_PROJECT_ID_PROD", "env-pid")
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}))
+    for name in (
+        "LANGSMITH_PROJECT",
+        "LANGCHAIN_PROJECT",
+        "LANGSMITH_SESSION",
+        "LANGCHAIN_SESSION",
+        "HOSTED_LANGSERVE_PROJECT_NAME",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    seen: list[str] = []
 
-    url = await ls_utils.get_langsmith_trace_url("t3")
+    async def _resolve(name: str) -> str | None:
+        seen.append(name)
+        return "default-pid"
 
-    assert url == "https://smith.example/o/tenant-1/projects/p/env-pid/t/t3"
+    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolve)
+
+    assert await ls_utils.get_langsmith_trace_url("t3") == (
+        "https://smith.example/o/tenant-1/projects/p/default-pid/t/t3"
+    )
+    assert seen == ["default"]
 
 
 async def test_trace_url_none_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,12 +89,12 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
-    first = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
-    second = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
+    first = await ls_utils._resolve_project_id_by_name("my-deployment")
+    second = await ls_utils._resolve_project_id_by_name("my-deployment")
 
     assert first == "pid-123"
     assert second == "pid-123"
-    assert calls == [AGENT_TRACING_PROJECT]
+    assert calls == ["my-deployment"]
 
 
 async def test_resolve_project_id_retries_transient_failure(
@@ -99,15 +115,16 @@ async def test_resolve_project_id_retries_transient_failure(
 
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
-    assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
-    assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
-    assert calls == [AGENT_TRACING_PROJECT, AGENT_TRACING_PROJECT]
+    assert await ls_utils._resolve_project_id_by_name("my-deployment") is None
+    assert await ls_utils._resolve_project_id_by_name("my-deployment") is None
+    assert calls == ["my-deployment", "my-deployment"]
 
 
 async def test_create_thread_feedback_posts_thread_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setenv("LANGSMITH_PROJECT", "my-deployment")
 
     class _FakeClient:
         async def _arequest_with_retries(
@@ -119,7 +136,7 @@ async def test_create_thread_feedback_posts_thread_scope(
     monkeypatch.setattr(
         ls_utils,
         "_resolve_project_id_by_name",
-        _resolver({AGENT_TRACING_PROJECT: "project-id"}),
+        _resolver({"my-deployment": "project-id"}),
     )
 
     result = await ls_utils.create_langsmith_thread_feedback(
@@ -167,3 +184,156 @@ async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", _boom)
 
     assert await ls_utils.get_langsmith_trace_url("t5") is None
+
+
+async def test_tenant_id_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_TENANT_ID", "tenant-env")
+    ls_utils._TENANT_ID_CACHE[ls_utils._workspace_key()] = "tenant-cached"
+
+    assert await ls_utils.resolve_tenant_id() == "tenant-env"
+
+
+async def test_cached_ids_belong_to_the_credentials_that_produced_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rotating the key or pointing at another workspace must not reuse the old ids."""
+    monkeypatch.delenv("LANGSMITH_TENANT_ID", raising=False)
+    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key-a")
+    projects = {"key-a": ("pid-a", "tenant-a"), "key-b": ("pid-b", "tenant-b")}
+
+    class _Client:
+        async def read_project(self, *, project_name: str) -> object:
+            project_id, tenant_id = projects[ls_utils.ENV.LANGSMITH_API_KEY.get()]
+            return type("P", (), {"id": project_id, "tenant_id": tenant_id})()
+
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _Client())
+
+    assert await ls_utils._resolve_project_id_by_name("proj") == "pid-a"
+    assert await ls_utils.resolve_tenant_id() == "tenant-a"
+
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key-b")
+    assert await ls_utils._resolve_project_id_by_name("proj") == "pid-b"
+    assert await ls_utils.resolve_tenant_id() == "tenant-b"
+
+
+async def test_tenant_id_is_learned_from_project_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
+
+    class _Project:
+        id = "pid"
+        tenant_id = "tenant-from-project"
+
+    class _Client:
+        async def read_project(self, *, project_name: str) -> _Project:
+            return _Project()
+
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _Client())
+
+    assert await ls_utils._resolve_project_id_by_name("open-swe-agent") == "pid"
+    assert await ls_utils.resolve_tenant_id() == "tenant-from-project"
+
+
+async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
+    calls = 0
+
+    def _discover() -> str:
+        nonlocal calls
+        calls += 1
+        return "tenant-listed"
+
+    monkeypatch.setattr(ls_utils, "_discover_tenant_id", _discover)
+
+    assert await ls_utils.resolve_tenant_id() == "tenant-listed"
+    assert await ls_utils.resolve_tenant_id() == "tenant-listed"
+    assert calls == 1
+
+
+async def test_tenant_id_none_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "LANGSMITH_TENANT_ID",
+        "LANGSMITH_TENANT_ID_PROD",
+        "LANGSMITH_API_KEY_PROD",
+        "LANGSMITH_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(ls_utils, "_discover_tenant_id", _REAL_DISCOVER_TENANT_ID)
+
+    assert ls_utils._discover_tenant_id() is None
+    assert await ls_utils.resolve_tenant_id() is None
+
+
+async def test_tenant_discovery_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
+
+    def _boom() -> str:
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(ls_utils, "_discover_tenant_id", _boom)
+
+    assert await ls_utils.resolve_tenant_id() is None
+
+
+async def test_trace_url_uses_discovered_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
+    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
+    monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: "tenant-d")
+    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+
+    assert await ls_utils.get_langsmith_trace_url("t9") == (
+        "https://smith.example/o/tenant-d/projects/p/pid/t/t9"
+    )
+
+
+def test_host_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example/")
+
+    assert ls_utils.langsmith_host_url() == "https://smith.example"
+
+
+def test_host_url_derived_from_self_hosted_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_URL_PROD", raising=False)
+    monkeypatch.delenv("LANGSMITH_ENDPOINT_PROD", raising=False)
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://langsmith.acme.internal/api")
+
+    assert ls_utils.langsmith_host_url() == "https://langsmith.acme.internal"
+
+
+def test_host_url_derived_from_regional_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_URL_PROD", raising=False)
+    monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
+    monkeypatch.setenv("LANGSMITH_ENDPOINT_PROD", "https://eu.api.smith.langchain.com")
+
+    assert ls_utils.langsmith_host_url() == "https://eu.smith.langchain.com"
+
+
+def test_host_url_default_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("LANGSMITH_URL_PROD", "LANGSMITH_ENDPOINT_PROD", "LANGSMITH_ENDPOINT"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert ls_utils.langsmith_host_url() == "https://smith.langchain.com"
+
+
+def test_feedback_clients_use_a_single_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "standard")
+    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "legacy")
+    monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
+    monkeypatch.delenv("LANGSMITH_ENDPOINT_PROD", raising=False)
+
+    assert ls_utils._build_langsmith_feedback_clients() == (
+        ("standard", "https://api.smith.langchain.com"),
+    )
+
+
+def test_tracing_project_follows_the_sdk_tracer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Links must query the project the tracer used, whichever legacy name supplied it."""
+    from agent.utils.tracing import tracing_project
+
+    for name in ("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT", "HOSTED_LANGSERVE_PROJECT_NAME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LANGCHAIN_PROJECT", "legacy-name")
+    assert tracing_project() == "legacy-name"
+
+    monkeypatch.setenv("LANGSMITH_PROJECT", "current-name")
+    assert tracing_project() == "current-name"

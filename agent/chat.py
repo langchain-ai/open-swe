@@ -71,7 +71,6 @@ from agent.tools import (
 from agent.utils import ttl_cache
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from agent.utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
 
@@ -255,4 +254,5 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     ).with_config(config)
 
 
-traced_chat_agent = traced_graph_factory(get_chat_agent, AGENT_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_chat_agent = get_chat_agent
