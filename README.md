@@ -148,7 +148,7 @@ make build-dashboard   # pnpm install + Vite build of the dashboard
 make dev               # http://localhost:2024 serves the API and the dashboard
 ```
 
-Add your LangSmith key, a model key, two generated secrets, and your GitHub login to `.env` as described in the [Installation Guide](docs/INSTALLATION.md), then sign in at `http://localhost:2024`. GitHub comment triggers need a public URL for the webhook: locally, the static domain of a free ngrok account; on LangGraph Platform, the deployment URL. The guide covers both, plus the optional Slack and Linear triggers.
+Add your LangSmith key, a model key, two generated secrets, and your GitHub login to `.env` as described in the [Installation Guide](docs/INSTALLATION.md), then sign in at `http://localhost:2024`. GitHub comment and Slack triggers need a public URL for the webhooks: locally, the static domain of a free ngrok account (`make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev`, or any tunnel to port 2024); on LangGraph Platform, the deployment URL. The guide covers both, plus the optional Slack and Linear triggers.
 
 For UI work, `make dev-ui` alone starts Vite and the backend fronting it, so `http://localhost:2024` hot-reloads with no cross-origin setup.
 

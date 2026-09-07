@@ -33,19 +33,28 @@ source .venv/bin/activate
 uv sync --all-extras
 ```
 
-## 2. Decide the URL GitHub and Slack will call
+## 2. Pick the public URL, and set up ngrok for local development
 
 The GitHub App from step 3 delivers webhooks to `<URL>/webhooks/github` and lists `<URL>/dashboard/api/auth/callback` as a login callback; a Slack app posts events to `<URL>/webhooks/slack`. Both need a public HTTPS URL that does not change, so pick it first.
 
-- **LangGraph Platform:** the deployment URL, `https://<name>-<hash>.<region>.langgraph.app`. Create the deployment first (see [Deploy](#7-deploy)) so you have it.
-- **Local development:** a tunnel to port 2024 on a fixed hostname. Sign up for a free [ngrok](https://dashboard.ngrok.com/signup) account, install the agent and add your authtoken as its dashboard shows, then claim the static domain the free plan includes under **Domains** and run:
-
-  ```bash
-  ngrok http 2024 --url https://<your-domain>.ngrok-free.dev
-  ```
-
-  Keep it running while you develop; the hostname is yours, so the App's webhook and Slack's request URL stay valid across restarts. Run the backend on port 2024 (`make dev`, or `make dev-ui` while working on the UI). You keep opening the dashboard on `http://localhost:2024`; the tunnel is only for GitHub and Slack. A throwaway tunnel such as `cloudflared tunnel --url http://localhost:2024` works for a quick test, but its hostname changes every run and you would edit the App's webhook and Slack's URLs each time.
+- **LangGraph Platform:** the deployment URL, `https://<name>-<hash>.<region>.langgraph.app`. Create the deployment first (see [Deploy](#7-deploy)) so you have it, and skip the rest of this step.
 - **Local development without GitHub or Slack triggers:** `http://localhost:2024`. Runs started from the dashboard work; GitHub cannot deliver webhooks to localhost, so the App is created without one and comment triggers wait until you have a public URL.
+- **Local development with GitHub or Slack triggers:** a tunnel to port 2024 on a hostname that stays the same across restarts. The free ngrok plan gives you one:
+
+  1. Sign up at [dashboard.ngrok.com](https://dashboard.ngrok.com/signup) and install the agent (`brew install ngrok`, or the download the dashboard offers).
+  2. Connect the agent to your account with the `ngrok config add-authtoken …` command shown under **Getting Started → Your Authtoken**.
+  3. Under **Domains**, claim the free static domain. It looks like `<name>.ngrok-free.dev`.
+  4. Start the tunnel and leave it running while you develop:
+
+     ```bash
+     make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev   # or export NGROK_DOMAIN once in your shell
+     ```
+
+  `make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That matters: `langgraph dev` has no authentication, so a bare tunnel would expose your threads, runs, and dashboard API to anyone who finds the hostname. Everything else stays on `http://localhost:2024`, where you keep opening the dashboard; the tunnel is only for GitHub and Slack. Check it with `curl https://<name>.ngrok-free.dev/webhooks/slack` once the backend is up (step 5): the backend answers `{"status":"ok", …}`, while `/ok` gets ngrok's own 404.
+
+  Any other tunnel works the same way as long as it forwards to port 2024 on a fixed hostname; restrict it to `/webhooks/*` if it can. A throwaway `cloudflared tunnel --url http://localhost:2024` is fine for a quick test, but its hostname changes every run and you would edit the App's webhook and Slack's URLs each time.
+
+  Use `https://<name>.ngrok-free.dev` as `--url` in the steps below.
 
 ## 3. Create a GitHub App
 
@@ -115,7 +124,7 @@ make build-dashboard   # pnpm install + Vite build into ui/.output/public
 make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard
 ```
 
-`langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API.
+`langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API. It reloads on code changes only: after editing `.env`, restart it.
 
 **Working on the UI?** Have the backend front the Vite dev server instead of serving a build:
 
@@ -484,7 +493,7 @@ REVIEWER_OUTCOMES_DATASET=""           # LangSmith dataset for reviewer outcomes
 
 ### Webhook not receiving events
 
-- The URL configured in GitHub, Slack, or Linear must be the deployment's URL (locally, your ngrok domain), and `ngrok http 2024` must be running against the port the backend listens on; GitHub shows each delivery and its response under the App's **Advanced** tab, and ngrok's inspector at `http://localhost:4040` shows what arrived.
+- The URL configured in GitHub, Slack, or Linear must be the deployment's URL (locally, your ngrok domain), and the tunnel (`make tunnel`) must be running against the port the backend listens on; GitHub shows each delivery and its response under the App's **Advanced** tab, and ngrok's inspector at `http://localhost:4040` shows what arrived. With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime. Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
