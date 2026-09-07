@@ -291,10 +291,13 @@ def test_dev_proxy_explains_a_missing_vite(monkeypatch: pytest.MonkeyPatch) -> N
     def vite(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    response = TestClient(_vite_app(vite, monkeypatch)).get("/", headers=HTML)
+    app = _vite_app(vite, monkeypatch)
+    route = next(r for r in app.router.routes if isinstance(r, DashboardDevProxyRoute))
+    response = TestClient(app).get("/", headers=HTML)
     assert response.status_code == 502
     assert "make web" in response.text
-    assert "http://vite.test:3000" in response.text
+    assert route.upstream in response.text
+    assert route.upstream == "http://vite.test:3000"
 
 
 def test_dev_proxy_is_kept_last_too(monkeypatch: pytest.MonkeyPatch) -> None:
