@@ -287,6 +287,8 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
+                if thread_source(metadata) in {"investigate", "investigate_coordinator"}:
+                    continue
                 if metadata.get("visibility", "public") != "public" and (
                     not include_private
                     or not thread_is_readable(metadata, viewer_login, viewer_email)

@@ -11,7 +11,7 @@ What a deployment needs:
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
 | A model provider key such as `ANTHROPIC_API_KEY`, or `LANGSMITH_GATEWAY_API_KEY` for the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` (step 4) |
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
-| `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
+| `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_ID`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 6) |
 | `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` | The GitHub organizations or users allowed to log in (step 6) |
 | `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 6) |
@@ -144,6 +144,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "app_mentions:read",
                 "channels:history",
                 "channels:read",
+                "channels:join",
                 "chat:write",
                 "files:write",
                 "groups:history",
@@ -164,6 +165,10 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
             "request_url": "https://<your-url>/webhooks/slack",
             "bot_events": [
                 "app_mention",
+                "channel_created",
+                "channel_rename",
+                "channel_archive",
+                "message.channels",
                 "message.im",
                 "message.mpim"
             ]
@@ -187,6 +192,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
 ```bash
 SLACK_BOT_TOKEN=""        # OAuth & Permissions → Bot User OAuth Token (xoxb-...)
 SLACK_SIGNING_SECRET=""   # Basic Information → App Credentials → Signing Secret
+SLACK_APP_ID=""           # Basic Information → App ID (A...); Investigate accepts events only from this app
 SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```

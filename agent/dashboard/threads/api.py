@@ -387,6 +387,9 @@ async def admin_cancel_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
 
+    if thread_source(thread_metadata(thread)) in {"investigate", "investigate_coordinator"}:
+        raise HTTPException(404, "thread not found")
+
     if thread_metadata(thread).get("visibility", "public") != "public":
         _assert_thread_readable(thread_metadata(thread), login, email)
 

@@ -273,6 +273,12 @@ async def slack_webhook(
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
 
+    from agent.investigations import service as investigations
+
+    investigation_response = await investigations.accept_slack_event(payload)
+    if investigation_response is not None:
+        return investigation_response
+
     event_id = envelope.event_id
     team_id = envelope.team_id or event.team
     channel_id = event.resolve_channel_id()
