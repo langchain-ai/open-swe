@@ -2031,6 +2031,18 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
             AsyncMock(return_value=findings),
         ),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review.fetch_pr_diff",
+            AsyncMock(
+                return_value=(
+                    "diff --git a/in_diff.py b/in_diff.py\n"
+                    "--- a/in_diff.py\n"
+                    "+++ b/in_diff.py\n"
+                    "@@ -1,1 +10,1 @@\n"
+                    "+touched\n"
+                )
+            ),
+        ),
         patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
         patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
@@ -2108,6 +2120,18 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
         ),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
         patch(
+            "agent.tools.publish_review.fetch_pr_diff",
+            AsyncMock(
+                return_value=(
+                    "diff --git a/in_diff.py b/in_diff.py\n"
+                    "--- a/in_diff.py\n"
+                    "+++ b/in_diff.py\n"
+                    "@@ -1,1 +10,1 @@\n"
+                    "+touched\n"
+                )
+            ),
+        ),
+        patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
@@ -2132,9 +2156,7 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
 
 @pytest.mark.asyncio
 async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -> None:
-    """When the unresolved_anchor 422 fires but the diff_line_set rules out
-    no findings (e.g., diff data unavailable), the tool must NOT retry — it
-    must surface the structured error so the agent stops looping."""
+    """When pruning cannot identify stale anchors, publish findings in the body."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
@@ -2148,7 +2170,7 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
         "_raw_errors": ["Path could not be resolved"],
         "_status": 422,
     }
-    post_review = AsyncMock(return_value=first_response)
+    post_review = AsyncMock(side_effect=[first_response, {"id": 1234}])
 
     with (
         patch(
@@ -2172,6 +2194,11 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             return_value=0,
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("agent.tools.publish_review._record_reviewer_usage", new_callable=AsyncMock),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply", new_callable=AsyncMock
+        ),
+        patch("agent.tools.publish_review.settle_review_check_run", new_callable=AsyncMock),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -2184,10 +2211,16 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             is_re_review=False,
         )
 
-    # Only one attempt — never retry blindly.
-    assert post_review.await_count == 1
-    assert result["success"] is False
-    assert result["unresolvable_findings"] == []
+    assert post_review.await_count == 2
+    assert post_review.await_args_list[1].kwargs["inline_comments"] == []
+    assert "in_diff.py" in post_review.await_args_list[1].kwargs["body"]
+    assert "line 10" in post_review.await_args_list[1].kwargs["body"]
+    assert "boom" in post_review.await_args_list[1].kwargs["body"]
+    assert result["success"] is True
+    assert result["review_id"] == 1234
+    assert result["surfaced_count"] == 0
+    assert result["inline_anchors_unresolvable"] is True
+    assert result["unresolvable_findings"] == ["f_only"]
     assert "update_finding" in result["hint"]
 
 
@@ -2224,7 +2257,12 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
     with (
         patch(
             "agent.run_config.get_config",
-            return_value={"configurable": {"thread_id": "tid"}},
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "diff_line_set": {"in_diff.py": {"RIGHT": {99}, "LEFT": set()}},
+                },
+            },
         ),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(

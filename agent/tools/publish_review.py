@@ -382,6 +382,7 @@ async def _publish_review_async(
     # retry once. Returning the bare 422 to the agent only invites it to
     # retry publish_review with byte-identical args until findings drain.
     unresolvable_findings: list[str] = []
+    inline_anchors_unresolvable = False
     if (
         isinstance(review_response, dict)
         and review_response.get("_error_kind") == "unresolved_anchor"
@@ -393,6 +394,7 @@ async def _publish_review_async(
             pr_number=pr_number,
             token=token,
             state=state,
+            force_refresh=True,
         )
         if dropped_ids and valid_with_payload:
             retry_inline = [p for _, p in valid_with_payload]
@@ -433,19 +435,43 @@ async def _publish_review_async(
                     ),
                 }
         else:
-            # Either nothing to drop (no diff_line_set available, so we can't
-            # tell which findings are bad) or everything would be dropped.
-            # Either way, do not retry — surface the structural signal so the
-            # agent stops retrying with the same args.
-            return {
-                "success": False,
-                "error": f"Failed to POST PR review: {review_response['_error']}",
-                "unresolvable_findings": dropped_ids,
-                "hint": (
-                    "Call update_finding(status='resolved') on these ids "
-                    "or fix their file/line before retrying."
-                ),
-            }
+            attempted_ids = [
+                finding_id
+                for finding, _ in eligible_with_payload
+                if isinstance(finding_id := finding.get("id"), str)
+            ]
+            body_only = render_review_body(
+                pr_number=pr_number,
+                surfaced_count=0,
+                trace_url=review_trace_url,
+                ui_url=review_ui_url,
+                out_of_diff_findings=[finding for finding, _ in eligible_with_payload],
+            )
+            body_only_response = await post_pull_request_review(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                body=body_only,
+                inline_comments=[],
+                token=token,
+            )
+            if isinstance(body_only_response, dict) and "_error" not in body_only_response:
+                review_response = body_only_response
+                inline_comments = []
+                eligible_with_payload = []
+                unresolvable_findings = attempted_ids
+                inline_anchors_unresolvable = True
+            else:
+                return {
+                    "success": False,
+                    "error": f"Failed to POST PR review: {review_response['_error']}",
+                    "unresolvable_findings": attempted_ids,
+                    "hint": (
+                        "Call update_finding(status='resolved') on these ids "
+                        "or fix their file/line before retrying."
+                    ),
+                }
     if isinstance(review_response, dict) and "_error" in review_response:
         return {
             "success": False,
@@ -553,6 +579,8 @@ async def _publish_review_async(
         "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
     }
+    if inline_anchors_unresolvable:
+        result["inline_anchors_unresolvable"] = True
     if unresolvable_findings:
         result["unresolvable_findings"] = unresolvable_findings
         result["hint"] = (
@@ -756,23 +784,17 @@ async def _resolve_diff_line_set(
     pr_number: int,
     token: str,
     state: dict[str, Any] | None = None,
+    force_refresh: bool = False,
 ) -> dict[str, dict[str, set[int]]] | None:
-    """Return the new-side line set for the PR diff, fetching it if needed.
-
-    Reviewer runs clear ``configurable['diff_line_set']`` before the agent
-    starts (so ``add_finding`` trusts the agent's anchors), which means the
-    publish-time retry path can't rely on it being populated. Fetch the PR's
-    unified diff from the GitHub REST API and recompute the line set on the
-    fly. Returns ``None`` if the fetch fails — caller treats that as "we
-    can't tell which finding is bad, don't retry blindly".
-    """
-    if isinstance(state, dict):
-        state_cached = state.get("diff_line_set")
-        if isinstance(state_cached, dict):
-            return state_cached
-    cached = RunConfig.from_runtime().diff_line_set
-    if cached is not None:
-        return cached
+    """Return the new-side line set for the PR diff, fetching it if needed."""
+    if not force_refresh:
+        if isinstance(state, dict):
+            state_cached = state.get("diff_line_set")
+            if isinstance(state_cached, dict):
+                return state_cached
+        cached = RunConfig.from_runtime().diff_line_set
+        if cached is not None:
+            return cached
 
     diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
     if diff_text is None:
@@ -788,16 +810,16 @@ async def _filter_against_pr_diff(
     pr_number: int,
     token: str,
     state: dict[str, Any] | None = None,
+    force_refresh: bool = False,
 ) -> tuple[list[tuple[Finding, dict[str, Any]]], list[str]]:
-    """Drop findings whose path/line range is not in the current PR diff.
-
-    Returns ``(valid_with_payload, dropped_finding_ids)``. When the diff
-    cannot be resolved (fetch failed and no cached set), we return everything
-    unchanged and an empty drop list — the caller will then surface the
-    original error rather than retry blindly.
-    """
+    """Drop findings whose path/line range is not in the current PR diff."""
     diff_line_set = await _resolve_diff_line_set(
-        owner=owner, repo=repo, pr_number=pr_number, token=token, state=state
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+        state=state,
+        force_refresh=force_refresh,
     )
     if diff_line_set is None:
         return list(eligible_with_payload), []

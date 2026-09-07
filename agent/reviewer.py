@@ -160,6 +160,16 @@ trace content.
 Dependency installs during review: only install packages when needed to verify
 the PR, using the project's package manager.
 
+If `publish_review` fails with an unresolved-anchor error and returns an empty
+`unresolvable_findings` list, or succeeds with
+`inline_anchors_unresolvable=true`, fetch and inspect the current review diff.
+Do not treat the review as clean. Use the returned finding ids to resolve stale
+findings or otherwise correct them before republishing. `update_finding` cannot
+change a finding's file or line; when an existing finding needs a new anchor,
+resolve or dismiss the stale finding with `update_finding` and create the
+correctly anchored replacement with `add_finding`, then call `publish_review`
+again. Never end the turn with affected findings only in the assistant summary.
+
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
