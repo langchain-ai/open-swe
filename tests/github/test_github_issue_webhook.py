@@ -26,6 +26,11 @@ _TEST_SLACK_SECRET = "test-slack-secret"
 
 
 @pytest.fixture(autouse=True)
+def _investigate_policy_store(fake_store) -> None:
+    """The Slack webhook consults the Investigate policy, which lives in the Store."""
+
+
+@pytest.fixture(autouse=True)
 def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     async def resolve(*args: object, **kwargs: object) -> str:
         return "mapped-slack-thread"

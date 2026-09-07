@@ -212,12 +212,21 @@ def test_slack_manifest_matches_the_documented_app() -> None:
     events = manifest["settings"]["event_subscriptions"]
     assert events == {
         "request_url": "https://swe.example.com/webhooks/slack",
-        "bot_events": ["app_mention", "message.im", "message.mpim"],
+        "bot_events": [
+            "app_mention",
+            "message.im",
+            "message.mpim",
+            "message.channels",
+            "channel_created",
+            "channel_rename",
+            "channel_archive",
+        ],
     }
     assert manifest["settings"]["interactivity"]["request_url"] == (
         "https://swe.example.com/webhooks/slack/interactivity"
     )
     assert "code_channels" not in manifest["features"]
+    assert "channels:join" in manifest["oauth_config"]["scopes"]["bot"]
 
 
 def test_slack_manifest_code_channels_variant() -> None:
@@ -230,6 +239,12 @@ def test_slack_manifest_code_channels_variant() -> None:
     }
     assert "code_channels:manage" in manifest["oauth_config"]["scopes"]["bot"]
     assert "code_channel_action" in manifest["settings"]["event_subscriptions"]["bot_events"]
+    events = manifest["settings"]["event_subscriptions"]["bot_events"]
+    assert {"channel_created", "channel_rename", "channel_archive", "message.channels"} <= set(
+        events
+    )
+    assert len(events) == len(set(events))
+    assert "channels:join" in manifest["oauth_config"]["scopes"]["bot"]
 
 
 def test_slack_credentials_and_identity_mapping() -> None:
@@ -244,6 +259,7 @@ def test_slack_credentials_and_identity_mapping() -> None:
         },
     }
     assert script.slack_credentials_from_create(created) == {
+        "SLACK_APP_ID": "A1",
         "SLACK_SIGNING_SECRET": "ss",
         "SLACK_CLIENT_ID": "1.2",
         "SLACK_CLIENT_SECRET": "cs",
@@ -254,7 +270,7 @@ def test_slack_credentials_and_identity_mapping() -> None:
         "SLACK_BOT_USER_ID": "U1",
         "SLACK_BOT_USERNAME": "open_swe",
     }
-    with pytest.raises(ValueError, match="SLACK_SIGNING_SECRET"):
+    with pytest.raises(ValueError, match="SLACK_APP_ID, SLACK_SIGNING_SECRET"):
         script.slack_credentials_from_create(
             {"credentials": {"client_id": "1", "client_secret": "2"}}
         )

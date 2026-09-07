@@ -229,7 +229,7 @@ async def create_durable_run(
     thread_id: str,
     assistant_id: str,
     *,
-    input: RunInput,
+    input: RunInput | dict[str, Any],
     source: str,
     config: LangGraphRunConfig | None = None,
     metadata: dict[str, Any] | None = None,
