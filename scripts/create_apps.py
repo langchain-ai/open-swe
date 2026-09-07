@@ -28,6 +28,7 @@ Nothing secret is printed.
 import argparse
 import getpass
 import html
+import io
 import json
 import os
 import re
@@ -587,6 +588,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Progress lines matter while the script waits on the browser; do not let a pipe buffer them.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
     args = _parse_args(argv)
     if args.deployment:
         api_key = ENV.LANGSMITH_API_KEY.optional()
