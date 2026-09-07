@@ -135,7 +135,7 @@ Open SWE includes a LangGraph backend, a web dashboard, and an experimental desk
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
 - **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
 
-Complete the required `.env`, GitHub App, and sandbox setup in the [Installation Guide](docs/INSTALLATION.md), then install the backend and dashboard dependencies:
+One deployment serves the API, the webhooks, and the dashboard from a single URL. To run it locally:
 
 ```bash
 git clone https://github.com/langchain-ai/open-swe.git
@@ -143,15 +143,12 @@ cd open-swe
 uv venv
 source .venv/bin/activate
 uv sync --all-extras
-pnpm install
+uv run python scripts/create_github_app.py --url http://localhost:2024 --env-file .env   # creates the GitHub App, writes its credentials
+make build-dashboard   # pnpm install + Vite build of the dashboard
+make dev               # http://localhost:2024 serves the API and the dashboard
 ```
 
-Run the services in separate terminals:
-
-```bash
-make dev  # terminal 1: backend
-make web  # terminal 2: dashboard
-```
+Add your LangSmith key, a model key, two generated secrets, and your GitHub login to `.env` as described in the [Installation Guide](docs/INSTALLATION.md), then sign in at `http://localhost:2024`. GitHub comment triggers need a public URL for the webhook (a tunnel locally, or the deployment URL on LangGraph Platform); the guide covers both, plus the optional Slack and Linear triggers.
 
 For UI work, `make dev-ui` alone starts Vite and the backend fronting it, so `http://localhost:2024` hot-reloads with no cross-origin setup.
 
