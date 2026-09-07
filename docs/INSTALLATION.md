@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide deploys Open SWE for a team. Running it on your own machine is summarized in [Local development](#local-development) at the end.
+This guide deploys Open SWE for a team. To run it on your own machine while developing, use the [development guide](DEVELOPMENT.md) instead.
 
 Open SWE is one deployment: a LangGraph server that runs the graphs (`agent`, `reviewer`, `analyzer`, `chat`, `scheduler`), the FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API, and the web dashboard, served from the same origin at `/`. Webhooks, the dashboard, GitHub login, and the API all share the deployment's URL, so there is no second frontend deploy and no cross-origin cookie or CORS setup.
 
@@ -55,7 +55,7 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
 
 Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → New GitHub App** and fill in:
 
-- **Callback URL**: `<URL>/dashboard/api/auth/callback`. GitHub Apps take several, one per line; for local development add `http://localhost:2024/dashboard/api/auth/callback`.
+- **Callback URL**: `<URL>/dashboard/api/auth/callback`. GitHub Apps take several, one per line; for [local development](DEVELOPMENT.md) add `http://localhost:2024/dashboard/api/auth/callback`.
 - **Request user authorization (OAuth) during installation**: off
 - **Webhook URL**: `<URL>/webhooks/github`, **Webhook secret**: the output of `openssl rand -hex 32`, saved as `GITHUB_WEBHOOK_SECRET`
 - **Repository permissions**:
@@ -137,7 +137,7 @@ Open a section when you want that feature; everything above keeps working withou
 <details id="slack">
 <summary><strong>Slack</strong></summary>
 
-Slack posts events to your deployment's URL, so it needs the same public URL as the GitHub App (locally, the public hostname of a tunnel to your backend; see [Local development](#local-development)).
+Slack posts events to your deployment's URL, so it needs the same public URL as the GitHub App (locally, the ngrok domain from the [development guide](DEVELOPMENT.md#3-tunnel-for-webhooks)).
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**, and paste the manifest below with `<your-url>` replaced by that URL.
 
@@ -321,18 +321,6 @@ A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_O
 3. Once every active user has signed in again (each fresh OAuth flow re-encrypts under the new key), drop the old key. Anything still encrypted under it fails to decrypt and that user is asked to sign in again.
 
 </details>
-
-## Local development
-
-The same application runs on your machine with `langgraph dev`, which serves the API, the webhooks, and the dashboard on `http://localhost:2024`:
-
-```bash
-uv sync --all-extras
-make build-dashboard   # pnpm install + Vite build of the dashboard
-make dev               # http://localhost:2024; make dev-ui instead while working on the UI, for hot reload
-```
-
-Put the variables from step 4 in a `.env` file in the repository root; `LANGGRAPH_URL` and the dashboard URLs default to `http://localhost:2024`, so they can be left out. Create a GitHub App as in step 3 with `http://localhost:2024/dashboard/api/auth/callback` as its callback URL. GitHub and Slack cannot deliver webhooks to `localhost`: for comment or Slack triggers you need a tunnel with a fixed public hostname forwarding to port 2024, and that hostname becomes the App's webhook URL and Slack's request URL. `langgraph dev` reloads on code changes only, so restart it after editing `.env`.
 
 ## Troubleshooting
 
