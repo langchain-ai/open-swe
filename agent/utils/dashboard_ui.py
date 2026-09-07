@@ -241,6 +241,8 @@ def mount_dashboard_ui(app: FastAPI) -> Path | None:
     dev_server = ENV.DASHBOARD_DEV_SERVER_URL.optional()
     if dev_server:
         app.router.routes.append(DashboardDevProxyRoute(dev_server))
+        # httpx logs every request at INFO; that is one line per module Vite serves.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         logger.info("Serving the dashboard from the Vite dev server at %s", dev_server)
         return None
     static_dir = dashboard_static_dir()

@@ -10,10 +10,11 @@ all: help
 dev:
 	uv run langgraph dev --no-browser --port 2024
 
-# UI development: the backend fronts the Vite dev server (`make web`) so http://localhost:2024
-# hot-reloads without a build or any cross-origin setup.
+# UI development in one terminal: Vite (`make web`) and the backend fronting it, so
+# http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
+# run side by side under -j2; Ctrl-C stops both. Command-line variables reach both recipes.
 dev-ui:
-	DASHBOARD_DEV_SERVER_URL=http://localhost:3000 uv run langgraph dev --no-browser --port 2024
+	$(MAKE) --no-print-directory -j2 web dev DASHBOARD_DEV_SERVER_URL=http://localhost:3000 TURBO_UI=stream
 
 web:
 	pnpm run dev
@@ -90,7 +91,7 @@ typecheck:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
-	@echo 'dev-ui                       - LangGraph dev server fronting the Vite dev server (run make web too)'
+	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'run                          - run webhook server'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
