@@ -125,7 +125,8 @@ export function InvestigationDetail({
         <ErrorState error={detail.error} retry={() => void detail.refetch()} />
       </div>
     )
-  const { investigation, report, activity, allowed_actions, trace_url } = detail.data
+  const { investigation, report, activity, allowed_actions, trace_url } =
+    detail.data
   const gaps = [
     ...new Set([...(detail.data.coverage.gaps ?? []), ...(report?.gaps ?? [])]),
   ]
