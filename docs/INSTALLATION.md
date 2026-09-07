@@ -109,7 +109,15 @@ make build-dashboard   # pnpm install + Vite build into ui/.output/public
 make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard
 ```
 
-`langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so it does not hot-reload: rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API. When working on the UI itself, run the Vite dev server with hot module replacement next to the backend, see [Dashboard on its own origin](#dashboard-on-its-own-origin).
+`langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API.
+
+**Working on the UI?** Have the backend front the Vite dev server instead of serving a build:
+
+```bash
+make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to it, in one terminal
+```
+
+`make dev-ui` runs `make web` and `make dev` side by side, the backend with `DASHBOARD_DEV_SERVER_URL=http://localhost:3000`; Ctrl-C stops both. Open `http://localhost:2024` as usual: the page, its modules, and hot module replacement come from Vite, while `/dashboard/api/*` and the LangGraph routes stay with the backend. Nothing else changes, because the browser never leaves port 2024. The HMR WebSocket connects straight to Vite's port; the UI's Vite config points the client there. Opening Vite on port 3000 directly also works but needs the extra settings in [Dashboard on its own origin](#dashboard-on-its-own-origin).
 
 | Endpoint | Purpose |
 |---|---|
@@ -303,7 +311,7 @@ A `repo:owner/name` token or GitHub URL in the comment overrides the mapping. **
 <details id="dashboard-on-its-own-origin">
 <summary><strong>Dashboard on its own origin (Vite dev server or separate frontend)</strong></summary>
 
-The bundled build has no hot reload. When working on the UI, run the Vite dev server (hot module replacement) next to the backend instead of rebuilding:
+`make dev-ui` (step 5) is the simple way to develop the UI. This section is for opening the Vite dev server on its own port, or deploying the dashboard separately from the backend.
 
 ```bash
 pnpm install      # from the repo root: ui/ and desktop/ are one pnpm workspace
