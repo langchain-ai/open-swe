@@ -3,7 +3,7 @@
 from urllib.parse import quote, urlsplit
 
 from agent.config import ENV
-from agent.utils.dashboard_ui import dashboard_on_this_origin
+from agent.utils.dashboard_ui import is_single_origin
 
 
 def dashboard_base_url() -> str:
@@ -17,7 +17,7 @@ def dashboard_base_url() -> str:
     explicit = ENV.DASHBOARD_BASE_URL.optional()
     if explicit:
         return explicit.rstrip("/")
-    if dashboard_on_this_origin():
+    if is_single_origin():
         return ENV.LANGGRAPH_URL.get().rstrip("/")
     return ""
 
