@@ -183,6 +183,7 @@ from agent.tools import (
     open_pull_request,
     output_iframe,
     read_user_settings,
+    record_automation_outcome,
     recreate_sandbox,
     report_platform_issue,
     request_pr_review,
@@ -1180,6 +1181,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_thread,
         manage_baby_sit,
         notify_automation_channel,
+        record_automation_outcome,
         open_pull_request,
         *(
             (output_iframe, create_sandbox_file_download_url, create_sandbox_service_url)

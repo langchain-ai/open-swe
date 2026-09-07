@@ -185,10 +185,12 @@ GITHUB_SOURCE_GUIDANCE = """This run was triggered from GitHub.
 
 SCHEDULE_SOURCE_GUIDANCE = """This is a scheduled automation run with no interactive source channel.
 - Do not send an initial acknowledgement.
+- Before finishing, call `record_automation_outcome` exactly once with the complete blocker-key set you observed, a concise outcome summary, and whether you took a concrete action. Use an empty list only when the check completed and found no blockers; use the tool's failure result or omit the call if the check was unavailable or fail-closed.
 - After a concrete requested action, call `notify_automation_channel` once with a concise outcome and link."""
 
 SCHEDULE_SLACK_SOURCE_GUIDANCE = """This is a scheduled automation run with a validated Slack destination.
 - Do not send an initial acknowledgement.
+- Before finishing, call `record_automation_outcome` exactly once with the complete blocker-key set you observed, a concise outcome summary, and whether you took a concrete action. Use an empty list only when the check completed and found no blockers; use the tool's failure result or omit the call if the check was unavailable or fail-closed.
 - After a concrete requested action, call `notify_automation_channel` once with a concise outcome and link.
 - Use Slack thread tools only when the scheduled task explicitly requires interaction in that destination."""
 

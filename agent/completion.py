@@ -46,6 +46,7 @@ _MAX_FAILURE_REPLY_RUN_IDS = 20
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
+_AUTOMATION_OUTCOME_KEY = "automation_outcome"
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
@@ -327,6 +328,35 @@ async def _schedule_success_cost_refresh(
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
+async def _record_automation_outcome(
+    thread_id: str, run_id: str | None, status: str, metadata: dict[str, Any]
+) -> None:
+    if metadata.get("source") != "schedule" or metadata.get("thread_category") != "automation":
+        return
+    existing = metadata.get(_AUTOMATION_OUTCOME_KEY)
+    existing = existing if isinstance(existing, dict) else {}
+    blocker_keys = existing.get("blocker_keys")
+    if blocker_keys is not None and not isinstance(blocker_keys, list):
+        blocker_keys = None
+    outcome = {
+        "blocker_keys": blocker_keys,
+        "outcome_summary": existing.get("outcome_summary")
+        if isinstance(existing.get("outcome_summary"), str)
+        else f"Scheduled automation run completed with status: {status}.",
+        "action_taken": existing.get("action_taken")
+        if isinstance(existing.get("action_taken"), bool)
+        else metadata.get("automation_action_posted_at") is not None,
+        "run_id": run_id or existing.get("run_id"),
+    }
+    try:
+        await langgraph_client().threads.update(
+            thread_id=thread_id,
+            metadata={_AUTOMATION_OUTCOME_KEY: outcome},
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("run-complete: could not record automation outcome", exc_info=True)
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -339,6 +369,18 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
     if status == "success":
+        client = langgraph_client()
+        try:
+            thread = await client.threads.get(thread_id)
+            metadata = thread.get("metadata") if isinstance(thread, dict) else None
+            await _record_automation_outcome(
+                thread_id,
+                run_id,
+                status,
+                metadata if isinstance(metadata, dict) else {},
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("run-complete: could not load automation thread", exc_info=True)
         return await _schedule_success_cost_refresh(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
     if (
@@ -380,6 +422,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    await _record_automation_outcome(thread_id, run_id, status, metadata)
     await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
     if run_id is None:

@@ -405,6 +405,25 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _automation_outcome(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
+    value = metadata.get("automation_outcome")
+    if not isinstance(value, Mapping):
+        return None
+    blocker_keys = value.get("blocker_keys")
+    if blocker_keys is not None and not isinstance(blocker_keys, list):
+        return None
+    return {
+        "blocker_keys": list(blocker_keys) if isinstance(blocker_keys, list) else None,
+        "outcome_summary": value.get("outcome_summary")
+        if isinstance(value.get("outcome_summary"), str)
+        else None,
+        "action_taken": value.get("action_taken")
+        if isinstance(value.get("action_taken"), bool)
+        else None,
+        "run_id": value.get("run_id") if isinstance(value.get("run_id"), str) else None,
+    }
+
+
 def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
     return (
         _metadata_string(metadata, "thread_category") == "automation"
@@ -544,6 +563,7 @@ async def _thread_summary(
             thread_category == "automation"
             and _metadata_string(metadata, "automation_action_posted_at") is not None
         ),
+        "automationOutcome": _automation_outcome(metadata),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (

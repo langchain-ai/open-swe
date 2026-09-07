@@ -265,6 +265,26 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
     return None
 
 
+def _last_assistant_message(state: Any) -> dict[str, Any] | None:
+    values = _value(state, "values")
+    messages = values.get("messages") if isinstance(values, Mapping) else None
+    if not isinstance(messages, list):
+        return None
+    for message in reversed(messages):
+        kind = _message_kind(message)
+        if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"ai", "assistant"}:
+            continue
+        text = _plain_message_text(_message_content(message))
+        if not text:
+            continue
+        return {
+            "text": text[:_MAX_DETAIL_MESSAGE_CHARS],
+            "truncated": len(text) > _MAX_DETAIL_MESSAGE_CHARS,
+            "timestamp": _message_timestamp(message),
+        }
+    return None
+
+
 def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
     messages = state.get("messages") if isinstance(state, Mapping) else None
     if not isinstance(messages, list):
@@ -398,7 +418,7 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Get bounded operational details for one Open SWE thread."""
+    """Get bounded operational details and the prior run conclusion for one thread."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -461,6 +481,8 @@ async def get_thread(
         "participants_truncated": len(returned_participants) < len(logins),
         "latest_run": _run_detail(latest_run),
         "last_user_message": _last_user_message(thread_state),
+        "last_assistant_message": _last_assistant_message(thread_state),
+        "last_run_outcome": _value(summary, "automationOutcome"),
         "queued_message_count": queued_count,
         "cost": cost,
         "plan": plan,
