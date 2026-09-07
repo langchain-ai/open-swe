@@ -44,6 +44,8 @@ from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_
 logger = logging.getLogger(__name__)
 
 ThreadScope = Literal["all", "interactive", "automation"]
+ThreadStatus = Literal["idle", "running", "finished", "error", "interrupted"]
+ThreadSource = Literal["schedule", "slack", "github", "dashboard", "linear"]
 ThreadAction = Literal[
     "send_message",
     "cancel",
@@ -143,14 +145,14 @@ async def list_threads(
     offset: int = 0,
     resolved: bool | None = None,
     viewed: bool | None = None,
-    source: str | None = None,
-    status: str | None = None,
+    source: ThreadSource | None = None,
+    status: ThreadStatus | None = None,
     query: str | None = None,
     scope: ThreadScope = "all",
     automation_id: str | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List Open SWE threads the current user, one other participant, or everyone joined."""
+    """List Open SWE threads; status is idle, running, finished, error, or interrupted; source is schedule, slack, github, dashboard, or linear; scope is all, interactive, or automation."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -161,6 +163,10 @@ async def list_threads(
         return _failure("participant and all_users cannot be used together")
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
+    if status is not None and status not in {"idle", "running", "finished", "error", "interrupted"}:
+        return _failure("status must be one of idle, running, finished, error, interrupted")
+    if source is not None and source not in {"schedule", "slack", "github", "dashboard", "linear"}:
+        return _failure("source must be one of schedule, slack, github, dashboard, linear")
     cross_user = bool(requested and requested.lower() != actor.login.lower())
     if (all_users or cross_user) and not actor.admin:
         return _failure("Only workspace admins can list other users' threads")
@@ -194,6 +200,9 @@ async def list_threads(
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),
+        "status": status,
+        "source": source,
+        "scope": scope,
     }
 
 

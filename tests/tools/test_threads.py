@@ -182,6 +182,48 @@ async def test_list_threads_all_users_requires_admin_and_uses_server_filter(
     assert awaited.kwargs["status"] == "running"
 
 
+async def test_list_threads_rejects_invalid_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = AsyncMock()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.list_threads(status="completed")
+
+    assert result == {
+        "success": False,
+        "error": "status must be one of idle, running, finished, error, interrupted",
+    }
+    page.assert_not_awaited()
+
+
+async def test_list_threads_valid_status_filters_normally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.list_threads(status="finished")
+
+    assert result["success"] is True
+    assert page.await_args is not None
+    assert page.await_args.kwargs["status"] == "finished"
+
+
+async def test_list_threads_success_echoes_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.list_threads(
+        status="running", source="schedule", scope="automation"
+    )
+
+    assert result["status"] == "running"
+    assert result["source"] == "schedule"
+    assert result["scope"] == "automation"
+
+
 class _DetailClient:
     def __init__(self) -> None:
         self.threads = SimpleNamespace(
