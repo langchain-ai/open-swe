@@ -549,7 +549,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
         "manage_code_channel",
-        "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
@@ -570,3 +569,32 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
     assert subagent_names == parent_names - parent_only_names
+
+
+@pytest.mark.asyncio
+async def test_always_mode_schedule_does_not_bind_automation_notification_tool() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "schedule",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+            "automation_slack_notification": {
+                "channel_id": "C123",
+                "mode": "always",
+                "schedule_id": "sched-1",
+            },
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert "notify_automation_channel" not in {_registered_tool_name(tool) for tool in tools}
+
+    configurable["automation_slack_notification"]["mode"] = "on_action"
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert "notify_automation_channel" in {_registered_tool_name(tool) for tool in tools}

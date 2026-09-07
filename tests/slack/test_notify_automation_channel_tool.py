@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from agent import store as agent_store
+from agent.prompt import construct_system_prompt
 
 notification_tool = importlib.import_module("agent.tools.notify_automation_channel")
 
@@ -100,8 +101,23 @@ async def test_notify_automation_channel_rejects_nonconditional_schedule(
 
     assert result == {
         "success": False,
-        "error": "This schedule is not configured for action-only Slack notifications",
+        "error": (
+            "This schedule is not configured for action-only Slack notifications; "
+            "post the outcome as a reply in the connected Slack thread"
+        ),
     }
+
+
+def test_always_mode_schedule_uses_connected_thread_for_outcome() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/workspace",
+        source="schedule",
+        slack_context=True,
+        automation_notify_enabled=False,
+    )
+
+    assert "call `notify_automation_channel`" not in prompt
+    assert "report the final outcome via `slack_thread_reply`" in prompt
 
 
 async def test_notify_automation_channel_validates_message(

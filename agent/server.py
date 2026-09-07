@@ -668,6 +668,12 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
 
 
+def _automation_notifications_enabled(cfg: RunConfig) -> bool:
+    """Return whether action-only automation notifications are configured."""
+    notification = cfg.automation_slack_notification
+    return notification is not None and notification.mode == "on_action"
+
+
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -893,6 +899,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(cfg),
+                automation_notify_enabled=_automation_notifications_enabled(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
             ),
         }
@@ -1204,6 +1211,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [http_request, fetch_url, web_search]
     elif stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
+    elif not _automation_notifications_enabled(cfg):
+        static_tools = [tool for tool in static_tools if tool is not notify_automation_channel]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]

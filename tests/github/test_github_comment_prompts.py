@@ -118,7 +118,11 @@ def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
     }
 
     for source, guidance in expected.items():
-        prompt = construct_system_prompt(working_dir="/workspace", source=source)
+        prompt = construct_system_prompt(
+            working_dir="/workspace",
+            source=source,
+            automation_notify_enabled=source == "schedule",
+        )
         assert guidance in prompt
         assert "Make `slack_thread_reply` your first tool call" not in prompt
 

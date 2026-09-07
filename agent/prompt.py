@@ -184,13 +184,20 @@ GITHUB_SOURCE_GUIDANCE = """This run was triggered from GitHub.
 - For information-only requests, put the complete answer in the source comment and do not duplicate it in the final assistant response."""
 
 SCHEDULE_SOURCE_GUIDANCE = """This is a scheduled automation run with no interactive source channel.
-- Do not send an initial acknowledgement.
-- After a concrete requested action, call `notify_automation_channel` once with a concise outcome and link."""
+- Do not send an initial acknowledgement."""
 
 SCHEDULE_SLACK_SOURCE_GUIDANCE = """This is a scheduled automation run with a validated Slack destination.
 - Do not send an initial acknowledgement.
-- After a concrete requested action, call `notify_automation_channel` once with a concise outcome and link.
 - Use Slack thread tools only when the scheduled task explicitly requires interaction in that destination."""
+
+SCHEDULE_AUTOMATION_NOTIFY_GUIDANCE = (
+    "- After a concrete requested action, call `notify_automation_channel` once with a concise "
+    "outcome and link."
+)
+SCHEDULE_SLACK_THREAD_REPLY_GUIDANCE = (
+    "- After a concrete requested action, report the final outcome via `slack_thread_reply` in "
+    "the connected thread."
+)
 
 GENERIC_SOURCE_GUIDANCE = """No interactive source channel is available.
 - Communicate through normal assistant responses and include the complete answer or final outcome there.
@@ -208,7 +215,9 @@ using the previous surface's messaging tools until another announcement moves th
 conversation back."""
 
 
-def _render_source_guidance(source: str, slack_context: bool) -> str:
+def _render_source_guidance(
+    source: str, slack_context: bool, automation_notify_enabled: bool
+) -> str:
     if source == "slack" and slack_context:
         guidance = SLACK_SOURCE_GUIDANCE
     elif source == "linear":
@@ -217,6 +226,10 @@ def _render_source_guidance(source: str, slack_context: bool) -> str:
         guidance = GITHUB_SOURCE_GUIDANCE
     elif source == "schedule":
         guidance = SCHEDULE_SLACK_SOURCE_GUIDANCE if slack_context else SCHEDULE_SOURCE_GUIDANCE
+        if automation_notify_enabled:
+            guidance += f"\n{SCHEDULE_AUTOMATION_NOTIFY_GUIDANCE}"
+        elif slack_context:
+            guidance += f"\n{SCHEDULE_SLACK_THREAD_REPLY_GUIDANCE}"
     elif source == "dashboard":
         guidance = DASHBOARD_SOURCE_GUIDANCE
     else:
@@ -568,6 +581,7 @@ def construct_system_prompt(
     admin_environments: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
+    automation_notify_enabled: bool = False,
     sandbox_file_downloads: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
@@ -583,7 +597,7 @@ def construct_system_prompt(
             DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
         ),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
-        source_guidance=_render_source_guidance(source, slack_context),
+        source_guidance=_render_source_guidance(source, slack_context, automation_notify_enabled),
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         plan_review_url=plan_url or "(the dashboard plan-review page)",

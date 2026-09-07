@@ -55,7 +55,10 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
     if notification is None or notification.mode != "on_action":
         return {
             "success": False,
-            "error": "This schedule is not configured for action-only Slack notifications",
+            "error": (
+                "This schedule is not configured for action-only Slack notifications; "
+                "post the outcome as a reply in the connected Slack thread"
+            ),
         }
 
     channel_id = notification.channel_id
