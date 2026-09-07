@@ -54,7 +54,7 @@ LANGSMITH_API_KEY=""            # LangSmith → Settings → API Keys; also used
 LANGSMITH_TRACING="true"        # trace runs to LangSmith
 LANGSMITH_PROJECT=""            # optional project for traces and "View trace" links; default "default"
 
-ANTHROPIC_API_KEY=""            # or OPENAI_API_KEY / GOOGLE_API_KEY, or LANGSMITH_GATEWAY_API_KEY for the LLM Gateway
+ANTHROPIC_API_KEY=""            # any provider key, or LANGSMITH_GATEWAY_API_KEY for the LLM Gateway; see the installation guide
 
 GITHUB_APP_ID=""                # step 2
 GITHUB_APP_CLIENT_ID=""
@@ -68,7 +68,7 @@ DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session co
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 ```
 
-`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Slack and Linear variables come from the [Slack](INSTALLATION.md#slack) and [Linear](INSTALLATION.md#linear) sections of the installation guide, with your ngrok domain as the URL.
+`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Slack and Linear variables come from the [Slack](INSTALLATION.md#slack) and [Linear](INSTALLATION.md#linear) sections of the installation guide, with your ngrok domain as the URL.
 
 ## 5. Run
 
