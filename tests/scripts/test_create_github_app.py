@@ -1,6 +1,8 @@
 """scripts/create_github_app.py without GitHub: manifest, callback server, sinks."""
 
 import json
+import os
+import stat
 import threading
 from pathlib import Path
 from urllib.request import urlopen
@@ -80,6 +82,15 @@ def test_write_env_values_creates_missing_file(tmp_path: Path) -> None:
     env.parent.mkdir()
     script.write_env_values(env, {"GITHUB_APP_INSTALLATION_ID": "9"})
     assert dotenv_values(env) == {"GITHUB_APP_INSTALLATION_ID": "9"}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="file modes")
+def test_write_env_values_keeps_the_file_owner_only(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("A=1\n")
+    env.chmod(0o644)
+    script.write_env_values(env, {"GITHUB_WEBHOOK_SECRET": "s"})
+    assert stat.S_IMODE(env.stat().st_mode) == 0o600
 
 
 def test_merge_secrets_overrides_and_keeps_others() -> None:

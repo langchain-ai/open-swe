@@ -141,7 +141,10 @@ def _quote_env(value: str) -> str:
 
 
 def write_env_values(path: Path, values: Mapping[str, str]) -> None:
-    """Set ``values`` in the env file: replace single-line assignments, append the rest."""
+    """Set ``values`` in the env file: replace single-line assignments, append the rest.
+
+    The file is the deployment's credential store, so it is kept owner-only.
+    """
     lines = path.read_text().splitlines() if path.exists() else []
     remaining = dict(values)
     for index, line in enumerate(lines):
@@ -153,7 +156,9 @@ def write_env_values(path: Path, values: Mapping[str, str]) -> None:
             lines.append("")
         lines.append("# Added by scripts/create_github_app.py")
         lines.extend(f"{k}={_quote_env(v)}" for k, v in remaining.items())
-    path.write_text("\n".join(lines) + "\n")
+    path.touch(mode=0o600, exist_ok=True)
+    path.chmod(0o600)
+    path.write_text("\n".join(lines) + "\n")  # codeql[py/clear-text-storage-sensitive-data]
 
 
 def merge_secrets(current: list[dict[str, str]], values: Mapping[str, str]) -> list[dict[str, str]]:
