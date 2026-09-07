@@ -131,11 +131,12 @@ Sandboxes can have network access and powerful tools. Deployments should use lea
 
 Open SWE includes a LangGraph backend, a web dashboard, and an experimental desktop client.
 
-- **[Installation Guide](docs/INSTALLATION.md)** — Set up local development, the GitHub App, LangSmith, integrations, and production deployment
+- **[Installation Guide](docs/INSTALLATION.md)** — Deploy Open SWE for a team: LangGraph Platform or Docker, the GitHub App, environment variables, and the optional Slack and Linear triggers
+- **[Development Guide](docs/DEVELOPMENT.md)** — Run it on your machine, with hot reload for the dashboard and an ngrok tunnel for webhooks
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
 - **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
 
-One deployment serves the API, the webhooks, and the dashboard from a single URL. To run it locally:
+One deployment serves the API, the webhooks, and the dashboard from a single URL. Locally:
 
 ```bash
 git clone https://github.com/langchain-ai/open-swe.git
@@ -143,14 +144,11 @@ cd open-swe
 uv venv
 source .venv/bin/activate
 uv sync --all-extras
-uv run python scripts/create_apps.py --url http://localhost:2024 --env-file .env   # creates the GitHub App, writes its credentials
 make build-dashboard   # pnpm install + Vite build of the dashboard
 make dev               # http://localhost:2024 serves the API and the dashboard
 ```
 
-Add your LangSmith key, a model key, two generated secrets, and your GitHub login to `.env` as described in the [Installation Guide](docs/INSTALLATION.md), then sign in at `http://localhost:2024`. GitHub comment and Slack triggers need a public URL for the webhooks: locally, the static domain of a free ngrok account (`make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev`, or any tunnel to port 2024); on LangGraph Platform, the deployment URL. The guide covers both, plus the optional Slack and Linear triggers.
-
-For UI work, `make dev-ui` alone starts Vite and the backend fronting it, so `http://localhost:2024` hot-reloads with no cross-origin setup.
+Create a GitHub App and fill in `.env` as described in the [development guide](docs/DEVELOPMENT.md), then sign in at `http://localhost:2024`. For UI work, `make dev-ui` starts Vite and the backend fronting it, so the same URL hot-reloads. GitHub comment and Slack triggers need a public webhook URL: locally the static domain of a free ngrok account (`make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev`, or any tunnel to port 2024), on LangGraph Platform the deployment URL.
 
 Production self-hosting uses the standalone LangGraph Agent Server and requires its license key.
 

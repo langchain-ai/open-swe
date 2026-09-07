@@ -19,7 +19,7 @@ dev-ui:
 web:
 	pnpm run dev
 
-# Public URL for GitHub and Slack webhooks while developing (docs/INSTALLATION.md, step 2).
+# Public URL for GitHub and Slack webhooks while developing (docs/DEVELOPMENT.md, step 3).
 # ngrok's free plan includes one static domain: NGROK_DOMAIN=<name>.ngrok-free.dev. The policy
 # file exposes only /webhooks/*; langgraph dev has no auth, so the rest of the API stays local.
 # Any other tunnel works too, as long as it forwards to port 2024.
