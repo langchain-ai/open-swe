@@ -143,7 +143,7 @@ cd open-swe
 uv venv
 source .venv/bin/activate
 uv sync --all-extras
-uv run python scripts/create_github_app.py --url http://localhost:2024 --env-file .env   # creates the GitHub App, writes its credentials
+uv run python scripts/create_apps.py --url http://localhost:2024 --env-file .env   # creates the GitHub App, writes its credentials
 make build-dashboard   # pnpm install + Vite build of the dashboard
 make dev               # http://localhost:2024 serves the API and the dashboard
 ```

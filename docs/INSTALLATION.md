@@ -8,7 +8,8 @@ What a deployment needs:
 |---|---|
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
 | A model key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`; or `LANGSMITH_GATEWAY_API_KEY` to route through the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` |
-| `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | `scripts/create_github_app.py` creates the App and writes all six (step 3) |
+| `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | `scripts/create_apps.py` creates the App and writes all six (step 3) |
+| Slack, optional: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | the same script with `--slack` ([Slack](#slack)) |
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 4) |
 | `CONFIGURED_ADMINS` | Your GitHub login (step 4) |
 | `LANGGRAPH_URL` | The deployment's public URL; defaults to `http://localhost:2024` |
@@ -42,15 +43,15 @@ The GitHub App from step 3 delivers webhooks to `<URL>/webhooks/github` and send
 
 ## 3. Create a GitHub App
 
-Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creating-github-apps) to clone repositories, push branches, open pull requests, and sign users in to the dashboard. The script creates the App through GitHub's manifest flow with the right permissions, events, webhook, and callback, then writes the credentials where the deployment reads them. It never prints them.
+Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creating-github-apps) to clone repositories, push branches, open pull requests, and sign users in to the dashboard. The script creates the App through GitHub's manifest flow with the right permissions, events, webhook, and callback, then writes the credentials where the deployment reads them. It never prints them. Add `--slack` to create the Slack app in the same run (public URL only; see [Slack](#slack)).
 
 ```bash
 # local: writes the credentials into .env
-uv run python scripts/create_github_app.py --url https://<your-tunnel-hostname> --env-file .env --callback-url http://localhost:2024
+uv run python scripts/create_apps.py --url https://<your-tunnel-hostname> --env-file .env --callback-url http://localhost:2024
 
 # LangGraph Platform: writes them into the deployment's environment (a new revision rolls out)
 LANGSMITH_API_KEY=<key for the workspace that owns the deployment> \
-uv run python scripts/create_github_app.py --url https://<your-deployment>.langgraph.app --deployment <deployment id>
+uv run python scripts/create_apps.py --url https://<your-deployment>.langgraph.app --deployment <deployment id>
 ```
 
 What happens:
@@ -108,7 +109,7 @@ make build-dashboard   # pnpm install + Vite build into ui/.output/public
 make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard
 ```
 
-`langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. Rebuild the dashboard when you pull UI changes; skip `make build-dashboard` if you only need webhooks and the API. Working on the UI itself? Run the Vite dev server instead, see [Dashboard on its own origin](#dashboard-on-its-own-origin).
+`langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so it does not hot-reload: rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API. When working on the UI itself, run the Vite dev server with hot module replacement next to the backend, see [Dashboard on its own origin](#dashboard-on-its-own-origin).
 
 | Endpoint | Purpose |
 |---|---|
@@ -140,7 +141,7 @@ DASHBOARD_JWT_SECRET=""
 CONFIGURED_ADMINS=""
 ```
 
-Then run `scripts/create_github_app.py --url <deployment URL> --deployment <id>` as in step 3 (the id is in the deployment page's URL); it writes the GitHub App credentials into the deployment's environment and the platform rolls out a new revision. Reusing an App you created for local development works too: add the deployment URL to its webhook URL and callback URLs and copy the same six variables into the deployment.
+Then run `scripts/create_apps.py --url <deployment URL> --deployment <id>` as in step 3 (the id is in the deployment page's URL); it writes the GitHub App credentials into the deployment's environment and the platform rolls out a new revision. Reusing an App you created for local development works too: add the deployment URL to its webhook URL and callback URLs and copy the same six variables into the deployment.
 
 Give each deployment its own GitHub App, or at least a distinct mention handle (`OPEN_SWE_MENTION_TAGS`) when several share a GitHub organization.
 
@@ -170,6 +171,18 @@ Open a section when you want that feature; everything above keeps working withou
 
 <details id="slack">
 <summary><strong>Slack</strong></summary>
+
+Slack only delivers events to a public HTTPS URL, so this needs the tunnel or deployment URL from step 2.
+
+**With the script.** Generate an app configuration token under **Your App Configuration Tokens** on [api.slack.com/apps](https://api.slack.com/apps) (valid twelve hours), then:
+
+```bash
+uv run python scripts/create_apps.py --url https://<your-url> --env-file .env --no-github --slack
+```
+
+It pastes the manifest below into Slack's `apps.manifest.create` for you, opens the app's install page, and, because Slack has no way to hand the bot token back to a script, asks you to paste the **Bot User OAuth Token** shown after installing. From that it discovers the bot's user id and handle and writes all six Slack variables (the client id and secret enable "Sign in with Slack" below). Drop `--no-github` to create both apps in one run; add `--slack-code-channels` for the code-channels manifest.
+
+**By hand.**
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**, and paste the manifest below with `<your-url>` replaced by the URL from step 2.
 
@@ -290,7 +303,7 @@ A `repo:owner/name` token or GitHub URL in the comment overrides the mapping. **
 <details id="dashboard-on-its-own-origin">
 <summary><strong>Dashboard on its own origin (Vite dev server or separate frontend)</strong></summary>
 
-When working on the UI, run the Vite dev server instead of the bundled build:
+The bundled build has no hot reload. When working on the UI, run the Vite dev server (hot module replacement) next to the backend instead of rebuilding:
 
 ```bash
 pnpm install      # from the repo root: ui/ and desktop/ are one pnpm workspace
@@ -304,7 +317,7 @@ DASHBOARD_BASE_URL="http://localhost:3000"       # the frontend origin; allowed 
 DASHBOARD_API_BASE_URL="http://localhost:3000"   # what browsers use for /dashboard/api/* and the OAuth callback
 ```
 
-and the GitHub App needs `http://localhost:3000/dashboard/api/auth/callback` as a callback URL (`scripts/create_github_app.py --callback-url http://localhost:3000`, or add it in the App's settings). Keep both URLs on `http://` locally so the cookie is `SameSite=Lax`.
+and the GitHub App needs `http://localhost:3000/dashboard/api/auth/callback` as a callback URL (`scripts/create_apps.py --callback-url http://localhost:3000`, or add it in the App's settings). Keep both URLs on `http://` locally so the cookie is `SameSite=Lax`.
 
 Both variables default to `LANGGRAPH_URL` when the dashboard is bundled, which is why the single-origin setup needs neither. `DASHBOARD_ALLOWED_ORIGINS` lists **additional** origins that may call the API with credentials (preview deploys, a frontend on another host); credentialed CORS is only enabled when it is set, and `*` is rejected.
 

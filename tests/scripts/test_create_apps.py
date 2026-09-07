@@ -1,4 +1,4 @@
-"""scripts/create_github_app.py without GitHub: manifest, callback server, sinks."""
+"""scripts/create_apps.py without GitHub or Slack: manifests, callback server, sinks."""
 
 import json
 import os
@@ -10,7 +10,7 @@ from urllib.request import urlopen
 import pytest
 from dotenv import dotenv_values
 
-from scripts import create_github_app as script
+from scripts import create_apps as script
 
 
 def test_public_url_gets_webhook_and_events() -> None:
@@ -190,3 +190,101 @@ def test_args_require_exactly_one_sink() -> None:
         script._parse_args(["--url", "https://x", "--env-file", ".env", "--deployment", "d"])
     args = script._parse_args(["--url", "https://x", "--deployment", "d", "--org", "acme"])
     assert args.deployment == "d" and args.org == "acme"
+
+
+def test_slack_needs_a_public_url_and_something_to_do() -> None:
+    with pytest.raises(SystemExit):
+        script._parse_args(["--url", "http://localhost:2024", "--env-file", ".env", "--slack"])
+    with pytest.raises(SystemExit):
+        script._parse_args(["--url", "https://x", "--env-file", ".env", "--no-github"])
+    args = script._parse_args(
+        ["--url", "https://x", "--env-file", ".env", "--no-github", "--slack"]
+    )
+    assert args.slack and args.no_github
+
+
+def test_slack_manifest_matches_the_documented_app() -> None:
+    manifest = script.build_slack_manifest(url="https://swe.example.com/", name="Open SWE")
+    assert manifest["oauth_config"]["redirect_urls"] == [
+        "https://swe.example.com/dashboard/api/slack/callback"
+    ]
+    assert manifest["oauth_config"]["scopes"]["bot"] == list(script.SLACK_BOT_SCOPES)
+    events = manifest["settings"]["event_subscriptions"]
+    assert events == {
+        "request_url": "https://swe.example.com/webhooks/slack",
+        "bot_events": ["app_mention", "message.im", "message.mpim"],
+    }
+    assert manifest["settings"]["interactivity"]["request_url"] == (
+        "https://swe.example.com/webhooks/slack/interactivity"
+    )
+    assert "code_channels" not in manifest["features"]
+
+
+def test_slack_manifest_code_channels_variant() -> None:
+    manifest = script.build_slack_manifest(
+        url="https://swe.example.com", name="Open SWE", code_channels=True
+    )
+    assert manifest["features"]["code_channels"] == {
+        "enabled": True,
+        "slash_command_url": "https://swe.example.com/webhooks/slack/code-channel-commands",
+    }
+    assert "code_channels:manage" in manifest["oauth_config"]["scopes"]["bot"]
+    assert "code_channel_action" in manifest["settings"]["event_subscriptions"]["bot_events"]
+
+
+def test_slack_credentials_and_identity_mapping() -> None:
+    created = {
+        "ok": True,
+        "app_id": "A1",
+        "credentials": {
+            "client_id": "1.2",
+            "client_secret": "cs",
+            "signing_secret": "ss",
+            "verification_token": "v",
+        },
+    }
+    assert script.slack_credentials_from_create(created) == {
+        "SLACK_SIGNING_SECRET": "ss",
+        "SLACK_CLIENT_ID": "1.2",
+        "SLACK_CLIENT_SECRET": "cs",
+    }
+    assert script.slack_bot_identity(
+        {"ok": True, "user_id": "U1", "user": "open_swe", "team": "T"}
+    ) == {
+        "SLACK_BOT_USER_ID": "U1",
+        "SLACK_BOT_USERNAME": "open_swe",
+    }
+    with pytest.raises(ValueError, match="SLACK_SIGNING_SECRET"):
+        script.slack_credentials_from_create(
+            {"credentials": {"client_id": "1", "client_secret": "2"}}
+        )
+
+
+def test_slack_call_surfaces_manifest_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "ok": False,
+                "error": "invalid_manifest",
+                "errors": [
+                    {
+                        "message": "must be https",
+                        "pointer": "/settings/event_subscriptions/request_url",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(script.httpx, "post", lambda *a, **k: Response())
+    with pytest.raises(
+        RuntimeError,
+        match="invalid_manifest: /settings/event_subscriptions/request_url must be https",
+    ):
+        script.slack_call("apps.manifest.create", "tok", {"manifest": {}})
+
+
+def test_prompt_secret_prefers_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SLACK_APP_CONFIG_TOKEN", " xoxe-1 ")
+    assert script._prompt_secret("SLACK_APP_CONFIG_TOKEN", "?") == "xoxe-1"

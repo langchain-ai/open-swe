@@ -1,4 +1,4 @@
-"""Create the GitHub App for an Open SWE deployment and write its credentials.
+"""Create the GitHub App, and optionally the Slack app, for an Open SWE deployment.
 
 GitHub's App Manifest flow does the clicking: this script opens your browser on
 GitHub with the App preconfigured (permissions, events, webhook URL, login
@@ -7,19 +7,29 @@ and the script writes them where the deployment reads them: a ``.env`` file, or
 the environment of a LangGraph Platform deployment. It then waits for you to
 install the App and records the installation id the same way.
 
-    # a LangGraph Platform deployment (LANGSMITH_API_KEY must be set)
-    uv run python scripts/create_github_app.py --url https://my-open-swe.us.langgraph.app \\
-        --deployment 2abd85fb-d8ff-467a-bdab-d36e85148abf --org my-org
+With ``--slack`` it also creates the Slack app from the same manifest the docs
+describe, through Slack's ``apps.manifest.create`` API. That needs an app
+configuration token from https://api.slack.com/apps (valid for twelve hours),
+pasted when prompted or set as ``SLACK_APP_CONFIG_TOKEN``. Slack has no
+browser-to-script handoff for the bot token, so after you install the app the
+script asks you to paste the Bot User OAuth Token, discovers the bot's user id
+and handle from it, and writes the Slack variables.
 
-    # local development: writes .env, no webhook (GitHub cannot reach localhost)
-    uv run python scripts/create_github_app.py --url http://localhost:2024 --env-file .env
+    # a LangGraph Platform deployment (LANGSMITH_API_KEY must be set)
+    uv run python scripts/create_apps.py --url https://my-open-swe.us.langgraph.app \\
+        --deployment 2abd85fb-d8ff-467a-bdab-d36e85148abf --org my-org --slack
+
+    # local development: writes .env, no GitHub webhook (GitHub cannot reach localhost)
+    uv run python scripts/create_apps.py --url http://localhost:2024 --env-file .env
 
 Nothing secret is printed.
 """
 
 import argparse
+import getpass
 import html
 import json
+import os
 import re
 import secrets
 import sys
@@ -39,6 +49,7 @@ from agent.config import ENV
 
 GITHUB_URL = "https://github.com"
 GITHUB_API_URL = "https://api.github.com"
+SLACK_API_URL = "https://slack.com/api"
 APP_HOMEPAGE = "https://github.com/langchain-ai/open-swe"
 DEFAULT_CONTROL_PLANE = "https://api.host.langchain.com"
 
@@ -154,7 +165,7 @@ def write_env_values(path: Path, values: Mapping[str, str]) -> None:
     if remaining:
         if lines and lines[-1].strip():
             lines.append("")
-        lines.append("# Added by scripts/create_github_app.py")
+        lines.append("# Added by scripts/create_apps.py")
         lines.extend(f"{k}={_quote_env(v)}" for k, v in remaining.items())
     path.touch(mode=0o600, exist_ok=True)
     path.chmod(0o600)
@@ -335,13 +346,205 @@ def wait_for_installation(
     return None
 
 
+# --- Slack -----------------------------------------------------------------------------
+
+# Mirrors ui/src/lib/slack-manifest.ts, which the dashboard's Admin page copies from.
+SLACK_BOT_SCOPES: tuple[str, ...] = (
+    "reactions:write",
+    "app_mentions:read",
+    "channels:history",
+    "channels:read",
+    "chat:write",
+    "files:write",
+    "groups:history",
+    "groups:read",
+    "im:history",
+    "im:read",
+    "im:write",
+    "mpim:history",
+    "mpim:read",
+    "team:read",
+    "users:read",
+    "users:read.email",
+)
+SLACK_BOT_EVENTS: tuple[str, ...] = ("app_mention", "message.im", "message.mpim")
+SLACK_CODE_CHANNEL_SCOPES: tuple[str, ...] = ("code_channels:manage", "files:read")
+SLACK_CODE_CHANNEL_EVENTS: tuple[str, ...] = (
+    "app_mention",
+    "agent_session_stopped",
+    "code_channel_action",
+    "message.channels",
+    "message.groups",
+    "message.im",
+    "message.mpim",
+)
+
+
+def build_slack_manifest(*, url: str, name: str, code_channels: bool = False) -> dict[str, Any]:
+    base = url.rstrip("/")
+    features: dict[str, Any] = {
+        "app_home": {
+            "home_tab_enabled": False,
+            "messages_tab_enabled": True,
+            "messages_tab_read_only_enabled": False,
+        },
+        "bot_user": {"display_name": name, "always_online": True},
+    }
+    if code_channels:
+        features["code_channels"] = {
+            "enabled": True,
+            "slash_command_url": f"{base}/webhooks/slack/code-channel-commands",
+        }
+    return {
+        "display_information": {
+            "name": name,
+            "description": "Enables Open SWE to interact with your workspace",
+            "background_color": "#000000",
+        },
+        "features": features,
+        "oauth_config": {
+            "redirect_urls": [f"{base}/dashboard/api/slack/callback"],
+            "scopes": {
+                "bot": list(SLACK_BOT_SCOPES + SLACK_CODE_CHANNEL_SCOPES)
+                if code_channels
+                else list(SLACK_BOT_SCOPES)
+            },
+        },
+        "settings": {
+            "event_subscriptions": {
+                "request_url": f"{base}/webhooks/slack",
+                "bot_events": list(
+                    SLACK_CODE_CHANNEL_EVENTS if code_channels else SLACK_BOT_EVENTS
+                ),
+            },
+            "interactivity": {
+                "is_enabled": True,
+                "request_url": f"{base}/webhooks/slack/interactivity",
+            },
+            "org_deploy_enabled": False,
+            "socket_mode_enabled": False,
+            "token_rotation_enabled": False,
+        },
+    }
+
+
+def slack_call(method: str, token: str, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """POST a Slack Web API method and raise on ``ok: false`` with Slack's reason."""
+    response = httpx.post(
+        f"{SLACK_API_URL}/{method}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json=dict(payload or {}),
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError(f"unexpected {method} response")
+    if not data.get("ok"):
+        detail = data.get("error", "unknown_error")
+        problems = data.get("errors")
+        if isinstance(problems, list) and problems:
+            detail += ": " + "; ".join(
+                f"{p.get('pointer', '')} {p.get('message', '')}".strip()
+                for p in problems
+                if isinstance(p, dict)
+            )
+        raise RuntimeError(f"Slack {method} failed: {detail}")
+    return data
+
+
+def slack_credentials_from_create(data: Mapping[str, Any]) -> dict[str, str]:
+    """Env names from an ``apps.manifest.create`` response."""
+    credentials = data.get("credentials") or {}
+    values = {
+        "SLACK_SIGNING_SECRET": str(credentials.get("signing_secret") or ""),
+        "SLACK_CLIENT_ID": str(credentials.get("client_id") or ""),
+        "SLACK_CLIENT_SECRET": str(credentials.get("client_secret") or ""),
+    }
+    missing = [k for k, v in values.items() if not v]
+    if missing:
+        raise ValueError(f"Slack's response lacks {', '.join(missing)}")
+    return values
+
+
+def slack_bot_identity(data: Mapping[str, Any]) -> dict[str, str]:
+    """Env names from an ``auth.test`` response for the bot token."""
+    values = {
+        "SLACK_BOT_USER_ID": str(data.get("user_id") or ""),
+        "SLACK_BOT_USERNAME": str(data.get("user") or ""),
+    }
+    missing = [k for k, v in values.items() if not v]
+    if missing:
+        raise ValueError(f"Slack auth.test lacks {', '.join(missing)}")
+    return values
+
+
+def _prompt_secret(env_name: str, prompt: str) -> str:
+    value = os.environ.get(env_name, "").strip()
+    if value:
+        return value
+    if not sys.stdin.isatty():
+        raise SystemExit(f"set {env_name} when running without a terminal")
+    value = getpass.getpass(prompt).strip()
+    if not value:
+        raise SystemExit("nothing entered")
+    return value
+
+
+def create_slack_app(
+    *, url: str, name: str, code_channels: bool, open_browser: bool
+) -> dict[str, str]:
+    """Create the Slack app, have the operator install it, and return its env values."""
+    config_token = _prompt_secret(
+        "SLACK_APP_CONFIG_TOKEN",
+        "Slack app configuration token (https://api.slack.com/apps -> Your App Configuration Tokens): ",
+    )
+    manifest = build_slack_manifest(url=url, name=name, code_channels=code_channels)
+    created = slack_call("apps.manifest.create", config_token, {"manifest": manifest})
+    values = slack_credentials_from_create(created)
+    app_id = str(created.get("app_id") or "")
+    settings_url = f"https://api.slack.com/apps/{app_id}"
+    install_url = f"{settings_url}/install-on-team"
+    print(f"Created Slack app {name} ({settings_url}).")
+    print(f"Install it to your workspace: {install_url}")
+    if open_browser:
+        webbrowser.open(install_url)
+    bot_token = _prompt_secret(
+        "SLACK_BOT_TOKEN", "Bot User OAuth Token shown after installing (xoxb-...): "
+    )
+    identity = slack_call("auth.test", bot_token)
+    values.update(slack_bot_identity(identity))
+    values["SLACK_BOT_TOKEN"] = bot_token
+    print(
+        f"Installed on {identity.get('team', '?')} as @{values['SLACK_BOT_USERNAME']} "
+        f"({values['SLACK_BOT_USER_ID']})."
+    )
+    return values
+
+
 # --- main ------------------------------------------------------------------------------
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--url", required=True, help="public URL of the Open SWE deployment")
-    parser.add_argument("--name", default="Open SWE", help="App name; unique across GitHub")
+    parser.add_argument(
+        "--name",
+        default="Open SWE",
+        help="app name for both GitHub (unique across GitHub) and Slack",
+    )
+    parser.add_argument("--no-github", action="store_true", help="skip the GitHub App")
+    parser.add_argument(
+        "--slack", action="store_true", help="also create the Slack app (needs a public --url)"
+    )
+    parser.add_argument(
+        "--slack-code-channels",
+        action="store_true",
+        help="Slack manifest with code channels enabled",
+    )
     parser.add_argument(
         "--org", default="", help="create under this organization instead of your account"
     )
@@ -376,6 +579,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if bool(args.env_file) == bool(args.deployment):
         parser.error("pass exactly one of --env-file or --deployment")
+    if args.no_github and not args.slack:
+        parser.error("nothing to do: --no-github without --slack")
+    if args.slack and not is_public_url(args.url):
+        parser.error("--slack needs a public https --url; Slack only delivers events to one")
     return args
 
 
@@ -391,6 +598,22 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sink = EnvFileSink(Path(args.env_file))
 
+    status = 0
+    if not args.no_github:
+        status = create_github_app(args, sink)
+    if args.slack:
+        values = create_slack_app(
+            url=args.url,
+            name=args.name,
+            code_channels=args.slack_code_channels,
+            open_browser=not args.no_browser,
+        )
+        sink.write(values)
+        print(f"Wrote {', '.join(sorted(values))} to {sink.describe()}.")
+    return status
+
+
+def create_github_app(args: argparse.Namespace, sink: EnvFileSink | DeploymentSink) -> int:
     if not is_public_url(args.url):
         print(
             f"{args.url} is not reachable from GitHub, so the App is created without a webhook "
