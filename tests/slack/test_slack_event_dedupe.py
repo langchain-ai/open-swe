@@ -92,6 +92,9 @@ async def _post(
 def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     slack_events.reset_slack_event_claims()
     client = _FakeClient()
+    monkeypatch.setattr(
+        "agent.investigations.service.accept_slack_event", AsyncMock(return_value=None)
+    )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}

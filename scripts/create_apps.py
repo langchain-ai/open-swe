@@ -355,6 +355,7 @@ SLACK_BOT_SCOPES: tuple[str, ...] = (
     "app_mentions:read",
     "channels:history",
     "channels:read",
+    "channels:join",
     "chat:write",
     "files:write",
     "groups:history",
@@ -368,16 +369,21 @@ SLACK_BOT_SCOPES: tuple[str, ...] = (
     "users:read",
     "users:read.email",
 )
-SLACK_BOT_EVENTS: tuple[str, ...] = ("app_mention", "message.im", "message.mpim")
-SLACK_CODE_CHANNEL_SCOPES: tuple[str, ...] = ("code_channels:manage", "files:read")
-SLACK_CODE_CHANNEL_EVENTS: tuple[str, ...] = (
+SLACK_BOT_EVENTS: tuple[str, ...] = (
     "app_mention",
-    "agent_session_stopped",
-    "code_channel_action",
-    "message.channels",
-    "message.groups",
     "message.im",
     "message.mpim",
+    "message.channels",
+    "channel_created",
+    "channel_rename",
+    "channel_archive",
+)
+SLACK_CODE_CHANNEL_SCOPES: tuple[str, ...] = ("code_channels:manage", "files:read")
+SLACK_CODE_CHANNEL_EVENTS: tuple[str, ...] = (
+    *SLACK_BOT_EVENTS,
+    "agent_session_stopped",
+    "code_channel_action",
+    "message.groups",
 )
 
 
@@ -461,6 +467,7 @@ def slack_credentials_from_create(data: Mapping[str, Any]) -> dict[str, str]:
     """Env names from an ``apps.manifest.create`` response."""
     credentials = data.get("credentials") or {}
     values = {
+        "SLACK_APP_ID": str(data.get("app_id") or ""),
         "SLACK_SIGNING_SECRET": str(credentials.get("signing_secret") or ""),
         "SLACK_CLIENT_ID": str(credentials.get("client_id") or ""),
         "SLACK_CLIENT_SECRET": str(credentials.get("client_secret") or ""),
@@ -506,8 +513,7 @@ def create_slack_app(
     manifest = build_slack_manifest(url=url, name=name, code_channels=code_channels)
     created = slack_call("apps.manifest.create", config_token, {"manifest": manifest})
     values = slack_credentials_from_create(created)
-    app_id = str(created.get("app_id") or "")
-    settings_url = f"https://api.slack.com/apps/{app_id}"
+    settings_url = f"https://api.slack.com/apps/{values['SLACK_APP_ID']}"
     install_url = f"{settings_url}/install-on-team"
     print(f"Created Slack app {name} ({settings_url}).")
     print(f"Install it to your workspace: {install_url}")

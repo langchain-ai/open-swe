@@ -1,8 +1,9 @@
-const LEGACY_BOT_SCOPES = [
+const BASE_BOT_SCOPES = [
   "reactions:write",
   "app_mentions:read",
   "channels:history",
   "channels:read",
+  "channels:join",
   "chat:write",
   "files:write",
   "groups:history",
@@ -17,7 +18,15 @@ const LEGACY_BOT_SCOPES = [
   "users:read.email",
 ]
 
-const LEGACY_BOT_EVENTS = ["app_mention", "message.im", "message.mpim"]
+const BASE_BOT_EVENTS = [
+  "app_mention",
+  "message.im",
+  "message.mpim",
+  "message.channels",
+  "channel_created",
+  "channel_rename",
+  "channel_archive",
+]
 
 export function slackAppManifest(codeChannelsEnabled = false) {
   const features: Record<string, unknown> = {
@@ -47,8 +56,8 @@ export function slackAppManifest(codeChannelsEnabled = false) {
       redirect_urls: ["http://localhost:2024/dashboard/api/slack/callback"],
       scopes: {
         bot: codeChannelsEnabled
-          ? [...LEGACY_BOT_SCOPES, "code_channels:manage", "files:read"]
-          : LEGACY_BOT_SCOPES,
+          ? [...BASE_BOT_SCOPES, "code_channels:manage", "files:read"]
+          : BASE_BOT_SCOPES,
       },
     },
     settings: {
@@ -56,15 +65,12 @@ export function slackAppManifest(codeChannelsEnabled = false) {
         request_url: "https://<your-ngrok-url>/webhooks/slack",
         bot_events: codeChannelsEnabled
           ? [
-              "app_mention",
+              ...BASE_BOT_EVENTS,
               "agent_session_stopped",
               "code_channel_action",
-              "message.channels",
               "message.groups",
-              "message.im",
-              "message.mpim",
             ]
-          : LEGACY_BOT_EVENTS,
+          : BASE_BOT_EVENTS,
       },
       interactivity: {
         is_enabled: true,

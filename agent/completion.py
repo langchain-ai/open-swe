@@ -288,6 +288,8 @@ async def _schedule_success_cost_refresh(
         return {"status": "error", "reason": "thread fetch failed"}
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    if metadata.get("source") in {"investigate", "investigate_coordinator"}:
+        return {"status": "ignored", "reason": "investigation completion"}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
@@ -380,6 +382,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    if metadata.get("source") in {"investigate", "investigate_coordinator"}:
+        return {"status": "ignored", "reason": "investigation completion"}
     await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
     if run_id is None:

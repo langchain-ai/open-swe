@@ -9,7 +9,7 @@ What a deployment needs:
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
 | A model key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`; or `LANGSMITH_GATEWAY_API_KEY` to route through the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` |
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | `scripts/create_apps.py` creates the App and writes all six (step 3) |
-| Slack, optional: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | the same script with `--slack` ([Slack](#slack)) |
+| Slack, optional: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_ID`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | the same script with `--slack` ([Slack](#slack)) |
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 4) |
 | `CONFIGURED_ADMINS` | Your GitHub login (step 4) |
 | `LANGGRAPH_URL` | The deployment's public URL; defaults to `http://localhost:2024` |
@@ -203,7 +203,7 @@ Slack only delivers events to a public HTTPS URL, so this needs the ngrok domain
 uv run python scripts/create_apps.py --url https://<your-url> --env-file .env --no-github --slack
 ```
 
-It pastes the manifest below into Slack's `apps.manifest.create` for you, opens the app's install page, and, because Slack has no way to hand the bot token back to a script, asks you to paste the **Bot User OAuth Token** shown after installing. From that it discovers the bot's user id and handle and writes all six Slack variables (the client id and secret enable "Sign in with Slack" below). Drop `--no-github` to create both apps in one run; add `--slack-code-channels` for the code-channels manifest.
+It pastes the manifest below into Slack's `apps.manifest.create` for you, opens the app's install page, and, because Slack has no way to hand the bot token back to a script, asks you to paste the **Bot User OAuth Token** shown after installing. From that it discovers the bot's user id and handle and writes all seven Slack variables (the app id binds Investigate to the app; the client id and secret enable "Sign in with Slack" below). Drop `--no-github` to create both apps in one run; add `--slack-code-channels` for the code-channels manifest.
 
 **By hand.**
 
@@ -240,6 +240,7 @@ It pastes the manifest below into Slack's `apps.manifest.create` for you, opens 
                 "app_mentions:read",
                 "channels:history",
                 "channels:read",
+                "channels:join",
                 "chat:write",
                 "files:write",
                 "groups:history",
@@ -260,6 +261,10 @@ It pastes the manifest below into Slack's `apps.manifest.create` for you, opens 
             "request_url": "https://<your-url>/webhooks/slack",
             "bot_events": [
                 "app_mention",
+                "channel_created",
+                "channel_rename",
+                "channel_archive",
+                "message.channels",
                 "message.im",
                 "message.mpim"
             ]
@@ -283,6 +288,7 @@ It pastes the manifest below into Slack's `apps.manifest.create` for you, opens 
 ```bash
 SLACK_BOT_TOKEN=""        # OAuth & Permissions → Bot User OAuth Token (xoxb-...)
 SLACK_SIGNING_SECRET=""   # Basic Information → App Credentials → Signing Secret
+SLACK_APP_ID=""           # Basic Information → App ID (A...); Investigate accepts events only from this app
 SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```

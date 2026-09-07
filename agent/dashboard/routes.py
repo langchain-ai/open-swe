@@ -45,6 +45,7 @@ from agent.dashboard.environments import (
     list_environment_options,
     slugify,
 )
+from agent.dashboard.investigate_api import router as investigate_router
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -269,6 +270,7 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
+router.include_router(investigate_router)
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"

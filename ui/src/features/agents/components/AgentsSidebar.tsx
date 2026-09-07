@@ -14,7 +14,7 @@ import {
   PushPinSlashIcon,
   SparkleIcon,
 } from "@phosphor-icons/react"
-import { Kanban } from "lucide-react"
+import { Kanban, Radar } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
@@ -123,6 +123,7 @@ const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
+  { to: "/investigate", label: "Investigate", icon: Radar },
 ] as const
 
 /** Threads shown per project before the group needs a "Show more". */

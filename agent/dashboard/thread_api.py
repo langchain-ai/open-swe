@@ -104,6 +104,7 @@ _THREAD_POST_COMMAND_METHODS = frozenset(
 )
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
+_INVESTIGATE_SOURCES = frozenset({"investigate", "investigate_coordinator"})
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
@@ -934,6 +935,8 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
+                if _thread_source(metadata) in _INVESTIGATE_SOURCES:
+                    continue
                 if surfaced_only and _thread_source(metadata) not in _SURFACED_SOURCES:
                     continue
                 if not _metadata_matches_filters(
@@ -1902,9 +1905,11 @@ async def cancel_dashboard_thread(
 async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
     client = langgraph_client()
     try:
-        await client.threads.get(thread_id)
+        thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
+    if _thread_source(thread_metadata(thread)) in _INVESTIGATE_SOURCES:
+        raise HTTPException(404, "thread not found")
 
     try:
         await _cancel_active_thread_runs(client, thread_id)
