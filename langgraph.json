@@ -24,7 +24,7 @@
   },
   "env": ".env",
   "dockerfile_lines": [
-    "# Bundle the dashboard so the deployment serves it at / (docs/INSTALLATION.md, Dashboard).",
+    "# Bundle the dashboard so the deployment serves it at / (docs/INSTALLATION.md).",
     "# The build is made for http.mount_prefix from langgraph.json, so the UI's asset URLs and router match where the server mounts it.",
     "# Best effort: a failed UI build leaves the backend deployable without the bundled UI.",
     "COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json langgraph.json /tmp/dashboard-src/",
