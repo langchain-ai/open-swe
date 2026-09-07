@@ -158,7 +158,7 @@ def write_env_values(path: Path, values: Mapping[str, str]) -> None:
         lines.extend(f"{k}={_quote_env(v)}" for k, v in remaining.items())
     path.touch(mode=0o600, exist_ok=True)
     path.chmod(0o600)
-    path.write_text("\n".join(lines) + "\n")  # codeql[py/clear-text-storage-sensitive-data]
+    path.write_text("\n".join(lines) + "\n")
 
 
 def merge_secrets(current: list[dict[str, str]], values: Mapping[str, str]) -> list[dict[str, str]]:
