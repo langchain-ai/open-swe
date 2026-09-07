@@ -21,7 +21,7 @@ Slack and Linear are optional triggers; see [Optional add-ons](#optional-add-ons
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
 - Node 22.22.2+ and [pnpm](https://pnpm.io/) to build the dashboard locally (LangGraph Platform builds it for you)
-- For local GitHub or Slack webhooks: a tunnel such as [ngrok](https://ngrok.com/) or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+- For local development with GitHub or Slack triggers: a free [ngrok](https://ngrok.com/) account. It comes with one static domain, so the URL you register with GitHub and Slack survives restarts (step 2).
 
 ## 1. Clone and install
 
@@ -33,13 +33,19 @@ source .venv/bin/activate
 uv sync --all-extras
 ```
 
-## 2. Decide the URL GitHub will call
+## 2. Decide the URL GitHub and Slack will call
 
-The GitHub App from step 3 delivers webhooks to `<URL>/webhooks/github` and sends dashboard logins back to `<URL>/dashboard/api/auth/callback`, so pick the URL first.
+The GitHub App from step 3 delivers webhooks to `<URL>/webhooks/github` and lists `<URL>/dashboard/api/auth/callback` as a login callback; a Slack app posts events to `<URL>/webhooks/slack`. Both need a public HTTPS URL that does not change, so pick it first.
 
 - **LangGraph Platform:** the deployment URL, `https://<name>-<hash>.<region>.langgraph.app`. Create the deployment first (see [Deploy](#7-deploy)) so you have it.
-- **Local development with GitHub triggers:** a tunnel to port 2024. Either keeps the same hostname across restarts only with an account (`ngrok http 2024 --url https://<your-subdomain>.ngrok.dev`); a free `cloudflared tunnel --url http://localhost:2024` gets a new hostname each run, so you would update the App's webhook URL each time.
-- **Local development without GitHub triggers:** `http://localhost:2024`. Runs started from the dashboard work; GitHub cannot deliver webhooks to localhost, so the App is created without one and comment triggers wait until you have a public URL.
+- **Local development:** a tunnel to port 2024 on a fixed hostname. Sign up for a free [ngrok](https://dashboard.ngrok.com/signup) account, install the agent and add your authtoken as its dashboard shows, then claim the static domain the free plan includes under **Domains** and run:
+
+  ```bash
+  ngrok http 2024 --url https://<your-domain>.ngrok-free.dev
+  ```
+
+  Keep it running while you develop; the hostname is yours, so the App's webhook and Slack's request URL stay valid across restarts. Run the backend on port 2024 (`make dev`, or `make dev-ui` while working on the UI). You keep opening the dashboard on `http://localhost:2024`; the tunnel is only for GitHub and Slack. A throwaway tunnel such as `cloudflared tunnel --url http://localhost:2024` works for a quick test, but its hostname changes every run and you would edit the App's webhook and Slack's URLs each time.
+- **Local development without GitHub or Slack triggers:** `http://localhost:2024`. Runs started from the dashboard work; GitHub cannot deliver webhooks to localhost, so the App is created without one and comment triggers wait until you have a public URL.
 
 ## 3. Create a GitHub App
 
@@ -47,7 +53,7 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
 
 ```bash
 # local: writes the credentials into .env
-uv run python scripts/create_apps.py --url https://<your-tunnel-hostname> --env-file .env --callback-url http://localhost:2024
+uv run python scripts/create_apps.py --url https://<your-domain>.ngrok-free.dev --env-file .env --callback-url http://localhost:2024
 
 # LangGraph Platform: writes them into the deployment's environment (a new revision rolls out)
 LANGSMITH_API_KEY=<key for the workspace that owns the deployment> \
@@ -60,7 +66,7 @@ What happens:
 2. GitHub sends the new App's credentials to the script, which writes `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET`.
 3. The browser opens the App's install page. Install it on the account and repositories Open SWE may work in. The script records the installation as `GITHUB_APP_INSTALLATION_ID` and exits. Pass `--skip-install` to do this later by hand: the installation id is the number at the end of `https://github.com/settings/installations/<id>`.
 
-`--callback-url http://localhost:2024` registers a second login callback, so a dashboard served at `http://localhost:2024` can sign in while webhooks arrive through the tunnel. When `--url` is `http://localhost:2024` itself, the App is created without a webhook; add one under the App's settings later (URL `<public URL>/webhooks/github`, the `GITHUB_WEBHOOK_SECRET` from your `.env`, and the events below).
+`--callback-url http://localhost:2024` registers a second login callback, so the dashboard you open at `http://localhost:2024` can sign in while webhooks arrive through the tunnel; the tunnel URL's own callback is what a deployment would use. When `--url` is `http://localhost:2024` itself, the App is created without a webhook; add one under the App's settings later (URL `<public URL>/webhooks/github`, the `GITHUB_WEBHOOK_SECRET` from your `.env`, and the events below).
 
 <details>
 <summary>Creating the App by hand instead</summary>
@@ -180,7 +186,7 @@ Open a section when you want that feature; everything above keeps working withou
 <details id="slack">
 <summary><strong>Slack</strong></summary>
 
-Slack only delivers events to a public HTTPS URL, so this needs the tunnel or deployment URL from step 2.
+Slack only delivers events to a public HTTPS URL, so this needs the ngrok domain or deployment URL from step 2.
 
 **With the script.** Generate an app configuration token under **Your App Configuration Tokens** on [api.slack.com/apps](https://api.slack.com/apps) (valid twelve hours), then:
 
@@ -478,7 +484,8 @@ REVIEWER_OUTCOMES_DATASET=""           # LangSmith dataset for reviewer outcomes
 
 ### Webhook not receiving events
 
-- The URL configured in GitHub, Slack, or Linear must be the deployment's URL (locally, the tunnel), and the tunnel must be running; GitHub shows each delivery and its response under the App's **Advanced** tab.
+- The URL configured in GitHub, Slack, or Linear must be the deployment's URL (locally, your ngrok domain), and `ngrok http 2024` must be running against the port the backend listens on; GitHub shows each delivery and its response under the App's **Advanced** tab, and ngrok's inspector at `http://localhost:4040` shows what arrived.
+- Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime. Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
 
