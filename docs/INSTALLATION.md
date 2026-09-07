@@ -9,19 +9,19 @@ What a deployment needs:
 | Value | How you get it |
 |---|---|
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
-| A model key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`; or `LANGSMITH_GATEWAY_API_KEY` to route through the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` |
+| A model provider key such as `ANTHROPIC_API_KEY`, or `LANGSMITH_GATEWAY_API_KEY` for the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` (step 4) |
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
-| `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 4) |
-| `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 4) |
+| `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 5) |
+| `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 5) |
 | `LANGGRAPH_URL` | The deployment's own public URL |
 
 Slack and Linear are optional triggers; see [Optional add-ons](#optional-add-ons). Every variable Open SWE reads is declared in `agent/config.py` with its description and default; that file is the complete reference.
 
 ## 1. Create the deployment
 
-You need the deployment's public URL before the GitHub App can be created, so create the deployment first; it starts without the GitHub variables and picks them up in step 4.
+You need the deployment's public URL before the GitHub App can be created, so create the deployment first; it starts without the GitHub variables and picks them up in step 5.
 
-**LangGraph Platform.** Connect the repository to a new deployment in LangSmith → Deployments. The image build bundles the dashboard (the `dockerfile_lines` in `langgraph.json`), so the deployment URL serves the UI at `/` and the API beneath it; a failed UI build is logged and the backend still deploys. The platform injects `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and `LANGSMITH_PROJECT`. You will set the environment variables in step 4.
+**LangGraph Platform.** Connect the repository to a new deployment in LangSmith → Deployments. The image build bundles the dashboard (the `dockerfile_lines` in `langgraph.json`), so the deployment URL serves the UI at `/` and the API beneath it; a failed UI build is logged and the backend still deploys. The platform injects `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and `LANGSMITH_PROJECT`. You will set the environment variables in step 5.
 
 **Standalone Docker.** The root `Dockerfile` builds a production LangGraph API server image (not the sandbox image):
 
@@ -43,10 +43,11 @@ The example assumes Postgres and Redis run on the Docker host; `--add-host` is w
 
 Either way, the URL browsers and webhooks use from here on is `<URL>`: `https://<name>-<hash>.<region>.langgraph.app` on the platform, or your ingress hostname in front of the container.
 
-## 2. LangSmith and a model
+## 2. LangSmith API key
 
-1. Create a [LangSmith](https://smith.langchain.com/) API key under **Settings → API Keys** and save it as `LANGSMITH_API_KEY`. LangGraph Platform injects it into the deployment for you, along with `LANGSMITH_TRACING` and `LANGSMITH_PROJECT`; standalone deployments set it themselves. It is also what sandboxes and trace links use: trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override).
-2. Pick a model provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`. Or set `LANGSMITH_GATEWAY_API_KEY` (a LangSmith key with `gateway:invoke`) to route every provider call through the LangSmith LLM Gateway; `LANGSMITH_GATEWAY_ENABLED` forces that on or off, and admins can toggle it per team in the dashboard.
+Create a [LangSmith](https://smith.langchain.com/) API key under **Settings → API Keys** and save it as `LANGSMITH_API_KEY`. LangGraph Platform injects it into the deployment for you, along with `LANGSMITH_TRACING` and `LANGSMITH_PROJECT`; standalone deployments set it themselves.
+
+The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override). Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture an **Environment** from the dashboard later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 ## 3. Create a GitHub App
 
@@ -80,13 +81,32 @@ Finally **Install App** in the sidebar: pick the account and the repositories Op
 
 Give each deployment its own GitHub App, or at least a distinct mention handle (`OPEN_SWE_MENTION_TAGS`, see [Allowlists](#repository-allowlists-mention-handles-and-user-mapping)) when several share a GitHub organization.
 
-## 4. Set the environment variables
+## 4. Model providers and API keys
+
+Open SWE calls models through [LangChain](https://python.langchain.com/) chat models named `provider:model`, so any provider you give a key for is available. Set at least one:
+
+| Provider | Variable | Notes |
+|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` | Provider of the default model |
+| OpenAI | `OPENAI_API_KEY` | Also used for voice dictation in the dashboard; `OPENAI_BASE_URL` points at an OpenAI-compatible API |
+| Google | `GOOGLE_API_KEY` | `google_genai:` models |
+| Fireworks | `FIREWORKS_API_KEY` | `fireworks:` models |
+| Groq | `GROQ_API_KEY` | `groq:` models |
+| Baseten | `BASETEN_API_KEY` | `baseten:` models |
+
+**LangSmith LLM Gateway.** Instead of per-provider keys, route every model call through the gateway with one LangSmith key that has the `gateway:invoke` permission, set as `LANGSMITH_GATEWAY_API_KEY`. Setting that key turns the gateway on; `LANGSMITH_GATEWAY_ENABLED=true|false` forces it either way (with `true` and no gateway key, `LANGSMITH_API_KEY` is used, which on LangGraph Platform may lack the permission). `LANGSMITH_GATEWAY_BASE_URL` points at a regional or self-hosted gateway. Admins can also toggle the gateway per team in the dashboard.
+
+**Which model runs.** The deployment default is `anthropic:claude-opus-5` at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Team settings**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+
+**Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
+
+## 5. Set the environment variables
 
 ```bash
 LANGGRAPH_URL="<URL>"                 # the deployment's own URL
 LANGSMITH_API_KEY=""                  # step 2; injected by LangGraph Platform
 LANGSMITH_TRACING="true"              # injected by LangGraph Platform
-ANTHROPIC_API_KEY=""                  # or OPENAI_API_KEY / GOOGLE_API_KEY, or LANGSMITH_GATEWAY_API_KEY
+ANTHROPIC_API_KEY=""                  # step 4: any provider key, or LANGSMITH_GATEWAY_API_KEY
 
 GITHUB_APP_ID=""                      # step 3
 GITHUB_APP_CLIENT_ID=""
@@ -102,9 +122,9 @@ CONFIGURED_ADMINS=""                  # GitHub logins or emails, comma-separated
 
 On LangGraph Platform, set them under the deployment's environment variables; saving rolls out a new revision. With Docker, put them in the file you pass as `--env-file`. `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` are not needed: they default to `LANGGRAPH_URL` because the dashboard is served from the same origin.
 
-## 5. Verify it works
+## 6. Verify it works
 
-**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer.
+**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
 
 **GitHub.** Signing in once is also what lets GitHub-triggered runs act as you: they run as the commenting user and need the token the sign-in stored; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
 
@@ -270,49 +290,6 @@ ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this
 
 </details>
 
-<details id="custom-sandbox-snapshot-and-environments">
-<summary><strong>Custom sandbox snapshot and environments</strong></summary>
-
-Each run executes in an isolated LangSmith sandbox booted from a **snapshot**. Without configuration that is LangSmith's root snapshot. Build your own (from a Docker image) when your repos need extra toolchains.
-
-The image must carry `git`, `gh`, `sfw`, the Docker CLI, and the language runtimes, and live in a registry LangSmith can pull from. Run `sfw --version` while building to populate its binary cache, and set `SFW_SKIP_UPDATE_CHECK=1` at runtime. Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy with runtime-minted installation tokens, so no GitHub token belongs in the image.
-
-Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), via the SDK, or with the helper script:
-
-```bash
-uv run python scripts/create_sandbox_snapshot.py \
-  --name open-swe-gh-cli-amd64 \
-  --image johanneslangchain/open-swe-sandbox:gh-cli-amd64
-```
-
-Then set the UUID in the environment, or on **Admin → Sandbox → Base snapshot** (the stored value wins; clearing it falls back to the env var):
-
-```bash
-DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"
-# Optional sizing and TTL overrides. Defaults: 128 GiB root FS, 4 vCPUs, 16 GiB RAM,
-# 7200 s idle stop (0 disables), 2592000 s (30 d) delete-after-stop (0 disables).
-DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"
-DEFAULT_SANDBOX_VCPUS="4"
-DEFAULT_SANDBOX_MEM_BYTES="17179869184"
-DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"
-```
-
-The same setting is available over the API, which is how the repo that builds your sandbox image can roll a new snapshot out on its own (see [Admin API credentials](#admin-api-credentials)):
-
-```bash
-curl -X PUT "$OPEN_SWE_BASE_URL/dashboard/api/sandbox-settings" \
-  -H "Authorization: Bearer $ADMIN_GITHUB_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"base_snapshot_id": "<snapshot-uuid>"}'
-```
-
-**Environments.** An environment pairs a prompt with a snapshot every run boots from, and can span several repos. Admins build one from an **admin thread** (the **Admin** toggle in the composer): the agent provisions its own sandbox, cloning repos, installing toolchains, and warming caches, and then captures it. The environment named `default` is the one runs use; any other name is a draft. Records live on the admin **Environments** page. With more than one environment, a picker appears in the composer, and a Slack thread can pick one with an `env:<name>` tag on its opening message (`@Open SWE env:staging fix the flaky test`); only the opening message can, because the sandbox is created once. Captures are named `openswe-environment-<name>`; set `ENVIRONMENT_SNAPSHOT_PREFIX` to replace the prefix when several deployments share a workspace. Resolution for a new sandbox: the run's environment, then the admin base snapshot, then `DEFAULT_SANDBOX_SNAPSHOT_ID`, then LangSmith's root snapshot.
-
-**Other providers.** `SANDBOX_TYPE` defaults to `langsmith`; `modal`, `daytona`, `runloop`, `e2b`, and `local` are available with their own credentials, listed in [CUSTOMIZATION.md](CUSTOMIZATION.md). Only the LangSmith provider gets the GitHub proxy, so other providers see GitHub tokens inside the sandbox.
-
-</details>
-
 <details id="repository-allowlists-mention-handles-and-user-mapping">
 <summary><strong>Repository allowlists, mention handles, and user mapping</strong></summary>
 
@@ -331,27 +308,6 @@ A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_O
 **User mapping.** Which GitHub users can trigger the agent is controlled by the user mapping (GitHub login ⇄ work email ⇄ optional Slack ID) in the LangGraph Store, managed under **Admin → User mappings**. Signing in to the dashboard records a mapping for that user. An unmapped person who tags Open SWE in Slack gets a run with the GitHub App's installation permissions and a "link your GitHub account" prompt; completing the org-gated login records a `self` mapping.
 
 **Default repository.** Runs that name no repository use **Admin → Team settings → Default repository**, seeded from `DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` when set; `SLACK_REPO_OWNER` / `SLACK_REPO_NAME` are a Slack-only fallback.
-
-</details>
-
-<details id="models-gateway-search-and-reviewer">
-<summary><strong>Models, LLM Gateway, web search, and reviewer settings</strong></summary>
-
-```bash
-ANTHROPIC_API_KEY=""
-OPENAI_API_KEY=""                      # OpenAI models and dashboard voice dictation
-# OPENAI_BASE_URL="https://api.openai.com/v1"  # optional OpenAI-compatible base URL
-GOOGLE_API_KEY=""                      # google_genai: models
-FIREWORKS_API_KEY=""                   # fireworks: models
-BASETEN_API_KEY=""                     # Baseten models when not using the gateway
-LLM_MODEL_ID=""                        # default model in provider:model form (see CUSTOMIZATION.md)
-
-LANGSMITH_GATEWAY_API_KEY=""           # LangSmith key with gateway:invoke; enables the LLM Gateway
-LANGSMITH_GATEWAY_ENABLED=""           # force the gateway on or off regardless of the key
-
-EXA_API_KEY=""                         # enables the web search tool (https://dashboard.exa.ai)
-REVIEWER_OUTCOMES_DATASET=""           # LangSmith dataset for reviewer outcomes; default openswe-reviewer-outcomes
-```
 
 </details>
 
@@ -407,7 +363,8 @@ Put the variables from step 4 in a `.env` file in the repository root; `LANGGRAP
 ### Sandbox creation failures
 
 - `LANGSMITH_API_KEY` must be set and valid, and the workspace must have sandbox access (403 on the sandbox endpoints means it does not; contact LangSmith support).
-- `Failed to create sandbox from snapshot '<id>'`: the snapshot must exist in that workspace with status `ready`; clear the admin **Base snapshot** or `DEFAULT_SANDBOX_SNAPSHOT_ID` to fall back to LangSmith's root snapshot.
+- Check LangSmith sandbox quotas in your workspace settings.
+- `Failed to create sandbox from snapshot '<id>'` means an admin-captured environment or base snapshot no longer exists or is not `ready` in that workspace; delete or recapture it under **Admin → Environments** (or clear **Admin → Sandbox → Base snapshot**) to fall back to the root snapshot.
 
 ### Agent not responding to comments
 
