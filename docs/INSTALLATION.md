@@ -87,8 +87,8 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 | Provider | Variable | Notes |
 |---|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` | Provider of the default model |
-| OpenAI | `OPENAI_API_KEY` | Also used for voice dictation in the dashboard; `OPENAI_BASE_URL` points at an OpenAI-compatible API |
+| Anthropic | `ANTHROPIC_API_KEY` | Default model when it is the only key set |
+| OpenAI | `OPENAI_API_KEY` | Default model otherwise; also used for voice dictation in the dashboard. `OPENAI_BASE_URL` points at an OpenAI-compatible API |
 | Google | `GOOGLE_API_KEY` | `google_genai:` models |
 | Fireworks | `FIREWORKS_API_KEY` | `fireworks:` models |
 | Groq | `GROQ_API_KEY` | `groq:` models |
@@ -96,7 +96,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 **LangSmith LLM Gateway.** Instead of per-provider keys, route every model call through the gateway with one LangSmith key that has the `gateway:invoke` permission, set as `LANGSMITH_GATEWAY_API_KEY`. Setting that key turns the gateway on; `LANGSMITH_GATEWAY_ENABLED=true|false` forces it either way (with `true` and no gateway key, `LANGSMITH_API_KEY` is used, which on LangGraph Platform may lack the permission). `LANGSMITH_GATEWAY_BASE_URL` points at a regional or self-hosted gateway. Admins can also toggle the gateway per team in the dashboard.
 
-**Which model runs.** The deployment default is `anthropic:claude-opus-5` at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Team settings**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+**Which model runs.** The deployment default is `anthropic:claude-opus-5` when only an Anthropic key is configured and `openai:gpt-5.6-sol` otherwise, at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Team settings**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 **Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
