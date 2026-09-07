@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev web build-dashboard desktop install-desktop install-checkout
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui web build-dashboard desktop install-desktop install-checkout
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -9,6 +9,11 @@ all: help
 
 dev:
 	uv run langgraph dev --no-browser --port 2024
+
+# UI development: the backend fronts the Vite dev server (`make web`) so http://localhost:2024
+# hot-reloads without a build or any cross-origin setup.
+dev-ui:
+	DASHBOARD_DEV_SERVER_URL=http://localhost:3000 uv run langgraph dev --no-browser --port 2024
 
 web:
 	pnpm run dev
@@ -85,6 +90,7 @@ typecheck:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
+	@echo 'dev-ui                       - LangGraph dev server fronting the Vite dev server (run make web too)'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'run                          - run webhook server'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'

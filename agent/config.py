@@ -299,6 +299,11 @@ ENV.var(
     "Directory holding the dashboard build (ui/.output/public) served at /; defaults to the "
     "in-repo build when present.",
 )
+ENV.var(
+    "DASHBOARD_DEV_SERVER_URL",
+    "Local development only: Vite dev server the backend forwards UI requests to instead of "
+    "serving a build, so the dashboard hot-reloads on the backend's origin.",
+)
 ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(
     "DASHBOARD_JWT_SECRET",

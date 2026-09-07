@@ -2,12 +2,14 @@
 
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from starlette.routing import Match
 
 from agent.api import app as app_module
 from agent.utils.dashboard_ui import (
+    DashboardDevProxyRoute,
     DashboardShellRoute,
     dashboard_static_dir,
     keep_dashboard_ui_last,
@@ -187,3 +189,122 @@ def test_serving_under_a_mount_prefix(build_dir: Path) -> None:
     assert client.get("/open-swe/assets/app-abc123.js").status_code == 200
     assert client.get("/open-swe/threads", headers=HTML).status_code == 404
     assert client.get("/", headers=HTML).status_code == 404
+
+
+# --- Vite dev server proxy -------------------------------------------------------------
+
+
+def _vite_response(
+    status: int, body: bytes, headers: list[tuple[str, str]] | None = None
+) -> httpx.Response:
+    """What a real Vite sends: a response whose body is still to be streamed."""
+    return httpx.Response(status, stream=httpx.ByteStream(body), headers=headers)
+
+
+def _vite_app(handler, monkeypatch: pytest.MonkeyPatch):
+    """The app with the UI route forwarding to a fake Vite, answered by ``handler``."""
+    monkeypatch.setenv("DASHBOARD_DEV_SERVER_URL", "http://vite.test:3000/")
+    app = app_module.create_app()
+    route = next(r for r in app.router.routes if isinstance(r, DashboardDevProxyRoute))
+    route.client = httpx.AsyncClient(
+        base_url="http://vite.test:3000",
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+    )
+    return app
+
+
+def test_dev_server_url_replaces_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[httpx.Request] = []
+
+    def vite(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _vite_response(200, b"<script type=module src=/@vite/client></script>")
+
+    client = TestClient(_vite_app(vite, monkeypatch))
+    response = client.get("/agents/t1?tab=files", headers={**HTML, "Cookie": "osw_session=abc"})
+
+    assert response.status_code == 200
+    assert "/@vite/client" in response.text
+    assert seen[0].url == "http://vite.test:3000/agents/t1?tab=files"
+    assert seen[0].headers["host"] == "vite.test:3000"
+    assert seen[0].headers["cookie"] == "osw_session=abc"
+
+
+def test_dev_proxy_forwards_modules_and_headers_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
+    def vite(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/src/routes/index.tsx"
+        return _vite_response(
+            200,
+            b"export default 1",
+            [
+                ("content-type", "text/javascript"),
+                ("etag", 'W/"abc"'),
+                ("set-cookie", "a=1; Path=/"),
+                ("set-cookie", "b=2; Path=/"),
+                ("connection", "keep-alive"),
+                ("date", "Mon, 01 Jan 2024 00:00:00 GMT"),
+            ],
+        )
+
+    client = TestClient(_vite_app(vite, monkeypatch))
+    response = client.get("/src/routes/index.tsx", headers={"Accept": "*/*"})
+
+    assert response.status_code == 200
+    assert response.content == b"export default 1"
+    assert response.headers["etag"] == 'W/"abc"'
+    assert response.headers.get_list("set-cookie") == ["a=1; Path=/", "b=2; Path=/"]
+    assert "connection" not in response.headers
+    assert response.headers.get_list("date") != ["Mon, 01 Jan 2024 00:00:00 GMT"]
+
+
+def test_dev_proxy_passes_redirects_and_bodies_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    def vite(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            assert request.read() == b'{"x":1}'
+            return _vite_response(201, b'{"ok": true}', [("content-type", "application/json")])
+        return _vite_response(302, b"", [("location", "/login?next=%2Fadmin")])
+
+    client = TestClient(_vite_app(vite, monkeypatch))
+    redirect = client.get("/admin", headers=HTML, follow_redirects=False)
+    assert redirect.status_code == 302
+    assert redirect.headers["location"] == "/login?next=%2Fadmin"
+
+    created = client.post(
+        "/_serverFn/x", content=b'{"x":1}', headers={"content-type": "application/json"}
+    )
+    assert created.status_code == 201
+    assert created.json() == {"ok": True}
+
+
+def test_dev_proxy_leaves_backend_paths_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    def vite(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"reserved path reached Vite: {request.url}")
+
+    client = TestClient(_vite_app(vite, monkeypatch))
+    assert client.get("/dashboard/api/me").status_code == 401
+    assert client.get("/threads", headers=HTML).status_code == 404
+    assert client.get("/ok").status_code == 404
+
+
+def test_dev_proxy_explains_a_missing_vite(monkeypatch: pytest.MonkeyPatch) -> None:
+    def vite(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    response = TestClient(_vite_app(vite, monkeypatch)).get("/", headers=HTML)
+    assert response.status_code == 502
+    assert "make web" in response.text
+    assert "http://vite.test:3000" in response.text
+
+
+def test_dev_proxy_is_kept_last_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = _vite_app(lambda request: _vite_response(200, b"vite"), monkeypatch)
+
+    @app.get("/mock/slack")
+    def mock_slack() -> dict:
+        return {"mock": True}
+
+    keep_dashboard_ui_last(app)
+    client = TestClient(app)
+    assert client.get("/mock/slack").json() == {"mock": True}
+    assert client.get("/anything", headers=HTML).text == "vite"

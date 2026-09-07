@@ -153,6 +153,8 @@ make dev  # terminal 1: backend
 make web  # terminal 2: dashboard
 ```
 
+For UI work, `make dev-ui` in place of `make dev` has the backend front the Vite dev server, so `http://localhost:2024` hot-reloads with no cross-origin setup.
+
 Production self-hosting uses the standalone LangGraph Agent Server and requires its license key.
 
 ## Project status
