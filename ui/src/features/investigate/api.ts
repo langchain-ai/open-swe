@@ -118,11 +118,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const investigateApi = {
-  list: (filters: {
-    view: InvestigationView
-    q?: string
-    cursor?: string
-  }) => {
+  list: (filters: { view: InvestigationView; q?: string; cursor?: string }) => {
     const params = new URLSearchParams({ view: filters.view })
     if (filters.q?.trim()) params.set("q", filters.q.trim())
     if (filters.cursor) params.set("cursor", filters.cursor)
