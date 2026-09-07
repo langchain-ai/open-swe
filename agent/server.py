@@ -395,6 +395,7 @@ def _subagent_middleware(
     if dynamic_tools is not None:
         middleware.append(dynamic_tools)
     middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
+    middleware.append(WorkflowPushGuardMiddleware())
     middleware.extend(_subagent_model_middleware())
     return middleware
 
