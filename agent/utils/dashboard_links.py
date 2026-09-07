@@ -3,20 +3,21 @@
 from urllib.parse import quote, urlsplit
 
 from agent.config import ENV
-from agent.utils.dashboard_ui import dashboard_static_dir
+from agent.utils.dashboard_ui import dashboard_on_this_origin
 
 
 def dashboard_base_url() -> str:
     """Public base URL of the dashboard frontend, or ``""`` when there is none.
 
     An explicit ``DASHBOARD_BASE_URL`` wins. Otherwise the dashboard lives on the
-    backend's own origin when its build is bundled, so ``LANGGRAPH_URL`` is the
+    backend's own origin when the backend serves it (a bundled build, or the Vite
+    dev server behind ``DASHBOARD_DEV_SERVER_URL``), so ``LANGGRAPH_URL`` is the
     base; with neither there is no dashboard to link to.
     """
     explicit = ENV.DASHBOARD_BASE_URL.optional()
     if explicit:
         return explicit.rstrip("/")
-    if dashboard_static_dir() is not None:
+    if dashboard_on_this_origin():
         return ENV.LANGGRAPH_URL.get().rstrip("/")
     return ""
 

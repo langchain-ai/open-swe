@@ -287,8 +287,8 @@ ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", s
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(
     "DASHBOARD_BASE_URL",
-    "Public URL of the dashboard frontend; defaults to LANGGRAPH_URL when the dashboard build "
-    "is bundled with the backend.",
+    "Public URL of the dashboard frontend; defaults to LANGGRAPH_URL when the backend serves "
+    "the dashboard (bundled build or DASHBOARD_DEV_SERVER_URL).",
 )
 ENV.var(
     "DASHBOARD_API_BASE_URL",

@@ -72,6 +72,12 @@ def dashboard_static_dir() -> Path | None:
     return None
 
 
+def dashboard_on_this_origin() -> bool:
+    """True when this backend serves the dashboard itself: a bundled build, or the
+    Vite dev server it fronts. Then ``LANGGRAPH_URL`` is also the dashboard's URL."""
+    return bool(ENV.DASHBOARD_DEV_SERVER_URL.optional()) or dashboard_static_dir() is not None
+
+
 def is_reserved_path(path: str) -> bool:
     return any(path == prefix or path.startswith(prefix + "/") for prefix in RESERVED_PREFIXES)
 
