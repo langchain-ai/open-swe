@@ -227,7 +227,9 @@ class SandboxBackendProxy(BaseSandbox):
                 response = await backend.aexecute(
                     build_tgrep_command(pattern, path, glob, max_count), timeout=30
                 )
-                if response.exit_code == 0 and (result := parse_tgrep_result(response.output)):
+                if response.exit_code == 0 and (
+                    result := parse_tgrep_result(response.output, max_count)
+                ):
                     return result
             except Exception:  # noqa: BLE001
                 logger.warning("Indexed sandbox search failed; using default grep", exc_info=True)

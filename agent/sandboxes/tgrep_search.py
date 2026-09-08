@@ -1,99 +1,13 @@
 """Indexed literal search for sandbox repositories."""
 
-import base64
-import json
 import logging
-from typing import Any
+import shlex
 
-from deepagents.backends.protocol import GrepResult
+from deepagents.backends.protocol import GrepMatch, GrepResult
 
 logger = logging.getLogger(__name__)
-
-_TGREP_SCRIPT = r"""
-import base64
-import hashlib
-import json
-import os
-import subprocess
-import sys
-
-payload = json.loads(base64.b64decode(sys.argv[1]))
-tgrep = "/usr/local/bin/tgrep"
-if not os.path.isfile(tgrep) or not os.access(tgrep, os.X_OK):
-    print(json.dumps({"status": "unavailable"}))
-    raise SystemExit
-path = os.path.realpath(payload["path"])
-probe = path if os.path.isdir(path) else os.path.dirname(path)
-root_result = subprocess.run(
-    ["git", "-C", probe, "rev-parse", "--show-toplevel"],
-    capture_output=True,
-    text=True,
-    timeout=5,
-)
-if root_result.returncode:
-    print(json.dumps({"status": "unavailable"}))
-    raise SystemExit
-root = os.path.realpath(root_result.stdout.strip())
-try:
-    if os.path.commonpath([root, path]) != root:
-        raise ValueError
-except ValueError:
-    print(json.dumps({"status": "unavailable"}))
-    raise SystemExit
-key = hashlib.sha256(root.encode()).hexdigest()
-index = os.path.join("/opt/open-swe/tgrep-indexes", key)
-if not os.path.isfile(os.path.join(index, "lookup.bin")):
-    print(json.dumps({"status": "unavailable"}))
-    raise SystemExit
-command = [tgrep, "--json", "--fixed-strings", "--color", "never"]
-if payload["glob"] is not None:
-    command.extend(["--glob", payload["glob"]])
-command.extend(["--regexp", payload["pattern"], path, "--index-path", index])
-limit = payload["max_count"]
-process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-matches = []
-try:
-    for line in process.stdout:
-        try:
-            frame = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if frame.get("type") != "match":
-            continue
-        data = frame.get("data", {})
-        file_path = data.get("path", {}).get("text")
-        line_number = data.get("line_number")
-        if not isinstance(file_path, str) or not isinstance(line_number, int):
-            continue
-        matches.append({
-            "path": file_path,
-            "line": line_number,
-            "text": data.get("lines", {}).get("text", "").rstrip("\n"),
-        })
-        if limit is not None and len(matches) > limit:
-            process.terminate()
-            break
-    try:
-        returncode = process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        returncode = process.wait(timeout=2)
-finally:
-    if process.stdout is not None:
-        process.stdout.close()
-stderr = process.stderr.read(1000) if process.stderr is not None else ""
-if process.stderr is not None:
-    process.stderr.close()
-truncated = limit is not None and len(matches) > limit
-if returncode not in (0, 1, -15) and not truncated:
-    print(json.dumps({"status": "error", "detail": stderr}))
-else:
-    print(json.dumps({
-        "status": "ok",
-        "matches": matches[:limit] if limit is not None else matches,
-        "truncated": truncated,
-    }))
-"""
+_START = "__OPEN_SWE_TGREP_START__"
+_END = "__OPEN_SWE_TGREP_END__"
 
 
 def build_tgrep_command(
@@ -102,29 +16,54 @@ def build_tgrep_command(
     glob: str | None,
     max_count: int | None = None,
 ) -> str:
-    """Build a sandbox command without interpolating model-controlled input."""
-    payload = base64.b64encode(
-        json.dumps(
-            {"pattern": pattern, "path": path or ".", "glob": glob, "max_count": max_count}
-        ).encode()
-    ).decode()
-    script = base64.b64encode(_TGREP_SCRIPT.encode()).decode()
-    return f"python -c \"import base64;exec(base64.b64decode('{script}'))\" '{payload}'"
+    """Build an indexed search command with shell-quoted model inputs."""
+    search_path = path or "."
+    quoted_probe = shlex.quote(search_path if search_path.endswith("/") else f"{search_path}/.")
+    options = ["--fixed-strings", "--color", "never"]
+    if glob is not None:
+        options.extend(["--glob", glob])
+    options.extend(["--regexp", pattern, search_path])
+    quoted_options = " ".join(shlex.quote(argument) for argument in options)
+    limit = f" | head -n {max_count + 1}" if max_count is not None else ""
+    return (
+        f"root=$(git -C {quoted_probe} rev-parse --show-toplevel 2>/dev/null) || exit 127; "
+        'root=$(realpath "$root") || exit 127; '
+        r'key=$(printf %s "$root" | sha256sum | cut -d\  -f1); '
+        'index="/opt/open-swe/tgrep-indexes/$key"; '
+        'test -x /usr/local/bin/tgrep -a -f "$index/lookup.bin" || exit 127; '
+        "files=$(mktemp) || exit 127; trap 'rm -f \"$files\"' EXIT; "
+        f"/usr/local/bin/tgrep --files-with-matches --null {quoted_options} "
+        '--index-path "$index" >"$files" 2>/dev/null; status=$?; '
+        "case $status in 0) ;; 1) printf '%s\\n%s\\n' "
+        f"'{_START}' '{_END}'; exit;; *) exit $status;; esac; "
+        'test "$(tr -cd \'\\0\' <"$files" | wc -c)" -le 256 || exit 75; '
+        f"printf '{_START}\\n'; "
+        f'xargs -0 grep -ZHnF -- {shlex.quote(pattern)} <"$files" 2>/dev/null'
+        f"{limit}; printf '{_END}\\n'"
+    )
 
 
-def parse_tgrep_result(output: str) -> GrepResult | None:
+def parse_tgrep_result(output: str, max_count: int | None = None) -> GrepResult | None:
     """Return an indexed result, or `None` when regular grep should run."""
+    lines = output.splitlines()
     try:
-        data: Any = json.loads(output.strip())
-    except json.JSONDecodeError, ValueError:
+        start = lines.index(_START)
+        end = lines.index(_END, start + 1)
+    except ValueError:
         return None
-    if not isinstance(data, dict) or data.get("status") != "ok":
-        return None
-    matches = data.get("matches")
-    if not isinstance(matches, list):
-        return None
+    matches: list[GrepMatch] = []
     try:
-        return GrepResult(matches=matches, truncated=bool(data.get("truncated")))
+        for line in lines[start + 1 : end]:
+            file_path, separator, remainder = line.partition("\0")
+            line_number, colon, text = remainder.removeprefix(":").partition(":")
+            if not separator or not colon:
+                raise ValueError
+            matches.append({"path": file_path, "line": int(line_number), "text": text})
     except TypeError, ValueError:
         logger.warning("Ignoring malformed tgrep sandbox response")
         return None
+    truncated = max_count is not None and len(matches) > max_count
+    return GrepResult(
+        matches=matches[:max_count] if max_count is not None else matches,
+        truncated=truncated,
+    )
