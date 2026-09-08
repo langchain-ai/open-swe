@@ -164,7 +164,7 @@ def _allowed_login_users() -> tuple[str, ...]:
 
 
 def validate_github_login_allowlist() -> None:
-    if _allowed_login_orgs() or _allowed_login_users():
+    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or _allowed_login_orgs() or _allowed_login_users():
         return
     message = "ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
     logger.error(message)

@@ -38,9 +38,10 @@ Packaged builds ask for the organization's backend URL on first launch and store
 local user data. They have no maintainer-hosted default. Use **Open SWE → Backend URL…** to switch
 deployments; switching clears the previous deployment's local session data.
 
-The backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a callback URL.
-Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on the backend to control which GitHub users
-can create dashboard sessions. The backend will not start if both allowlists are empty.
+The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a
+callback URL. Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which
+GitHub users can create cloud dashboard sessions. The desktop app's private local backend does not
+require GitHub or either allowlist.
 
 The desktop sign-in screen also offers **Continue in local mode**. This skips GitHub sign-in and
 limits the Agents workspace to projects and threads on **This Mac**; cloud threads, settings, and

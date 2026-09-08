@@ -10,6 +10,7 @@ from agent.dashboard import oauth
 
 @pytest.mark.parametrize("value", [None, "  ,  "])
 def test_startup_rejects_missing_allowlists(monkeypatch, caplog, value: str | None) -> None:
+    monkeypatch.delenv("OPEN_SWE_LOCAL_AUTH_TOKEN", raising=False)
     if value is None:
         monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
         monkeypatch.delenv("ALLOWED_GITHUB_USERS", raising=False)
@@ -31,6 +32,7 @@ async def test_app_lifespan_exits_when_allowlists_are_missing(monkeypatch) -> No
 
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     monkeypatch.delenv("ALLOWED_GITHUB_USERS", raising=False)
+    monkeypatch.delenv("OPEN_SWE_LOCAL_AUTH_TOKEN", raising=False)
 
     with pytest.raises(
         RuntimeError, match="ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
@@ -44,6 +46,14 @@ def test_startup_accepts_either_allowlist(monkeypatch, variable: str) -> None:
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     monkeypatch.delenv("ALLOWED_GITHUB_USERS", raising=False)
     monkeypatch.setenv(variable, "allowed")
+
+    oauth.validate_github_login_allowlist()
+
+
+def test_desktop_local_backend_accepts_missing_allowlists(monkeypatch) -> None:
+    monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
+    monkeypatch.delenv("ALLOWED_GITHUB_USERS", raising=False)
+    monkeypatch.setenv("OPEN_SWE_LOCAL_AUTH_TOKEN", "local-token")
 
     oauth.validate_github_login_allowlist()
 

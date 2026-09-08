@@ -95,7 +95,9 @@ TEST_USERS = [
 # Alice is the workspace admin (so admin threads + the environments dashboard are
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
-_DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(user["login"] for user in TEST_USERS)
+_DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(
+    [*(user["login"] for user in TEST_USERS), "thread-tools-e2e", "threads-workspace-e2e"]
+)
 _DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
 
 # The default Slack sender / thread owner; a session with this email may continue
