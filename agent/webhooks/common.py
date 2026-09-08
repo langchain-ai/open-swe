@@ -99,11 +99,9 @@ from agent.slack.client import (
     get_slack_channel_context,
     get_slack_channel_context_description,
     get_slack_channel_description,
-    get_slack_channel_info,
     get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
-    is_slack_channel_named,
     lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
@@ -164,7 +162,6 @@ __all__ = [
     "CODE_CHANNEL_SESSION_TS",
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
-    "DOCS_PLZ_SLACK_GATE_REPLY",
     "FEEDBACK_REACTIONS",
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
@@ -200,7 +197,6 @@ __all__ = [
     "_get_thread_metadata_safe",
     "_get_thread_environment",
     "_get_thread_plan_mode",
-    "_is_docs_plz_slack_channel",
     "_is_not_found_error",
     "_is_pr_diff_unchanged_since_last_review",
     "_is_repo_allowed",
@@ -334,10 +330,6 @@ DEFAULT_REPO_OWNER = ENV.DEFAULT_REPO_OWNER.get()
 DEFAULT_REPO_NAME = ENV.DEFAULT_REPO_NAME.get()
 SLACK_REPO_OWNER = ENV.SLACK_REPO_OWNER.get() or DEFAULT_REPO_OWNER
 SLACK_REPO_NAME = ENV.SLACK_REPO_NAME.get() or DEFAULT_REPO_NAME
-DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
-DOCS_PLZ_SLACK_GATE_REPLY = (
-    "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
-)
 
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 
@@ -552,22 +544,6 @@ async def _get_slack_channel_context(channel_id: str, *, use_cache: bool = True)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to resolve Slack channel context")
         return normalize_slack_channel_context(channel_id, None)
-
-
-async def _is_docs_plz_slack_channel(
-    channel_id: str, channel_context: dict[str, Any] | None = None
-) -> bool:
-    """Check whether a Slack channel is the docs-plz handoff channel."""
-    if channel_context is not None:
-        return is_slack_channel_named(channel_context, DOCS_PLZ_SLACK_CHANNEL_NAME)
-    try:
-        channel = await get_slack_channel_info(channel_id)
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to resolve Slack channel info for docs-plz gate")
-        return False
-    return is_slack_channel_named(
-        normalize_slack_channel_context(channel_id, channel), DOCS_PLZ_SLACK_CHANNEL_NAME
-    )
 
 
 def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
