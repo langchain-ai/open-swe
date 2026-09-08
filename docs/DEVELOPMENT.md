@@ -7,7 +7,8 @@ Run Open SWE on your machine: the backend and the dashboard on `http://localhost
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
 - Node 22.22.2+ and [pnpm](https://pnpm.io/) for the dashboard
-- A free [ngrok](https://ngrok.com/) account if you want GitHub or Slack to trigger your local backend (step 3)
+- A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
+- A Slack workspace where you may create apps, and a GitHub account or organization where you may create a GitHub App
 
 ## 1. Clone and install
 
@@ -30,7 +31,7 @@ Use a name of your own (GitHub App names are unique), and give it a distinct men
 
 ## 3. Tunnel for webhooks
 
-Skip this if you only start runs from the dashboard. Otherwise GitHub and Slack need a public HTTPS hostname that stays the same across restarts. The free ngrok plan gives you one:
+GitHub and Slack need a public HTTPS hostname that stays the same across restarts (skip this only if you will start runs from the dashboard alone). The free ngrok plan gives you one:
 
 1. Sign up at [dashboard.ngrok.com](https://dashboard.ngrok.com/signup) and install the agent (`brew install ngrok`, or the download the dashboard offers).
 2. Connect the agent to your account with the `ngrok config add-authtoken …` command shown under **Getting Started → Your Authtoken**.
@@ -41,11 +42,17 @@ Skip this if you only start runs from the dashboard. Otherwise GitHub and Slack 
    make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev   # or export NGROK_DOMAIN once in your shell
    ```
 
-`make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That restriction is not optional. Under `langgraph dev` the LangGraph API itself (`/threads`, `/runs`, `/assistants`, `/store`, …) has no authentication at all: the dashboard API checks its session cookie and the webhook endpoints check their signatures, but anyone who can reach port 2024 can read and create threads and runs. A tunnel that forwards the whole port publishes exactly that. Everything except the webhooks stays on `http://localhost:2024`, where you keep opening the dashboard. Check the policy once the backend is up (step 5): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
+`make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That restriction is not optional. Under `langgraph dev` the LangGraph API itself (`/threads`, `/runs`, `/assistants`, `/store`, …) has no authentication at all: the dashboard API checks its session cookie and the webhook endpoints check their signatures, but anyone who can reach port 2024 can read and create threads and runs. A tunnel that forwards the whole port publishes exactly that. Everything except the webhooks stays on `http://localhost:2024`, where you keep opening the dashboard. Check the policy once the backend is up (step 6): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
 
 Use ngrok with this policy. A different tunnel is only an option if it can restrict the public paths to `/webhooks/*` the same way; one that forwards the whole port is not.
 
-## 4. Write `.env`
+## 4. Create a Slack app for your machine
+
+Slack delivers events to one URL per app, so a local backend needs its own Slack app rather than the one a shared deployment uses. Follow [Create the Slack app](INSTALLATION.md#5-create-the-slack-app) in the installation guide with `https://<name>.ngrok-free.dev` (your domain from step 3) as `<your-url>`, and give it a name that says it is yours, for example `open-swe-<you>`; the bot's handle follows from it. Copy the four values it lists into `.env` in the next step.
+
+Slack checks the events Request URL against a running backend. If you create the app before `make dev` is up, open **Event Subscriptions** afterwards and press **Retry**. The same applies whenever you change `SLACK_SIGNING_SECRET`: restart the backend, then Retry.
+
+## 5. Write `.env`
 
 Create `.env` in the repository root; `langgraph dev` loads it.
 
@@ -63,14 +70,19 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVA
 GITHUB_WEBHOOK_SECRET=""
 GITHUB_APP_INSTALLATION_ID=""
 
+SLACK_BOT_TOKEN=""              # step 4: OAuth & Permissions → Bot User OAuth Token (xoxb-...)
+SLACK_SIGNING_SECRET=""         # Basic Information → App Credentials
+SLACK_BOT_USER_ID=""            # the bot's member id (bot profile → ⋮ → Copy member ID)
+SLACK_BOT_USERNAME=""           # the bot's handle, e.g. open_swe_you
+
 TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 ```
 
-`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Slack and Linear variables come from the [Slack](INSTALLATION.md#slack) and [Linear](INSTALLATION.md#linear) sections of the installation guide, with your ngrok domain as the URL.
+`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
-## 5. Run
+## 6. Run
 
 ```bash
 make build-dashboard   # pnpm install + Vite build into ui/.output/public
@@ -99,9 +111,11 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 
 > `make run` serves the FastAPI app alone with uvicorn on port 8000, without the LangGraph runtime. Nothing that creates runs works there; use `make dev`.
 
-## 6. Verify it works
+## 7. Verify it works
 
 **Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages appear. Set **Admin → Team settings → Default repository**, then start a task from the composer.
+
+**Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
 **GitHub.** With the tunnel running and the App's webhook pointed at it, comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once. The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
 

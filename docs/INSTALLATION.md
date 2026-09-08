@@ -11,17 +11,18 @@ What a deployment needs:
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
 | A model provider key such as `ANTHROPIC_API_KEY`, or `LANGSMITH_GATEWAY_API_KEY` for the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` (step 4) |
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
-| `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 5) |
-| `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 5) |
+| `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
+| `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 6) |
+| `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 6) |
 | `LANGGRAPH_URL` | The deployment's own public URL |
 
-Slack and Linear are optional triggers; see [Optional add-ons](#optional-add-ons). Every variable Open SWE reads is declared in `agent/config.py` with its description and default; that file is the complete reference.
+GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on. Every variable Open SWE reads is declared in `agent/config.py` with its description and default; that file is the complete reference.
 
 ## 1. Create the deployment
 
-You need the deployment's public URL before the GitHub App can be created, so create the deployment first; it starts without the GitHub variables and picks them up in step 5.
+You need the deployment's public URL before the GitHub App can be created, so create the deployment first; it starts without the GitHub and Slack variables and picks them up in step 6.
 
-**LangGraph Platform.** Connect the repository to a new deployment in LangSmith → Deployments. The image build bundles the dashboard (the `dockerfile_lines` in `langgraph.json`), so the deployment URL serves the UI at `/` and the API beneath it; a failed UI build is logged and the backend still deploys. The platform injects `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and `LANGSMITH_PROJECT`. You will set the environment variables in step 5.
+**LangGraph Platform.** Connect the repository to a new deployment in LangSmith → Deployments. The image build bundles the dashboard (the `dockerfile_lines` in `langgraph.json`), so the deployment URL serves the UI at `/` and the API beneath it; a failed UI build is logged and the backend still deploys. The platform injects `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and `LANGSMITH_PROJECT`. You will set the environment variables in step 6.
 
 **Standalone Docker.** The root `Dockerfile` builds a production LangGraph API server image (not the sandbox image):
 
@@ -104,44 +105,9 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 **Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
-## 5. Set the environment variables
+## 5. Create the Slack app
 
-```bash
-LANGGRAPH_URL="<URL>"                 # the deployment's own URL
-LANGSMITH_API_KEY=""                  # step 2; injected by LangGraph Platform
-LANGSMITH_TRACING="true"              # injected by LangGraph Platform
-ANTHROPIC_API_KEY=""                  # step 4: any provider key, or LANGSMITH_GATEWAY_API_KEY
-
-GITHUB_APP_ID=""                      # step 3
-GITHUB_APP_CLIENT_ID=""
-GITHUB_APP_CLIENT_SECRET=""
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one line with \n between the PEM lines, or the multi-line value your platform accepts
-GITHUB_WEBHOOK_SECRET=""
-GITHUB_APP_INSTALLATION_ID=""
-
-TOKEN_ENCRYPTION_KEY=""               # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
-DASHBOARD_JWT_SECRET=""               # openssl rand -hex 32     (signs the session cookie and OAuth state)
-CONFIGURED_ADMINS=""                  # GitHub logins or emails, comma-separated; admins see the Admin pages
-```
-
-On LangGraph Platform, set them under the deployment's environment variables; saving rolls out a new revision. With Docker, put them in the file you pass as `--env-file`. `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` are not needed: they default to `LANGGRAPH_URL` because the dashboard is served from the same origin.
-
-## 6. Verify it works
-
-**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
-
-**GitHub.** Signing in once is also what lets GitHub-triggered runs act as you: they run as the commenting user and need the token the sign-in stored; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
-
----
-
-## Optional add-ons
-
-Open a section when you want that feature; everything above keeps working without it.
-
-<details id="slack">
-<summary><strong>Slack</strong></summary>
-
-Slack posts events to your deployment's URL, so it needs the same public URL as the GitHub App (locally, the ngrok domain from the [development guide](DEVELOPMENT.md#3-tunnel-for-webhooks)).
+Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack is how most teams start runs. The app posts events to your deployment's URL, so it needs the same public URL as the GitHub App.
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**, and paste the manifest below with `<your-url>` replaced by that URL.
 
@@ -214,7 +180,7 @@ Slack posts events to your deployment's URL, so it needs the same public URL as 
 </details>
 
 2. Install the app to your workspace.
-3. Add to the deployment's environment:
+3. Add to the environment (step 6):
 
 ```bash
 SLACK_BOT_TOKEN=""        # OAuth & Permissions → Bot User OAuth Token (xoxb-...)
@@ -225,7 +191,51 @@ SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 
 Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`. Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository. Open SWE refuses Slack Connect channels (`is_ext_shared`) and fails closed when it cannot verify a channel.
 
-**Verify:** invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. The agent replies in a thread.
+Slack verifies the events Request URL the first time it can reach it; if the backend is not up yet when you create the app, use **Retry** under **Event Subscriptions** after step 7.
+
+## 6. Set the environment variables
+
+```bash
+LANGGRAPH_URL="<URL>"                 # the deployment's own URL
+LANGSMITH_API_KEY=""                  # step 2; injected by LangGraph Platform
+LANGSMITH_TRACING="true"              # injected by LangGraph Platform
+ANTHROPIC_API_KEY=""                  # step 4: any provider key, or LANGSMITH_GATEWAY_API_KEY
+
+GITHUB_APP_ID=""                      # step 3
+GITHUB_APP_CLIENT_ID=""
+GITHUB_APP_CLIENT_SECRET=""
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one line with \n between the PEM lines, or the multi-line value your platform accepts
+GITHUB_WEBHOOK_SECRET=""
+GITHUB_APP_INSTALLATION_ID=""
+
+SLACK_BOT_TOKEN=""                    # step 5
+SLACK_SIGNING_SECRET=""
+SLACK_BOT_USER_ID=""
+SLACK_BOT_USERNAME=""
+
+TOKEN_ENCRYPTION_KEY=""               # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
+DASHBOARD_JWT_SECRET=""               # openssl rand -hex 32     (signs the session cookie and OAuth state)
+CONFIGURED_ADMINS=""                  # GitHub logins or emails, comma-separated; admins see the Admin pages
+```
+
+On LangGraph Platform, set them under the deployment's environment variables; saving rolls out a new revision. With Docker, put them in the file you pass as `--env-file`. `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` are not needed: they default to `LANGGRAPH_URL` because the dashboard is served from the same origin.
+
+## 7. Verify it works
+
+**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
+
+**Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Runs it starts act as the GitHub App until the Slack user is linked to a GitHub login, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
+
+**GitHub.** Signing in once is also what lets GitHub-triggered runs act as you: they run as the commenting user and need the token the sign-in stored; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
+
+---
+
+## Optional add-ons
+
+Open a section when you want that feature; everything above keeps working without it.
+
+<details id="slack-sign-in-and-code-channels">
+<summary><strong>Slack: "Sign in with Slack" linking and code channels</strong></summary>
 
 **"Sign in with Slack" account linking.** Lets a user link their Slack identity to their GitHub login from **My settings**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims. Without it, an admin links people under **Admin → User mappings**. The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace. When they are unset the link is simply hidden.
 
