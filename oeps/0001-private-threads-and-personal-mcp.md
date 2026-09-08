@@ -1,6 +1,6 @@
 # OEP-0001: Private threads and personal MCP access
 
-- **Authors:** Ramon Nogueira (`@ramon-langchain`), Mukil Loganathan (`@langchain-infra`)
+- **Authors:** Ramon Nogueira (`@ramon-langchain`), Mukil Loganathan (`@langchain-infra`), Johannes Jolkkonen (`@johannes117`)
 - **Status:** Draft
 - **Created:** 2026-09-08
 - **Discussion:** https://github.com/langchain-ai/open-swe/pulls?q=is%3Apr+OEP-0001
