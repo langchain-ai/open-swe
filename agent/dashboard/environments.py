@@ -156,13 +156,23 @@ def script_root() -> str:
     because ``SANDBOX_TYPE=local`` executes on a developer's own machine, whose
     filesystem root is not writable.
     """
-    configured = os.environ.get("OPENSWE_SCRIPT_ROOT", "").strip().rstrip("/")
-    return configured or DEFAULT_SCRIPT_ROOT
+    return ENV.OPENSWE_SCRIPT_ROOT.get().strip().rstrip("/") or DEFAULT_SCRIPT_ROOT
 
 
 def script_log_path(label: str) -> str:
     """Canonical log path for a script, inside the sandbox and in the snapshot."""
     return f"{script_root()}/logs/{label}.log"
+
+
+def script_log_paths() -> dict[str, str]:
+    """Every script log path, for handing to a caller that wants to read them later.
+
+    These are paths *inside a sandbox*. A refresh writes them on its own
+    throwaway builder, which is reclaimed once the capture lands — so they are
+    not readable from the thread that started the refresh. They are captured
+    into the snapshot, so any sandbox booted from it afterwards has them.
+    """
+    return {label: script_log_path(label) for label in ("setup", "update")}
 
 
 def script_command(script: str, label: str) -> str:
@@ -199,12 +209,10 @@ def sandbox_update_timeout() -> int:
     Tighter than the builder's: this one is on the critical path before the first
     model call, and a ``git pull`` that takes minutes is broken rather than slow.
     """
-    raw = os.environ.get("ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS", "").strip()
-    try:
-        value = int(raw) if raw else 0
-    except ValueError:
-        value = 0
-    return value if value > 0 else DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
+    seconds = ENV.ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS.get_int(
+        DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
+    )
+    return seconds if seconds > 0 else DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
 
 
 def log_excerpt(log: str | None, *, lines: int = LOG_EXCERPT_LINES) -> str | None:
@@ -439,6 +447,7 @@ class Environment(BaseModel):
     last_captured_at: str | None = None
     refresh_status: RefreshStatus = "never"
     refresh_kind: RefreshKind | None = None
+    refresh_run_id: str | None = None
     refresh_started_at: str | None = None
     refresh_finished_at: str | None = None
     refresh_log: str | None = None

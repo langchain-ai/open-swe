@@ -381,6 +381,30 @@ ENV.var(
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
 ENV.var("ENVIRONMENT_SNAPSHOT_PREFIX", "Prefix for environment snapshot names.", default="openswe")
+ENV.var(
+    "OPENSWE_SCRIPT_ROOT",
+    "Where an environment's setup/update scripts and their logs live inside a sandbox. "
+    "The default assumes a sandbox where the agent is root; the local provider runs on a "
+    "developer's own machine, whose filesystem root is not writable.",
+    default="/openswe",
+)
+ENV.var(
+    "ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",
+    "Deadline for an environment's setup script on a builder sandbox.",
+)
+ENV.var(
+    "ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for an environment's update script on a builder sandbox.",
+)
+ENV.var(
+    "ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for the update script when it runs in a run's own sandbox, before the first "
+    "model call. Tighter than the builder's on purpose.",
+)
+ENV.var(
+    "ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",
+    "Deadline for capturing a builder sandbox as an environment's snapshot.",
+)
 ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")
 ENV.var(
     "GIT_CONFIG_GLOBAL",

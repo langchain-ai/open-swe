@@ -40,7 +40,8 @@ _TOOL_MODULES = {
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
-    "refresh_environment": ".environments",
+    "refresh_environment_poll": ".environments",
+    "refresh_environment_start": ".environments",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
@@ -105,7 +106,8 @@ __all__ = [
     "read_repo_file",
     "read_user_settings",
     "recreate_sandbox",
-    "refresh_environment",
+    "refresh_environment_poll",
+    "refresh_environment_start",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
@@ -167,7 +169,8 @@ if TYPE_CHECKING:
     from agent.tools.environments import (
         delete_environment,
         list_environments,
-        refresh_environment,
+        refresh_environment_poll,
+        refresh_environment_start,
         save_environment,
     )
     from agent.tools.fetch_review_diff import fetch_review_diff

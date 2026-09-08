@@ -955,6 +955,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             },
             "call-env-save",
         ),
+        _tool_step(
+            "Waiting for the rebuild to finish.",
+            "refresh_environment_poll",
+            {"name": ENVIRONMENT_NAME},
+            "call-env-poll",
+        ),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
     "followup": (_dynamic_step(_followup_step),),

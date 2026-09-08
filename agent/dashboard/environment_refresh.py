@@ -28,12 +28,12 @@ snapshot in place: runs keep booting from the last image that worked.
 
 import hashlib
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.config import ENV, EnvVar
 from agent.dashboard.environments import (
     ENVIRONMENTS,
     Environment,
@@ -62,19 +62,14 @@ STALE_REFRESH_SECONDS = 3 * 60 * 60
 BUILDER_DELETE_AFTER_STOP_SECONDS = 10 * 60
 
 
+def _seconds(var: EnvVar, default: int) -> int:
+    """A positive timeout from ``var``, else ``default``."""
+    seconds = var.get_int(default)
+    return seconds if seconds > 0 else default
+
+
 def _client():
     return get_client()
-
-
-def _timeout(name: str, default: int) -> int:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -183,7 +178,7 @@ def _scripts_to_run(record: Environment, kind: RefreshKind) -> list[tuple[str, s
             (
                 "setup",
                 script_command(record.setup_script, "setup"),
-                _timeout("ENVIRONMENT_REFRESH_TIMEOUT_SECONDS", DEFAULT_SCRIPT_TIMEOUT_SECONDS),
+                _seconds(ENV.ENVIRONMENT_REFRESH_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS),
             )
         )
     if record.update_script:
@@ -191,7 +186,7 @@ def _scripts_to_run(record: Environment, kind: RefreshKind) -> list[tuple[str, s
             (
                 "update",
                 script_command(record.update_script, "update"),
-                _timeout("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS", DEFAULT_UPDATE_TIMEOUT_SECONDS),
+                _seconds(ENV.ENVIRONMENT_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )
     return steps
@@ -300,8 +295,8 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
         await capture_environment_snapshot(
             slug,
             sandbox_id,
-            timeout=_timeout(
-                "ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS", DEFAULT_CAPTURE_TIMEOUT_SECONDS
+            timeout=_seconds(
+                ENV.ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS
             ),
         )
     except Exception as exc:
@@ -337,7 +332,14 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
         logger.exception("Failed to start refresh run for environment %s", slug)
         return None
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
-    return run_id if isinstance(run_id, str) else None
+    if not isinstance(run_id, str):
+        return None
+    # Recorded so a poll can tell this refresh from a later one that superseded it.
+    record = await ENVIRONMENTS.get(slug)
+    if record is not None:
+        record.refresh_run_id = run_id
+        await ENVIRONMENTS.save(record)
+    return run_id
 
 
 async def run_environment_refresh_tick(

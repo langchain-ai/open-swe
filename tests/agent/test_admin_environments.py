@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
@@ -263,7 +264,7 @@ async def test_save_environment_rejects_clear_sizing_with_values(
 
 
 @pytest.mark.asyncio
-async def test_refresh_tool_requires_a_saved_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refresh_start_requires_a_saved_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with (
         patch(
@@ -274,18 +275,18 @@ async def test_refresh_tool_requires_a_saved_environment(monkeypatch: pytest.Mon
             env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
         ),
     ):
-        result = await env_tools.refresh_environment("base")
+        result = await env_tools.refresh_environment_start("base")
 
     assert result["ok"] is False
     assert "save_environment" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_refresh_tool_refuses_an_environment_with_no_script(
+async def test_refresh_start_refuses_an_environment_with_no_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    run_refresh = AsyncMock()
+    start = AsyncMock()
     with (
         patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
@@ -294,27 +295,21 @@ async def test_refresh_tool_refuses_an_environment_with_no_script(
             new_callable=AsyncMock,
             return_value=Environment(slug="base"),
         ),
-        patch.object(env_tools.refresh, "refresh_environment", run_refresh),
+        patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
-        result = await env_tools.refresh_environment("base")
+        result = await env_tools.refresh_environment_start("base")
 
     assert result["ok"] is False
     assert "setup_script" in result["error"]
-    run_refresh.assert_not_awaited()
+    start.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_refresh_tool_waits_and_hands_back_the_failure(
+async def test_refresh_start_returns_a_handle_and_where_the_logs_land(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The admin thread iterates on the script, so it needs the error, not a job id."""
+    """Minutes of work, so the tool hands back a task id instead of blocking."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    outcome = {
-        "status": "failed",
-        "script": "init",
-        "error": "init script exited 1",
-        "log": "fatal: not a git repository",
-    }
     with (
         patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
@@ -325,29 +320,126 @@ async def test_refresh_tool_waits_and_hands_back_the_failure(
         ),
         patch.object(
             env_tools.refresh,
-            "refresh_environment",
+            "start_refresh_run",
             new_callable=AsyncMock,
-            return_value=outcome,
+            return_value="run-1",
         ),
     ):
-        result = await env_tools.refresh_environment("base")
+        result = await env_tools.refresh_environment_start("base")
 
-    assert result["ok"] is False
-    assert result["failed_script"] == "init"
-    assert result["error"] == "init script exited 1"
-    assert result["log"] == "fatal: not a git repository"
+    assert result["ok"] is True
+    assert result["task_id"] == "run-1"
+    assert result["poll_with"] == "refresh_environment_poll"
+    # The builder is reclaimed, so say plainly where these are readable.
+    assert set(result["log_paths"]) == {"setup", "update"}
+    assert "not readable from this thread" in result["log_paths_note"]
 
 
 @pytest.mark.asyncio
-async def test_saving_a_setup_script_runs_it_and_registers_the_cron(
+async def test_refresh_start_refuses_while_one_is_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    running = Environment(
+        slug="base",
+        setup_script="make setup",
+        refresh_status="refreshing",
+        refresh_started_at=datetime.now(UTC).isoformat(),
+        refresh_run_id="run-1",
+    )
+    start = AsyncMock()
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=running
+        ),
+        patch.object(env_tools.refresh, "start_refresh_run", start),
+    ):
+        result = await env_tools.refresh_environment_start("base")
+
+    assert result["ok"] is False
+    assert result["task_id"] == "run-1"
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_poll_reports_a_refresh_still_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    running = Environment(
+        slug="base",
+        refresh_status="refreshing",
+        refresh_kind="full",
+        refresh_run_id="run-1",
+    )
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=running
+        ),
+    ):
+        result = await env_tools.refresh_environment_poll("base")
+
+    assert result["ok"] is True
+    assert result["status"] == "refreshing"
+    assert result["kind"] == "full"
+    assert result["log"] is None
+
+
+@pytest.mark.asyncio
+async def test_poll_hands_back_the_failure_and_its_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    failed = Environment(
+        slug="base",
+        refresh_status="failed",
+        refresh_kind="full",
+        refresh_error="setup script exited 2",
+        refresh_log="gcc: fatal error",
+        refresh_run_id="run-1",
+    )
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=failed
+        ),
+    ):
+        result = await env_tools.refresh_environment_poll("base")
+
+    assert result["ok"] is False
+    assert result["error"] == "setup script exited 2"
+    assert result["log"] == "gcc: fatal error"
+
+
+@pytest.mark.asyncio
+async def test_poll_says_when_a_later_refresh_superseded_the_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The environment is the handle, so a stale task id gets an explanation."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    latest = Environment(slug="base", refresh_status="success", refresh_run_id="run-2")
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=latest
+        ),
+    ):
+        result = await env_tools.refresh_environment_poll("base", task_id="run-1")
+
+    assert result["ok"] is True
+    assert result["task_id"] == "run-2"
+    assert "run-1 is not the latest" in result["superseded"]
+
+
+@pytest.mark.asyncio
+async def test_saving_a_setup_script_starts_a_rebuild_and_registers_the_cron(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     record = Environment(slug="base", name="base", setup_script="make setup")
     ensure_cron = AsyncMock(return_value="cron-1")
-    run_refresh = AsyncMock(return_value={"status": "success", "seconds": 12, "log": "done"})
+    start = AsyncMock(return_value="run-1")
     with (
         patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        # Once for the create/update decision, once inside the refresh start.
         patch.object(
             env_tools.store.ENVIRONMENTS,
             "get",
@@ -358,23 +450,22 @@ async def test_saving_a_setup_script_runs_it_and_registers_the_cron(
             env_tools.store.ENVIRONMENTS, "create", new_callable=AsyncMock, return_value=record
         ),
         patch.object(env_tools.refresh, "ensure_refresh_cron", ensure_cron),
-        patch.object(env_tools.refresh, "refresh_environment", run_refresh),
+        patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
         result = await env_tools.save_environment("base", "prompt", setup_script="make setup")
 
     assert result["ok"] is True
-    assert result["environment"]["setup_script"] == "make setup"
-    assert result["refresh"] == {"ok": True, "refreshed": True, "seconds": 12, "log": "done"}
-    run_refresh.assert_awaited_once_with("base")
+    assert result["refresh"]["task_id"] == "run-1"
+    assert result["refresh"]["poll_with"] == "refresh_environment_poll"
     ensure_cron.assert_awaited_once_with("base")
 
 
 @pytest.mark.asyncio
-async def test_a_prompt_only_save_does_not_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_prompt_only_save_starts_no_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
     """A rebuild costs minutes; only a changed script has earned one."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     existing = Environment(slug="base", name="base", setup_script="make setup")
-    run_refresh = AsyncMock()
+    start = AsyncMock()
     with (
         patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
@@ -387,42 +478,13 @@ async def test_a_prompt_only_save_does_not_rebuild(monkeypatch: pytest.MonkeyPat
             return_value=existing.model_copy(update={"prompt": "new"}),
         ),
         patch.object(env_tools.refresh, "ensure_refresh_cron", AsyncMock()),
-        patch.object(env_tools.refresh, "refresh_environment", run_refresh),
+        patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
         result = await env_tools.save_environment("base", "new")
 
     assert result["ok"] is True
     assert "refresh" not in result
-    run_refresh.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_a_failed_rebuild_makes_the_save_report_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    record = Environment(slug="base", name="base", setup_script="make setup")
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
-        ),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "create", new_callable=AsyncMock, return_value=record
-        ),
-        patch.object(env_tools.refresh, "ensure_refresh_cron", AsyncMock()),
-        patch.object(
-            env_tools.refresh,
-            "refresh_environment",
-            new_callable=AsyncMock,
-            return_value={"status": "failed", "script": "setup", "error": "boom", "log": "gcc: no"},
-        ),
-    ):
-        result = await env_tools.save_environment("base", "prompt", setup_script="make setup")
-
-    assert result["ok"] is False
-    assert result["refresh"]["failed_script"] == "setup"
-    assert result["refresh"]["log"] == "gcc: no"
+    start.assert_not_awaited()
 
 
 # --- prompt wiring ---

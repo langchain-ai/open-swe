@@ -298,6 +298,16 @@ test.describe("Environments", () => {
       page.getByText(/environment is captured and live/),
     ).toBeVisible();
 
+    // The rebuild runs as its own background job now, so the agent's reply can
+    // land before the capture does. Wait for the record rather than the message.
+    await expect
+      .poll(
+        async () =>
+          (await findEnvironment(page, DEFAULT_SLUG))?.snapshot_status,
+        { timeout: 60_000 },
+      )
+      .toBe("ready");
+
     // The record the real tools wrote: prompt, repos, and a ready snapshot.
     const record = await findEnvironment(page, DEFAULT_SLUG);
     expect(record).toBeDefined();
