@@ -23,6 +23,13 @@ def test_prompt_composes_artifact_delivery_guidance_with_available_tools() -> No
     assert "use `slack_attach_html`" in download_prompt
 
 
+def test_prompt_avoids_archived_deployments_repository() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "Never use `langchain-ai/deployments` as a target repository" in prompt
+    assert "ask for the current writable replacement" in prompt
+
+
 def test_prompt_restricts_edits_to_allowed_github_orgs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", " LangChain-AI,anthropics,langchain-ai ")
 
