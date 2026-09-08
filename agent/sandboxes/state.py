@@ -28,6 +28,7 @@ from agent.sandboxes.providers.registry import create_sandbox
 from agent.sandboxes.tgrep_search import build_tgrep_command, parse_tgrep_result
 
 logger = logging.getLogger(__name__)
+_TGREP_MIN_PATTERN_BYTES = 12
 
 
 class SandboxUnreachableError(RuntimeError):
@@ -217,18 +218,35 @@ class SandboxBackendProxy(BaseSandbox):
         max_count: int | None = None,
     ) -> GrepResult:
         backend = await self._aget_backend()
-        if len(pattern.encode()) >= 3 and (max_count is None or max_count >= 100):
+        if len(pattern.encode()) < _TGREP_MIN_PATTERN_BYTES:
+            return await backend.agrep(pattern, path, glob, max_count=max_count)
+
+        async def indexed_search() -> GrepResult | None:
             try:
                 response = await backend.aexecute(
                     build_tgrep_command(pattern, path, glob, max_count), timeout=30
                 )
-                if response.exit_code == 0 and (
-                    result := parse_tgrep_result(response.output, max_count)
-                ):
-                    return result
+                if response.exit_code == 0:
+                    return parse_tgrep_result(response.output, max_count)
             except Exception:  # noqa: BLE001
                 logger.warning("Indexed sandbox search failed; using default grep", exc_info=True)
-        return await backend.agrep(pattern, path, glob, max_count=max_count)
+            return None
+
+        tasks = {
+            asyncio.create_task(indexed_search()),
+            asyncio.create_task(backend.agrep(pattern, path, glob, max_count=max_count)),
+        }
+        try:
+            for task in asyncio.as_completed(tasks):
+                result = await task
+                if result is not None and result.error is None:
+                    return result
+            return await backend.agrep(pattern, path, glob, max_count=max_count)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)

@@ -129,9 +129,17 @@ async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_prefers_indexed_search(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_sandbox_proxy_returns_faster_indexed_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     backend = _FakeSandboxBackend()
     proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+
+    async def slower_grep(*args: object, **kwargs: object) -> GrepResult:
+        await asyncio.sleep(1)
+        return GrepResult(matches=[])
+
+    monkeypatch.setattr(backend, "agrep", slower_grep)
     monkeypatch.setattr(
         backend,
         "aexecute",
@@ -143,9 +151,27 @@ async def test_sandbox_proxy_prefers_indexed_search(monkeypatch: pytest.MonkeyPa
         ),
     )
 
-    result = await proxy.agrep("needle", "/repo")
+    result = await proxy.agrep("selective-needle", "/repo")
 
     assert result.matches == [{"path": "/repo/a.py", "line": 2, "text": "needle"}]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_returns_faster_default_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _FakeSandboxBackend()
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+
+    async def slower_index(*args: object, **kwargs: object) -> ExecuteResponse:
+        await asyncio.sleep(1)
+        return ExecuteResponse(output="", exit_code=1)
+
+    monkeypatch.setattr(backend, "aexecute", slower_index)
+
+    result = await proxy.agrep("selective-needle", "/repo", max_count=1000)
+
+    assert result.matches == [{"path": "/repo", "line": 1, "text": "selective-needle"}]
 
 
 @pytest.mark.asyncio
@@ -160,13 +186,13 @@ async def test_sandbox_proxy_falls_back_when_index_is_unavailable(
         AsyncMock(return_value=ExecuteResponse(output='{"status":"unavailable"}', exit_code=0)),
     )
 
-    result = await proxy.agrep("needle", "/repo")
+    result = await proxy.agrep("selective-needle", "/repo")
 
-    assert result.matches == [{"path": "/repo", "line": 1, "text": "needle"}]
+    assert result.matches == [{"path": "/repo", "line": 1, "text": "selective-needle"}]
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_skips_index_for_short_or_small_capped_searches(
+async def test_sandbox_proxy_skips_index_for_short_or_broad_searches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _FakeSandboxBackend()
@@ -175,7 +201,7 @@ async def test_sandbox_proxy_skips_index_for_short_or_small_capped_searches(
     monkeypatch.setattr(backend, "aexecute", execute)
 
     assert (await proxy.agrep("id", "/repo")).matches
-    assert (await proxy.agrep("needle", "/repo", max_count=10)).matches
+    assert (await proxy.agrep("LangSmith", "/repo", max_count=1000)).matches
     execute.assert_not_awaited()
 
 
