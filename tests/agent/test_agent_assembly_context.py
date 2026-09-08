@@ -458,7 +458,7 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_excludes_deepagents_grep_tool() -> None:
+async def test_agent_excludes_unused_deepagents_tools() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]
     subagents = captured["subagents"]
@@ -466,14 +466,14 @@ async def test_agent_excludes_deepagents_grep_tool() -> None:
     assert isinstance(subagents, list)
 
     exclusion = next(item for item in middleware if type(item).__name__ == "ExcludeToolsMiddleware")
-    assert exclusion._excluded == frozenset({"grep"})
+    assert exclusion._excluded == frozenset({"grep", "write_todos"})
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     subagent_exclusion = next(
         item
         for item in general_purpose["middleware"]
         if type(item).__name__ == "ExcludeToolsMiddleware"
     )
-    assert subagent_exclusion._excluded == frozenset({"grep"})
+    assert subagent_exclusion._excluded == frozenset({"grep", "write_todos"})
 
 
 @pytest.mark.asyncio

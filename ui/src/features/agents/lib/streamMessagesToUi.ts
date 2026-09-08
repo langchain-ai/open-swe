@@ -35,11 +35,7 @@ const EDIT_TOOLS = new Set([
 const EXECUTE_TOOLS = new Set(["execute", "bash", "shell", "run_terminal_cmd"])
 const SEARCH_TOOLS = new Set(["glob", "grep", "web_search", "search"])
 const FETCH_TOOLS = new Set(["fetch", "fetch_url", "http_request"])
-const INTERNAL_TOOLS = new Set([
-  "confirming_completion",
-  "no_op",
-  "write_todos",
-])
+const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
 
 type ToolKind = ToolExecutionChunk["toolKind"]
 

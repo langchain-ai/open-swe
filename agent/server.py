@@ -247,7 +247,7 @@ DEEP_AGENT_TOOL_NAMES = {
     "task",
     "write_file",
 }
-DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep", "write_todos"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
