@@ -41,9 +41,9 @@ Skip this if you only start runs from the dashboard. Otherwise GitHub and Slack 
    make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev   # or export NGROK_DOMAIN once in your shell
    ```
 
-`make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That matters: `langgraph dev` has no authentication, so a bare tunnel would expose your threads, runs, and dashboard API to anyone who finds the hostname. Everything else stays on `http://localhost:2024`, where you keep opening the dashboard; the tunnel is only for GitHub and Slack. Check it once the backend is up (step 5): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
+`make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That restriction is not optional. Under `langgraph dev` the LangGraph API itself (`/threads`, `/runs`, `/assistants`, `/store`, …) has no authentication at all: the dashboard API checks its session cookie and the webhook endpoints check their signatures, but anyone who can reach port 2024 can read and create threads and runs. A tunnel that forwards the whole port publishes exactly that. Everything except the webhooks stays on `http://localhost:2024`, where you keep opening the dashboard. Check the policy once the backend is up (step 5): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
 
-Any other tunnel works the same way as long as it forwards to port 2024 on a fixed hostname; restrict it to `/webhooks/*` if it can. A throwaway `cloudflared tunnel --url http://localhost:2024` is fine for a quick test, but its hostname changes every run and you would edit the App's webhook and Slack's URLs each time.
+Other tunnels are fine only if they enforce the same allowlist, letting `/webhooks/*` through and answering everything else themselves, or if you put a filtering reverse proxy between the tunnel and port 2024 that does so. Quick tunnels that forward a whole port with no policy, such as `cloudflared tunnel --url http://localhost:2024`, are not a safe shortcut even for a test.
 
 ## 4. Write `.env`
 
@@ -159,7 +159,7 @@ Development connects to `http://localhost:2024`. For a hosted backend run `pnpm 
 
 ### Webhook not receiving events
 
-- The tunnel must be running (`make tunnel`) against port 2024, and the URL in GitHub or Slack must be your ngrok domain. GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived. With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
+- The tunnel must be running (`make tunnel`) against port 2024, and the URL in GitHub or Slack must be your ngrok domain. Do not swap in a tunnel that forwards the whole port; see step 3. GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived. With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime. Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
 
