@@ -20,7 +20,7 @@ def _resolver(ids: dict[str, str], *, default: str | None = None):
 
 
 def _set_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     monkeypatch.setenv("LANGSMITH_TENANT_ID", "tenant-1")
     monkeypatch.setenv("LANGSMITH_PROJECT", "my-deployment")
 
@@ -176,7 +176,6 @@ async def test_create_thread_feedback_posts_thread_scope(
 
 
 async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
 
     def _boom() -> None:
         raise AssertionError("must not build a client when the tenant id is unset")
@@ -198,7 +197,6 @@ async def test_cached_ids_belong_to_the_credentials_that_produced_them(
 ) -> None:
     """Rotating the key or pointing at another workspace must not reuse the old ids."""
     monkeypatch.delenv("LANGSMITH_TENANT_ID", raising=False)
-    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
     monkeypatch.setenv("LANGSMITH_API_KEY", "key-a")
     projects = {"key-a": ("pid-a", "tenant-a"), "key-b": ("pid-b", "tenant-b")}
 
@@ -218,7 +216,6 @@ async def test_cached_ids_belong_to_the_credentials_that_produced_them(
 
 
 async def test_tenant_id_is_learned_from_project_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
 
     class _Project:
         id = "pid"
@@ -235,7 +232,6 @@ async def test_tenant_id_is_learned_from_project_lookup(monkeypatch: pytest.Monk
 
 
 async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
     calls = 0
 
     def _discover() -> str:
@@ -253,8 +249,6 @@ async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.Monk
 async def test_tenant_id_none_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "LANGSMITH_TENANT_ID",
-        "LANGSMITH_TENANT_ID_PROD",
-        "LANGSMITH_API_KEY_PROD",
         "LANGSMITH_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -265,7 +259,6 @@ async def test_tenant_id_none_without_credentials(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_tenant_discovery_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
 
     def _boom() -> str:
         raise RuntimeError("network down")
@@ -276,8 +269,7 @@ async def test_tenant_discovery_failure_is_swallowed(monkeypatch: pytest.MonkeyP
 
 
 async def test_trace_url_uses_discovered_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
-    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: "tenant-d")
     monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
 
@@ -286,40 +278,27 @@ async def test_trace_url_uses_discovered_tenant(monkeypatch: pytest.MonkeyPatch)
     )
 
 
-def test_host_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example/")
-
-    assert ls_utils.langsmith_host_url() == "https://smith.example"
-
-
 def test_host_url_derived_from_self_hosted_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_URL_PROD", raising=False)
-    monkeypatch.delenv("LANGSMITH_ENDPOINT_PROD", raising=False)
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://langsmith.acme.internal/api")
 
     assert ls_utils.langsmith_host_url() == "https://langsmith.acme.internal"
 
 
 def test_host_url_derived_from_regional_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_URL_PROD", raising=False)
-    monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
-    monkeypatch.setenv("LANGSMITH_ENDPOINT_PROD", "https://eu.api.smith.langchain.com")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://eu.api.smith.langchain.com")
 
     assert ls_utils.langsmith_host_url() == "https://eu.smith.langchain.com"
 
 
 def test_host_url_default_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("LANGSMITH_URL_PROD", "LANGSMITH_ENDPOINT_PROD", "LANGSMITH_ENDPOINT"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
 
     assert ls_utils.langsmith_host_url() == "https://smith.langchain.com"
 
 
 def test_feedback_clients_use_a_single_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "standard")
-    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "legacy")
     monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
-    monkeypatch.delenv("LANGSMITH_ENDPOINT_PROD", raising=False)
 
     assert ls_utils._build_langsmith_feedback_clients() == (
         ("standard", "https://api.smith.langchain.com"),

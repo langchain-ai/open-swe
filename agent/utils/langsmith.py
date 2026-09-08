@@ -61,13 +61,7 @@ def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
 
 
 def langsmith_host_url() -> str:
-    """Web host for trace links, derived from the API endpoint.
-
-    ``LANGSMITH_URL_PROD`` is a deprecated explicit override.
-    """
-    explicit = ENV.LANGSMITH_URL_PROD.optional()
-    if explicit:
-        return explicit.rstrip("/")
+    """Web host for trace links, derived from the API endpoint."""
     return str(get_host_url(None, ENV.LANGSMITH_ENDPOINT.get())).rstrip("/")
 
 

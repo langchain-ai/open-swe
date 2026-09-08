@@ -9,19 +9,19 @@ from agent.config import ENV, Registry
 
 
 def test_current_name_wins_over_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "standard")
-    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "legacy")
+    monkeypatch.setenv("LANGSMITH_PROJECT", "standard")
+    monkeypatch.setenv("LANGCHAIN_PROJECT", "legacy")
 
-    assert ENV.LANGSMITH_API_KEY.get() == "standard"
-    assert ENV.LANGSMITH_API_KEY.source() == "LANGSMITH_API_KEY"
+    assert ENV.LANGSMITH_PROJECT.get() == "standard"
+    assert ENV.LANGSMITH_PROJECT.source() == "LANGSMITH_PROJECT"
 
 
 def test_alias_is_read_when_current_name_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
-    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "legacy")
+    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+    monkeypatch.setenv("LANGCHAIN_PROJECT", "legacy")
 
-    assert ENV.LANGSMITH_API_KEY.optional() == "legacy"
-    assert ENV.LANGSMITH_API_KEY.source() == "LANGSMITH_API_KEY_PROD"
+    assert ENV.LANGSMITH_PROJECT.optional() == "legacy"
+    assert ENV.LANGSMITH_PROJECT.source() == "LANGCHAIN_PROJECT"
 
 
 def test_blank_value_counts_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,11 +70,11 @@ def test_typed_getters(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_deprecated_in_use_lists_aliases_and_obsolete_names() -> None:
-    env = {"LANGSMITH_API_KEY_PROD": "k", "LANGSMITH_ENDPOINT": "e"}
+    env = {"LANGCHAIN_PROJECT": "k", "LANGSMITH_ENDPOINT": "e"}
 
     found = dict(ENV.deprecated_in_use(env))
 
-    assert found["LANGSMITH_API_KEY_PROD"] == "use LANGSMITH_API_KEY instead."
+    assert found["LANGCHAIN_PROJECT"] == "use LANGSMITH_PROJECT instead."
     assert "LANGSMITH_ENDPOINT" not in found
     # A legacy name on its own, with no current key configured at all, is reported.
     assert "LANGCHAIN_API_KEY" in dict(ENV.deprecated_in_use({"LANGCHAIN_API_KEY": "k"}))
