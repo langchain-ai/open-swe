@@ -104,11 +104,24 @@ class SandboxCreateConfig:
         environment = self.environment
         if environment is None or not is_snapshot_stale(environment):
             return
-        async with aphase(thread_id, "sandbox.update_script"):
-            result = await sandbox_backend.aexecute(
-                script_command(environment.update_script, "update"),
-                timeout=sandbox_update_timeout(),
+        try:
+            async with aphase(thread_id, "sandbox.update_script"):
+                result = await sandbox_backend.aexecute(
+                    script_command(environment.update_script, "update"),
+                    timeout=sandbox_update_timeout(),
+                )
+        except Exception:
+            # "Never fatal" has to cover the execute itself: it can raise past
+            # its own retries when a freshly booted box is briefly unreachable,
+            # and losing the whole sandbox over a skipped `git pull` is worse
+            # than starting from the snapshot as captured.
+            logger.warning(
+                "Environment update script could not run in sandbox %s",
+                sandbox_backend.id,
+                exc_info=True,
+                extra={"environment": environment.slug},
             )
+            return
         if result.exit_code != 0:
             logger.warning(
                 "Environment update script exited %s in sandbox %s",

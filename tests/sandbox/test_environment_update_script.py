@@ -93,6 +93,20 @@ async def test_a_failing_update_does_not_fail_the_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_execute_that_raises_does_not_lose_the_sandbox() -> None:
+    """`aexecute` can raise past its retries; the box is still usable without a pull."""
+    backend = MagicMock()
+    backend.id = "sb-1"
+    backend.aexecute = AsyncMock(side_effect=RuntimeError("sandbox unreachable"))
+
+    await SandboxCreateConfig(snapshot_id="snap-1", environment=_stale()).run_update_script(
+        backend, "t-1"
+    )
+
+    backend.aexecute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_an_environment_with_no_snapshot_yet_skips() -> None:
     """Nothing to freshen: the box booted from the base image, not a capture."""
     backend = _backend(_Result("", 0))
