@@ -51,7 +51,7 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
     assert client.list_kwargs["is_root"] is True
     assert "prepare_run_id" in client.list_kwargs["filter"]
     assert client.list_kwargs["select"] == ["id", "end_time"]
-    assert client.list_kwargs["limit"] == 20
+    assert "limit" not in client.list_kwargs
     assert client.threads.calls == [
         {
             "thread_id": "thread-1",

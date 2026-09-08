@@ -205,7 +205,6 @@ async def get_langsmith_thread_cost(
             is_root=True,
             filter=_langsmith_metadata_filter("prepare_run_id", prepare_run_id),
             select=["id", "end_time"],
-            limit=20,
         )
         matched_roots = [
             (str(root_id), parsed)
