@@ -1,4 +1,4 @@
-import { memo } from "react"
+import { memo, useEffect, useRef } from "react"
 import { Bot, Loader2 } from "lucide-react"
 
 import { SubagentActivity } from "./SubagentActivity"
@@ -20,6 +20,7 @@ export const SubagentCard = memo(function SubagentCard({
   chunk: ToolExecutionChunk
 }) {
   const inLiveStream = useIsInAgentThreadStream()
+  const card = useRef<HTMLDivElement>(null)
   const input = chunk.input ?? {}
   const subagentType = asString(input.subagent_type) || "subagent"
   const description = asString(input.description)
@@ -30,9 +31,20 @@ export const SubagentCard = memo(function SubagentCard({
     inLiveStream && namespace && namespace.length > 0 ? (
       <SubagentActivity namespace={namespace} />
     ) : null
+  const id = `subagent-${chunk.toolCallId}`
+
+  useEffect(() => {
+    if (window.location.hash === `#${id}`) {
+      card.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }
+  }, [id])
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5">
+    <div
+      ref={card}
+      id={id}
+      className="flex min-w-0 scroll-mt-16 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5"
+    >
       <div className="flex min-w-0 items-center gap-1.5">
         {isRunning ? (
           <Loader2
