@@ -28,7 +28,7 @@ import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
-import { ThreadContextMenuPopup } from "@/features/agents/components/ThreadContextMenuPopup"
+import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
 import {
   markAgentThreadViewed,
@@ -428,15 +428,21 @@ export function SidebarThreadRow({
             </TooltipPopup>
           </Tooltip>
         </ContextMenu.Trigger>
-        <ThreadContextMenuPopup
-          thread={thread}
-          pinned={pinned}
-          archived={archived}
-          isDeleting={isDeleting}
-          onTogglePin={onTogglePin}
-          onToggleArchived={onToggleArchived}
-          onDelete={() => setDeleteOpen(true)}
-        />
+        <ContextMenu.Portal>
+          <ContextMenu.Positioner className="z-50 outline-none">
+            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+              <ThreadMenuItems
+                thread={thread}
+                pinned={pinned}
+                archived={archived}
+                isDeleting={isDeleting}
+                onTogglePin={onTogglePin}
+                onToggleArchived={onToggleArchived}
+                onDelete={() => setDeleteOpen(true)}
+              />
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
       </ContextMenu.Root>
       <DeleteThreadDialog
         open={deleteOpen}

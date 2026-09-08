@@ -19,7 +19,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
-import type { PullRequestSnapshot } from "@/features/agents/lib/api"
+import type {
+  PullRequestSnapshot,
+  SidebarProject,
+} from "@/features/agents/lib/api"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type {
   SidebarProjectGroup,
@@ -81,7 +84,6 @@ import {
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
   applyProjectKeyAliases,
-  cloudProjectAliases,
   cloudSidebarThread,
   groupSidebarThreadsByProject,
   localSidebarThread,
@@ -125,6 +127,22 @@ const NAV = [
 
 /** Threads shown per project before the group needs a "Show more". */
 const PROJECT_PREVIEW_COUNT = 5
+
+function cloudProjectAliases(
+  projects: ReadonlyArray<SidebarProject>
+): Map<string, string> {
+  const keys = new Map<string, Array<string>>()
+  for (const project of projects) {
+    const label = project.name.trim().toLowerCase()
+    const key = sidebarProjectKey(project.repoFullName)
+    if (label && key) keys.set(label, [...(keys.get(label) ?? []), key])
+  }
+  return new Map(
+    [...keys].flatMap(([label, values]) =>
+      values.length === 1 ? [[label, values[0] as string]] : []
+    )
+  )
+}
 
 /**
  * Tracks whether the scroll container has content hidden above or below, so

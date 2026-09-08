@@ -12,42 +12,6 @@ import { IoLogoSlack } from "react-icons/io5"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 
-export function ThreadContextMenuPopup({
-  thread,
-  pinned,
-  archived,
-  isDeleting,
-  onTogglePin,
-  onToggleArchived,
-  onDelete,
-}: {
-  thread: AgentThread | null
-  pinned: boolean
-  archived: boolean
-  isDeleting: boolean
-  onTogglePin: () => void
-  onToggleArchived: () => void
-  onDelete: () => void
-}) {
-  return (
-    <ContextMenu.Portal>
-      <ContextMenu.Positioner className="z-50 outline-none">
-        <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-          <ThreadMenuItems
-            thread={thread}
-            pinned={pinned}
-            archived={archived}
-            isDeleting={isDeleting}
-            onTogglePin={onTogglePin}
-            onToggleArchived={onToggleArchived}
-            onDelete={onDelete}
-          />
-        </ContextMenu.Popup>
-      </ContextMenu.Positioner>
-    </ContextMenu.Portal>
-  )
-}
-
 export function ThreadMenuItems({
   thread,
   pinned,

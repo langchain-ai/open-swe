@@ -5,22 +5,6 @@ import type {
 } from "@/desktop"
 import type { AgentSource, AgentStatus, AgentThread } from "./types"
 
-export function cloudProjectAliases(
-  projects: ReadonlyArray<{ name: string; repoFullName: string }>
-): Map<string, string> {
-  const keys = new Map<string, Array<string>>()
-  for (const project of projects) {
-    const label = project.name.trim().toLowerCase()
-    const key = sidebarProjectKey(project.repoFullName)
-    if (label && key) keys.set(label, [...(keys.get(label) ?? []), key])
-  }
-  return new Map(
-    [...keys].flatMap(([label, values]) =>
-      values.length === 1 ? [[label, values[0] as string]] : []
-    )
-  )
-}
-
 export type SidebarThreadLocation = "cloud" | "local"
 
 interface SidebarThreadItemBase {

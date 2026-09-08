@@ -1,25 +1,71 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import { DotsThreeIcon } from "@phosphor-icons/react"
-import { useCallback, useRef, useState } from "react"
+import { Folder } from "lucide-react"
+import { useRef, useState } from "react"
 
 import { useNavigate } from "@tanstack/react-router"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import { useRefreshLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
+import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
-import { ThreadProjectIndicator } from "@/features/agents/components/ThreadProjectIndicator"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
-import { ThreadMenuItems } from "@/features/agents/components/ThreadContextMenuPopup"
+import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import type { AgentThread } from "@/features/agents/lib/types"
 import {
   useDeleteAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
   useSidebarPinnedThreads,
+  useSidebarProjects,
 } from "@/features/agents/lib/queries"
+import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
+
+function ThreadProjectIndicator({
+  thread,
+  localThread,
+}: {
+  thread?: AgentThread
+  localThread?: DesktopLocalThreadSummary
+}) {
+  const [open, setOpen] = useState(false)
+  const { projects } = useDesktopProjects()
+  const { prefs } = useSidebarPrefs()
+  const session = useSession()
+  const cloudProjects = useSidebarProjects({
+    ...prefs.filters,
+    enabled: !localThread && Boolean(session.data),
+  })
+  const repo = !localThread ? thread?.repoFullName.trim() : undefined
+  const projectName = localThread
+    ? projects.find((project) => project.cwd === localThread.cwd)?.name
+    : (cloudProjects.data?.find(
+        (project) => project.repoFullName.toLowerCase() === repo?.toLowerCase()
+      )?.name ?? (repo ? thread?.repo || repo : undefined))
+  if (!projectName) return null
+
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger
+        render={<button type="button" />}
+        closeOnClick={false}
+        onClick={() => setOpen(true)}
+        onPointerLeave={() => setOpen(false)}
+        onBlur={() => setOpen(false)}
+        aria-label={`Project: ${projectName}`}
+        data-no-drag=""
+        className="flex size-7 shrink-0 items-center justify-center text-muted-foreground"
+      >
+        <Folder className="size-4" />
+      </TooltipTrigger>
+      <TooltipPopup>{projectName}</TooltipPopup>
+    </Tooltip>
+  )
+}
 
 export function AgentThreadHeader({
   title,
@@ -93,10 +139,6 @@ export function AgentThreadHeader({
   const editingRef = useRef(false)
   const titleButtonRef = useRef<HTMLButtonElement>(null)
   const [editorWidth, setEditorWidth] = useState<number>()
-  const focusInput = useCallback((input: HTMLInputElement | null) => {
-    input?.focus()
-    input?.select()
-  }, [])
   const saveTitle = async () => {
     if (!editingRef.current || !onRename || draft === null) return
     editingRef.current = false
@@ -171,7 +213,8 @@ export function AgentThreadHeader({
             )}
             {draft !== null ? (
               <input
-                ref={focusInput}
+                autoFocus
+                onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
                 className="min-w-0 rounded-md bg-muted px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
