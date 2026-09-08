@@ -8,7 +8,7 @@ human messages before the next model call.
 import logging
 from typing import Any, cast
 
-import httpx
+import httpx2 as httpx
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime

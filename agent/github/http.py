@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 logger = logging.getLogger(__name__)
 

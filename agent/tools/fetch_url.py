@@ -1,6 +1,6 @@
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 from markdownify import markdownify
 
 from agent.utils.url_safety import request_with_safe_redirects

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 exa_py_stub = types.ModuleType("exa_py")

@@ -1,4 +1,4 @@
-import httpx
+import httpx2 as httpx
 from fastapi import HTTPException, Request
 
 from agent.config import ENV

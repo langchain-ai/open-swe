@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
-import httpx
+import httpx2 as httpx
 from fastapi import HTTPException, Response
 
 from agent.github.app import get_github_app_installation_token

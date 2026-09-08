@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 from agent.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,

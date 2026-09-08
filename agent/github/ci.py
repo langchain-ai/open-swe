@@ -12,7 +12,7 @@ webhook handling.
 import logging
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 from agent.github.checks import REVIEW_CHECK_RUN_NAME
 from agent.github.http import GITHUB_API_BASE, github_client, github_request

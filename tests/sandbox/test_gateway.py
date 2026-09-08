@@ -3,7 +3,7 @@
 from typing import Any, cast
 from unittest.mock import patch
 
-import httpx
+import httpx2 as httpx
 import pytest
 from fireworks import AsyncFireworks
 from langchain_core.messages import AIMessage, HumanMessage

@@ -32,7 +32,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import anthropic
-import httpx
+import httpx2 as httpx
 import openai
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
@@ -77,15 +77,8 @@ MODEL_OUTAGE_MESSAGE = (
 )
 
 
-def _is_httpx2_transport_error(exc: BaseException) -> bool:
-    return any(
-        base.__module__.partition(".")[0] == "httpx2" and base.__name__ == "TransportError"
-        for base in type(exc).__mro__
-    )
-
-
 def _should_fallback(exc: BaseException) -> bool:
-    if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_httpx2_transport_error(exc):
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS):
         return True
     # Catches OverloadedError (529) and other 5xx/429 surfaced as APIStatusError.
     if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):

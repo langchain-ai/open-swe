@@ -5,7 +5,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 from agent.github.http import (
     GITHUB_API_BASE,

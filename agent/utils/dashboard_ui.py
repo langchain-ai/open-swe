@@ -20,7 +20,7 @@ import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-import httpx
+import httpx2 as httpx
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -249,7 +249,7 @@ def mount_dashboard_ui(app: FastAPI) -> Path | None:
     if dev_server:
         app.router.routes.append(DashboardDevProxyRoute(dev_server))
         # httpx logs every request at INFO; that is one line per module Vite serves.
-        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpx2").setLevel(logging.WARNING)
         logger.info("Serving the dashboard from the Vite dev server at %s", dev_server)
         return None
     static_dir = dashboard_static_dir()

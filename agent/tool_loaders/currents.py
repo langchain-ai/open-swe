@@ -12,7 +12,7 @@ screenshots and DOM snapshots.
 import logging
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 from langchain_core.tools import BaseTool, StructuredTool
 
 from agent.dashboard.user_credentials import CURRENTS_API_BASE, get_currents_api_key

@@ -8,7 +8,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import httpx
+import httpx2 as httpx
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag

@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2 as httpx
 from langgraph_sdk import get_client
 
 from agent.dashboard.agent_usage import record_agent_pr_usage

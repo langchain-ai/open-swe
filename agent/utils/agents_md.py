@@ -10,7 +10,7 @@ import posixpath
 from collections.abc import Iterable
 from urllib.parse import quote
 
-import httpx
+import httpx2 as httpx
 
 logger = logging.getLogger(__name__)
 

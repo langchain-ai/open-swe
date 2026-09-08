@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
-import httpx
+import httpx2 as httpx
 from fastapi import (
     APIRouter,
     Depends,

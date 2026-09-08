@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_openai.chat_models.codex import _ChatOpenAICodex  # noqa: PLC2701
 from langchain_openai.chatgpt_oauth import (  # noqa: PLC2701

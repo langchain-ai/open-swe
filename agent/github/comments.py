@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 from agent.config import ENV
 from agent.github.thread_token import GitHubAuthError

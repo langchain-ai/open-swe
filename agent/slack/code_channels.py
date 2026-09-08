@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 from urllib.parse import quote
 
-import httpx
+import httpx2 as httpx
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack.client import (

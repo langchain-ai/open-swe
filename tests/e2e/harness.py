@@ -31,7 +31,7 @@ import patches  # noqa: E402
 patches.apply()
 
 import fakes  # noqa: E402
-import httpx  # noqa: E402
+import httpx2 as httpx  # noqa: E402
 from e2e_env import (  # noqa: E402
     BASE_URL,
     BOT_USER_ID,

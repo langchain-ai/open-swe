@@ -1,6 +1,6 @@
 import json
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 from agent.middleware.model_call_timeout import ModelCallTimeoutError

@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx2 import Response
 
 from agent.api.app import app
 from agent.github import webhook as github_webhooks

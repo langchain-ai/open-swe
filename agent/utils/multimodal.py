@@ -6,7 +6,7 @@ import mimetypes
 import re
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 from langchain_core.messages.content import (
     ImageContentBlock,
     TextContentBlock,

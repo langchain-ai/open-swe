@@ -224,7 +224,7 @@ async def fetch_pr_diff(
     The full diff is returned uncapped: the reviewer model has a large context
     window and reviews the complete diff.
     """
-    import httpx
+    import httpx2 as httpx
 
     from agent.github.http import github_client, github_request
 
@@ -260,7 +260,7 @@ async def fetch_pr_metadata(
     reflected on every re-review. ``body`` is normalized to ``""`` when the
     PR has no description.
     """
-    import httpx
+    import httpx2 as httpx
 
     from agent.github.http import github_client, github_request
 

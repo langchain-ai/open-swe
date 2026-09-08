@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-import httpx
+import httpx2 as httpx
 from fastapi import HTTPException
 
 from agent.config import ENV

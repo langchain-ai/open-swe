@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 

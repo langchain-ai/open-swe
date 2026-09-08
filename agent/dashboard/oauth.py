@@ -12,7 +12,7 @@ from functools import cache
 from typing import Any
 from urllib.parse import quote, urlparse
 
-import httpx
+import httpx2 as httpx
 import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection

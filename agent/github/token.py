@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-import httpx
+import httpx2 as httpx
 import jwt
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client

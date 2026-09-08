@@ -6,7 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from typing import Any, cast
 
-import httpx
+import httpx2 as httpx
 from langchain_core.messages.content import create_text_block
 
 from agent.input_messages import (

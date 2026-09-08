@@ -12,7 +12,7 @@ import asyncio
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2 as httpx
 from fastapi import HTTPException
 
 _GITHUB_API = "https://api.github.com"

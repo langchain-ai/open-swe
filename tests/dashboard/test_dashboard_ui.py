@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import httpx
+import httpx2 as httpx
 import pytest
 from fastapi.testclient import TestClient
 from starlette.routing import Match

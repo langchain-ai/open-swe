@@ -23,7 +23,7 @@ import logging
 import re
 from typing import Any, TypedDict
 
-import httpx
+import httpx2 as httpx
 
 from agent.github.checks import CheckConclusion, complete_review_check_run
 from agent.github.http import (

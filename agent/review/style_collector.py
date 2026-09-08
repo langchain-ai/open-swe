@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 from agent.tools._sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 from agent.utils.url_safety import (

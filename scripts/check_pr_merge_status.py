@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 
 logger = logging.getLogger(__name__)
 

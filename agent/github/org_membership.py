@@ -3,7 +3,7 @@
 import logging
 from urllib.parse import quote
 
-import httpx
+import httpx2 as httpx
 
 from agent.config import ENV
 from agent.github.app import (

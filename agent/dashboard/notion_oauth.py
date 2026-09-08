@@ -6,7 +6,7 @@ import secrets
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-import httpx
+import httpx2 as httpx
 
 from agent.config import ENV
 from agent.encryption import decrypt_token, encrypt_token

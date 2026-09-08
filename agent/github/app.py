@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2 as httpx
 import jwt
 
 from agent.config import ENV

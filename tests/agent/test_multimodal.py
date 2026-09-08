@@ -2,7 +2,7 @@ import socket
 from typing import Any, cast
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 
 import agent.utils.multimodal as multimodal
 import agent.utils.url_safety as url_safety

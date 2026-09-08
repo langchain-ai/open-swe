@@ -4,8 +4,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import anthropic
-import httpx
-import httpx2
+import httpx2 as httpx
 import openai
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -69,9 +68,8 @@ class TestShouldFallback:
         exc = anthropic.RateLimitError("rate", response=response, body={})
         assert _should_fallback(exc) is True
 
-    @pytest.mark.parametrize("http_module", [httpx, httpx2])
-    def test_http_remote_protocol_error_falls_back(self, http_module: Any) -> None:
-        exc = http_module.RemoteProtocolError(
+    def test_http_remote_protocol_error_falls_back(self) -> None:
+        exc = httpx.RemoteProtocolError(
             "peer closed connection without sending complete message body (incomplete chunked read)"
         )
         assert _should_fallback(exc) is True
@@ -124,7 +122,7 @@ class TestModelFallbackMiddleware:
         async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             if len(calls) == 1:
-                raise httpx2.RemoteProtocolError(
+                raise httpx.RemoteProtocolError(
                     "peer closed connection without sending complete message body "
                     "(incomplete chunked read)"
                 )

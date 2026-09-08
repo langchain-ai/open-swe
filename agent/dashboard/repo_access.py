@@ -1,6 +1,6 @@
 """GitHub repository access checks for dashboard actions."""
 
-import httpx
+import httpx2 as httpx
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token

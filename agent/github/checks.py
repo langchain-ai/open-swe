@@ -13,7 +13,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Literal
 
-import httpx
+import httpx2 as httpx
 
 from agent.github.http import (
     GITHUB_API_BASE,

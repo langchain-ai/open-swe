@@ -8,7 +8,7 @@ run config (seeded by the dashboard chat proxy).
 import base64
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 from agent.github.checks import github_headers
 from agent.run_config import RunConfig

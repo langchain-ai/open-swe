@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
-import httpx
+import httpx2 as httpx
 
 _MAX_REDIRECTS = 5
 _REDIRECT_CODES = {301, 302, 303, 307, 308}

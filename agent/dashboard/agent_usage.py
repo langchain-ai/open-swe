@@ -12,8 +12,8 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-import httpx
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import APIStatusError
 
 from agent.review.findings import coerce_finding, is_surfaced
 from agent.utils.json_types import as_json_object, thread_metadata
@@ -102,7 +102,7 @@ def _write_lock(namespace: list[str], key: str) -> asyncio.Lock:
 async def _get(namespace: list[str], key: str) -> dict[str, Any] | None:
     try:
         return _record(await _client().store.get_item(namespace, key))
-    except httpx.HTTPStatusError as exc:
+    except APIStatusError as exc:
         if exc.response.status_code == 404:
             return None
         raise

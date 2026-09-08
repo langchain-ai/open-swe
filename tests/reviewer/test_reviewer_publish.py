@@ -1136,7 +1136,7 @@ async def test_open_swe_review_exists_returns_none_on_http_error() -> None:
     """A failed reviews API call is reported as ``None`` (unknown), never
     ``False`` — the empty-summary dedup must not treat a transient failure as
     "no prior review exists" and double-post."""
-    import httpx
+    import httpx2 as httpx
 
     client_cm = AsyncMock()
     client_cm.__aenter__.return_value = client_cm
@@ -1837,7 +1837,7 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_pr_review_threads_returns_empty_on_http_error() -> None:
-    import httpx
+    import httpx2 as httpx
 
     client_cm = AsyncMock()
     client_cm.__aenter__.return_value = client_cm
@@ -1881,7 +1881,7 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_422() -> None:
     ``unresolved_anchor`` and carry the raw errors so the tool layer can act
     on it (drop offending findings + retry) instead of bubbling an opaque
     error string that the agent will only retry with identical args."""
-    import httpx
+    import httpx2 as httpx
 
     response = MagicMock()
     response.status_code = 422
@@ -1920,7 +1920,7 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_line_error() -
     """A 'Line could not be resolved' 422 must also be tagged as
     ``unresolved_anchor`` so a line that's not in the diff is treated the same
     way as a path that's not in the diff."""
-    import httpx
+    import httpx2 as httpx
 
     response = MagicMock()
     response.status_code = 422
@@ -1956,7 +1956,7 @@ async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
     """A 422 whose errors don't match the anchor patterns must NOT be tagged
     as ``unresolved_anchor`` — the retry path is only safe for known
     per-comment anchor failures."""
-    import httpx
+    import httpx2 as httpx
 
     response = MagicMock()
     response.status_code = 422

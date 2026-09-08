@@ -17,7 +17,7 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
-import httpx
+import httpx2 as httpx
 
 from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
 

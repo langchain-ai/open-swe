@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 from agent.config import ENV
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT

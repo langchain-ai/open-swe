@@ -13,7 +13,7 @@ remains the only credential for everything else.
 import logging
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 from fastapi import HTTPException, Request
 
 from agent.dashboard.admin import is_admin
