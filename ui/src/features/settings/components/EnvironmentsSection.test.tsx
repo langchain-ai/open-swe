@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { EnvironmentsSection } from "./EnvironmentsSection"
@@ -10,6 +10,7 @@ import { api } from "@/lib/api"
 const clients: Array<QueryClient> = []
 
 afterEach(() => {
+  cleanup()
   for (const client of clients) client.clear()
   clients.length = 0
   vi.restoreAllMocks()
@@ -63,6 +64,31 @@ describe("EnvironmentsSection", () => {
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
     expect(screen.getByText("Refresh log")).toBeTruthy()
     expect(view.container.querySelector("button, input, textarea")).toBeNull()
+  })
+
+  it("never renders a refresh log for non-admins, even if one arrives", async () => {
+    // The API already omits it; a `bash -x` trace can carry expanded
+    // credentials, so the row refuses to show one regardless.
+    vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
+      default_slug: "default",
+      environments: [
+        {
+          slug: "default",
+          name: "Default",
+          has_snapshot: true,
+          refresh_status: "success",
+          refresh_kind: "full",
+          refresh_finished_at: new Date(Date.now() - 3_600_000).toISOString(),
+          refresh_log_excerpt: "+ TOKEN=hunter2",
+        },
+      ],
+    })
+
+    renderSection(false)
+
+    expect(await screen.findByText(/Rebuilt 1 hour ago/)).toBeTruthy()
+    expect(screen.queryByText("Refresh log")).toBeNull()
+    expect(screen.queryByText(/hunter2/)).toBeNull()
   })
 
   it("says so when an environment has never been refreshed", async () => {

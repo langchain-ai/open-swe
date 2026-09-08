@@ -561,9 +561,14 @@ class Environment(BaseModel):
             logger.warning("Ignoring invalid sandbox create params for environment %s", self.slug)
             return {}
 
-    def option(self) -> dict[str, Any]:
-        """Name/slug/snapshot-state only, for the non-admin environment picker."""
-        return {
+    def option(self, *, include_log: bool = False) -> dict[str, Any]:
+        """Name/slug/refresh-state for the environment picker and the settings page.
+
+        The log excerpt is admin-only: scripts run under ``bash -x``, whose trace
+        expands every argument, so a script that put a credential on a command
+        line has written it here.
+        """
+        option = {
             "slug": self.slug,
             "name": self.name,
             "has_snapshot": self.snapshot_status == "ready",
@@ -571,9 +576,11 @@ class Environment(BaseModel):
             "refresh_kind": self.refresh_kind,
             "refresh_finished_at": self.refresh_finished_at,
             "refresh_error": self.refresh_error,
-            "refresh_log_excerpt": log_excerpt(self.refresh_log),
             "refresh_steps": [step.model_dump(mode="json") for step in self.refresh_steps],
         }
+        if include_log:
+            option["refresh_log_excerpt"] = log_excerpt(self.refresh_log)
+        return option
 
 
 class EnvironmentStore(TypedStore[Environment]):
@@ -849,13 +856,13 @@ async def resolve_environment(slug: str | None) -> Environment | None:
     return record
 
 
-async def list_environment_options() -> list[dict[str, Any]]:
-    """Name/slug/snapshot-state only, for the non-admin environment picker.
+async def list_environment_options(*, include_logs: bool = False) -> list[dict[str, Any]]:
+    """Every environment's picker/settings view; ``include_logs`` only for admins.
 
-    Prompts and snapshot ids stay admin-only; picking an environment needs
+    Prompts and snapshot ids never appear here; picking an environment needs
     neither.
     """
-    return [record.option() for record in await ENVIRONMENTS.list_all()]
+    return [record.option(include_log=include_logs) for record in await ENVIRONMENTS.list_all()]
 
 
 def parse_environment_tag(text: str) -> tuple[str | None, str]:

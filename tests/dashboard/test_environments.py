@@ -564,21 +564,27 @@ async def test_environment_options_omit_admin_only_settings(fake_store: FakeStor
         snapshot_name="prior",
         source_sandbox_id="sb-prior",
     )
+    await ENVIRONMENTS.mark_refresh_settled("default", "success", log="+ TOKEN=hunter2\ndone")
     options = await env_store.list_environment_options()
 
+    # No prompt, no snapshot id — and no log: `bash -x` expands arguments, so a
+    # script that put a credential on a command line has written it there.
     assert options == [
         {
             "slug": "default",
             "name": "default",
             "has_snapshot": True,
-            "refresh_status": "never",
+            "refresh_status": "success",
             "refresh_kind": None,
-            "refresh_finished_at": None,
+            "refresh_finished_at": options[0]["refresh_finished_at"],
             "refresh_error": None,
-            "refresh_log_excerpt": None,
             "refresh_steps": [],
         }
     ]
+    assert options[0]["refresh_finished_at"]
+
+    admin_view = await env_store.list_environment_options(include_logs=True)
+    assert admin_view[0]["refresh_log_excerpt"] == "+ TOKEN=hunter2\ndone"
 
 
 @pytest.mark.asyncio

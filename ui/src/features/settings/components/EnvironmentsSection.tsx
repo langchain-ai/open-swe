@@ -76,9 +76,11 @@ function RefreshSteps({ steps }: { steps: Array<EnvironmentRefreshStep> }) {
 function EnvironmentRow({
   environment,
   isDefault,
+  isAdmin,
 }: {
   environment: EnvironmentOption
   isDefault: boolean
+  isAdmin: boolean
 }) {
   const status = environment.refresh_status ?? "never"
   const when = refreshedAt(environment.refresh_finished_at)
@@ -113,7 +115,9 @@ function EnvironmentRow({
           {environment.refresh_error}
         </p>
       )}
-      {log && (
+      {/* The API omits the log for non-admins; this guard is defence in depth
+          for a `bash -x` trace that can carry expanded credentials. */}
+      {isAdmin && log && (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">Refresh log</summary>
           <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
@@ -161,6 +165,7 @@ export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
             key={environment.slug}
             environment={environment}
             isDefault={environment.slug === options.default_slug}
+            isAdmin={isAdmin}
           />
         ))
       )}

@@ -1081,11 +1081,11 @@ async def api_create_environment(
 
 @router.get("/environments/options")
 async def api_environment_options(
-    _session: dict[str, Any] = _SESSION_DEP,
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    """Pickable environments for any signed-in user: names only, no prompts."""
+    """Pickable environments for any signed-in user; refresh logs only for admins."""
     return {
-        "environments": await list_environment_options(),
+        "environments": await list_environment_options(include_logs=_session_is_admin(session)),
         "default_slug": DEFAULT_ENVIRONMENT_SLUG,
     }
 
