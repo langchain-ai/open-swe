@@ -1,3 +1,4 @@
+import uuid
 from typing import Any, cast
 
 import pytest
@@ -57,10 +58,16 @@ async def _active_thread(thread_id: str) -> bool:
     return True
 
 
-def _queued_message_without_metadata(queued_messages: list[object]) -> dict[str, object]:
+def _queued_message_without_metadata(
+    queued_messages: list[object], expected_queue_id: str | None = None
+) -> dict[str, object]:
     assert len(queued_messages) == 1
     queued_message = cast(dict[str, object], queued_messages[0])
-    assert cast(str, queued_message.pop("queue_id")).startswith("queued-")
+    queue_id = cast(str, queued_message.pop("queue_id"))
+    if expected_queue_id:
+        assert queue_id == expected_queue_id
+    else:
+        assert queue_id.startswith("queued-")
     assert isinstance(queued_message.pop("created_at_ms"), int)
     return queued_message
 
@@ -172,15 +179,18 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
     monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
 
+    client_message_id = uuid.UUID("8a60896d-65ca-4e40-8a2d-1fbe81777001")
     await thread_api.send_dashboard_message(
         "thread-1",
         "octocat",
-        thread_api.ThreadMessageBody(content="continue in web"),
+        thread_api.ThreadMessageBody(
+            content="continue in web", client_message_id=client_message_id
+        ),
         email="octocat@example.com",
     )
 
     assert client.threads.updates[0]["source"] == "dashboard"
-    assert _queued_message_without_metadata(queued_messages) == {
+    assert _queued_message_without_metadata(queued_messages, str(client_message_id)) == {
         "text": "continue in web",
         "source": "dashboard",
         "surface": "web",

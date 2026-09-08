@@ -301,6 +301,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)
+                    queue_id = content.get("queue_id")
+                    if isinstance(queue_id, str) and structured:
+                        structured[-1]["id"] = queue_id
                     queued_updates.extend(cast(list[dict[str, Any]], structured))
                 else:
                     content_blocks.extend(blocks)
