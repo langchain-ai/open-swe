@@ -295,19 +295,23 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         "user_email",
         "schedule_id",
     )
-    dumped = cfg.dump()
-    wakeup_configurable: dict[str, Any] = {"thread_id": thread_id}
-    for key in passthrough_keys:
-        value = dumped.get(key)
-        if value is not None:
-            wakeup_configurable[key] = value
-    active = await get_active_slack_thread(
-        client,
-        thread_id,
-        cfg.slack_thread.dump() if cfg.slack_thread else None,
-    )
-    if active:
-        wakeup_configurable["slack_thread"] = active
+    try:
+        dumped = cfg.dump()
+        wakeup_configurable: dict[str, Any] = {"thread_id": thread_id}
+        for key in passthrough_keys:
+            value = dumped.get(key)
+            if value is not None:
+                wakeup_configurable[key] = value
+        active = await get_active_slack_thread(
+            client,
+            thread_id,
+            cfg.slack_thread.dump() if cfg.slack_thread else None,
+        )
+        if active:
+            wakeup_configurable["slack_thread"] = active
+    except Exception as exc:
+        logger.exception("Failed to serialize thread wakeup config for %s", thread_id)
+        return {"success": False, "error": str(exc)}
 
     await _purge_expired_wakeups_best_effort()
 

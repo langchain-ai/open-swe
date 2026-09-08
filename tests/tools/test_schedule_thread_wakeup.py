@@ -215,6 +215,23 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
     assert captured["fire_time"].microsecond == 0
 
 
+async def test_schedule_thread_wakeup_returns_error_on_config_dump_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Config:
+        thread_id = "test-thread-123"
+        slack_thread = None
+
+        def dump(self) -> dict[str, Any]:
+            raise RuntimeError("config serialization failed")
+
+    monkeypatch.setattr(wakeup_tool.RunConfig, "from_runtime", lambda: _Config())
+
+    result = await wakeup_tool.schedule_thread_wakeup(5)
+
+    assert result == {"success": False, "error": "config serialization failed"}
+
+
 async def test_wakeup_cron_includes_trace_correlation_and_completion_webhook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

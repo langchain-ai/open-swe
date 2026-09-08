@@ -21,6 +21,12 @@ def test_dump_round_trips_only_the_keys_that_were_set():
     assert RunConfig.parse(raw).dump() == raw
 
 
+def test_dump_drops_unserializable_extra_keys():
+    cfg = RunConfig.parse({"thread_id": "t", "langgraph_auth_user": object()})
+
+    assert cfg.dump() == {"thread_id": "t"}
+
+
 def test_parse_drops_only_the_malformed_field():
     cfg = RunConfig.parse({"thread_id": "t1", "pr_number": {"not": "an int"}})
     assert cfg.thread_id == "t1"

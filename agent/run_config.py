@@ -26,11 +26,12 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Self
 
 from langgraph.config import get_config
-from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, TypeAdapter, ValidationError
 
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
+_JSON_VALUE_ADAPTER = TypeAdapter(Any)
 
 
 def _reject_bool(value: Any) -> Any:
@@ -41,6 +42,14 @@ def _reject_bool(value: Any) -> Any:
 
 
 Int = Annotated[int, BeforeValidator(_reject_bool)]
+
+
+def _is_unserializable_json_value(value: Any) -> bool:
+    try:
+        _JSON_VALUE_ADAPTER.dump_python(value, mode="json")
+    except Exception:
+        return True
+    return False
 
 
 class Repo(BaseModel):
@@ -221,7 +230,16 @@ class RunConfig(BaseModel):
 
     def dump(self) -> dict[str, Any]:
         """The JSON value to store, preserving exactly the keys that were set."""
-        return self.model_dump(mode="json", exclude_unset=True)
+        unserializable_extras = {
+            key
+            for key, value in (self.model_extra or {}).items()
+            if _is_unserializable_json_value(value)
+        }
+        return self.model_dump(
+            mode="json",
+            exclude_unset=True,
+            exclude=unserializable_extras,
+        )
 
     def get(self, key: str) -> Any:
         """Value for ``key``, whether it is a declared field or an extra."""
