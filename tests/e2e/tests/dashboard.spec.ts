@@ -138,6 +138,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .getByTestId("queued-message")
       .filter({ hasText: queuedText });
     await expect(queuedMessage).toBeVisible();
+    await page.reload();
+    await expect(queuedMessage).toBeVisible();
     const screenshotPath = testInfo.outputPath("queued-messages-dashboard.png");
     await page.screenshot({ path: screenshotPath, fullPage: true });
     await testInfo.attach("queued-messages-dashboard", {
@@ -555,7 +557,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await page.addInitScript(() => {
       localStorage.setItem(
         "open-swe.agents.sidebar-prefs",
-        JSON.stringify({ filters: { statuses: ["running"] } }),
+        JSON.stringify({ filters: { sources: ["slack"] } }),
       );
     });
 
@@ -571,23 +573,20 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       await route.continue();
     });
 
+    const sidebarRequest = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return (
+        url.pathname === "/dashboard/api/threads/page" &&
+        url.searchParams.get("resolved") === "false" &&
+        url.searchParams.get("limit") === "10"
+      );
+    });
     await page.goto("/agents", { waitUntil: "commit" });
 
     const skeleton = page.getByTestId("sidebar-threads-skeleton");
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
 
-    // The skeleton is in the server-rendered HTML, so its presence says nothing
-    // about hydration — and the persisted filter is only read on the client.
-    // `useSidebarPrefs` writes the full sanitized object back on mount, so the
-    // stored value gaining a key the seed never had is the hydration signal.
-    await page.waitForFunction(
-      () =>
-        (localStorage.getItem("open-swe.agents.sidebar-prefs") ?? "").includes(
-          "collapsed",
-        ),
-      undefined,
-      { timeout: 30_000 },
-    );
+    await sidebarRequest;
 
     await expect(skeleton).toBeVisible();
     await expect(page.getByText("No threads match these filters.")).toHaveCount(

@@ -34,6 +34,7 @@ import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitA
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   useAgentSkills,
+  useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
@@ -86,6 +87,7 @@ export function AgentThreadView({
   thread,
   autoFocusComposer = false,
 }: AgentThreadViewProps) {
+  const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadRuntime()
   const isMobile = useIsMobile()
@@ -245,9 +247,14 @@ export function AgentThreadView({
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
-          project={thread.repoFullName}
+          key={thread.id}
+          title={thread.title}
+          onRename={(title) =>
+            renameThread.mutateAsync({ threadId: thread.id, title })
+          }
           target="Cloud"
           panelCollapsed={panelCollapsed}
+          thread={thread}
         />
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">

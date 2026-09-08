@@ -33,6 +33,34 @@ def _empty_thread_pins(monkeypatch) -> None:
     monkeypatch.setattr(thread_api, "list_thread_pin_ids", empty_pins)
 
 
+async def test_rename_thread_trims_title_and_clears_seed(monkeypatch) -> None:
+    metadata = {"source": "dashboard", "title": "Old title", "title_seed": "Old title"}
+    thread = {"thread_id": "thread-1", "metadata": metadata}
+    authorized = AsyncMock(return_value=thread)
+    update = AsyncMock()
+    monkeypatch.setattr(thread_api, "_authorized_thread", authorized)
+    monkeypatch.setattr(
+        thread_api, "_thread_summary", AsyncMock(side_effect=lambda t: t["metadata"])
+    )
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(update=update)),
+    )
+
+    result = await routes.api_rename_thread(
+        "thread-1",
+        thread_api.ThreadRenameBody(title="  New title  "),
+        {"sub": "alice", "email": "alice@example.com"},
+    )
+
+    authorized.assert_awaited_once_with("thread-1", "alice", email="alice@example.com")
+    update.assert_awaited_once_with(
+        thread_id="thread-1", metadata={"title": "New title", "title_seed": None}
+    )
+    assert result == {**metadata, "title": "New title", "title_seed": None}
+
+
 def _image() -> thread_api.DashboardImageBody:
     return thread_api.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),

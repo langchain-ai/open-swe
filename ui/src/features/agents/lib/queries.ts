@@ -864,6 +864,23 @@ export function usePinAgentThread() {
   })
 }
 
+export function useRenameAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; title: string }) =>
+      agentsApi.renameThread(vars.threadId, vars.title),
+    onSuccess: (thread, vars) => {
+      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      queryClient.setQueryData(
+        agentThreadKeys.sidebarActive(vars.threadId),
+        thread
+      )
+    },
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
 export function useResolveAgentThread() {
   const queryClient = useQueryClient()
 

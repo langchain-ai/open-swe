@@ -169,6 +169,7 @@ from agent.dashboard.team_settings import (
 )
 from agent.dashboard.thread_api import (
     ThreadMessageBody,
+    ThreadRenameBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -191,6 +192,7 @@ from agent.dashboard.thread_api import (
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
+    rename_dashboard_thread,
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
@@ -2292,6 +2294,20 @@ async def api_send_thread_message(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
+
+
+@router.patch("/threads/{thread_id}")
+async def api_rename_thread(
+    thread_id: str,
+    body: ThreadRenameBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await rename_dashboard_thread(
+        thread_id,
+        session["sub"],
+        title=body.title,
+        email=session.get("email"),
+    )
 
 
 @router.post("/threads/{thread_id}/resolve")
