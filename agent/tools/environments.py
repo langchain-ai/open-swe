@@ -32,7 +32,7 @@ _SUMMARY_FIELDS = {
     "fs_capacity_bytes",
     "create_params",
     "setup_script",
-    "init_script",
+    "update_script",
     "base_snapshot_id",
     "snapshot_status",
     "snapshot_id",
@@ -41,6 +41,7 @@ _SUMMARY_FIELDS = {
     "status_message",
     "last_captured_at",
     "refresh_status",
+    "refresh_kind",
     "refresh_finished_at",
     "refresh_error",
 }
@@ -76,7 +77,7 @@ def _scripts_changed(existing: store.Environment | None, record: store.Environme
         return True
     return (
         existing.setup_script != record.setup_script
-        or existing.init_script != record.init_script
+        or existing.update_script != record.update_script
         or existing.base_snapshot_id != record.base_snapshot_id
     )
 
@@ -105,7 +106,7 @@ async def save_environment(
     name: str,
     prompt: str,
     setup_script: str | None = None,
-    init_script: str | None = None,
+    update_script: str | None = None,
     base_snapshot_id: str | None = None,
     clear_base_snapshot_id: bool = False,
     snapshot_name: str | None = None,
@@ -120,7 +121,7 @@ async def save_environment(
     """Create an environment, or update an existing one's definition.
 
     Saving a new or changed script runs it immediately and waits: the setup
-    script and then the init script execute on a throwaway sandbox booted from
+    script and then the update script execute on a throwaway sandbox booted from
     the base snapshot, and the snapshot is captured only if both succeed. The
     result comes back under ``refresh`` with the log, so a broken script can be
     fixed and saved again. A save that leaves the scripts alone rebuilds nothing.
@@ -140,11 +141,13 @@ async def save_environment(
             every night, so it must be non-interactive and safe to re-run from
             scratch, and it must never write a secret or a proxy credential to
             disk. A full replacement, not a delta; empty string clears it.
-        init_script: Optional bash script every new sandbox for this environment
-            runs once after booting from the snapshot, for what goes stale in an
-            image (``git pull``, a dependency sync). It is on the critical path
-            before the first model call, so keep it short. A full replacement;
-            empty string clears it.
+        update_script: Optional bash script for what goes stale in an image — a
+            ``git pull``, a dependency sync. It runs against the current snapshot
+            on a throwaway builder, at most once an hour and only while the
+            environment is in use, and the result becomes the new snapshot. No
+            run ever waits on it. It also runs at the end of every full rebuild,
+            so a broken one is caught nightly. A full replacement; empty string
+            clears it.
         base_snapshot_id: Optional snapshot the setup script provisions from,
             when this environment needs something other than the configured base.
         clear_base_snapshot_id: Go back to the configured base snapshot. Cannot be
@@ -203,7 +206,7 @@ async def save_environment(
                     name=name,
                     prompt=prompt,
                     setup_script=setup_script or "",
-                    init_script=init_script or "",
+                    update_script=update_script or "",
                     base_snapshot_id=base_snapshot_id,
                     snapshot_name=snapshot_name,
                     repos=repos or [],
@@ -227,8 +230,8 @@ async def save_environment(
                 update_values["create_params"] = {}
             if setup_script is not None:
                 update_values["setup_script"] = setup_script
-            if init_script is not None:
-                update_values["init_script"] = init_script
+            if update_script is not None:
+                update_values["update_script"] = update_script
             if snapshot_name is not None:
                 update_values["snapshot_name"] = snapshot_name
             if base_snapshot_id is not None:
@@ -267,7 +270,7 @@ async def refresh_environment(name: str) -> dict[str, Any]:
     """Rebuild an environment's snapshot by running its scripts, and wait for it.
 
     A throwaway sandbox boots from the base snapshot, runs the setup script and
-    then the init script, and the result is captured as this environment's
+    then the update script, and the result is captured as this environment's
     snapshot only if both succeed. Blocks until it finishes — minutes for a real
     setup script — and returns the log so a failure can be fixed and re-run.
 

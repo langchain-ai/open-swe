@@ -26,10 +26,10 @@ interface Environment {
   repos: Array<string>;
   snapshot_id: string | null;
   snapshot_name: string | null;
-  init_script?: string;
+  update_script?: string;
   snapshot_status: string;
   snapshot_tag?: string | null;
-  validated_init_script?: string;
+  refresh_kind?: string | null;
   refresh_status?: string;
   refresh_error?: string | null;
   refresh_log?: string | null;
@@ -311,9 +311,9 @@ test.describe("Environments", () => {
     expect(record?.refresh_error).toBeNull();
     expect(record?.refresh_log).toContain("--- setup script ---");
     expect(record?.refresh_log).toContain(".provisioned");
-    expect(record?.refresh_log).toContain("--- init script ---");
-    // Only a script that passed here is allowed to run on later sandboxes.
-    expect(record?.validated_init_script).toBe(record?.init_script);
+    expect(record?.refresh_log).toContain("--- update script ---");
+    // The save ran a full rebuild; hourly updates are a separate kind.
+    expect(record?.refresh_kind).toBe("full");
 
     // Published as name:latest, and captured from the refresh's own builder
     // sandbox rather than this thread's.
@@ -344,7 +344,8 @@ test.describe("Environments", () => {
     await expect(
       page.getByText("Default environment · Snapshot ready"),
     ).toBeVisible();
-    await expect(page.getByText(/^Refreshed /)).toBeVisible();
+    // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
+    await expect(page.getByText(/^Rebuilt /)).toBeVisible();
     await expect(page.getByText("Refresh log")).toBeVisible();
     await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
 

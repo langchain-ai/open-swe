@@ -111,7 +111,7 @@ def apply() -> None:
     _applied = True
 
 
-async def _fake_builder_sandbox(_record: object) -> object:
+async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) -> object:
     from agent.sandboxes.providers.registry import create_sandbox
 
     return await create_sandbox()

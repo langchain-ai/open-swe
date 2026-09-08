@@ -533,7 +533,7 @@ ENVIRONMENT_PROMPT = (
 ENVIRONMENT_SETUP_SCRIPT = (
     "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls -a repos"
 )
-ENVIRONMENT_INIT_SCRIPT = "echo refreshed >> repos/.provisioned"
+ENVIRONMENT_UPDATE_SCRIPT = "echo refreshed >> repos/.provisioned"
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
@@ -913,7 +913,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "name": ENVIRONMENT_NAME,
                 "prompt": ENVIRONMENT_PROMPT,
                 "setup_script": ENVIRONMENT_SETUP_SCRIPT,
-                "init_script": ENVIRONMENT_INIT_SCRIPT,
+                "update_script": ENVIRONMENT_UPDATE_SCRIPT,
                 "repos": [f"{OWNER}/{REPO}"],
             },
             "call-env-save",

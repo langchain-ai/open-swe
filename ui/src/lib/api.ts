@@ -405,6 +405,7 @@ export interface EnvironmentOption {
   name: string
   has_snapshot: boolean
   refresh_status?: EnvironmentRefreshStatus
+  refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null
   refresh_error?: string | null
   refresh_log_excerpt?: string | null

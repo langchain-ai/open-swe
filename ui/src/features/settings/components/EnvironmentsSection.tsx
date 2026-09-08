@@ -16,6 +16,19 @@ const REFRESH_LABEL: Record<EnvironmentRefreshStatus, string> = {
   failed: "Refresh failed",
 }
 
+// A nightly rebuild from the base image and an hourly update of the current
+// snapshot read differently to a person deciding whether to trust the image.
+function refreshLabel(
+  status: EnvironmentRefreshStatus,
+  kind: EnvironmentOption["refresh_kind"]
+): string {
+  if (status === "success" && kind === "update") return "Updated"
+  if (status === "success" && kind === "full") return "Rebuilt"
+  if (status === "refreshing" && kind === "update") return "Updating…"
+  if (status === "refreshing" && kind === "full") return "Rebuilding…"
+  return REFRESH_LABEL[status]
+}
+
 const REFRESH_CLASS: Record<EnvironmentRefreshStatus, string> = {
   never: "text-muted-foreground",
   refreshing: "text-muted-foreground",
@@ -58,7 +71,7 @@ function EnvironmentRow({
           </span>
         </div>
         <span className={`text-xs sm:shrink-0 ${REFRESH_CLASS[status]}`}>
-          {REFRESH_LABEL[status]}
+          {refreshLabel(status, environment.refresh_kind)}
           {status !== "refreshing" && when ? ` ${when}` : ""}
         </span>
       </div>
@@ -93,8 +106,8 @@ export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
       title="Environments"
       description={
         isAdmin
-          ? "Each environment is rebuilt nightly from its setup script. To create or edit one, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
-          : "Each environment is rebuilt nightly from its setup script. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
+          ? "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
+          : "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
       }
     >
       {environments.isLoading ? (

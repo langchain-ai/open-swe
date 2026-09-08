@@ -93,9 +93,9 @@ def test_snapshot_name_rejects_a_tag_separator() -> None:
 
 
 def test_scripts_are_stripped_on_the_way_in() -> None:
-    record = Environment(slug="base", setup_script="  make setup  ", init_script="   ")
+    record = Environment(slug="base", setup_script="  make setup  ", update_script="   ")
     assert record.setup_script == "make setup"
-    assert not record.init_script
+    assert not record.update_script
 
 
 def test_log_excerpt_keeps_the_head_and_the_tail() -> None:
@@ -212,24 +212,15 @@ def test_a_capture_in_flight_keeps_serving_the_previous_snapshot() -> None:
 
 
 @pytest.mark.asyncio
-async def test_capture_records_the_init_script_that_shipped(fake_store: FakeStore) -> None:
-    """The snapshot and the init script validated against it move together."""
+async def test_a_refresh_records_which_kind_it_was(fake_store: FakeStore) -> None:
+    """The dashboard tells an hourly update apart from a nightly rebuild."""
     await ENVIRONMENTS.create(
-        EnvironmentCreate(name="base", setup_script="make setup", init_script="git pull"), "ramon"
+        EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"), "ramon"
     )
-    record = await ENVIRONMENTS.get("base")
-    assert record is not None
-    assert record.validated_init_script == ""
-
-    captured = await ENVIRONMENTS.mark_captured(
-        "base",
-        snapshot_id="snap-1",
-        snapshot_name="openswe-environment-base",
-        source_sandbox_id="sb-1",
-    )
-
-    assert captured is not None
-    assert captured.validated_init_script == "git pull"
+    marked = await ENVIRONMENTS.mark_refreshing("base", "update")
+    assert marked is not None
+    assert marked.refresh_kind == "update"
+    assert marked.option()["refresh_kind"] == "update"
 
 
 def test_environment_prompt_blank_is_none() -> None:
@@ -581,6 +572,7 @@ async def test_environment_options_omit_admin_only_settings(fake_store: FakeStor
             "name": "default",
             "has_snapshot": True,
             "refresh_status": "never",
+            "refresh_kind": None,
             "refresh_finished_at": None,
             "refresh_error": None,
             "refresh_log_excerpt": None,

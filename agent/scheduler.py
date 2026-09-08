@@ -27,6 +27,7 @@ class SchedulerState(BaseModel):
     schedule_id: str | None = None
     task: str | None = None
     environment_slug: str | None = None
+    refresh_kind: str | None = None
     watch_key: str | None = None
     thread_id: str | None = None
     agent_thread_id: str | None = None
@@ -55,7 +56,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         return {"result": await monitor_background_tasks(thread_id)}
     if task == ENVIRONMENT_REFRESH_TASK:
         slug = state.environment_slug or cfg.environment
-        return {"result": await run_environment_refresh_tick(slug or None)}
+        kind = "update" if state.refresh_kind == "update" else "full"
+        return {"result": await run_environment_refresh_tick(slug or None, kind)}
     if task == "session_cost":
         return {"result": await run_session_cost_refresh(state.model_dump())}
     if task == "agent_cost":

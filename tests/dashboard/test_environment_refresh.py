@@ -1,4 +1,5 @@
 import base64
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -96,10 +97,10 @@ async def test_refresh_runs_the_script_then_captures_and_cleans_up(
 
 
 @pytest.mark.asyncio
-async def test_the_init_script_runs_after_setup_and_gates_the_capture(
+async def test_the_update_script_runs_after_setup_and_gates_the_capture(
     fake_store: FakeStore,
 ) -> None:
-    """A broken init script must be caught here, not on someone's first run."""
+    """A broken update script must be caught here, not by the next hourly update."""
     backend = _backend(_Result("provisioned", 0), _Result("fatal: not a git repository", 1))
     capture = AsyncMock()
     with (
@@ -108,18 +109,18 @@ async def test_the_init_script_runs_after_setup_and_gates_the_capture(
         patch.object(refresh, "capture_environment_snapshot", capture),
     ):
         await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup", init_script="git pull"),
+            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
         result = await refresh.refresh_environment("base")
         record = await ENVIRONMENTS.get("base")
 
     assert result["status"] == "failed"
-    assert result["script"] == "init"
+    assert result["script"] == "update"
     capture.assert_not_awaited()
     assert _scripts_run(backend) == ["make setup", "git pull"]
     assert record is not None
-    assert record.refresh_error == "init script exited 1"
+    assert record.refresh_error == "update script exited 1"
     # Both sections ride along, so the model can see what ran before the break.
     assert record.refresh_log is not None
     assert "--- setup script ---" in record.refresh_log
@@ -236,6 +237,110 @@ async def test_the_nightly_sweep_only_visits_scripted_environments(
         await refresh.run_environment_refresh_tick(None)
 
     assert [call.args[0] for call in refreshed.await_args_list] == ["scripted"]
+
+
+# --- update kind + lazy trigger ---
+
+
+@pytest.mark.asyncio
+async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_update_script(
+    fake_store: FakeStore,
+) -> None:
+    backend = _backend(_Result("Already up to date.", 0))
+    create_builder = AsyncMock(return_value=backend)
+    capture = AsyncMock()
+    with (
+        patch.object(refresh, "_create_builder_sandbox", create_builder),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_environment_snapshot", capture),
+    ):
+        await ENVIRONMENTS.create(
+            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
+            "ramon",
+        )
+        await ENVIRONMENTS.mark_captured(
+            "base",
+            snapshot_id="snap-1",
+            snapshot_name="openswe-environment-base",
+            source_sandbox_id="sb-prior",
+        )
+        result = await refresh.refresh_environment("base", "update")
+        record = await ENVIRONMENTS.get("base")
+
+    assert result["status"] == "success"
+    assert result["kind"] == "update"
+    # From the live snapshot, not the base image.
+    assert create_builder.await_args is not None
+    assert create_builder.await_args.args[1] == "snap-1"
+    assert _scripts_run(backend) == ["git pull"]
+    capture.assert_awaited_once()
+    assert record is not None
+    assert record.refresh_kind == "update"
+
+
+@pytest.mark.asyncio
+async def test_an_update_needs_a_snapshot_to_update(fake_store: FakeStore) -> None:
+    create_builder = AsyncMock()
+    with patch.object(refresh, "_create_builder_sandbox", create_builder):
+        await ENVIRONMENTS.create(
+            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
+            "ramon",
+        )
+        result = await refresh.refresh_environment("base", "update")
+
+    assert result["status"] == "no_snapshot_to_update"
+    create_builder.assert_not_awaited()
+
+
+def test_an_update_is_due_only_when_stale_and_idle() -> None:
+    ready = Environment(
+        slug="base",
+        update_script="git pull",
+        snapshot_status="ready",
+        snapshot_id="snap-1",
+    )
+    assert refresh.is_update_due(ready) is True  # never refreshed
+    fresh = ready.model_copy(update={"refresh_finished_at": datetime.now(UTC).isoformat()})
+    assert refresh.is_update_due(fresh) is False
+    stale = ready.model_copy(
+        update={
+            "refresh_finished_at": (
+                datetime.now(UTC) - timedelta(seconds=refresh.UPDATE_INTERVAL_SECONDS + 1)
+            ).isoformat()
+        }
+    )
+    assert refresh.is_update_due(stale) is True
+    running = stale.model_copy(
+        update={
+            "refresh_status": "refreshing",
+            "refresh_started_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    assert refresh.is_update_due(running) is False
+    assert refresh.is_update_due(ready.model_copy(update={"update_script": ""})) is False
+    assert refresh.is_update_due(ready.model_copy(update={"snapshot_status": "failed"})) is False
+
+
+@pytest.mark.asyncio
+async def test_a_new_sandbox_starts_a_background_update_when_one_is_due() -> None:
+    start = AsyncMock(return_value="run-1")
+    due = Environment(
+        slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="s"
+    )
+    with patch.object(refresh, "start_refresh_run", start):
+        assert await refresh.maybe_start_update(due) == "run-1"
+        assert await refresh.maybe_start_update(None) is None
+
+    start.assert_awaited_once_with("base", kind="update")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_trigger_never_reaches_the_sandbox_creation() -> None:
+    due = Environment(
+        slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="s"
+    )
+    with patch.object(refresh, "start_refresh_run", AsyncMock(side_effect=RuntimeError("down"))):
+        assert await refresh.maybe_start_update(due) is None
 
 
 # --- cron ---

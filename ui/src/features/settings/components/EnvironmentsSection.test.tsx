@@ -37,6 +37,7 @@ describe("EnvironmentsSection", () => {
           name: "Default",
           has_snapshot: true,
           refresh_status: "success",
+          refresh_kind: "update",
           refresh_finished_at: new Date(Date.now() - 3_600_000).toISOString(),
           refresh_log_excerpt: "cloning acme/repo\ndone",
         },
@@ -57,7 +58,7 @@ describe("EnvironmentsSection", () => {
     expect(
       screen.getByText("Default environment · Snapshot ready")
     ).toBeTruthy()
-    expect(screen.getByText(/Refreshed 1 hour ago/)).toBeTruthy()
+    expect(screen.getByText(/Updated 1 hour ago/)).toBeTruthy()
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
     expect(screen.getByText("Refresh log")).toBeTruthy()

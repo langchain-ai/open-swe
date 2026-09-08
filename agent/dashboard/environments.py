@@ -3,8 +3,9 @@
 An environment is a definition, not a frozen image. It holds a prompt appended to
 the agent's system prompt, a ``setup_script`` that provisions a sandbox from the
 base snapshot (clone the repos, install toolchains, warm caches), and an optional
-``init_script`` run on every new sandbox booted from the resulting snapshot to
-freshen what goes stale in an image.
+``update_script`` that freshens what goes stale in an image — a ``git pull``, a
+dependency sync — run against the current snapshot at most hourly, and only while
+the environment is actually in use.
 
 :mod:`agent.dashboard.environment_refresh` runs both scripts in a throwaway
 sandbox and captures the result, nightly on a cron and on demand. Because the
@@ -45,6 +46,7 @@ DEFAULT_ENVIRONMENT_SLUG = "default"
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
 RefreshStatus = Literal["never", "refreshing", "success", "failed"]
+RefreshKind = Literal["full", "update"]
 
 
 class SandboxResources(TypedDict, total=False):
@@ -64,8 +66,7 @@ LOG_EXCERPT_LINES = 10
 SNAPSHOT_TAG = "latest"
 
 SETUP_SCRIPT_PATH = "/tmp/openswe-environment-setup.sh"  # noqa: S108
-INIT_SCRIPT_PATH = "/tmp/openswe-environment-init.sh"  # noqa: S108
-DEFAULT_INIT_SCRIPT_TIMEOUT_SECONDS = 2 * 60 * 60
+UPDATE_SCRIPT_PATH = "/tmp/openswe-environment-update.sh"  # noqa: S108
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_CREATE_PARAM_KEYS = frozenset(
@@ -153,16 +154,6 @@ def script_command(script: str, path: str) -> str:
     """
     encoded = base64.b64encode(script.encode()).decode()
     return f"printf %s {shlex.quote(encoded)} | base64 -d > {path} && bash {path} 2>&1"
-
-
-def init_script_timeout() -> int:
-    """Deadline for the per-sandbox init script, which blocks the first model call."""
-    raw = os.environ.get("ENVIRONMENT_INIT_SCRIPT_TIMEOUT_SECONDS", "").strip()
-    try:
-        value = int(raw) if raw else 0
-    except ValueError:
-        value = 0
-    return value if value > 0 else DEFAULT_INIT_SCRIPT_TIMEOUT_SECONDS
 
 
 def log_excerpt(log: str | None, *, lines: int = LOG_EXCERPT_LINES) -> str | None:
@@ -280,7 +271,7 @@ class EnvironmentCreate(BaseModel):
     name: str
     prompt: str = ""
     setup_script: str = ""
-    init_script: str = ""
+    update_script: str = ""
     base_snapshot_id: str | None = None
     snapshot_name: str | None = None
     repos: list[str] = Field(default_factory=list)
@@ -299,7 +290,7 @@ class EnvironmentCreate(BaseModel):
     def _check_prompt(cls, v: str) -> str:
         return _validate_prompt(v)
 
-    @field_validator("setup_script", "init_script")
+    @field_validator("setup_script", "update_script")
     @classmethod
     def _check_script(cls, v: str) -> str:
         return _validate_script(v)
@@ -331,7 +322,7 @@ class EnvironmentUpdate(BaseModel):
     name: str | None = None
     prompt: str | None = None
     setup_script: str | None = None
-    init_script: str | None = None
+    update_script: str | None = None
     base_snapshot_id: str | None = None
     snapshot_name: str | None = None
     repos: list[str] | None = None
@@ -350,7 +341,7 @@ class EnvironmentUpdate(BaseModel):
     def _check_prompt(cls, v: str | None) -> str | None:
         return None if v is None else _validate_prompt(v)
 
-    @field_validator("setup_script", "init_script")
+    @field_validator("setup_script", "update_script")
     @classmethod
     def _check_script(cls, v: str | None) -> str | None:
         return None if v is None else _validate_script(v)
@@ -381,7 +372,7 @@ class Environment(BaseModel):
     name: str = ""
     prompt: str = ""
     setup_script: str = ""
-    init_script: str = ""
+    update_script: str = ""
     base_snapshot_id: str | None = None
     repos: list[str] = Field(default_factory=list)
     mem_bytes: int | None = None
@@ -393,12 +384,10 @@ class Environment(BaseModel):
     snapshot_status: SnapshotStatus = "none"
     status_message: str | None = None
     snapshot_tag: str | None = None
-    # The init script as it stood when the live snapshot was captured. `init_script`
-    # is the desired one and may be unvalidated; this is the one that shipped.
-    validated_init_script: str = ""
     source_sandbox_id: str | None = None
     last_captured_at: str | None = None
     refresh_status: RefreshStatus = "never"
+    refresh_kind: RefreshKind | None = None
     refresh_started_at: str | None = None
     refresh_finished_at: str | None = None
     refresh_log: str | None = None
@@ -414,7 +403,7 @@ class Environment(BaseModel):
         """``EnvironmentUpdate`` clears create params with an explicit null."""
         return {} if v is None else v
 
-    @field_validator("setup_script", "init_script", mode="before")
+    @field_validator("setup_script", "update_script", mode="before")
     @classmethod
     def _scripts_are_stripped(cls, v: Any) -> Any:
         """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
@@ -428,7 +417,7 @@ class Environment(BaseModel):
             name=create.name.strip(),
             prompt=create.prompt,
             setup_script=create.setup_script,
-            init_script=create.init_script,
+            update_script=create.update_script,
             base_snapshot_id=create.base_snapshot_id,
             snapshot_name=create.snapshot_name or default_snapshot_name_for(slugify(create.name)),
             repos=create.repos,
@@ -496,6 +485,7 @@ class Environment(BaseModel):
             "name": self.name,
             "has_snapshot": self.snapshot_status == "ready",
             "refresh_status": self.refresh_status,
+            "refresh_kind": self.refresh_kind,
             "refresh_finished_at": self.refresh_finished_at,
             "refresh_error": self.refresh_error,
             "refresh_log_excerpt": log_excerpt(self.refresh_log),
@@ -537,8 +527,8 @@ class EnvironmentStore(TypedStore[Environment]):
             record.repos = update.repos
         if update.setup_script is not None:
             record.setup_script = update.setup_script
-        if update.init_script is not None:
-            record.init_script = update.init_script
+        if update.update_script is not None:
+            record.update_script = update.update_script
         for field in (
             "mem_bytes",
             "vcpus",
@@ -598,16 +588,16 @@ class EnvironmentStore(TypedStore[Environment]):
         record.snapshot_id = snapshot_id
         record.snapshot_name = snapshot_name
         record.snapshot_tag = snapshot_tag
-        record.validated_init_script = record.init_script
         record.source_sandbox_id = source_sandbox_id
         record.last_captured_at = now_iso()
         return await self.save(record)
 
-    async def mark_refreshing(self, slug: str) -> Environment | None:
+    async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Environment | None:
         record = await self.get(slug)
         if record is None:
             return None
         record.refresh_status = "refreshing"
+        record.refresh_kind = kind
         record.refresh_started_at = now_iso()
         record.refresh_finished_at = None
         record.refresh_log = None
