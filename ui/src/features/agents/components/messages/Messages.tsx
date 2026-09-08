@@ -17,6 +17,7 @@ import { UserMessage } from "./UserMessage"
 import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
+import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
@@ -67,6 +68,8 @@ export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
   showPlanArtifact = false,
+  emptyState,
+  pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   isStreaming,
   streamIsLoading,
@@ -274,6 +277,7 @@ export const Messages = memo(function MessagesComponent({
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
+            {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
               const isLastMessage = index === visibleMessages.length - 1
               const messageIsStreaming = isStreaming && isLastMessage
@@ -303,6 +307,12 @@ export const Messages = memo(function MessagesComponent({
             })}
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
+            )}
+            {threadId && (
+              <WorkflowApprovalCard
+                threadId={threadId}
+                pollWhileActive={pollWorkflowApprovalsWhileActive}
+              />
             )}
             <QueuedMessages queuedMessages={queuedMessages} />
             <ThinkingSpinner

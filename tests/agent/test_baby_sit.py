@@ -421,7 +421,7 @@ async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(scheduler, "evaluate_watch", evaluate)
 
     result = await scheduler._launch(
-        {"task": "baby_sit", "watch_key": "acme/repo#7"},
+        scheduler.SchedulerState(task="baby_sit", watch_key="acme/repo#7"),
         {"configurable": {}},
     )
 

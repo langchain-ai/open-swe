@@ -20,6 +20,7 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
+import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
@@ -142,6 +143,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [models, threadEffort, threadModelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
+  const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const streamRef = useRef(stream)
   useEffect(() => {
     streamRef.current = stream
@@ -526,6 +528,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               isRunning ? visibleQueuedMessages(queued, messages) : []
             }
             streamIsLoading={stream.isLoading}
+            scrollControlRef={scrollControlRef}
           />
           <AgentComposerDock>
             {terminalContexts.length > 0 && (
@@ -570,6 +573,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 }
               }}
               onSubmit={async (prompt, images) => {
+                scrollControlRef.current?.scrollToBottom()
                 const terminalContext = terminalContexts.join("\n\n")
                 setTerminalContexts([])
                 const text = terminalContext

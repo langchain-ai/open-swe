@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:update-state", listener);
     return () => ipcRenderer.removeListener("desktop:update-state", listener);
   },
+  connectService: (provider) =>
+    ipcRenderer.invoke("desktop:connect-service", provider),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
@@ -63,6 +65,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:get-local-diff", threadId),
   getLocalPrDiff: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
+  getProjectDiff: (cwd) => ipcRenderer.invoke("desktop:get-project-diff", cwd),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects);
     ipcRenderer.on("desktop:projects-changed", listener);

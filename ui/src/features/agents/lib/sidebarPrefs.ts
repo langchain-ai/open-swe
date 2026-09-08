@@ -7,8 +7,8 @@ export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
 const ORGANIZE_MODES = ["project", "list"] as const
-const CHAT_SORTS = ["priority", "updated"] as const
-const PINNED_SORTS = ["priority", "updated", "manual"] as const
+const CHAT_SORTS = ["updated"] as const
+const PINNED_SORTS = ["updated", "manual"] as const
 
 export type OrganizeMode = (typeof ORGANIZE_MODES)[number]
 export type ChatSort = (typeof CHAT_SORTS)[number]
@@ -42,7 +42,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   expandedProjectKeys: [],
   collapsedSectionKeys: [],
   organize: "project",
-  sortChats: "priority",
+  sortChats: "updated",
   sortPinned: "manual",
 }
 

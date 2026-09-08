@@ -19,6 +19,7 @@ import { AgentComposerDock } from "@/features/agents/components/composer/AgentCo
 import { LocalProjectSelector } from "@/features/agents/components/composer/RunTargetSelector"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { LocalProjectRightPanel } from "@/features/agents/components/LocalProjectRightPanel"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
@@ -271,8 +272,29 @@ export function AgentsHome() {
   }
 
   const handleRemoveLocalProject = async (cwd: string) => {
-    if (!(await removeProject(cwd))) return
-    if (localProjectPath === cwd) setLocalProjectPath(null)
+    const project = localProjects.find((candidate) => candidate.cwd === cwd)
+    if (!project) return
+    setLocalError(null)
+    try {
+      const terminals = await window.openSweDesktop?.terminal.list(
+        project.scopeId
+      )
+      await Promise.all(
+        (terminals ?? []).map(({ terminalId }) =>
+          window.openSweDesktop?.terminal.close({
+            localSessionId: project.scopeId,
+            terminalId,
+            deleteHistory: true,
+          })
+        )
+      )
+      if (!(await removeProject(cwd))) return
+      if (localProjectPath === cwd) setLocalProjectPath(null)
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : "Could not remove project"
+      )
+    }
   }
 
   const resetPendingSubmit = () => {
@@ -403,6 +425,15 @@ export function AgentsHome() {
       .catch(handleCloudSubmitError)
   }
 
+  const handlePanelCollapsedChange = (next: boolean) => {
+    setPanelCollapsed(next)
+    writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
+  }
+
+  const localProject =
+    runTarget === "local"
+      ? localProjects.find((project) => project.cwd === localProjectPath)
+      : undefined
   const hasProjects =
     runTarget === "local"
       ? localProjects.length > 0
@@ -436,7 +467,7 @@ export function AgentsHome() {
           <div className="flex min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
             <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-6">
               <img
-                src="/logo-mark.png"
+                src={`${import.meta.env.BASE_URL}logo-mark.png`}
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />
@@ -549,20 +580,26 @@ export function AgentsHome() {
           />
         </AgentComposerDock>
       </div>
-      <AgentRightPanel
-        threadRef={NEW_AGENT_PANEL_REF}
-        terminals={newAgentTerminals}
-        terminalTarget={{ kind: "cloud", threadId: NEW_AGENT_PANEL_ID }}
-        cwd=""
-        terminalAvailable={false}
-        diffAvailable={false}
-        collapsed={panelCollapsed}
-        onCollapsedChange={(next) => {
-          setPanelCollapsed(next)
-          writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
-        }}
-        renderDiff={() => null}
-      />
+      {localProject ? (
+        <LocalProjectRightPanel
+          scopeId={localProject.scopeId}
+          cwd={localProject.cwd}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      ) : (
+        <AgentRightPanel
+          threadRef={NEW_AGENT_PANEL_REF}
+          terminals={newAgentTerminals}
+          terminalTarget={{ kind: "cloud", threadId: NEW_AGENT_PANEL_ID }}
+          cwd=""
+          terminalAvailable={false}
+          diffAvailable={false}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+          renderDiff={() => null}
+        />
+      )}
     </>
   )
 }

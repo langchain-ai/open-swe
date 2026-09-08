@@ -3,10 +3,10 @@ name = "open-swe-agent"
 version = "0.1.0"
 description = "Open SWE Agent - Python agent for automating software engineering tasks"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.6",
+    "deepagents==0.7.13",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx>=0.28.1",
@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "basedpyright>=1.39.10",
+    "ty==0.0.78",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.4",
@@ -45,16 +45,16 @@ dev = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.6 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.11 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
-override-dependencies = ["deepagents==0.7.6", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.11", "wcmatch>=11.0"]
 # Each langgraph-api release pins its langgraph-runtime-inmem peer to a single
 # minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`), which
 # uv's default pre-release policy shies away from, so a plain resolve lands on the
 # end-of-life 0.10.3. Hold the local dev server at the version `langgraph.json`
 # declares for the deployment, so tests run against the runtime that serves prod.
-constraint-dependencies = ["langgraph-api>=0.12.7,<0.13"]
+constraint-dependencies = ["langgraph-api>=0.13.3,<0.14"]
 
 [build-system]
 requires = ["hatchling"]
@@ -68,7 +68,6 @@ packages = ["agent"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -92,11 +91,23 @@ ignore = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-[tool.basedpyright]
-venvPath = "."
-venv = ".venv"
-pythonVersion = "3.11"
-typeCheckingMode = "standard"
+[tool.ty.src]
 include = ["agent", "tests"]
-exclude = ["**/node_modules", "**/__pycache__", ".venv", "ui", "**/.*"]
-reportMissingTypeStubs = false
+
+[tool.ty.analysis]
+allowed-unresolved-imports = ["langgraph_api.metrics_datadog"]
+
+[tool.ty.terminal]
+error-on-warning = false
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+invalid-key = "ignore"
+invalid-return-type = "ignore"
+invalid-type-form = "ignore"
+not-subscriptable = "ignore"
+unresolved-attribute = "ignore"

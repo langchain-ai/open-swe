@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
@@ -20,12 +20,12 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
@@ -116,12 +116,14 @@ export function AgentThreadView({
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const [planFeedbackPending, setPlanFeedbackPending] =
     useState(autoFocusComposer)
+  const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
+      scrollControlRef.current?.scrollToBottom()
       if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
@@ -286,52 +288,51 @@ export function AgentThreadView({
             </Alert>
           </div>
         )}
-        <WorkflowApprovalCard
-          threadId={thread.id}
-          pollWhileActive={isStreaming}
-        />
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {hasConversation ? (
+          {isHydrating ? (
+            <div className="flex flex-1 items-center justify-center px-6">
+              <img
+                src={`${import.meta.env.BASE_URL}logo-mark.png`}
+                alt="Loading conversation"
+                className="size-12 animate-pulse"
+              />
+            </div>
+          ) : (
             <Messages
               messages={baseMessages}
               threadId={thread.id}
               showPlanArtifact={
                 thread.planStatus === "ready" || thread.planStatus === "shared"
               }
+              emptyState={
+                <div className="flex min-h-60 items-center justify-center">
+                  {hydrationFailed ? (
+                    <Alert variant="error" className="max-w-3xl">
+                      <CircleAlertIcon />
+                      <AlertDescription>
+                        <span>
+                          This thread&apos;s messages could not be loaded.
+                          Reload to try again.
+                        </span>
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <p className="text-xs text-muted-foreground/70">
+                      This thread has no messages yet.
+                    </p>
+                  )}
+                </div>
+              }
               onOpenFile={handleOpenFile}
               queuedMessages={queuedMessages}
               isStreaming={isStreaming}
               streamIsLoading={stream.isLoading}
+              scrollControlRef={scrollControlRef}
               isThinking={isThinking}
               settingUpSandbox={settingUpSandbox}
+              pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
             />
-          ) : isHydrating ? (
-            <div className="flex flex-1 items-center justify-center px-6">
-              <img
-                src="/logo-mark.png"
-                alt="Loading conversation"
-                className="size-12 animate-pulse"
-              />
-            </div>
-          ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-              {hydrationFailed ? (
-                <Alert variant="error" className="max-w-3xl">
-                  <CircleAlertIcon />
-                  <AlertDescription>
-                    <span>
-                      This thread&apos;s messages could not be loaded. Reload to
-                      try again.
-                    </span>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <p className="text-xs text-muted-foreground/70">
-                  This thread has no messages yet.
-                </p>
-              )}
-            </div>
           )}
           {!isHydrating && (
             <AgentComposerDock>

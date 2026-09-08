@@ -292,7 +292,7 @@ export function SidebarThreadRow({
         <span
           ref={marquee.text}
           className={cn(
-            "block w-max text-[13px] whitespace-nowrap will-change-transform",
+            "block w-max text-sm whitespace-nowrap will-change-transform",
             marquee.shift !== 0 && "sidebar-title-marquee"
           )}
           style={
@@ -377,13 +377,14 @@ export function SidebarThreadRow({
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
+    "text-foreground",
     isActive
       ? thread?.adminThread
-        ? "bg-destructive/10 text-foreground"
-        : "bg-accent text-foreground"
+        ? "bg-destructive/10"
+        : "bg-accent"
       : thread?.adminThread
-        ? "bg-destructive/5 text-muted-foreground group-hover/row:bg-destructive/10"
-        : "text-muted-foreground group-hover/row:bg-sidebar-row-hover group-hover/row:text-foreground"
+        ? "bg-destructive/5 group-hover/row:bg-destructive/10"
+        : "group-hover/row:bg-sidebar-row-hover"
   )
 
   const link =
@@ -423,7 +424,7 @@ export function SidebarThreadRow({
               side="right"
               align="start"
               sideOffset={8}
-              className="pointer-events-auto max-w-80 rounded-xl p-3"
+              className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--sidebar)]"
             >
               <ThreadHoverCard item={item} live={live} />
             </TooltipPopup>

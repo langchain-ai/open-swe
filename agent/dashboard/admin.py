@@ -1,15 +1,15 @@
 """Admin gate driven by the CONFIGURED_ADMINS env var."""
 
-import os
+from agent.config import ENV
 
 
 def _configured_admins() -> frozenset[str]:
-    raw = os.environ.get("CONFIGURED_ADMINS", "")
+    raw = ENV.CONFIGURED_ADMINS.get()
     return frozenset(entry.strip().lower() for entry in raw.split(",") if entry.strip())
 
 
 def _observability_emails() -> frozenset[str]:
-    raw = os.environ.get("OBSERVABILITY_AUTHORIZED_EMAILS", "")
+    raw = ENV.OBSERVABILITY_AUTHORIZED_EMAILS.get()
     return frozenset(entry.strip().lower() for entry in raw.split(",") if entry.strip())
 
 

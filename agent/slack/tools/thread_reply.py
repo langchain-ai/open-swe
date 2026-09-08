@@ -36,7 +36,8 @@ async def slack_thread_reply(
 
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
-    bullet lists with "• ", ```code blocks```, > blockquotes.
+    bullet lists with "• ", ```code blocks```, > blockquotes. Code fences must be
+    bare triple backticks; do not add a language identifier such as ```sql.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
 
     To ask a user to choose from predefined options, pass `options`. Slack will
@@ -166,7 +167,11 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Approve workflow push", "emoji": True},
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Approve & continue push",
+                        "emoji": True,
+                    },
                     "style": "primary",
                     "value": json.dumps(
                         {
@@ -179,7 +184,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Reject", "emoji": True},
+                    "text": {"type": "plain_text", "text": "Cancel push", "emoji": True},
                     "style": "danger",
                     "value": json.dumps(
                         {

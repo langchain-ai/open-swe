@@ -1,9 +1,10 @@
 import asyncio
 import inspect
-import os
 from collections.abc import Callable
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
+
+from agent.config import ENV
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
@@ -49,7 +50,7 @@ async def create_sandbox(
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
     create_params: dict[str, Any] | None = None,
-) -> "SandboxBackendProtocol":
+) -> SandboxBackendProtocol:
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
@@ -73,7 +74,7 @@ async def create_sandbox(
     Returns:
         A sandbox backend implementing SandboxBackendProtocol.
     """
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    sandbox_type = ENV.SANDBOX_TYPE.get()
     factory = _load_sandbox_factory(sandbox_type)
     if sandbox_type == "langsmith":
         options = {
@@ -100,7 +101,7 @@ def validate_sandbox_startup_config() -> None:
     Called from the FastAPI lifespan hook so errors surface at boot rather
     than on the first sandbox creation.
     """
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    sandbox_type = ENV.SANDBOX_TYPE.get()
     if sandbox_type == "langsmith":
         from agent.sandboxes.providers.langsmith import LangSmithProvider
 

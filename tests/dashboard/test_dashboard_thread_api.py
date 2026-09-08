@@ -17,7 +17,7 @@ from agent.dashboard.ttft import AssistantTextObservation
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
-_FABLE = "anthropic:claude-fable-5"
+_FABLE = "anthropic:claude-fable-5-1"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
@@ -1026,7 +1026,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
         def __init__(self, *a: object, **kw: object) -> None:
             pass
 
-        async def __aenter__(self) -> "FakeAsyncClient":
+        async def __aenter__(self) -> FakeAsyncClient:
             return self
 
         async def __aexit__(self, *a: object) -> None:
@@ -1150,7 +1150,7 @@ async def test_run_ttft_observer_records_first_assistant_text(
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        async def __aenter__(self) -> "FakeAsyncClient":
+        async def __aenter__(self) -> FakeAsyncClient:
             return self
 
         async def __aexit__(self, *args: object) -> None:
@@ -1270,7 +1270,7 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        async def __aenter__(self) -> "FakeAsyncClient":
+        async def __aenter__(self) -> FakeAsyncClient:
             return self
 
         async def __aexit__(self, *args: object) -> None:
@@ -1356,7 +1356,7 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
         def __init__(self, *a: object, **kw: object) -> None:
             pass
 
-        async def __aenter__(self) -> "FakeAsyncClient":
+        async def __aenter__(self) -> FakeAsyncClient:
             return self
 
         async def __aexit__(self, *a: object) -> None:
