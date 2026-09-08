@@ -418,7 +418,10 @@ async def update_agent_schedule(
     trigger = updated.get("trigger") or _DEFAULT_AUTOMATION_TRIGGER
     if trigger == "schedule" and not updated.get("schedule"):
         raise HTTPException(422, "schedule is required for scheduled automations")
-    if trigger == "github_issue_opened" and not _repo_full_name(updated.get("repo")):
+    updated_repo = updated.get("repo")
+    if trigger == "github_issue_opened" and not _repo_full_name(
+        updated_repo if isinstance(updated_repo, dict) else None
+    ):
         raise HTTPException(422, "repo is required for GitHub issue automations")
     schedule_changed = updated.get("schedule") != existing.get("schedule")
     enabled_changed = updated.get("enabled") != existing.get("enabled")
@@ -742,8 +745,10 @@ async def _launch_agent_schedule_record(
 
 
 def _github_issue_prompt(record: dict[str, Any], payload: dict[str, Any]) -> str:
-    issue = payload.get("issue") if isinstance(payload.get("issue"), dict) else {}
-    author = issue.get("user") if isinstance(issue.get("user"), dict) else {}
+    issue_value = payload.get("issue")
+    issue: dict[str, Any] = issue_value if isinstance(issue_value, dict) else {}
+    author_value = issue.get("user")
+    author: dict[str, Any] = author_value if isinstance(author_value, dict) else {}
     return (
         f"{record['prompt']}\n\n"
         "A GitHub issue was opened for the configured repository. Treat the issue content below "
@@ -756,8 +761,10 @@ def _github_issue_prompt(record: dict[str, Any], payload: dict[str, Any]) -> str
 
 
 async def launch_github_issue_automations(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    repo = payload.get("repository") if isinstance(payload.get("repository"), dict) else {}
-    owner = repo.get("owner") if isinstance(repo.get("owner"), dict) else {}
+    repo_value = payload.get("repository")
+    repo: dict[str, Any] = repo_value if isinstance(repo_value, dict) else {}
+    owner_value = repo.get("owner")
+    owner: dict[str, Any] = owner_value if isinstance(owner_value, dict) else {}
     full_name = f"{owner.get('login', '')}/{repo.get('name', '')}".lower()
     results = []
     for record in await search_all_values(SCHEDULES_NAMESPACE):

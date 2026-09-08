@@ -282,7 +282,9 @@ export function AutomationEditor({
         <div className="rounded-xl border border-border bg-card p-1.5">
           <Select
             value={trigger}
-            onValueChange={(value) => value && setTrigger(value as AutomationTrigger)}
+            onValueChange={(value) =>
+              value && setTrigger(value as AutomationTrigger)
+            }
             disabled={!canManage}
           >
             <SelectTrigger className="w-full">
@@ -290,7 +292,9 @@ export function AutomationEditor({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="schedule">Schedule</SelectItem>
-              <SelectItem value="github_issue_opened">GitHub issue opened</SelectItem>
+              <SelectItem value="github_issue_opened">
+                GitHub issue opened
+              </SelectItem>
             </SelectContent>
           </Select>
           {trigger === "schedule" && cron && (
@@ -323,7 +327,9 @@ export function AutomationEditor({
               </button>
             </div>
           )}
-          {trigger === "schedule" && cron && <div className="mx-3 h-px bg-border/60" />}
+          {trigger === "schedule" && cron && (
+            <div className="mx-3 h-px bg-border/60" />
+          )}
           {canManage && trigger === "schedule" && (
             <ScheduleTriggerPicker
               onSelect={onPickTrigger}
