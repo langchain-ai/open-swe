@@ -105,4 +105,3 @@ async def test_run_slack_task_reports_failure(monkeypatch: pytest.MonkeyPatch) -
     await failures.run_slack_task(_target(), task())
 
     post_reply.assert_awaited_once()
-

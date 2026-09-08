@@ -149,19 +149,16 @@ ENV.var(
     "LANGSMITH_API_KEY",
     "LangSmith API key for sandboxes, trace links and feedback; the LangSmith SDK "
     "reads the same variable for tracing and LangGraph Platform injects it.",
-    aliases=("LANGSMITH_API_KEY_PROD",),
     secret=True,
 )
 ENV.var(
     "LANGSMITH_ENDPOINT",
     "LangSmith API endpoint; set for self-hosted or regional LangSmith.",
     default="https://api.smith.langchain.com",
-    aliases=("LANGSMITH_ENDPOINT_PROD",),
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",
     "LangSmith workspace id used in trace links; discovered from the workspace when unset.",
-    aliases=("LANGSMITH_TENANT_ID_PROD",),
 )
 ENV.var(
     "LANGSMITH_PROJECT",
@@ -169,11 +166,6 @@ ENV.var(
     "LangGraph Platform sets it to the deployment name.",
     default="default",
     aliases=("LANGCHAIN_PROJECT",),
-)
-ENV.var(
-    "LANGSMITH_URL_PROD",
-    "Explicit LangSmith web host for trace links.",
-    deprecated="the web host is derived from LANGSMITH_ENDPOINT.",
 )
 ENV.var(
     "LANGSMITH_HOST_API_URL",
@@ -212,7 +204,6 @@ ENV.var(
     "LANGGRAPH_URL",
     "URL of the LangGraph server the FastAPI side calls to create and stream runs.",
     default="http://localhost:2024",
-    aliases=("LANGGRAPH_URL_PROD",),
 )
 ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."

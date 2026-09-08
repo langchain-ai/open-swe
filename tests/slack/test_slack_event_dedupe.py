@@ -97,9 +97,6 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}
 
-    async def not_docs_plz(_channel_id: str, _context: dict[str, Any]) -> bool:
-        return False
-
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -107,8 +104,6 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "is_docs_plz_slack_channel", not_docs_plz)
-
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
     return client
 

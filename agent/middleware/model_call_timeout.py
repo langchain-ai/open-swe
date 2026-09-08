@@ -12,10 +12,10 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
 from agent.config import ENV
+from agent.middleware.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def _configured_timeout_seconds() -> float:
     return value if value > 0 else DEFAULT_MODEL_CALL_TIMEOUT_SECONDS
 
 
-class ModelCallTimeoutMiddleware(AgentMiddleware):
+class ModelCallTimeoutMiddleware(OpenSWEMiddleware):
     """Fail a model call that exceeds the deadline instead of hanging forever."""
 
     def __init__(self, timeout_seconds: float | None = None) -> None:

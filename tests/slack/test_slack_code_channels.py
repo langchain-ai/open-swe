@@ -207,7 +207,6 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "is_docs_plz_slack_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
         webhook_common,
         "get_slack_repo_config",
