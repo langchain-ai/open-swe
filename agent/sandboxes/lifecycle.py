@@ -15,8 +15,14 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
-from agent.dashboard.environment_refresh import maybe_start_update
-from agent.dashboard.environments import Environment, SandboxResources, resolve_environment
+from agent.dashboard.environment_refresh import is_snapshot_stale, maybe_start_update
+from agent.dashboard.environments import (
+    Environment,
+    SandboxResources,
+    resolve_environment,
+    sandbox_update_timeout,
+    script_command,
+)
 from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
 from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.github.app import get_github_app_installation_token_with_expiry
@@ -82,6 +88,39 @@ class SandboxCreateConfig:
     def proxy_config(self) -> dict[str, Any] | None:
         return _get_sandbox_proxy_config(self.create_params)
 
+    async def run_update_script(
+        self, sandbox_backend: SandboxBackendProtocol, thread_id: str | None
+    ) -> None:
+        """Freshen this box's checkouts when the snapshot it booted from has aged out.
+
+        Awaited before the first model call, on purpose: refreshing only the
+        snapshot in the background never helps the run that triggered it, and
+        with sparse traffic every run is a triggering run — so the first run
+        after a quiet spell would otherwise work against a checkout as old as
+        the last nightly rebuild. Bounded by a short timeout, and never fatal:
+        the image is already usable, so a failed pull costs freshness, not the
+        run.
+        """
+        environment = self.environment
+        if environment is None or not is_snapshot_stale(environment):
+            return
+        async with aphase(thread_id, "sandbox.update_script"):
+            result = await sandbox_backend.aexecute(
+                script_command(environment.update_script, "update"),
+                timeout=sandbox_update_timeout(),
+            )
+        if result.exit_code != 0:
+            logger.warning(
+                "Environment update script exited %s in sandbox %s",
+                result.exit_code,
+                sandbox_backend.id,
+                extra={
+                    "environment": environment.slug,
+                    "exit_code": result.exit_code,
+                    "log_tail": (result.output or "")[-2000:],
+                },
+            )
+
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
             return await create_sandbox(
@@ -130,8 +169,9 @@ async def _create_sandbox_with_proxy(
                 base_proxy_config=proxy_config,
             )
 
-    # Never awaited: the snapshot this box booted from is already usable, and a
-    # fresher one is for the next creation. The update runs on its own builder.
+    # This run gets fresh checkouts now; the background capture makes the *next*
+    # creation skip the step entirely.
+    await config.run_update_script(sandbox_backend, thread_id)
     _fire_and_forget(maybe_start_update(config.environment), "environment update trigger")
     return sandbox_backend
 

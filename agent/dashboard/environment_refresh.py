@@ -11,10 +11,15 @@ its capture lands:
 - ``update``: boot from the environment's *current* snapshot, run only
   ``update_script`` (a ``git pull``, a dependency sync), capture. Triggered
   lazily: creating a sandbox for an environment whose snapshot is older than
-  ``UPDATE_INTERVAL_SECONDS`` kicks one off in the background. The triggering
-  run boots from the snapshot it found; the fresh one lands for the next. So an
-  idle environment costs nothing, a busy one is at most an hour stale, and no
-  run ever waits on or fails because of the script.
+  ``UPDATE_INTERVAL_SECONDS`` enqueues one in the background, so the image
+  converges and later creations skip the work.
+
+Creating a sandbox from a stale snapshot *also* runs the update script in that
+sandbox, before the first model call — see ``SandboxCreateConfig.run_update_script``.
+The background capture alone is not enough: it never helps the run that
+triggered it, and when runs are sparse every run is a triggering run, so the
+first one after a quiet spell would work against a checkout as old as the last
+nightly rebuild.
 
 The outcome — status, kind, timestamps, a capped log — lands on the environment
 record for the dashboard. A failed refresh of either kind leaves the previous
@@ -31,8 +36,6 @@ from langgraph_sdk import get_client
 
 from agent.dashboard.environments import (
     ENVIRONMENTS,
-    SETUP_SCRIPT_PATH,
-    UPDATE_SCRIPT_PATH,
     Environment,
     RefreshKind,
     capture_environment_snapshot,
@@ -179,7 +182,7 @@ def _scripts_to_run(record: Environment, kind: RefreshKind) -> list[tuple[str, s
         steps.append(
             (
                 "setup",
-                script_command(record.setup_script, SETUP_SCRIPT_PATH),
+                script_command(record.setup_script, "setup"),
                 _timeout("ENVIRONMENT_REFRESH_TIMEOUT_SECONDS", DEFAULT_SCRIPT_TIMEOUT_SECONDS),
             )
         )
@@ -187,22 +190,37 @@ def _scripts_to_run(record: Environment, kind: RefreshKind) -> list[tuple[str, s
         steps.append(
             (
                 "update",
-                script_command(record.update_script, UPDATE_SCRIPT_PATH),
+                script_command(record.update_script, "update"),
                 _timeout("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS", DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )
     return steps
 
 
-def is_update_due(record: Environment) -> bool:
-    """Whether a new sandbox for this environment should kick off an update.
+def is_snapshot_stale(record: Environment) -> bool:
+    """Whether the image a new sandbox boots from has aged past the interval.
 
-    Only when there is something to update (a script and a ready snapshot), no
-    refresh is already running, and the last refresh of either kind — success
-    or failure — is older than the interval. Counting failures keeps a broken
-    network from retrying on every single sandbox creation.
+    This gates the update that runs *in the run's own sandbox*, so it keys on
+    when the snapshot was captured — not on when a refresh was last attempted.
+    Every sandbox gets its own copy of the snapshot, so while the image is stale
+    each one needs the script; once a capture lands, they all boot fresh.
     """
     if not record.update_script or record.ready_snapshot_id is None:
+        return False
+    captured = _parse_iso(record.last_captured_at)
+    if captured is None:
+        return True
+    return (datetime.now(UTC) - captured).total_seconds() >= UPDATE_INTERVAL_SECONDS
+
+
+def is_update_due(record: Environment) -> bool:
+    """Whether a new sandbox should also kick off a background snapshot update.
+
+    Same staleness test, plus: no refresh already running, and the last attempt
+    — success *or* failure — is older than the interval. Counting failures keeps
+    a broken script or network from enqueueing a builder on every creation.
+    """
+    if not is_snapshot_stale(record):
         return False
     if is_refresh_in_flight(record):
         return False

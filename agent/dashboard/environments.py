@@ -65,8 +65,11 @@ SNAPSHOT_NAME_MAX_CHARS = 128
 LOG_EXCERPT_LINES = 10
 SNAPSHOT_TAG = "latest"
 
-SETUP_SCRIPT_PATH = "/tmp/openswe-environment-setup.sh"  # noqa: S108
-UPDATE_SCRIPT_PATH = "/tmp/openswe-environment-update.sh"  # noqa: S108
+# Scripts and their logs live under a fixed root that is captured with the
+# snapshot, so any sandbox booted from an image carries the log of the run that
+# produced it — readable in place, without the dashboard.
+DEFAULT_SCRIPT_ROOT = "/openswe"
+DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS = 120
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_CREATE_PARAM_KEYS = frozenset(
@@ -146,14 +149,62 @@ def default_snapshot_name_for(slug: str) -> str:
     return f"{snapshot_name_prefix()}-environment-{slug}"
 
 
-def script_command(script: str, path: str) -> str:
-    """Shell command that writes one of an environment's scripts and runs it.
+def script_root() -> str:
+    """Where an environment's scripts and their logs live inside a sandbox.
+
+    ``/openswe`` in a real sandbox, where the agent runs as root. Configurable
+    because ``SANDBOX_TYPE=local`` executes on a developer's own machine, whose
+    filesystem root is not writable.
+    """
+    configured = os.environ.get("OPENSWE_SCRIPT_ROOT", "").strip().rstrip("/")
+    return configured or DEFAULT_SCRIPT_ROOT
+
+
+def script_log_path(label: str) -> str:
+    """Canonical log path for a script, inside the sandbox and in the snapshot."""
+    return f"{script_root()}/logs/{label}.log"
+
+
+def script_command(script: str, label: str) -> str:
+    """Shell command that writes one of an environment's scripts, runs it, and logs it.
 
     Base64 so nothing in the script body — quotes, heredocs, newlines — can break
-    out of the command carrying it. Output is merged so the caller gets one log.
+    out of the command carrying it.
+
+    ``bash -x`` traces each command into the log, which is what makes it useful
+    after the fact: a hung or half-finished provision shows the exact step it
+    reached. Note that the trace expands arguments, so a script that puts a
+    credential on a command line would write it here — scripts must not carry
+    secrets, and the proxy injects git auth precisely so they do not have to.
+
+    The log is written to ``<root>/logs/<label>.log`` inside the sandbox *and*
+    echoed back, so the caller records it while the file rides along into the
+    snapshot. The exit code is the script's own, not ``cat``'s.
     """
+    root = script_root()
+    path = f"{root}/{label}.sh"
+    log_path = script_log_path(label)
     encoded = base64.b64encode(script.encode()).decode()
-    return f"printf %s {shlex.quote(encoded)} | base64 -d > {path} && bash {path} 2>&1"
+    return (
+        f"mkdir -p {shlex.quote(f'{root}/logs')} "
+        f"&& printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)} "
+        f"&& {{ bash -x {shlex.quote(path)} > {shlex.quote(log_path)} 2>&1; }}; "
+        f"rc=$?; cat {shlex.quote(log_path)} 2>/dev/null; exit $rc"
+    )
+
+
+def sandbox_update_timeout() -> int:
+    """Deadline for the update script when it runs in a run's own sandbox.
+
+    Tighter than the builder's: this one is on the critical path before the first
+    model call, and a ``git pull`` that takes minutes is broken rather than slow.
+    """
+    raw = os.environ.get("ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS", "").strip()
+    try:
+        value = int(raw) if raw else 0
+    except ValueError:
+        value = 0
+    return value if value > 0 else DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
 
 
 def log_excerpt(log: str | None, *, lines: int = LOG_EXCERPT_LINES) -> str | None:

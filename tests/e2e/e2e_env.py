@@ -49,6 +49,10 @@ _DEFAULTS = {
     # Sandbox: real local provider, rooted in a throwaway temp dir.
     "SANDBOX_TYPE": "local",
     "LOCAL_SANDBOX_ROOT_DIR": str(_WORK_DIR),
+    # Environment scripts write themselves and their logs here. The default,
+    # /openswe, assumes a sandbox where the agent is root; this provider runs on
+    # the developer's own machine, whose filesystem root is not writable.
+    "OPENSWE_SCRIPT_ROOT": str(TMP / "openswe"),
     # Keep git's --global writes (bot identity) out of the user's ~/.gitconfig.
     "GIT_CONFIG_GLOBAL": str(TMP / "gitconfig-global"),
     "GIT_CONFIG_SYSTEM": "/dev/null",

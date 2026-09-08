@@ -142,11 +142,13 @@ async def save_environment(
             scratch, and it must never write a secret or a proxy credential to
             disk. A full replacement, not a delta; empty string clears it.
         update_script: Optional bash script for what goes stale in an image — a
-            ``git pull``, a dependency sync. It runs against the current snapshot
-            on a throwaway builder, at most once an hour and only while the
-            environment is in use, and the result becomes the new snapshot. No
-            run ever waits on it. It also runs at the end of every full rebuild,
-            so a broken one is caught nightly. A full replacement; empty string
+            ``git pull``, a dependency sync. Keep it to seconds: a run whose
+            sandbox boots from a snapshot older than an hour runs this script in
+            that sandbox before the first model call, and the same creation
+            refreshes the snapshot on a throwaway builder in the background so
+            later runs skip it. It also runs at the end of every full rebuild,
+            which is where a broken one is caught. Output is traced to
+            ``/openswe/logs/update.log``. A full replacement; empty string
             clears it.
         base_snapshot_id: Optional snapshot the setup script provisions from,
             when this environment needs something other than the configured base.

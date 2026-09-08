@@ -38,11 +38,36 @@ def _scripts_run(backend: MagicMock) -> list[str]:
 def test_script_command_carries_the_script_verbatim() -> None:
     """Base64 so quotes and heredocs in the body cannot break the command."""
     script = "set -euo pipefail\ngit clone 'git@github.com:acme/repo'  # it's fine\n"
-    command = env_store.script_command(script, env_store.SETUP_SCRIPT_PATH)
+    command = env_store.script_command(script, "setup")
 
     encoded = command.split("printf %s ")[1].split(" |")[0].strip("'")
     assert base64.b64decode(encoded).decode() == script
-    assert command.endswith(f"bash {env_store.SETUP_SCRIPT_PATH} 2>&1")
+
+
+def test_script_command_traces_into_a_canonical_log_and_keeps_the_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The log rides into the snapshot, and `cat` must not mask a failing script."""
+    monkeypatch.delenv("OPENSWE_SCRIPT_ROOT", raising=False)
+    command = env_store.script_command("git pull", "update")
+
+    assert env_store.script_log_path("update") == "/openswe/logs/update.log"
+    assert "mkdir -p /openswe/logs" in command
+    assert "bash -x /openswe/update.sh > /openswe/logs/update.log" in command
+    # The script's own status, captured before `cat` runs.
+    assert "rc=$?" in command
+    assert command.endswith("exit $rc")
+
+
+def test_the_script_root_is_configurable_for_providers_without_a_writable_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`SANDBOX_TYPE=local` runs on a developer's machine, where / is read-only."""
+    monkeypatch.setenv("OPENSWE_SCRIPT_ROOT", "/tmp/e2e/openswe/")
+
+    assert env_store.script_root() == "/tmp/e2e/openswe"
+    assert env_store.script_log_path("setup") == "/tmp/e2e/openswe/logs/setup.log"
+    assert "mkdir -p /tmp/e2e/openswe/logs" in env_store.script_command("make setup", "setup")
 
 
 def test_daily_schedule_is_stable_and_staggered() -> None:
@@ -292,6 +317,43 @@ async def test_an_update_needs_a_snapshot_to_update(fake_store: FakeStore) -> No
     create_builder.assert_not_awaited()
 
 
+def test_a_snapshot_is_stale_once_its_capture_ages_out() -> None:
+    """Gates the in-sandbox update: every sandbox copies the same stale image."""
+    ready = Environment(
+        slug="base",
+        update_script="git pull",
+        snapshot_status="ready",
+        snapshot_id="snap-1",
+    )
+    assert refresh.is_snapshot_stale(ready) is True  # never captured
+    fresh = ready.model_copy(update={"last_captured_at": datetime.now(UTC).isoformat()})
+    assert refresh.is_snapshot_stale(fresh) is False
+    aged = ready.model_copy(
+        update={
+            "last_captured_at": (
+                datetime.now(UTC) - timedelta(seconds=refresh.UPDATE_INTERVAL_SECONDS + 1)
+            ).isoformat()
+        }
+    )
+    assert refresh.is_snapshot_stale(aged) is True
+    # A refresh already running does not stop the sandbox from freshening itself.
+    assert (
+        refresh.is_snapshot_stale(
+            aged.model_copy(
+                update={
+                    "refresh_status": "refreshing",
+                    "refresh_started_at": datetime.now(UTC).isoformat(),
+                }
+            )
+        )
+        is True
+    )
+    assert refresh.is_snapshot_stale(ready.model_copy(update={"update_script": ""})) is False
+    assert (
+        refresh.is_snapshot_stale(ready.model_copy(update={"snapshot_status": "failed"})) is False
+    )
+
+
 def test_an_update_is_due_only_when_stale_and_idle() -> None:
     ready = Environment(
         slug="base",
@@ -299,17 +361,16 @@ def test_an_update_is_due_only_when_stale_and_idle() -> None:
         snapshot_status="ready",
         snapshot_id="snap-1",
     )
-    assert refresh.is_update_due(ready) is True  # never refreshed
-    fresh = ready.model_copy(update={"refresh_finished_at": datetime.now(UTC).isoformat()})
+    assert refresh.is_update_due(ready) is True  # never captured, never refreshed
+    aged = (datetime.now(UTC) - timedelta(seconds=refresh.UPDATE_INTERVAL_SECONDS + 1)).isoformat()
+    fresh = ready.model_copy(update={"last_captured_at": datetime.now(UTC).isoformat()})
     assert refresh.is_update_due(fresh) is False
-    stale = ready.model_copy(
-        update={
-            "refresh_finished_at": (
-                datetime.now(UTC) - timedelta(seconds=refresh.UPDATE_INTERVAL_SECONDS + 1)
-            ).isoformat()
-        }
-    )
+    stale = ready.model_copy(update={"last_captured_at": aged, "refresh_finished_at": aged})
     assert refresh.is_update_due(stale) is True
+    # A recent *attempt* holds off the builder even while the image is stale, so
+    # a failing script cannot enqueue one per sandbox creation.
+    just_tried = stale.model_copy(update={"refresh_finished_at": datetime.now(UTC).isoformat()})
+    assert refresh.is_update_due(just_tried) is False
     running = stale.model_copy(
         update={
             "refresh_status": "refreshing",

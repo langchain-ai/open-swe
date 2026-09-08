@@ -312,6 +312,8 @@ test.describe("Environments", () => {
     expect(record?.refresh_log).toContain("--- setup script ---");
     expect(record?.refresh_log).toContain(".provisioned");
     expect(record?.refresh_log).toContain("--- update script ---");
+    // `bash -x` traces each command, which is what makes the log worth keeping.
+    expect(record?.refresh_log).toContain("+ ");
     // The save ran a full rebuild; hourly updates are a separate kind.
     expect(record?.refresh_kind).toBe("full");
 
