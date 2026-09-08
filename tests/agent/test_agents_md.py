@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx2 as httpx
+import httpx2
 import pytest
 
 from agent.utils import agents_md
@@ -91,7 +91,7 @@ async def test_fetch_agents_md_oversized_agents_md_does_not_fall_back_to_claude_
 async def test_fetch_agents_md_handles_http_error() -> None:
     with patch("httpx2.AsyncClient") as mock_client_cls:
         client = MagicMock()
-        client.get = AsyncMock(side_effect=httpx.HTTPError("boom"))
+        client.get = AsyncMock(side_effect=httpx2.HTTPError("boom"))
         mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         result = await agents_md.fetch_agents_md("acme", "repo", "main", token="tok")

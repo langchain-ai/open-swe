@@ -32,7 +32,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import anthropic
-import httpx2 as httpx
+import httpx2
 import openai
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
@@ -54,7 +54,7 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.APITimeoutError,
     openai.RateLimitError,
     openai.InternalServerError,
-    httpx.TransportError,
+    httpx2.TransportError,
     # Includes ``ModelCallTimeoutMiddleware``'s deadline: a wedged provider call
     # is exactly the case where trying the other provider is worthwhile.
     TimeoutError,

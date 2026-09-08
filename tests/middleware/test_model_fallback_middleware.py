@@ -4,7 +4,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import anthropic
-import httpx2 as httpx
+import httpx2
 import openai
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -18,8 +18,8 @@ from agent.middleware.model_fallback import (
 
 
 def _anthropic_overloaded() -> anthropic.APIStatusError:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx.Response(
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(
         529,
         request=request,
         json={"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}},
@@ -29,8 +29,8 @@ def _anthropic_overloaded() -> anthropic.APIStatusError:
 
 
 def _openai_5xx() -> openai.APIStatusError:
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
-    response = httpx.Response(503, request=request, json={"error": {"message": "unavailable"}})
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx2.Response(503, request=request, json={"error": {"message": "unavailable"}})
     return openai.APIStatusError("unavailable", response=response, body=response.json())
 
 
@@ -44,8 +44,8 @@ def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
         },
         "request_id": "req_test",
     }
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx.Response(400, request=request, json=body)
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(400, request=request, json=body)
     return anthropic.BadRequestError("model unavailable", response=response, body=body)
 
 
@@ -63,20 +63,20 @@ class TestShouldFallback:
         assert _should_fallback(_openai_5xx()) is True
 
     def test_anthropic_rate_limit_falls_back(self) -> None:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx.Response(429, request=request, json={"error": {}})
+        request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+        response = httpx2.Response(429, request=request, json={"error": {}})
         exc = anthropic.RateLimitError("rate", response=response, body={})
         assert _should_fallback(exc) is True
 
     def test_http_remote_protocol_error_falls_back(self) -> None:
-        exc = httpx.RemoteProtocolError(
+        exc = httpx2.RemoteProtocolError(
             "peer closed connection without sending complete message body (incomplete chunked read)"
         )
         assert _should_fallback(exc) is True
 
     def test_anthropic_400_does_not_fall_back(self) -> None:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx.Response(400, request=request, json={"error": {}})
+        request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+        response = httpx2.Response(400, request=request, json={"error": {}})
         exc = anthropic.BadRequestError("bad", response=response, body={})
         assert _should_fallback(exc) is False
 
@@ -122,7 +122,7 @@ class TestModelFallbackMiddleware:
         async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             if len(calls) == 1:
-                raise httpx.RemoteProtocolError(
+                raise httpx2.RemoteProtocolError(
                     "peer closed connection without sending complete message body "
                     "(incomplete chunked read)"
                 )
