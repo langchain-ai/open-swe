@@ -11,9 +11,11 @@
 Open SWE should make thread privacy the boundary for personal credentials. Collaborative threads
 may be prompted by multiple users and run only as a shared, least-privilege Open SWE identity.
 Private threads have one owner, are promptable only by that owner, and may use the owner's MCP
-connections. An agent may fork a collaborative thread into a private thread when it needs personal
-authority, preserving safe execution context and cache where possible without moving credentials
-across the boundary.
+connections. On Slack, private threads run as bot DM threads with that user, and every bot DM thread
+is private. An admin thread is not a separate concept: it is a private thread owned by an admin, so
+private threads created by admins are admin threads by default. An agent may fork a collaborative
+channel thread into a private DM thread when it needs personal authority, preserving safe execution
+context and cache where possible without moving credentials across the boundary.
 
 A private thread may later be made publicly viewable, but viewers cannot prompt it or invoke the
 owner's tools. There is no mode in which personal MCP connections are available to a thread that
@@ -39,13 +41,15 @@ Every thread is one of two kinds for its lifetime:
    principal is the Open SWE service identity. It may use only administrator-managed capabilities
    explicitly approved for all participants, such as read-only Datadog or GCP access. The baseline
    must be least privilege and centrally auditable.
-2. **Private thread:** Exactly one non-admin user owns and may prompt it. Its credential principal is
-   that owner. It may load and invoke the owner's MCP connections and personal OAuth grants. It is
-   visible only to the owner and administrators by default.
+2. **Private thread:** Exactly one user owns and may prompt it. Its credential principal is that
+   owner. It may load and invoke the owner's MCP connections and personal OAuth grants. It is visible
+   only to the owner and administrators by default. If the owner is an administrator, the private
+   thread is an admin thread and receives the admin capabilities permitted by the deployment; no
+   separate admin-thread type exists.
 
-Administrators retain access for support, security, and governance, but administrative access must
-be explicit and audited. The product must show the thread kind and active principal before
-credentialed actions.
+Administrators retain access for support, security, and governance, but administrative access to
+another user's thread must be explicit and audited. The product must show the thread kind, active
+principal, and whether its owner grants it admin capabilities before credentialed actions.
 
 ### Personal MCP discovery and invocation
 
