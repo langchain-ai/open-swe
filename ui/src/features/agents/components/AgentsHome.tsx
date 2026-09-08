@@ -69,7 +69,13 @@ function promptContent(text: string, images: Array<ImageChunk>) {
   return [...imageBlocks, ...(trimmed ? [{ type: "text", text: trimmed }] : [])]
 }
 
-export function AgentsHome() {
+export function AgentsHome({
+  initialRepo,
+  initialLocalProject,
+}: {
+  initialRepo?: string
+  initialLocalProject?: string
+}) {
   const stream = useAgentThreadRuntime()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -111,12 +117,17 @@ export function AgentsHome() {
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
+  const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
+    initialLocalProject ? "local" : initialRepo ? "cloud" : null
+  )
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
-      ? desktopThreadSource
+      ? (runTargetOverride ?? desktopThreadSource)
       : "local"
     : "cloud"
-  const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
+  const [localProjectPath, setLocalProjectPath] = useState<string | null>(
+    initialLocalProject ?? null
+  )
   const localProjectPathRef = useRef(localProjectPath)
   useEffect(() => {
     localProjectPathRef.current = localProjectPath
@@ -141,7 +152,7 @@ export function AgentsHome() {
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
-    undefined
+    initialRepo
   )
   const repo =
     repoOverride === undefined
@@ -255,12 +266,14 @@ export function AgentsHome() {
   }, [refreshLocalProjectBranch])
 
   const handleRunTargetChange = (next: RunTarget) => {
+    setRunTargetOverride(next)
     setDesktopThreadSource(next)
     setLocalError(null)
   }
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
+    setRunTargetOverride("local")
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setDesktopThreadSource("local")
     setLocalError(null)
