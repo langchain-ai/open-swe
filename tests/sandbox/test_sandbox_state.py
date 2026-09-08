@@ -138,7 +138,7 @@ async def test_sandbox_proxy_prefers_indexed_search(monkeypatch: pytest.MonkeyPa
         "aexecute",
         AsyncMock(
             return_value=ExecuteResponse(
-                output="__OPEN_SWE_TGREP_START__\n/repo/a.py\0:2:needle\n__OPEN_SWE_TGREP_END__",
+                output='__OPEN_SWE_TGREP_START__\n{"type":"match","data":{"path":{"text":"/repo/a.py"},"line_number":2,"lines":{"text":"needle\\n"}}}\n__OPEN_SWE_TGREP_END__',
                 exit_code=0,
             )
         ),
