@@ -13,13 +13,13 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 import hmac
 import logging
-import os
 from typing import Any
 
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
 from agent.agent_cost import finalize_agent_run_usage
+from agent.config import ENV
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.linear.client import comment_on_linear_issue
@@ -49,12 +49,13 @@ _MAX_FAILURE_REPLY_RUN_IDS = 20
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
+_MESSAGE_CONVERSION_ERRORS = (NotImplementedError, TypeError, ValueError)
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
 # attacker hitting the public route. Fail closed when unset: the route rejects
 # every call, so completion replies stay off until the secret is configured.
-RUN_COMPLETE_WEBHOOK_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
+RUN_COMPLETE_WEBHOOK_SECRET = ENV.RUN_COMPLETE_WEBHOOK_SECRET.optional()
 if not RUN_COMPLETE_WEBHOOK_SECRET:
     logger.warning(
         "RUN_COMPLETE_WEBHOOK_SECRET is not set; /webhooks/run-complete is fail-closed "
@@ -271,7 +272,7 @@ async def _finalize_agent_usage_telemetry(
     if state is not None and isinstance(state.get("messages"), list):
         try:
             state["messages"] = convert_to_messages(state["messages"])
-        except NotImplementedError, TypeError, ValueError:
+        except _MESSAGE_CONVERSION_ERRORS:
             state = None
     await finalize_agent_run_usage(
         run_id=prepare_run_id,

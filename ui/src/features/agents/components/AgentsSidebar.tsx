@@ -524,7 +524,6 @@ export function AgentsSidebar({
           value={prefs.sortChats}
           onValueChange={(value) => setView({ sortChats: value as ChatSort })}
         >
-          <MenuRadioItem value="priority">Priority</MenuRadioItem>
           <MenuRadioItem value="updated">Last updated</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
@@ -605,7 +604,11 @@ export function AgentsSidebar({
           to={localOnly ? "/agents" : "/my-settings"}
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
-          <img src="/logo-mark.png" alt="" className="size-5" />
+          <img
+            src={`${import.meta.env.BASE_URL}logo-mark.png`}
+            alt=""
+            className="size-5"
+          />
           Open SWE
         </Link>
         <div className="flex items-center gap-1">
@@ -728,9 +731,6 @@ export function AgentsSidebar({
                             setView({ sortPinned: value as PinnedSort })
                           }
                         >
-                          <MenuRadioItem value="priority">
-                            Priority
-                          </MenuRadioItem>
                           <MenuRadioItem value="updated">
                             Last updated
                           </MenuRadioItem>

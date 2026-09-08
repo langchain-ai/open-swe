@@ -34,11 +34,11 @@ from typing import Any
 import anthropic
 import httpx
 import openai
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.errors import error_tracking_fields, exception_fields
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ def _provider_access_error_message(exc: BaseException) -> str | None:
     return None
 
 
-class ModelFallbackMiddleware(AgentMiddleware):
+class ModelFallbackMiddleware(OpenSWEMiddleware):
     """Retry the model call across primary and fallback providers on transient errors.
 
     Args:

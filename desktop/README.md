@@ -12,11 +12,11 @@ The composer's workspace selector chooses where a local thread runs. **Current c
 
 The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
 
-For local OpenAI models, the app can use either `OPENAI_API_KEY` or Sign in with ChatGPT. When no
-API key is configured, sending the first local task opens the system browser for sign-in. OAuth
-credentials are encrypted with the operating system's secure storage, refreshed by Electron, and
-made available to the local model client through an authenticated loopback broker. Refresh tokens
-are never placed in the local backend environment or inherited by agent shell commands.
+For local OpenAI models, the app can use either `OPENAI_API_KEY` or a ChatGPT subscription. When no
+API key is configured, sending the first local task opens the system browser for ChatGPT sign-in.
+OAuth credentials are encrypted with the operating system's secure storage, refreshed by Electron,
+and made available to the local model client through an authenticated loopback broker. Refresh
+tokens are never placed in the local backend environment or inherited by agent shell commands.
 
 Local model calls also honor `LANGSMITH_GATEWAY_*` configuration. On managed macOS installs, the
 app reads `LC_GATEWAY_KEY` from `launchctl` when no explicit gateway key is configured and enables

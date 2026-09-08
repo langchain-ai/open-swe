@@ -241,8 +241,19 @@ class _FakeSandboxClient:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("snapshot_id", [None, ""])
-async def test_provider_passes_empty_snapshot_id_to_api(snapshot_id: str | None) -> None:
+@pytest.mark.parametrize(
+    ("snapshot_id", "create_params"),
+    [(None, None), ("", None), (None, {"snapshot_id": ""})],
+)
+async def test_provider_omits_snapshot_id_when_unset(
+    snapshot_id: str | None, create_params: dict[str, str] | None
+) -> None:
+    """No usable snapshot must send no `snapshot_id` key at all.
+
+    The API boots its default root snapshot only when the field is absent. It
+    is a UUID server-side, so sending "" is rejected with a 422 before any
+    validation runs, and no sandbox is created.
+    """
     client = AsyncSandboxClient(api_key="key", api_endpoint="https://example.com/v2/sandboxes")
     response = MagicMock()
     response.raise_for_status.return_value = None
@@ -251,10 +262,12 @@ async def test_provider_passes_empty_snapshot_id_to_api(snapshot_id: str | None)
     client._http.post = post
 
     with patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client):
-        await LangSmithProvider(api_key="key").get_or_create(snapshot_id=snapshot_id)
+        await LangSmithProvider(api_key="key").get_or_create(
+            snapshot_id=snapshot_id, create_params=create_params
+        )
 
     assert post.await_args is not None
-    assert post.await_args.kwargs["json"]["snapshot_id"] == ""
+    assert "snapshot_id" not in post.await_args.kwargs["json"]
 
 
 @pytest.mark.asyncio

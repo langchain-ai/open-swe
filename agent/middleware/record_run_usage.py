@@ -3,15 +3,16 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware, AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware import AgentState, ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
 from agent.agent_cost import finalize_agent_run_usage
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 
 
-class RecordRunUsageMiddleware(AgentMiddleware):
+class RecordRunUsageMiddleware(OpenSWEMiddleware):
     """Tag model responses with their run and persist usage on completion."""
 
     async def awrap_model_call(

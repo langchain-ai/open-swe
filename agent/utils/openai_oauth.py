@@ -1,4 +1,3 @@
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
@@ -11,14 +10,16 @@ from langchain_openai.chatgpt_oauth import (  # noqa: PLC2701
     _ChatGPTToken,
 )
 
+from agent.config import ENV
+
 _BROKER_URL_ENV = "OPEN_SWE_OPENAI_OAUTH_BROKER_URL"
 _BROKER_TOKEN_ENV = "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN"
 _BROKER_MANAGED_REFRESH_TOKEN = "managed-by-desktop-broker"
 
 
 def _broker_config() -> tuple[str, str] | None:
-    url = os.environ.get(_BROKER_URL_ENV, "")
-    token = os.environ.get(_BROKER_TOKEN_ENV, "")
+    url = ENV.OPEN_SWE_OPENAI_OAUTH_BROKER_URL.get()
+    token = ENV.OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN.get()
     if not url or not token:
         return None
     parsed = urlparse(url)
