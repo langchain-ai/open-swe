@@ -23,7 +23,7 @@ def _lifecycle(run_id: str) -> dict[str, object]:
         "lifecycle",
         {"event": "running"},
         namespace=[],
-        event_id=f"synth:{run_id}:lc::running",
+        event_id=f"synth:{run_id}:lc||running",
     )
 
 

@@ -37,8 +37,8 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
         _event("tools", {"event": "tool-finished", "tool_call_id": "call-1"}),
         _event("lifecycle", {"event": "completed"}),
     ]
-    events[1]["event_id"] = "synth:run-1:lc::running"
-    events[-1]["event_id"] = "synth:run-1:lc::completed"
+    events[1]["event_id"] = "synth:run-1:lc||running"
+    events[-1]["event_id"] = "synth:run-1:lc||completed"
 
     class ThreadStream:
         async def __aenter__(self):

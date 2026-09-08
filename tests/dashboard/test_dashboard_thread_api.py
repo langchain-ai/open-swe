@@ -1108,7 +1108,7 @@ async def test_run_ttft_observer_records_first_assistant_text(
     events = [
         {
             "type": "event",
-            "event_id": "synth:historical-run:lc::running",
+            "event_id": "synth:historical-run:lc||running",
             "method": "lifecycle",
             "params": {"namespace": [], "timestamp": 1_000, "data": {"event": "running"}},
         },
@@ -1123,7 +1123,7 @@ async def test_run_ttft_observer_records_first_assistant_text(
         ),
         {
             "type": "event",
-            "event_id": "synth:run-1:lc::running",
+            "event_id": "synth:run-1:lc||running",
             "method": "lifecycle",
             "params": {"namespace": [], "timestamp": 2_000, "data": {"event": "running"}},
         },

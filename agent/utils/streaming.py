@@ -24,7 +24,7 @@ def root_lifecycle(event: Mapping[str, Any]) -> tuple[str, str] | None:
         or len(parts) != 3
         or parts[0] != "synth"
         or not parts[1]
-        or not parts[2].startswith("lc:")
+        or not parts[2].startswith("lc|")
     ):
         return None
     return parts[1], phase
