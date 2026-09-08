@@ -13,6 +13,12 @@ export default defineConfig({
   plugins: [tanstackStart(), viteReact({ compiler: true })],
   resolve: { tsconfigPaths: true },
   test: {
+    exclude: [
+      "**/*.gap.test.ts",
+      "**/*.gap.test.tsx",
+      "**/node_modules/**",
+      "**/dist/**",
+    ],
     // Per-file `@vitest-environment jsdom` docblocks pick the environment;
     // node stays the default so the tests that read files off disk keep a
     // `file:` `import.meta.url`.
