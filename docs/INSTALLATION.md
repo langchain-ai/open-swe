@@ -34,12 +34,16 @@ docker run \
   --add-host=host.docker.internal:host-gateway \
   -e DATABASE_URI="postgres://postgres:postgres@host.docker.internal:5432/postgres?sslmode=disable" \
   -e REDIS_URI="redis://host.docker.internal:6379" \
-  -e LANGGRAPH_AUTH_TYPE="noop" \
+  -e LANGGRAPH_AUTH_TYPE="langsmith" \
+  -e LANGSMITH_AUTH_ENDPOINT="https://api.smith.langchain.com" \
+  -e LANGSMITH_TENANT_ID="<your LangSmith workspace id>" \
   -e LANGGRAPH_URL="https://<your-backend-url>" \
   open-swe
 ```
 
-The example assumes Postgres and Redis run on the Docker host; `--add-host` is what makes `host.docker.internal` resolve on a plain Linux Docker Engine. If they run as containers, drop the flag and point `DATABASE_URI` / `REDIS_URI` at their service names on a shared network. Add the standalone Agent Server requirements: `DATABASE_URI`, `REDIS_URI`, `LANGSMITH_API_KEY`, and `LANGGRAPH_CLOUD_LICENSE_KEY`. Expose port `8000` through your ingress, and do not use scale-to-zero hosting: background runs rely on the Redis- and Postgres-backed workers staying up. If the built-in LangGraph API routes are reachable from the public internet, put the service behind a private network, API gateway, or custom LangGraph auth before using `LANGGRAPH_AUTH_TYPE=noop`. Bundle the dashboard by building it (`make build-dashboard`) before `docker build`, or set `DASHBOARD_STATIC_DIR` to a directory holding the build.
+The example assumes Postgres and Redis run on the Docker host; `--add-host` is what makes `host.docker.internal` resolve on a plain Linux Docker Engine. If they run as containers, drop the flag and point `DATABASE_URI` / `REDIS_URI` at their service names on a shared network. Add the standalone Agent Server requirements: `DATABASE_URI`, `REDIS_URI`, `LANGSMITH_API_KEY`, and `LANGGRAPH_CLOUD_LICENSE_KEY`. Expose port `8000` through your ingress, and do not use scale-to-zero hosting: background runs rely on the Redis- and Postgres-backed workers staying up. Bundle the dashboard by building it (`make build-dashboard`) before `docker build`, or set `DASHBOARD_STATIC_DIR` to a directory holding the build.
+
+**Authentication.** The three `LANGGRAPH_AUTH_TYPE` lines matter. The standalone image defaults to `noop`, which leaves the LangGraph API (`/threads`, `/runs`, `/assistants`, `/store`) open to anyone who can reach the port; only the dashboard API (session cookie) and the webhooks (signatures) check anything themselves. `langsmith` makes the LangGraph API require a LangSmith API key from your workspace on every call, which is what LangGraph Platform does and what Open SWE's own calls already send (`LANGSMITH_API_KEY`); the webhooks and dashboard API are custom routes and keep working as before. It needs `LANGSMITH_AUTH_ENDPOINT` (your LangSmith API URL) and `LANGSMITH_TENANT_ID` (the workspace id, shown under **Settings → Workspaces** in LangSmith). Use `noop` only on a private network behind a gateway that does the authentication for you.
 
 Either way, the URL browsers and webhooks use from here on is `<URL>`: `https://<name>-<hash>.<region>.langgraph.app` on the platform, or your ingress hostname in front of the container.
 
