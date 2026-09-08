@@ -23,12 +23,14 @@ export type RenderItem =
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "plan-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "iframe-item",
+  "plan-item",
 ])
 
 export function splitWorkAndReply(items: Array<RenderItem>): {
@@ -48,6 +50,7 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
     if (
       item.type === "reply-item" ||
       item.type === "iframe-item" ||
+      item.type === "plan-item" ||
       index >= trailingReplyIndex
     ) {
       replyItems.push(item)
@@ -227,10 +230,13 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
-      if (chunk.display?.type === "output_iframe") {
+      if (chunk.display) {
         flushGroups()
         items.push({
-          type: "iframe-item",
+          type:
+            chunk.display.type === "output_iframe"
+              ? "iframe-item"
+              : "plan-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })

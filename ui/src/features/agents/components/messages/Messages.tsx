@@ -253,6 +253,12 @@ export const Messages = memo(function MessagesComponent({
   }, [onShowScrollToBottomChange, showScrollToBottom])
 
   const projectPath = project?.path
+  const hasInlinePlanArtifact = visibleMessages.some((message) =>
+    message.chunks.some(
+      (chunk) =>
+        chunk.kind === "tool-execution" && chunk.display?.type === "plan"
+    )
+  )
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
@@ -298,6 +304,7 @@ export const Messages = memo(function MessagesComponent({
                   isMarkdownLive={messageIsMarkdownLive}
                   projectPath={projectPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
+                  threadId={threadId}
                   onApprove={onApprove}
                   onReject={onReject}
                   onAutoApprove={onAutoApprove}
@@ -305,7 +312,7 @@ export const Messages = memo(function MessagesComponent({
                 />
               )
             })}
-            {threadId && showPlanArtifact && (
+            {threadId && showPlanArtifact && !hasInlinePlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
             )}
             {threadId && (

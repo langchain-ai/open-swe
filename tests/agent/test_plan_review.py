@@ -159,13 +159,13 @@ async def test_save_plan_requires_run_context() -> None:
     from agent.tools.save_plan import save_plan
 
     with pytest.raises(RuntimeError, match="outside of a runnable context"):
-        await save_plan("/workspace/plans/2026-06-29-test-plan.html")
+        await save_plan.coroutine("/workspace/plans/2026-06-29-test-plan.html")
 
 
 async def test_save_plan_rejects_empty_path() -> None:
     from agent.tools.save_plan import save_plan
 
-    result = await save_plan("   ")
+    result, _ = await save_plan.coroutine("   ")
     assert result["success"] is False
     assert "empty" in result["error"]
 
@@ -173,7 +173,7 @@ async def test_save_plan_rejects_empty_path() -> None:
 async def test_save_plan_rejects_non_html_path() -> None:
     from agent.tools.save_plan import save_plan
 
-    result = await save_plan("/workspace/plans/plan.txt")
+    result, _ = await save_plan.coroutine("/workspace/plans/plan.txt")
     assert result["success"] is False
     assert "HTML" in result["error"]
 
@@ -181,7 +181,7 @@ async def test_save_plan_rejects_non_html_path() -> None:
 async def test_save_plan_rejects_html_outside_plans_dir() -> None:
     from agent.tools.save_plan import save_plan
 
-    result = await save_plan("/workspace/plan.html")
+    result, _ = await save_plan.coroutine("/workspace/plan.html")
     assert result["success"] is False
     assert "/workspace/plans" in result["error"]
 
@@ -232,9 +232,15 @@ async def test_save_plan_reads_html_file_from_sandbox(
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
 
-    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-test-plan.html")
+    result, artifact = await save_plan_tool._save_plan("/workspace/plans/2026-06-29-test-plan.html")
 
     assert result == {"success": True, "path": "/workspace/plans/2026-06-29-test-plan.html"}
+    assert artifact == {
+        "type": "plan",
+        "html": "<!doctype html><html><head><title>Plan</title></head><body><h1>Plan</h1></body></html>",
+        "title": "Test plan",
+        "path": "/workspace/plans/2026-06-29-test-plan.html",
+    }
     assert reads == [
         ("/workspace/plans/2026-06-29-test-plan.html", 0, save_plan_tool._MAX_PLAN_LINES)
     ]
@@ -277,7 +283,9 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
 
-    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-add-webhook-retries.html")
+    result, _ = await save_plan_tool._save_plan(
+        "/workspace/plans/2026-06-29-add-webhook-retries.html"
+    )
 
     assert result["success"] is True
     assert saved["html"].startswith("<!doctype html>")
@@ -323,7 +331,7 @@ async def test_save_plan_preserves_plan_mode_from_state_when_active(
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
 
-    result = await save_plan_tool.save_plan(
+    result, _ = await save_plan_tool._save_plan(
         "/workspace/plans/2026-06-29-test-plan.html", state={"plan_mode": True}
     )
 
@@ -371,7 +379,7 @@ async def test_save_plan_preserves_plan_mode_from_config_when_active(
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
 
-    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-test-plan.html")
+    result, _ = await save_plan_tool._save_plan("/workspace/plans/2026-06-29-test-plan.html")
 
     assert result["success"] is True
     assert saved["plan_mode"] is True
@@ -462,7 +470,8 @@ async def test_list_workflow_approvals_returns_records(
 def test_save_plan_exported_and_wired() -> None:
     from agent.tools import save_plan
 
-    assert callable(save_plan)
+    assert save_plan.name == "save_plan"
+    assert save_plan.response_format == "content_and_artifact"
 
 
 def test_plan_status_constants() -> None:

@@ -14,6 +14,7 @@ import type {
   DiffData,
   Message,
   OutputIframeDisplay,
+  PlanDisplay,
   ToolExecutionChunk,
 } from "./types"
 
@@ -268,6 +269,33 @@ function isHttpUrl(value: unknown): value is string {
   }
 }
 
+function planDisplay(
+  toolName: string,
+  toolMessage: ToolMessage | undefined
+): PlanDisplay | undefined {
+  if (toolName !== "save_plan") return undefined
+  const artifact = toolMessage?.artifact
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return undefined
+  }
+  const value = artifact as Record<string, unknown>
+  if (
+    value.type !== "plan" ||
+    typeof value.html !== "string" ||
+    typeof value.title !== "string" ||
+    typeof value.path !== "string" ||
+    !value.path.startsWith("/workspace/plans/")
+  ) {
+    return undefined
+  }
+  return {
+    type: "plan",
+    html: value.html,
+    title: value.title,
+    path: value.path,
+  }
+}
+
 function outputIframeDisplay(
   toolMessage: ToolMessage | undefined
 ): OutputIframeDisplay | undefined {
@@ -451,7 +479,8 @@ export function streamMessagesToUi(
         }
         const output = toolOutputText(assembled, toolMessage)
         if (output) chunk.output = output
-        const display = outputIframeDisplay(toolMessage)
+        const display =
+          planDisplay(name, toolMessage) ?? outputIframeDisplay(toolMessage)
         if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData
