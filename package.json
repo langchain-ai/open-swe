@@ -11,7 +11,7 @@
     "format:check": "oxfmt --check",
     "lint": "oxlint",
     "test": "turbo run test",
-    "test:gaps": "OPEN_SWE_RUN_GAP_TESTS=1 uv run pytest -q tests/gaps && pnpm --filter open-swe-dashboard run test:gaps",
+    "test:gaps": "uv run pytest -q tests/gaps && pnpm --filter open-swe-dashboard run test:gaps",
     "test:e2e": "pnpm --filter open-swe-e2e run test",
     "test:e2e:gaps": "pnpm --filter open-swe-e2e run test:gaps",
     "test:e2e:desktop": "pnpm --filter open-swe-e2e run test:desktop",

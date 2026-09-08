@@ -3,5 +3,5 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   ...base,
-  testDir: "./gaps",
+  testDir: "./tests/gaps",
 });

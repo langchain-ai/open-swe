@@ -6,7 +6,7 @@ import {
   openThreadViaSlackLink,
   threadIdFromUrl,
   waitForThreadIdle,
-} from "../tests/helpers/dashboard";
+} from "../helpers/dashboard";
 
 test("a long transcript mounts a bounded tail and stays responsive", async ({
   page,

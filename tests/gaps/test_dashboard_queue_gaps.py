@@ -1,23 +1,29 @@
 import asyncio
 import copy
 import importlib
-import os
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from agent.middleware.check_message_queue import LinearNotifyState
 from agent.utils import thread_ops
 
 queue_middleware = importlib.import_module("agent.middleware.check_message_queue")
 
-pytestmark = [
-    pytest.mark.asyncio,
-    pytest.mark.skipif(
-        os.environ.get("OPEN_SWE_RUN_GAP_TESTS") != "1",
-        reason="intentionally red queue contract suite",
-    ),
-]
+
+def _state() -> LinearNotifyState:
+    return cast(LinearNotifyState, {"messages": []})
+
+
+def _task_name() -> str:
+    task = asyncio.current_task()
+    assert task is not None
+    return task.get_name()
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class _Client:
@@ -51,10 +57,10 @@ class _LostUpdateStore:
         return snapshot
 
     async def put_item(self, namespace: object, key: str, value: dict[str, object]) -> None:
-        if asyncio.current_task().get_name() == "append-first":
+        if _task_name() == "append-first":
             await self.second_written.wait()
         self.item = {"value": copy.deepcopy(value)}
-        if asyncio.current_task().get_name() == "append-second":
+        if _task_name() == "append-second":
             self.second_written.set()
 
 
@@ -84,7 +90,7 @@ class _AdmissionOrderStore:
         self.second_done = asyncio.Event()
 
     async def get_item(self, namespace: object, key: str) -> dict[str, object] | None:
-        if asyncio.current_task().get_name() == "append-first":
+        if _task_name() == "append-first":
             self.first_admitted.set()
             await self.second_done.wait()
         else:
@@ -93,7 +99,7 @@ class _AdmissionOrderStore:
 
     async def put_item(self, namespace: object, key: str, value: dict[str, object]) -> None:
         self.item = {"value": copy.deepcopy(value)}
-        if asyncio.current_task().get_name() == "append-second":
+        if _task_name() == "append-second":
             self.second_done.set()
 
 
@@ -145,12 +151,8 @@ async def test_only_one_model_call_claims_each_queue_batch(monkeypatch) -> None:
     monkeypatch.setattr(queue_middleware, "get_store", lambda: store)
 
     results = await asyncio.gather(
-        queue_middleware.check_message_queue_before_model.abefore_model(
-            {"messages": []}, MagicMock()
-        ),
-        queue_middleware.check_message_queue_before_model.abefore_model(
-            {"messages": []}, MagicMock()
-        ),
+        queue_middleware.check_message_queue_before_model.abefore_model(_state(), MagicMock()),
+        queue_middleware.check_message_queue_before_model.abefore_model(_state(), MagicMock()),
     )
 
     assert sum(result is not None for result in results) == 1
@@ -194,9 +196,7 @@ async def test_consume_does_not_delete_a_message_appended_after_claim(monkeypatc
     monkeypatch.setattr(queue_middleware, "get_store", lambda: store)
 
     consumed, appended = await asyncio.gather(
-        queue_middleware.check_message_queue_before_model.abefore_model(
-            {"messages": []}, MagicMock()
-        ),
+        queue_middleware.check_message_queue_before_model.abefore_model(_state(), MagicMock()),
         thread_ops.queue_message_for_thread("thread-1", {"text": "new"}),
     )
 

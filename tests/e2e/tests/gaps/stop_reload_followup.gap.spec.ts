@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { SAME_USER, loginAs } from "../tests/helpers/dashboard";
+import { SAME_USER, loginAs } from "../helpers/dashboard";
 
 type HeldRequest = {
   release: () => void;
