@@ -133,7 +133,6 @@ _IFRAME_HTML = """<!doctype html>
   <main>
     <h1>Iframe preview</h1>
     <p id="output-data">Prototype loaded</p>
-    <a id="output-link" href="about:blank" target="_blank">Open link</a>
   </main>
 </body>
 </html>
@@ -438,6 +437,7 @@ PLAN_HTML = """<!doctype html>
     <main>
       <h1>Add greet() helper</h1>
       <p class="lede">Add a tiny greeting helper to the demo repo.</p>
+      <a id="plan-link" href="about:blank" target="_blank">Open reference</a>
 
       <h2>Files to change</h2>
       <ul>

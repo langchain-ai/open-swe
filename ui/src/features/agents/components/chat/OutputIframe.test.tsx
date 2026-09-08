@@ -25,9 +25,7 @@ describe("OutputIframe", () => {
     const iframe = screen.getByTitle(display.title)
     expect(iframe.getAttribute("src")).toBe(display.previewUrl)
     expect(iframe.getAttribute("srcdoc")).toBeNull()
-    expect(iframe.getAttribute("sandbox")).toBe(
-      "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox"
-    )
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-downloads")
     expect(iframe.getAttribute("referrerpolicy")).toBe("no-referrer")
     expect(screen.queryByRole("button", { name: "Open in new tab" })).toBeNull()
   })

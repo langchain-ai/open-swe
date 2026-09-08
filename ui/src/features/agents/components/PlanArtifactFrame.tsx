@@ -5,7 +5,7 @@ import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFr
 import {
   ARTIFACT_ALLOW,
   ARTIFACT_CSP,
-  ARTIFACT_SANDBOX,
+  ARTIFACT_SANDBOX_WITH_POPUPS,
   withArtifactShell,
 } from "@/features/agents/lib/artifactShell"
 import { useResolvedTheme } from "@/lib/theme"
@@ -351,7 +351,7 @@ export function PlanArtifactFrame({
       testId="plan-artifact-frame"
       title={title}
       html={srcDoc}
-      sandbox={ARTIFACT_SANDBOX}
+      sandbox={ARTIFACT_SANDBOX_WITH_POPUPS}
       allow={ARTIFACT_ALLOW}
       onLoad={connect}
       className={cn("bg-background", className)}

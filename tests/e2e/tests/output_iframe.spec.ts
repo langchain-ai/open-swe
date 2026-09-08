@@ -36,7 +36,7 @@ test.describe("output_iframe", () => {
     await expect(iframe).toBeVisible({ timeout: 60_000 });
     await expect(iframe).toHaveAttribute(
       "sandbox",
-      "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox",
+      "allow-scripts allow-downloads",
     );
     await expect(iframe).toHaveAttribute("allow", "clipboard-write");
 
@@ -48,12 +48,6 @@ test.describe("output_iframe", () => {
       "color",
       "rgb(102, 51, 153)",
     );
-    const popupPromise = page.waitForEvent("popup");
-    await preview.locator("#output-link").click();
-    const popup = await popupPromise;
-    await popup.waitForLoadState();
-    expect(popup.url()).toBe("about:blank");
-    await popup.close();
     await expect
       .poll(() =>
         iframe.evaluate((element) => element.getBoundingClientRect().height),
