@@ -449,11 +449,6 @@ export function AgentsHome() {
         {optimisticDraftThread && (
           <AgentThreadHeader
             title={optimisticDraftThread.title}
-            project={
-              runTarget === "local"
-                ? localProjectPath
-                : optimisticDraftThread.repoFullName
-            }
             target={runTarget === "local" ? "This Mac" : "Cloud"}
             panelCollapsed={panelCollapsed}
           />

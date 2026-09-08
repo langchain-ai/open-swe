@@ -173,6 +173,12 @@ class ThreadMessageBody(BaseModel):
     plan_mode: bool = False
 
 
+class ThreadRenameBody(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=80)
+
+
 class ThreadResolveBody(BaseModel):
     resolved: bool = True
 
@@ -1938,6 +1944,24 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
     await client.threads.delete(thread_id)
+
+
+async def rename_dashboard_thread(
+    thread_id: str, login: str, *, title: str, email: str | None = None
+) -> dict[str, Any]:
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata_update = {"title": title, "title_seed": None}
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not rename thread", extra={"thread_id": thread_id}, exc_info=True)
+        raise HTTPException(502, "failed to update thread") from exc
+    thread = {
+        **as_thread_dict(thread),
+        "metadata": {**thread_metadata(thread), **metadata_update},
+    }
+    return await _thread_summary(thread)
 
 
 async def resolve_dashboard_thread(

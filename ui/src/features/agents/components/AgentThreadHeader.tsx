@@ -1,10 +1,17 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
-import { FolderOpen } from "lucide-react"
-import { useState } from "react"
+import { Menu } from "@base-ui/react/menu"
+import { DotsThreeIcon } from "@phosphor-icons/react"
+import { useCallback, useRef, useState } from "react"
+
+import { useNavigate } from "@tanstack/react-router"
+import type { DesktopLocalThreadSummary } from "@/desktop"
+import { useRefreshLocalThreads } from "@/features/agents/lib/desktopLocal"
+import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import { ThreadProjectIndicator } from "@/features/agents/components/ThreadProjectIndicator"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
-import { ThreadContextMenuPopup } from "@/features/agents/components/ThreadContextMenuPopup"
+import { ThreadMenuItems } from "@/features/agents/components/ThreadContextMenuPopup"
 import type { AgentThread } from "@/features/agents/lib/types"
 import {
   useDeleteAgentThread,
@@ -16,17 +23,24 @@ import { cn } from "@/lib/utils"
 
 export function AgentThreadHeader({
   title,
-  project,
   target,
   panelCollapsed,
   thread,
+  onRename,
+  localThread,
 }: {
   title?: string | null
-  project?: string | null
   target: "Cloud" | "This Mac"
   panelCollapsed: boolean
+  onRename?: (title: string) => Promise<unknown>
+  localThread?: DesktopLocalThreadSummary
   thread?: AgentThread
 }) {
+  const navigate = useNavigate()
+  const refreshLocalThreads = useRefreshLocalThreads()
+  const { prefs, toggleLocalPin } = useSidebarPrefs()
+  const [deletingLocal, setDeletingLocal] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const sidebarCollapsed = useSidebarCollapsed()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -35,10 +49,105 @@ export function AgentThreadHeader({
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const pinned =
-    thread !== undefined &&
-    Boolean(pinnedThreads.data?.some((candidate) => candidate.id === thread.id))
-  const archived = thread?.resolved === true
+  const pinned = localThread
+    ? prefs.pinnedLocalIds.includes(localThread.id)
+    : Boolean(
+        pinnedThreads.data?.some((candidate) => candidate.id === thread?.id)
+      )
+  const archived = localThread
+    ? localThread.archived === true
+    : thread?.resolved === true
+  const isDeleting = deletingLocal || deleteThread.isPending
+  const confirmDelete = async () => {
+    if (isDeleting) return
+    if (!localThread) {
+      if (thread)
+        deleteThread.mutate(thread.id, {
+          onSuccess: () => setDeleteOpen(false),
+        })
+      return
+    }
+    setDeletingLocal(true)
+    setDeleteError(null)
+    try {
+      const deleted = await window.openSweDesktop?.deleteLocalThread(
+        localThread.id
+      )
+      if (deleted) {
+        refreshLocalThreads(localThread.id)
+        setDeleteOpen(false)
+        void navigate({ to: "/agents" })
+      } else {
+        setDeleteError("Local Open SWE thread not found")
+      }
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error ? error.message : "Could not delete local thread"
+      )
+    }
+    setDeletingLocal(false)
+  }
+  const [draft, setDraft] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const editingRef = useRef(false)
+  const titleButtonRef = useRef<HTMLButtonElement>(null)
+  const [editorWidth, setEditorWidth] = useState<number>()
+  const focusInput = useCallback((input: HTMLInputElement | null) => {
+    input?.focus()
+    input?.select()
+  }, [])
+  const saveTitle = async () => {
+    if (!editingRef.current || !onRename || draft === null) return
+    editingRef.current = false
+    setDraft(null)
+    const next = draft.trim()
+    if (!next || next === title) return
+    setSaving(true)
+    try {
+      await onRename(next)
+    } catch (error) {
+      setRenameError(
+        error instanceof Error ? error.message : "Could not rename thread"
+      )
+    }
+    setSaving(false)
+  }
+
+  const startRename = () => {
+    if (!onRename || saving || !title) return
+    setRenameError(null)
+    setEditorWidth(titleButtonRef.current?.getBoundingClientRect().width)
+    editingRef.current = true
+    setDraft(title)
+  }
+  const menuItems = (
+    <ThreadMenuItems
+      thread={thread ?? null}
+      pinned={pinned}
+      archived={archived}
+      isDeleting={isDeleting}
+      onTogglePin={() => {
+        if (localThread) toggleLocalPin(localThread.id)
+        else if (thread && !pinThread.isPending) {
+          pinThread.mutate({ threadId: thread.id, pinned: !pinned })
+        }
+      }}
+      onToggleArchived={() => {
+        if (localThread) {
+          void window.openSweDesktop
+            ?.updateLocalThread({
+              threadId: localThread.id,
+              archived: !archived,
+            })
+            .then(() => refreshLocalThreads(localThread.id))
+        } else if (thread && !resolveThread.isPending) {
+          resolveThread.mutate({ threadId: thread.id, resolved: !archived })
+        }
+      }}
+      onDelete={() => setDeleteOpen(true)}
+    />
+  )
 
   const header = (
     <header
@@ -53,20 +162,90 @@ export function AgentThreadHeader({
         )}
       >
         {title && (
-          <span
-            className="min-w-0 flex-1 truncate text-sm font-medium"
-            title={title}
-          >
-            {title}
-          </span>
-        )}
-        {project && (
-          <span className="flex max-w-[40%] min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <FolderOpen className="size-3.5 shrink-0" />
-            <span className="truncate" title={project}>
-              {project}
-            </span>
-          </span>
+          <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
+            {(thread || localThread) && (
+              <ThreadProjectIndicator
+                thread={thread}
+                localThread={localThread}
+              />
+            )}
+            {draft !== null ? (
+              <input
+                ref={focusInput}
+                aria-label="Thread title"
+                data-no-drag=""
+                className="min-w-0 rounded-md bg-muted px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                style={{ width: editorWidth }}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onBlur={() => void saveTitle()}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    void saveTitle()
+                  } else if (event.key === "Escape") {
+                    event.preventDefault()
+                    editingRef.current = false
+                    setDraft(null)
+                  }
+                }}
+              />
+            ) : onRename ? (
+              <button
+                type="button"
+                aria-label="Rename thread"
+                ref={titleButtonRef}
+                aria-busy={saving}
+                disabled={saving}
+                title={title}
+                data-no-drag=""
+                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+                onClick={startRename}
+              >
+                {title}
+              </button>
+            ) : (
+              <span className="min-w-0 truncate" title={title}>
+                {title}
+              </span>
+            )}
+            {(thread || localThread) && (
+              <Menu.Root>
+                <Menu.Trigger
+                  aria-label="Thread actions"
+                  data-no-drag=""
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <DotsThreeIcon className="size-5" weight="bold" />
+                </Menu.Trigger>
+                <Menu.Portal>
+                  <Menu.Positioner
+                    align="start"
+                    sideOffset={4}
+                    className="z-50 outline-none"
+                  >
+                    <Menu.Popup
+                      finalFocus={() =>
+                        editingRef.current ? false : undefined
+                      }
+                      className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+                    >
+                      {menuItems}
+                    </Menu.Popup>
+                  </Menu.Positioner>
+                </Menu.Portal>
+              </Menu.Root>
+            )}
+            {renameError && (
+              <span
+                role="alert"
+                className="absolute top-full left-4 rounded-md border border-destructive/30 bg-background px-2 py-1 text-xs text-destructive"
+              >
+                {renameError}
+              </span>
+            )}
+          </div>
         )}
         <span className="ml-auto shrink-0 text-xs text-muted-foreground">
           {target}
@@ -75,43 +254,40 @@ export function AgentThreadHeader({
     </header>
   )
 
-  if (!thread) return header
+  if (!thread && !localThread) return header
 
   return (
     <>
       <ContextMenu.Root>
         <ContextMenu.Trigger render={header} />
-        <ThreadContextMenuPopup
-          thread={thread}
-          pinned={pinned}
-          archived={archived}
-          isDeleting={deleteThread.isPending}
-          onTogglePin={() => {
-            if (!pinThread.isPending) {
-              pinThread.mutate({ threadId: thread.id, pinned: !pinned })
-            }
-          }}
-          onToggleArchived={() => {
-            if (!resolveThread.isPending) {
-              resolveThread.mutate({
-                threadId: thread.id,
-                resolved: !archived,
-              })
-            }
-          }}
-          onDelete={() => setDeleteOpen(true)}
-        />
+        <ContextMenu.Portal>
+          <ContextMenu.Positioner className="z-50 outline-none">
+            <ContextMenu.Popup
+              finalFocus={() => (editingRef.current ? false : undefined)}
+              className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+            >
+              {menuItems}
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
       </ContextMenu.Root>
       <DeleteThreadDialog
         open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        threadTitle={thread.title}
-        isDeleting={deleteThread.isPending}
-        onConfirm={() =>
-          deleteThread.mutate(thread.id, {
-            onSuccess: () => setDeleteOpen(false),
-          })
+        onOpenChange={(open) => {
+          setDeleteOpen(open)
+          if (!open) setDeleteError(null)
+        }}
+        threadTitle={title ?? ""}
+        isDeleting={isDeleting}
+        onConfirm={() => void confirmDelete()}
+        detail={
+          localThread
+            ? localThread.ownedWorktrees?.length
+              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+              : "This removes its history but does not revert changes made to your project."
+            : undefined
         }
+        error={deleteError}
       />
     </>
   )

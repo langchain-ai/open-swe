@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useSyncExternalStore } from "react"
 
 import { DEFAULT_SIDEBAR_FILTERS } from "./sidebarFilter"
 import type { SidebarFilters } from "./sidebarFilter"
@@ -118,27 +118,56 @@ function toggleMembership(values: Array<string>, value: string): Array<string> {
     : [...values, value]
 }
 
-function loadPrefs(): SidebarPrefs {
+let cachedRaw: string | null | undefined
+let cachedPrefs = DEFAULT_SIDEBAR_PREFS
+const listeners = new Set<() => void>()
+
+function getSnapshot(): SidebarPrefs {
   if (typeof window === "undefined") return DEFAULT_SIDEBAR_PREFS
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_SIDEBAR_PREFS
-    return sanitizePrefs(JSON.parse(raw))
-  } catch {
-    return DEFAULT_SIDEBAR_PREFS
+    if (raw !== cachedRaw) {
+      cachedRaw = raw
+      cachedPrefs = DEFAULT_SIDEBAR_PREFS
+      if (raw) cachedPrefs = sanitizePrefs(JSON.parse(raw))
+    }
+  } catch {}
+  return cachedPrefs
+}
+
+function notifyListeners() {
+  listeners.forEach((listener) => listener())
+}
+
+function onStorage(event: StorageEvent) {
+  if (event.key === STORAGE_KEY || event.key === null) notifyListeners()
+}
+
+function subscribe(listener: () => void) {
+  if (listeners.size === 0) window.addEventListener("storage", onStorage)
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size === 0) window.removeEventListener("storage", onStorage)
   }
 }
 
-export function useSidebarPrefs() {
-  const [prefs, setPrefs] = useState<SidebarPrefs>(loadPrefs)
+function setPrefs(update: (prev: SidebarPrefs) => SidebarPrefs) {
+  cachedPrefs = update(getSnapshot())
+  try {
+    const raw = JSON.stringify(cachedPrefs)
+    window.localStorage.setItem(STORAGE_KEY, raw)
+    cachedRaw = raw
+  } catch {}
+  notifyListeners()
+}
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs))
-    } catch {
-      /* ignore persistence failures (private mode, quota, SSR) */
-    }
-  }, [prefs])
+export function useSidebarPrefs() {
+  const prefs = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    () => DEFAULT_SIDEBAR_PREFS
+  )
 
   const setCompact = useCallback(
     (compact: boolean) => setPrefs((prev) => ({ ...prev, compact })),

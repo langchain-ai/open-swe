@@ -503,8 +503,24 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
+          key={sessionId}
           title={thread.title}
-          project={thread.cwd}
+          localThread={thread}
+          onRename={async (title) => {
+            const updated = await window.openSweDesktop?.updateLocalThread({
+              threadId: sessionId,
+              title,
+            })
+            if (!updated) throw new Error("Could not rename local thread")
+            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+            queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+              localThreadKeys.all,
+              (threads = []) =>
+                threads.map((entry) =>
+                  entry.id === sessionId ? updated : entry
+                )
+            )
+          }}
           target="This Mac"
           panelCollapsed={panelCollapsed}
         />

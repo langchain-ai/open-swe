@@ -33,6 +33,73 @@ def _empty_thread_pins(monkeypatch) -> None:
     monkeypatch.setattr(thread_api, "list_thread_pin_ids", empty_pins)
 
 
+@pytest.mark.parametrize("title", ["", " \n\t ", "x" * 81])
+def test_rename_thread_rejects_invalid_title(title) -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        thread_api.ThreadRenameBody(title=title)
+
+
+@pytest.mark.parametrize("title", ["New title", "x" * 80])
+async def test_rename_thread_trims_title_and_clears_seed(monkeypatch, title) -> None:
+    metadata = {"source": "dashboard", "title": "Old title", "title_seed": "Old title"}
+    thread = {"thread_id": "thread-1", "metadata": metadata}
+    authorized = AsyncMock(return_value=thread)
+    update = AsyncMock()
+    summary = AsyncMock(side_effect=lambda value: value["metadata"])
+    monkeypatch.setattr(thread_api, "_authorized_thread", authorized)
+    monkeypatch.setattr(thread_api, "_thread_summary", summary)
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(update=update)),
+    )
+
+    result = await routes.api_rename_thread(
+        "thread-1",
+        thread_api.ThreadRenameBody(title=f"  {title}  "),
+        {"sub": "alice", "email": "alice@example.com"},
+    )
+
+    authorized.assert_awaited_once_with("thread-1", "alice", email="alice@example.com")
+    update.assert_awaited_once_with(
+        thread_id="thread-1", metadata={"title": title, "title_seed": None}
+    )
+    assert result == {**metadata, "title": title, "title_seed": None}
+
+
+@pytest.mark.parametrize("status", [403, 404])
+async def test_rename_thread_preserves_authorization_errors(monkeypatch, status) -> None:
+    update = AsyncMock()
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(update=update)),
+    )
+    monkeypatch.setattr(
+        thread_api, "_authorized_thread", AsyncMock(side_effect=HTTPException(status, "denied"))
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.rename_dashboard_thread("thread-1", "alice", title="New title")
+    assert exc_info.value.status_code == status
+    update.assert_not_awaited()
+
+
+async def test_rename_thread_update_failure(monkeypatch) -> None:
+    monkeypatch.setattr(thread_api, "_authorized_thread", AsyncMock(return_value={"metadata": {}}))
+    monkeypatch.setattr(
+        thread_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(update=AsyncMock(side_effect=RuntimeError))
+        ),
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.rename_dashboard_thread("thread-1", "alice", title="New title")
+    assert exc_info.value.status_code == 502
+
+
 def _image() -> thread_api.DashboardImageBody:
     return thread_api.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),
