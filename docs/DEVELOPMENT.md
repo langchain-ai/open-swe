@@ -43,7 +43,7 @@ Skip this if you only start runs from the dashboard. Otherwise GitHub and Slack 
 
 `make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That restriction is not optional. Under `langgraph dev` the LangGraph API itself (`/threads`, `/runs`, `/assistants`, `/store`, …) has no authentication at all: the dashboard API checks its session cookie and the webhook endpoints check their signatures, but anyone who can reach port 2024 can read and create threads and runs. A tunnel that forwards the whole port publishes exactly that. Everything except the webhooks stays on `http://localhost:2024`, where you keep opening the dashboard. Check the policy once the backend is up (step 5): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
 
-Other tunnels are fine only if they enforce the same allowlist, letting `/webhooks/*` through and answering everything else themselves, or if you put a filtering reverse proxy between the tunnel and port 2024 that does so. Quick tunnels that forward a whole port with no policy, such as `cloudflared tunnel --url http://localhost:2024`, are not a safe shortcut even for a test.
+Use ngrok with this policy. A different tunnel is only an option if it can restrict the public paths to `/webhooks/*` the same way; one that forwards the whole port is not.
 
 ## 4. Write `.env`
 
