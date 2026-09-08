@@ -211,7 +211,7 @@ test.describe("Plan review", () => {
     });
     await expect(ownerArtifact).toHaveAttribute(
       "sandbox",
-      "allow-scripts allow-downloads",
+      "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox",
     );
     const embeddedSummaryBox = await owner
       .getByTestId("plan-summary")

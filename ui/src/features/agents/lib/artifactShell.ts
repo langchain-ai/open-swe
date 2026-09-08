@@ -11,7 +11,8 @@ export const ARTIFACT_CSP = [
   "connect-src 'none'",
 ].join("; ")
 
-export const ARTIFACT_SANDBOX = "allow-scripts allow-downloads"
+export const ARTIFACT_SANDBOX =
+  "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox"
 export const ARTIFACT_ALLOW = "clipboard-write"
 
 export function withArtifactShell(

@@ -133,6 +133,7 @@ _IFRAME_HTML = """<!doctype html>
   <main>
     <h1>Iframe preview</h1>
     <p id="output-data">Prototype loaded</p>
+    <a id="output-link" href="about:blank" target="_blank">Open link</a>
   </main>
 </body>
 </html>
