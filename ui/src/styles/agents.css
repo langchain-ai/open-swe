@@ -21,7 +21,7 @@
 html[data-agents-theme] {
   color-scheme: light;
 
-  --background: oklch(99.2% 0 0); /* zinc-25 */
+  --background: pink;
   --app-chrome-background: var(--background);
   --foreground: oklch(27.4% 0.006 286.033); /* zinc-800 */
   --card: #fff;
