@@ -7,6 +7,7 @@ import pytest
 from fastapi import BackgroundTasks, Request
 
 from agent.slack import routes as slack_routes
+from agent.slack.payloads import SlackBlockAction, SlackInteraction
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -59,7 +60,11 @@ async def test_selected_option_updates_original_message(monkeypatch: pytest.Monk
     update = AsyncMock(return_value=(True, None))
     monkeypatch.setattr(slack_routes.common, "update_slack_message", update)
 
-    await slack_routes._update_selected_option_message(payload, payload["actions"][0], "Option B")
+    await slack_routes._update_selected_option_message(
+        SlackInteraction.model_validate(payload),
+        SlackBlockAction.model_validate(payload["actions"][0]),
+        "Option B",
+    )
 
     update.assert_awaited_once_with(
         "C1",
@@ -138,7 +143,11 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     assert result == {"status": "accepted", "message": "Slack option queued"}
     assert [task.func for task in background_tasks.tasks] == [update, process]
     await background_tasks()
-    update.assert_awaited_once_with(payload, payload["actions"][0], "Option B")
+    update.assert_awaited_once_with(
+        SlackInteraction.model_validate(payload),
+        SlackBlockAction.model_validate(payload["actions"][0]),
+        "Option B",
+    )
     process.assert_awaited_once()
 
 
@@ -189,9 +198,9 @@ async def test_code_channel_view_action_routes_to_channel_session(
     assert result["status"] == "accepted"
     assert process.await_args is not None
     event_data = process.await_args.args[0]
-    assert event_data["thread_ts"] == "0"
-    assert event_data["explicit_request"] is True
-    assert "approve-plan" in event_data["text"]
+    assert event_data.thread_ts == "0"
+    assert event_data.explicit_request is True
+    assert "approve-plan" in event_data.text
 
 
 @pytest.mark.asyncio

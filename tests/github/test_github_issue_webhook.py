@@ -15,6 +15,7 @@ from agent.github import webhook as github_webhooks
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
+from agent.slack.request import SlackRequest
 from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
 from agent.webhooks import common as webhook_common
@@ -738,9 +739,9 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         "channel_context": channel_context,
     }
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert event_data["channel_context"] == channel_context
-    assert event_data["text"] == "<@UBOT> review https://github.com/langchain-ai/open-swe/pull/1244"
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.channel_context == channel_context
+    assert event_data.text == "<@UBOT> review https://github.com/langchain-ai/open-swe/pull/1244"
 
 
 def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> None:
@@ -783,10 +784,8 @@ def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> Non
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert (
-        event_data["text"] == "<@UBOT> review https://github.com/langchain-ai/open-swe/issues/1244"
-    )
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.text == "<@UBOT> review https://github.com/langchain-ai/open-swe/issues/1244"
 
 
 def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
@@ -841,8 +840,8 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert event_data["text"] == "<@UBOT> review this branch"
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.text == "<@UBOT> review this branch"
 
 
 def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> None:
@@ -895,9 +894,9 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
         "slack_user_id": "U123",
     }
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert event_data["thread_ts"] == "1700000000.000100"
-    assert event_data["event_ts"] == "1700000000.000200"
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.thread_ts == "1700000000.000100"
+    assert event_data.event_ts == "1700000000.000200"
 
 
 def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
@@ -953,7 +952,7 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
         "slack_user_id": "U123",
     }
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
+    assert isinstance(event_data, SlackRequest)
     assert event_data["text"] == "please check my branch"
     assert event_data["treat_all_messages_as_mentions"] is True
 

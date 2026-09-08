@@ -11,6 +11,7 @@ from starlette.requests import Request
 from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
 
 
@@ -142,8 +143,7 @@ async def _untagged_flag_for(text: str, event_id: str) -> bool:
         cast(BackgroundTasks, background_tasks),
     )
     assert response["status"] == "accepted", response
-    event_data = background_tasks.tasks[0][1][0]
-    return bool(event_data["untagged_reply"])
+    return cast(SlackRequest, background_tasks.tasks[0][1][0]).untagged_reply
 
 
 async def test_id_mention_is_not_marked_untagged() -> None:
@@ -168,13 +168,13 @@ async def test_message_update_queues_only_the_new_text() -> None:
 
     assert response["status"] == "accepted"
     assert background_tasks.tasks[0][0] is slack_routes._process_slack_message_update
-    event_data = background_tasks.tasks[0][1][0]
-    assert event_data["message_update"] is True
-    assert event_data["event_ts"] == "1786573400.000000"
-    assert event_data["original_message_ts"] == "1786573369.551099"
-    assert event_data["thread_ts"] == "1786573300.000000"
-    assert event_data["text"] == "new corrected text"
-    assert "old text that must not be resent" not in str(event_data)
+    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+    assert request.message_update is True
+    assert request.event_ts == "1786573400.000000"
+    assert request.original_message_ts == "1786573369.551099"
+    assert request.thread_ts == "1786573300.000000"
+    assert request.text == "new corrected text"
+    assert "old text that must not be resent" not in str(request)
 
 
 async def _run_message_update_task(background_tasks: _FakeBackgroundTasks) -> None:
@@ -202,8 +202,8 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     await _run_message_update_task(background_tasks)
 
     assert response["status"] == "accepted"
-    event_data = background_tasks.tasks[0][1][0]
-    assert event_data["thread_ts"] == "1786573369.551099"
+    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+    assert request.thread_ts == "1786573369.551099"
     lookup = cast(AsyncMock, webhook_common.lookup_slack_thread_id)
     lookup.assert_awaited_once()
     await_args = lookup.await_args

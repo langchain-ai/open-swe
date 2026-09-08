@@ -26,7 +26,8 @@ from agent.input_messages import (
 )
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
-from agent.slack.failures import SlackRequestTarget, report_slack_failure
+from agent.slack.failures import report_slack_failure
+from agent.slack.request import SlackRequest
 from agent.slack.thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils.json_types import as_json_object
@@ -456,79 +457,69 @@ def _slack_context_input(
     return {"messages": run_messages}
 
 
-async def process_slack_mention(event_data: dict[str, Any], repo_config: Repo | None) -> None:
+async def process_slack_mention(request: SlackRequest, repo: Repo | None) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
-        await _process_slack_mention_impl(event_data, repo_config)
+        await _process_slack_mention_impl(request, repo)
     except Exception as exc:  # noqa: BLE001
-        await _notify_slack_processing_error(event_data, repo_config, exc)
+        await _notify_slack_processing_error(request, repo, exc)
 
 
-async def process_slack_plan_approval(event_data: dict[str, Any], repo_config: Repo | None) -> None:
+async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) -> None:
     from agent.dashboard.plan_api import approve_plan_for_thread
     from agent.dashboard.plan_store import make_plan_approver
 
     try:
-        user_id = str(event_data.get("user_id") or "")
-        user_name = str(event_data.get("user_name") or "")
         await approve_plan_for_thread(
-            str(event_data.get("thread_id") or ""),
+            request.thread_id or "",
             approver=make_plan_approver(
-                actor_id=user_id,
-                name=user_name or user_id or "Slack user",
+                actor_id=request.user_id,
+                name=request.user_name or request.user_id or "Slack user",
                 source="slack",
             ),
         )
     except Exception as exc:  # noqa: BLE001
-        await _notify_slack_processing_error(event_data, repo_config, exc)
+        await _notify_slack_processing_error(request, repo, exc)
 
 
 async def _notify_slack_processing_error(
-    event_data: dict[str, Any], repo_config: Repo | None, exc: BaseException
+    request: SlackRequest, repo: Repo | None, exc: BaseException
 ) -> None:
     """Mark the agent thread errored when one exists, then always tell the Slack thread."""
-    channel_id = event_data.get("channel_id", "")
-    thread_ts = event_data.get("thread_ts", "")
-    thread_id = event_data.get("thread_id")
-    if channel_id and thread_ts and not (isinstance(thread_id, str) and thread_id):
+    thread_id = request.thread_id
+    if request.channel_id and request.thread_ts and not thread_id:
         try:
             thread_id = await common.lookup_slack_thread_id(
-                get_langgraph_client(), channel_id, thread_ts
+                get_langgraph_client(), request.channel_id, request.thread_ts
             )
         except Exception:  # noqa: BLE001
             thread_id = None
-    if isinstance(thread_id, str) and thread_id:
-        await _mark_slack_thread_errored(thread_id, event_data, repo_config)
-    await report_slack_failure(
-        SlackRequestTarget.model_validate({**event_data, "thread_id": thread_id}), exc
-    )
+    if thread_id:
+        await _mark_slack_thread_errored(thread_id, request, repo)
+    await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
 async def _mark_slack_thread_errored(
-    thread_id: str, event_data: dict[str, Any], repo_config: Repo | None
+    thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
-    channel_id = event_data.get("channel_id", "")
-    thread_ts = event_data.get("thread_ts", "")
-    event_ts = event_data.get("event_ts", "")
-    user_id = event_data.get("user_id", "")
-    text = event_data.get("text", "")
-    bot_user_id = event_data.get("bot_user_id", "")
     try:
         clean_text = (
-            common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+            common.strip_bot_mention(
+                request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
+            )
             or "Slack request"
         )
         await common.upsert_agent_thread_metadata(
             thread_id,
             source="slack",
-            repo_config=repo_config.model_dump() if repo_config else None,
+            repo_config=repo.model_dump() if repo else None,
             title=clean_text,
             source_context=SourceContext(
                 slack_thread=SlackThreadRef(
-                    channel_id=channel_id,
-                    thread_ts=thread_ts,
-                    triggering_user_id=user_id,
-                    triggering_event_ts=event_ts,
+                    channel_id=request.channel_id,
+                    thread_ts=request.thread_ts,
+                    triggering_user_id=request.user_id,
+                    triggering_event_ts=request.event_ts,
                 )
             ),
         )
@@ -549,28 +540,26 @@ async def _mark_slack_thread_errored(
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
 
-async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: Repo | None) -> None:
-    repo_dict = repo_config.model_dump() if repo_config else None
-    channel_id = event_data.get("channel_id", "")
-    thread_ts = event_data.get("thread_ts", "")
-    event_ts = event_data.get("event_ts", "")
-    user_id = event_data.get("user_id", "")
-    text = event_data.get("text", "")
-    attachments = event_data.get("attachments", [])
-    bot_user_id = event_data.get("bot_user_id", "")
-    message_update = bool(event_data.get("message_update"))
-    reply_thread_ts = event_data.get("reply_thread_ts")
-    if not isinstance(reply_thread_ts, str):
-        reply_thread_ts = ""
-    original_message_ts = event_data.get("original_message_ts")
-    if not isinstance(original_message_ts, str) or not original_message_ts:
-        original_message_ts = event_ts
-    channel_context_raw = event_data.get("channel_context")
+async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) -> None:
+    repo_dict = repo.model_dump() if repo else None
+    channel_id = request.channel_id
+    thread_ts = request.thread_ts
+    event_ts = request.event_ts
+    user_id = request.user_id
+    text = request.text
+    attachments = request.attachments
+    bot_user_id = request.bot_user_id
+    message_update = request.message_update
+    reply_thread_ts = request.reply_thread_ts
+    original_message_ts = request.original_message_ts or event_ts
     channel_context = (
-        channel_context_raw
-        if isinstance(channel_context_raw, dict)
+        request.channel_context
+        if request.channel_context is not None
         else common.normalize_slack_channel_context(channel_id, None)
     )
+    treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
+    untagged_reply = request.untagged_reply
+    code_channel = request.code_channel
 
     if not channel_id or not thread_ts or not event_ts:
         common.logger.warning(
@@ -582,9 +571,9 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
         return
 
     langgraph_client = get_langgraph_client()
-    thread_id = event_data.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
-        thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
+    thread_id = request.thread_id or await common.resolve_slack_thread_id(
+        langgraph_client, channel_id, thread_ts
+    )
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
         await common.refresh_user_mapping_cache()
@@ -633,9 +622,6 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
     elif current_message is not None and attachments and not current_message.get("attachments"):
         current_message["attachments"] = attachments
 
-    treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
-    untagged_reply = bool(event_data.get("untagged_reply"))
-    code_channel = bool(event_data.get("code_channel"))
     context_messages, context_mode = common.select_slack_context_messages(
         thread_messages,
         event_ts,
@@ -700,9 +686,9 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
         channel_id, thread_ts, context_source, channel_context
     )
     repo_hint_section = (
-        f"## Default Repository Hint\n{repo_config.full_name}\n"
+        f"## Default Repository Hint\n{repo.full_name}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
-        if repo_config
+        if repo
         else ""
     )
     operational_context = (
@@ -876,7 +862,7 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
         code_channel=code_channel,
         message_update=message_update,
-        explicit_request=bool(event_data.get("explicit_request")),
+        explicit_request=request.explicit_request,
     )
     run_input = _slack_context_input(
         context_messages,
@@ -931,7 +917,7 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
             mapping_thread_ts=thread_ts,
             original_message_ts=original_message_ts,
             recipient_user_id=user_id,
-            recipient_team_id=str(event_data.get("team_id") or ""),
+            recipient_team_id=request.team_id,
         )
     if is_first_mention:
         if isinstance(run_id, str) and run_id:

@@ -12,6 +12,7 @@ from agent.slack import code_channels as slack_code_channels
 from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
 
 
@@ -77,10 +78,10 @@ async def test_runtime_slash_command_routes_to_code_channel_session(
 
     assert response == {"response_type": "ephemeral", "text": "Working on /run-tests…"}
     assert code_channel_route.await_args is not None
-    event_data = code_channel_route.await_args.args[0]
-    assert event_data["thread_ts"] == "0"
-    assert event_data["explicit_request"] is True
-    assert "/run-tests tests/slack" in event_data["text"]
+    request = cast(SlackRequest, code_channel_route.await_args.args[0])
+    assert request.thread_ts == "0"
+    assert request.explicit_request is True
+    assert "/run-tests tests/slack" in request.text
 
 
 async def test_context_bar_action_routes_to_code_channel_session(
@@ -110,7 +111,7 @@ async def test_context_bar_action_routes_to_code_channel_session(
 
     assert response["status"] == "accepted"
     assert code_channel_route.await_args is not None
-    assert "create-pr" in code_channel_route.await_args.args[0]["text"]
+    assert "create-pr" in code_channel_route.await_args.args[0].text
 
 
 @pytest.mark.parametrize("is_private", [False, True])
@@ -238,11 +239,11 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     )
 
     assert response["status"] == "accepted", response
-    event_data = cast(dict[str, Any], background_tasks.tasks[0].args[0])
-    assert event_data["code_channel"] is True
-    assert event_data["treat_all_messages_as_mentions"] is True
-    assert event_data["thread_ts"] == webhook_common.CODE_CHANNEL_SESSION_TS
-    assert event_data["reply_thread_ts"] == "1786573300.000000"
+    request = cast(SlackRequest, background_tasks.tasks[0].args[0])
+    assert request.code_channel is True
+    assert request.treat_all_messages_as_mentions is True
+    assert request.thread_ts == webhook_common.CODE_CHANNEL_SESSION_TS
+    assert request.reply_thread_ts == "1786573300.000000"
 
 
 async def test_code_channel_replies_are_posted_top_level(monkeypatch: pytest.MonkeyPatch) -> None:

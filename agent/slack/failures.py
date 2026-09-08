@@ -9,9 +9,10 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import BaseModel
 
 from agent.slack.client import post_slack_thread_reply
+from agent.slack.responses import WebhookResponse, failed
 from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -35,9 +36,7 @@ class SlackRequestTarget(BaseModel):
     channel_id: str = ""
     thread_ts: str = ""
     event_id: str = ""
-    agent_thread_id: str | None = Field(
-        default=None, validation_alias=AliasChoices("agent_thread_id", "thread_id")
-    )
+    agent_thread_id: str | None = None
 
 
 async def report_slack_failure(target: SlackRequestTarget, exc: BaseException) -> str:
@@ -75,8 +74,8 @@ async def report_slack_failure(target: SlackRequestTarget, exc: BaseException) -
 
 
 async def answer_slack_request(
-    target: SlackRequestTarget, handle: Callable[[], Awaitable[dict[str, str]]]
-) -> dict[str, str]:
+    target: SlackRequestTarget, handle: Callable[[], Awaitable[WebhookResponse]]
+) -> WebhookResponse:
     """Run a webhook handler for an addressed request; a failure becomes a thread reply.
 
     Slack sees 200 either way so it does not retry a request the user has
@@ -85,7 +84,7 @@ async def answer_slack_request(
     try:
         return await handle()
     except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "error_id": await report_slack_failure(target, exc)}
+        return failed(await report_slack_failure(target, exc))
 
 
 async def run_slack_task(target: SlackRequestTarget, task: Awaitable[None]) -> None:

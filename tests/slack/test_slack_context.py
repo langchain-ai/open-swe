@@ -17,6 +17,7 @@ from agent.slack.client import (
     select_slack_context_messages,
     strip_bot_mention,
 )
+from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
@@ -986,14 +987,16 @@ def test_process_slack_mention_runs_without_a_repository(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> hello",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> hello",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             None,
         )
     )
@@ -1038,21 +1041,23 @@ def test_process_slack_mention_preserves_forwarded_attachment_from_event(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> handle this",
-                "attachments": [
-                    {
-                        "is_share": True,
-                        "author_name": "Teammate",
-                        "text": "Forwarded requirements",
-                    }
-                ],
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> handle this",
+                    "attachments": [
+                        {
+                            "is_share": True,
+                            "author_name": "Teammate",
+                            "text": "Forwarded requirements",
+                        }
+                    ],
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1084,14 +1089,16 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": thread_ts,
-                "event_ts": event_ts,
-                "user_id": "U123",
-                "text": "<@UBOT> continue on the branch",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": thread_ts,
+                    "event_ts": event_ts,
+                    "user_id": "U123",
+                    "text": "<@UBOT> continue on the branch",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1181,15 +1188,17 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "D123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "continue on the branch",
-                "bot_user_id": "UBOT",
-                "treat_all_messages_as_mentions": True,
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "D123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "continue on the branch",
+                    "bot_user_id": "UBOT",
+                    "treat_all_messages_as_mentions": True,
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1236,14 +1245,16 @@ def test_process_slack_mention_skips_trace_reply_on_followup_mention(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": thread_ts,
-                "event_ts": event_ts,
-                "user_id": "U123",
-                "text": "<@UBOT> follow up question",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": thread_ts,
+                    "event_ts": event_ts,
+                    "user_id": "U123",
+                    "text": "<@UBOT> follow up question",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1287,14 +1298,16 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> do the thing",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> do the thing",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1340,14 +1353,16 @@ def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> do the thing",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> do the thing",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1389,14 +1404,16 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> do the thing",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> do the thing",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1429,14 +1446,16 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> do the thing",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> do the thing",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1478,14 +1497,16 @@ def test_process_slack_mention_bot_only_mode_runs_without_user_token(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> do the thing",
-                "bot_user_id": "UBOT",
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> do the thing",
+                    "bot_user_id": "UBOT",
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1811,15 +1832,17 @@ def test_process_slack_mention_queues_a_message_edit_instead_of_running(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000300",
-                "user_id": "U123",
-                "text": "<@UBOT> actually use PR 5889",
-                "bot_user_id": "UBOT",
-                "message_update": True,
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000300",
+                    "user_id": "U123",
+                    "text": "<@UBOT> actually use PR 5889",
+                    "bot_user_id": "UBOT",
+                    "message_update": True,
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )
@@ -1854,15 +1877,17 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000300",
-                "user_id": "U123",
-                "text": "<@UBOT> actually use PR 5889",
-                "bot_user_id": "UBOT",
-                "message_update": True,
-            },
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000300",
+                    "user_id": "U123",
+                    "text": "<@UBOT> actually use PR 5889",
+                    "bot_user_id": "UBOT",
+                    "message_update": True,
+                }
+            ),
             Repo(owner="langchain-ai", name="open-swe"),
         )
     )

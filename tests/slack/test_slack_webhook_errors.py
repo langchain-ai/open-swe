@@ -7,6 +7,7 @@ from agent.dashboard import plan_api
 from agent.run_config import Repo
 from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
+from agent.slack.request import SlackRequest
 
 
 class _FakeThreads:
@@ -22,15 +23,15 @@ class _FakeClient:
         self.threads = _FakeThreads()
 
 
-def _event_data() -> dict[str, Any]:
-    return {
-        "channel_id": "C1",
-        "thread_ts": "123.45",
-        "event_ts": "123.45",
-        "user_id": "U1",
-        "text": "help",
-        "bot_user_id": "BOT",
-    }
+def _event_data() -> SlackRequest:
+    return SlackRequest(
+        channel_id="C1",
+        thread_ts="123.45",
+        event_ts="123.45",
+        user_id="U1",
+        text="help",
+        bot_user_id="BOT",
+    )
 
 
 @pytest.mark.asyncio
@@ -103,13 +104,11 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
 async def test_slack_plan_button_uses_verified_actor(monkeypatch: pytest.MonkeyPatch) -> None:
     approve = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
-    event_data = {
-        "thread_id": "t1",
-        "user_id": "U1",
-        "user_name": "Alice",
-    }
+    event_data = SlackRequest(
+        channel_id="C1", thread_ts="123.45", thread_id="t1", user_id="U1", user_name="Alice"
+    )
 
-    await slack_webhook.process_slack_plan_approval(event_data, {})
+    await slack_webhook.process_slack_plan_approval(event_data, None)
 
     approve.assert_awaited_once_with(
         "t1",
@@ -141,13 +140,9 @@ async def test_slack_plan_button_failure_notifies_user(
     notify = AsyncMock()
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
     monkeypatch.setattr(slack_webhook, "_notify_slack_processing_error", notify)
-    event_data = {
-        "thread_id": "t1",
-        "channel_id": "C1",
-        "thread_ts": "123.45",
-        "user_id": "U1",
-        "user_name": "Alice",
-    }
+    event_data = SlackRequest(
+        thread_id="t1", channel_id="C1", thread_ts="123.45", user_id="U1", user_name="Alice"
+    )
     repo_config = Repo(owner="langchain-ai", name="open-swe")
 
     await slack_webhook.process_slack_plan_approval(event_data, repo_config)
@@ -506,18 +501,18 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     monkeypatch.setattr(slack_webhook.common, "store_slack_run_mapping", store_mapping)
 
     await slack_webhook._process_slack_mention_impl(
-        {
-            "channel_id": "C1",
-            "channel_context": {},
-            "thread_ts": "1.0",
-            "event_ts": "2.0",
-            "original_message_ts": "1.0",
-            "user_id": "U1",
-            "text": "new corrected text",
-            "bot_user_id": "BOT",
-            "thread_id": "t1",
-            "message_update": True,
-        },
+        SlackRequest(
+            channel_id="C1",
+            channel_context={},
+            thread_ts="1.0",
+            event_ts="2.0",
+            original_message_ts="1.0",
+            user_id="U1",
+            text="new corrected text",
+            bot_user_id="BOT",
+            thread_id="t1",
+            message_update=True,
+        ),
         Repo(owner="langchain-ai", name="open-swe"),
     )
 

@@ -106,10 +106,3 @@ async def test_run_slack_task_reports_failure(monkeypatch: pytest.MonkeyPatch) -
 
     post_reply.assert_awaited_once()
 
-
-def test_target_reads_agent_thread_from_event_data() -> None:
-    target = failures.SlackRequestTarget.model_validate(
-        {"channel_id": "C1", "thread_ts": "1.0", "thread_id": "t1", "text": "ignored"}
-    )
-    assert target.agent_thread_id == "t1"
-    assert failures.SlackRequestTarget.model_validate({"thread_id": None}).agent_thread_id is None

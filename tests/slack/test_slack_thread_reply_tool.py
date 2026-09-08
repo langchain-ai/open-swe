@@ -7,6 +7,8 @@ from uuid import UUID
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.slack.payloads import SlackBlockAction
+
 slack_reply_tool = importlib.import_module("agent.slack.tools.thread_reply")
 
 
@@ -317,10 +319,11 @@ def test_slack_action_ids_are_unique_and_recognized() -> None:
     actions = blocks[1]["elements"]
 
     assert len({action["action_id"] for action in actions}) == len(actions)
-    assert slack_routes._first_open_swe_option_action(actions) is actions[0]
-    legacy = {"action_id": "open_swe_option_select"}
-    assert slack_routes._first_open_swe_option_action([legacy]) is legacy
-    assert slack_routes._first_open_swe_option_action([{"action_id": "unrelated"}]) is None
+    parsed = [SlackBlockAction.model_validate(action) for action in actions]
+    assert slack_routes._first_option_action(parsed) is parsed[0]
+    legacy = SlackBlockAction(action_id="open_swe_option_select")
+    assert slack_routes._first_option_action([legacy]) is legacy
+    assert slack_routes._first_option_action([SlackBlockAction(action_id="unrelated")]) is None
 
 
 async def test_slack_thread_reply_passes_live_run_id(
