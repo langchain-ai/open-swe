@@ -73,6 +73,25 @@ async def test_gate_allows_member_of_any_configured_org(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("authorized_by", ["user", "org"])
+async def test_gate_uses_union_when_both_allowlists_are_set(
+    monkeypatch, authorized_by: str
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
+    membership = AsyncMock(return_value=authorized_by == "org")
+    monkeypatch.setattr(oauth, "is_user_active_org_member", membership)
+
+    login = "alice" if authorized_by == "user" else "insider"
+    await oauth.enforce_github_login_gate(login)
+
+    if authorized_by == "user":
+        membership.assert_not_awaited()
+    else:
+        membership.assert_awaited_once_with("insider", "primary")
+
+
+@pytest.mark.asyncio
 async def test_gate_rejects_user_outside_both_allowlists(monkeypatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
