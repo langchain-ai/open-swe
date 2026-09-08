@@ -44,7 +44,6 @@ function toolKind(name: string): ToolKind {
   if (lowered === "task") return "task"
   if (lowered === "slack_thread_reply") return "slack"
   if (lowered === "linear_comment") return "linear"
-  if (lowered === "write_todos") return "other"
   if (
     EDIT_TOOLS.has(lowered) ||
     ["edit", "write", "replace"].some((t) => lowered.includes(t))

@@ -49,7 +49,10 @@ The main agent and middleware stack are assembled in `agent/server.py`. Middlewa
 - Add middleware to `agent/middleware/`, export it, and place it deliberately in the stack.
 - Add sandbox providers under `agent/sandboxes/providers/` and register them in `registry.py`.
 - Add dashboard endpoints through `agent/dashboard/routes.py` and graph entrypoints through `langgraph.json`.
-- Do not add tests that only restate static prompt text; test rendering, composition, precedence, or behavior.
+
+## Testing
+
+Add tests only when they meaningfully protect observable behavior. Do not add change-detector tests that merely restate constants, mappings, prompt text, source structure, or incidental interactions such as internal call order. Refactors that preserve behavior should not require mechanical test updates; rewrite or remove tests that do. Cover meaningful edge cases and keep tests deterministic.
 
 <!-- OPENWIKI:START -->
 

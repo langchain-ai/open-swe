@@ -1,11 +1,11 @@
 """GitHub organization membership checks for webhook gating."""
 
 import logging
-import os
 from urllib.parse import quote
 
 import httpx
 
+from agent.config import ENV
 from agent.github.app import (
     get_github_app_installation_id_for_org,
     get_github_app_installation_token,
@@ -15,11 +15,7 @@ logger = logging.getLogger(__name__)
 
 INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
     {"open-swe[bot]", "openswe-dev[bot]"}
-    | {
-        login.strip()
-        for login in os.environ.get("EXTRA_INTERNAL_BOT_LOGINS", "").split(",")
-        if login.strip()
-    }
+    | {login.strip() for login in ENV.EXTRA_INTERNAL_BOT_LOGINS.get().split(",") if login.strip()}
 )
 
 

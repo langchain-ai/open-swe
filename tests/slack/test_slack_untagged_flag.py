@@ -101,9 +101,6 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}
 
-    async def not_docs_plz(_channel_id: str, _context: dict[str, Any]) -> bool:
-        return False
-
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -125,7 +122,6 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
@@ -300,28 +296,6 @@ async def test_message_update_retries_until_delivery_mapping_exists(
 
     sleep.assert_awaited_once_with(0.1)
     process.assert_awaited_once()
-
-
-async def test_unassociated_message_update_does_not_trigger_docs_gate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
-    is_docs_plz = AsyncMock(return_value=True)
-    post_reply = AsyncMock()
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", is_docs_plz)
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
-        cast(BackgroundTasks, background_tasks),
-    )
-    await _run_message_update_task(background_tasks)
-
-    assert response == {"status": "accepted", "message": "Slack update queued"}
-    is_docs_plz.assert_not_awaited()
-    post_reply.assert_not_awaited()
 
 
 async def test_message_update_rejects_changed_sender_identity() -> None:

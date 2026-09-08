@@ -4,12 +4,12 @@ import asyncio
 import hashlib
 import hmac
 import logging
-import os
 import re
 from typing import Any
 
 import httpx
 
+from agent.config import ENV
 from agent.github.thread_token import GitHubAuthError
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
@@ -38,9 +38,7 @@ _DEFAULT_OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
 
 def _load_open_swe_tags() -> tuple[str, ...]:
     configured = tuple(
-        tag.strip().lower()
-        for tag in os.environ.get("OPEN_SWE_MENTION_TAGS", "").split(",")
-        if tag.strip()
+        tag.strip().lower() for tag in ENV.OPEN_SWE_MENTION_TAGS.get().split(",") if tag.strip()
     )
     return configured or _DEFAULT_OPEN_SWE_TAGS
 

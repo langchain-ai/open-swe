@@ -1,10 +1,11 @@
+import runpy
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.dashboard import options
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
-    DEFAULT_MODEL_ID,
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     SUPPORTED_MODELS,
@@ -34,6 +35,22 @@ DEPRECATED_OPENAI = "openai:gpt-5.5"
 DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
 SUPPORTED_GLM = "fireworks:accounts/fireworks/models/glm-5p3"
 FABLE = "anthropic:claude-fable-5-1"
+
+
+@pytest.mark.parametrize(
+    ("model", "effort", "expected"),
+    [
+        ("", "", (SUPPORTED_OPENAI, "medium")),
+        ("", "high", (SUPPORTED_OPENAI, "high")),
+        (SUPPORTED_ANTHROPIC, "", (SUPPORTED_ANTHROPIC, "medium")),
+        (" anthropic:claude-haiku-4-5 ", "", ("anthropic:claude-haiku-4-5", "none")),
+        (SUPPORTED_ANTHROPIC, " max ", (SUPPORTED_ANTHROPIC, "max")),
+    ],
+)
+def test_environment_default_model_pair(monkeypatch, model, effort, expected) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", model)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", effort)
+    assert default_model_pair() == expected
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
@@ -229,9 +246,22 @@ def test_profile_unknown_provider_defers_to_team_default() -> None:
     assert normalize_profile_overrides(profile) == (None, None)
 
 
-def test_global_default_is_gpt_5_6_sol() -> None:
-    model, _ = default_model_pair()
-    assert model == DEFAULT_MODEL_ID == SUPPORTED_OPENAI
+@pytest.mark.parametrize(
+    ("anthropic_key", "openai_key", "expected"),
+    [
+        ("key", "", SUPPORTED_ANTHROPIC),
+        ("key", "key", SUPPORTED_OPENAI),
+        ("", "", SUPPORTED_OPENAI),
+    ],
+)
+def test_global_default_matches_available_credentials(
+    monkeypatch: pytest.MonkeyPatch, anthropic_key: str, openai_key: str, expected: str
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_key)
+    monkeypatch.setenv("OPENAI_API_KEY", openai_key)
+    defaults = runpy.run_path(options.__file__)
+    assert defaults["default_model_pair"]() == (expected, "medium")
+    assert defaults["default_vision_model_pair"]() == (expected, "medium")
 
 
 def test_gate_fable_passthrough_when_enabled() -> None:

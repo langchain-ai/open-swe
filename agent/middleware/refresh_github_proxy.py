@@ -15,10 +15,12 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from agent.github.proxy import maybe_refresh_proxy_token
+from agent.middleware.trace import scrub_middleware_inputs
 
 logger = logging.getLogger(__name__)
 
 
+@scrub_middleware_inputs
 @before_model
 async def refresh_github_proxy_before_model(
     state: AgentState,  # noqa: ARG001

@@ -292,7 +292,7 @@ export function AgentThreadView({
           {isHydrating ? (
             <div className="flex flex-1 items-center justify-center px-6">
               <img
-                src="/logo-mark.png"
+                src={`${import.meta.env.BASE_URL}logo-mark.png`}
                 alt="Loading conversation"
                 className="size-12 animate-pulse"
               />

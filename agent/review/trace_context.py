@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import posixpath
 import uuid
 from dataclasses import dataclass
@@ -15,7 +14,7 @@ from agent.dashboard.team_credentials import get_langsmith_credentials
 from agent.dashboard.team_settings import get_team_review_tracing_project
 from agent.run_config import RunConfig
 from agent.tool_loaders.langsmith import _client
-from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.langsmith import get_langsmith_trace_url, langsmith_host_url, resolve_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -461,10 +460,9 @@ async def _trace_url(thread_id: str, project: str) -> str | None:
     resolved = await get_langsmith_trace_url(thread_id, project_name=project)
     if resolved:
         return resolved
-    tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")
+    tenant_id = await resolve_tenant_id()
     if tenant_id and _looks_uuid(project):
-        host_url = os.environ.get("LANGSMITH_URL_PROD", "https://smith.langchain.com")
-        return f"{host_url}/o/{tenant_id}/projects/p/{project}/t/{thread_id}"
+        return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project}/t/{thread_id}"
     return None
 
 
