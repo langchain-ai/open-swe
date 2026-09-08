@@ -218,7 +218,7 @@ class SandboxBackendProxy(BaseSandbox):
         max_count: int | None = None,
     ) -> GrepResult:
         backend = await self._aget_backend()
-        if len(pattern.encode()) < _TGREP_MIN_PATTERN_BYTES:
+        if len(pattern.encode()) < _TGREP_MIN_PATTERN_BYTES or max_count is not None:
             return await backend.agrep(pattern, path, glob, max_count=max_count)
 
         async def indexed_search() -> GrepResult | None:

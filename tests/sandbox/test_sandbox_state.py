@@ -157,7 +157,7 @@ async def test_sandbox_proxy_returns_faster_indexed_search(
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_returns_faster_default_search(
+async def test_sandbox_proxy_skips_index_for_capped_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _FakeSandboxBackend()
@@ -167,11 +167,13 @@ async def test_sandbox_proxy_returns_faster_default_search(
         await asyncio.sleep(1)
         return ExecuteResponse(output="", exit_code=1)
 
-    monkeypatch.setattr(backend, "aexecute", slower_index)
+    execute = AsyncMock(side_effect=slower_index)
+    monkeypatch.setattr(backend, "aexecute", execute)
 
     result = await proxy.agrep("selective-needle", "/repo", max_count=1000)
 
     assert result.matches == [{"path": "/repo", "line": 1, "text": "selective-needle"}]
+    execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
