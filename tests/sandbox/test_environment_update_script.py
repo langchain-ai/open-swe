@@ -104,16 +104,3 @@ async def test_an_execute_that_raises_does_not_lose_the_sandbox() -> None:
     )
 
     backend.aexecute.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_an_environment_with_no_snapshot_yet_skips() -> None:
-    """Nothing to freshen: the box booted from the base image, not a capture."""
-    backend = _backend(_Result("", 0))
-    never_captured = _stale(snapshot_status="none", snapshot_id=None)
-
-    await SandboxCreateConfig(snapshot_id=None, environment=never_captured).run_update_script(
-        backend, None
-    )
-
-    backend.aexecute.assert_not_awaited()

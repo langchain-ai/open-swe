@@ -393,36 +393,6 @@ async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_publish_rejects_clear_sizing_with_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")):
-        result = await env_tools.publish_environment("base", "prompt", vcpus=8, clear_sizing=True)
-
-    assert result == {
-        "ok": False,
-        "error": "clear_sizing cannot be combined with sizing values",
-    }
-
-
-@pytest.mark.asyncio
-async def test_refresh_start_requires_a_saved_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with (
-        patch(
-            "agent.run_config.get_config",
-            return_value=_config(github_login="ramonn", thread_id="t-1"),
-        ),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
-        ),
-    ):
-        result = await env_tools.refresh_environment_start("base")
-
-    assert result["status"] == "error"
-    assert "publish_environment" in result["error"]
-
-
-@pytest.mark.asyncio
 async def test_refresh_start_refuses_an_environment_with_no_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

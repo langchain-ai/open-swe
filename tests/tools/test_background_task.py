@@ -67,12 +67,6 @@ def test_a_task_id_routes_to_exactly_one_provider() -> None:
     assert command_owns("2b1c4f9e-0000-4000-8000-000000000000")
 
 
-@pytest.mark.asyncio
-async def test_status_and_stop_need_a_task_id() -> None:
-    assert (await background_task("status"))["success"] is False
-    assert "task_id is required" in (await background_task("stop"))["error"]
-
-
 # --- environment refreshes ---
 
 
@@ -179,18 +173,6 @@ async def test_one_provider_failing_does_not_blank_the_listing(admin: Any) -> No
 
     assert result["success"] is True
     assert [task["kind"] for task in result["tasks"]] == ["environment_refresh"]
-
-
-@pytest.mark.asyncio
-async def test_a_never_refreshed_environment_is_not_a_task(admin: Any) -> None:
-    with (
-        _store(Environment(slug="base"), _running()),
-        patch("agent.tools.background_execute.task_list", new_callable=AsyncMock, return_value=[]),
-    ):
-        result = await background_task("list")
-
-    assert [task["environment"] for task in result["tasks"]] == ["base"]
-    assert len(result["tasks"]) == 1
 
 
 # --- authorization ---

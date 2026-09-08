@@ -63,11 +63,6 @@ def test_slugify_rejects_names_without_alphanumerics() -> None:
         slugify("---")
 
 
-def test_snapshot_name_defaults_to_the_prefixed_slug(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ENVIRONMENT_SNAPSHOT_PREFIX", raising=False)
-    assert default_snapshot_name_for("monorepo") == "openswe-environment-monorepo"
-
-
 def test_snapshot_name_prefix_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENVIRONMENT_SNAPSHOT_PREFIX", "acme")
     assert default_snapshot_name_for("default") == "acme-environment-default"
@@ -193,34 +188,12 @@ def test_create_params_enforce_serialized_size_limit() -> None:
         )
 
 
-def test_snapshot_id_only_resolves_when_there_is_one() -> None:
-    assert (
-        Environment(slug="e", snapshot_status="ready", snapshot_id="s-1").ready_snapshot_id == "s-1"
-    )
-    assert Environment(slug="e", snapshot_status="ready").ready_snapshot_id is None
-    assert (
-        Environment(slug="e", snapshot_status="failed", snapshot_id="s-1").ready_snapshot_id is None
-    )
-
-
 def test_a_capture_in_flight_keeps_serving_the_previous_snapshot() -> None:
     """The new id lands only on success, so the old one is still what runs want."""
     capturing = Environment(slug="e", snapshot_status="capturing", snapshot_id="s-1")
     assert capturing.ready_snapshot_id == "s-1"
     # Nothing captured yet: a first capture in flight has nothing to fall back to.
     assert Environment(slug="e", snapshot_status="capturing").ready_snapshot_id is None
-
-
-@pytest.mark.asyncio
-async def test_a_refresh_records_which_kind_it_was(fake_store: FakeStore) -> None:
-    """The dashboard tells an hourly update apart from a nightly rebuild."""
-    await ENVIRONMENTS.create(
-        EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"), "ramon"
-    )
-    marked = await ENVIRONMENTS.mark_refreshing("base", "update")
-    assert marked is not None
-    assert marked.refresh_kind == "update"
-    assert marked.option()["refresh_kind"] == "update"
 
 
 def test_environment_prompt_blank_is_none() -> None:

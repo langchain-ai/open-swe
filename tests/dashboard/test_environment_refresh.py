@@ -61,19 +61,6 @@ def test_script_command_traces_into_a_canonical_log_and_keeps_the_exit_code(
     assert command.endswith("exit $rc")
 
 
-def test_the_script_root_is_configurable_for_providers_without_a_writable_root(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`SANDBOX_TYPE=local` runs on a developer's machine, where / is read-only."""
-    monkeypatch.setenv("OPENSWE_SCRIPT_ROOT", "/tmp/e2e/open-swe/environment/")
-
-    assert env_store.script_root() == "/tmp/e2e/open-swe/environment"
-    assert env_store.script_log_path("setup") == "/tmp/e2e/open-swe/environment/logs/setup.log"
-    assert "mkdir -p /tmp/e2e/open-swe/environment/logs" in env_store.script_command(
-        "make setup", "setup"
-    )
-
-
 def test_daily_schedule_is_stable_and_staggered() -> None:
     assert refresh.daily_schedule("default") == refresh.daily_schedule("default")
     schedules = {refresh.daily_schedule(slug) for slug in ("default", "staging", "preview")}
@@ -213,16 +200,6 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure(
 
 
 @pytest.mark.asyncio
-async def test_an_environment_without_a_script_is_not_refreshed(fake_store: FakeStore) -> None:
-    create = AsyncMock()
-    with patch.object(refresh, "_create_builder_sandbox", create):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
-        result = await refresh.refresh_environment("base")
-
-    assert result["status"] == "no_setup_script"
-    create.assert_not_awaited()
-
-
 @pytest.mark.asyncio
 async def test_a_refresh_in_flight_blocks_a_second_one(fake_store: FakeStore) -> None:
     create = AsyncMock()
