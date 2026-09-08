@@ -3,7 +3,7 @@
 from typing import Any, cast
 from unittest.mock import patch
 
-import httpx2
+import httpx
 import pytest
 from fireworks import AsyncFireworks
 from langchain_core.messages import AIMessage, HumanMessage
@@ -55,11 +55,11 @@ def test_openai_overrides_chat_completions_optout(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_openai_sdk_uses_gateway_responses_path() -> None:
-    requests: list[httpx2.Request] = []
+    requests: list[httpx.Request] = []
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx2.Response(
+        return httpx.Response(
             200,
             json={
                 "id": "resp_test",
@@ -80,7 +80,7 @@ async def test_openai_sdk_uses_gateway_responses_path() -> None:
             },
         )
 
-    http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
         chat_model = ChatOpenAI(
             model="gpt-5.6-sol",
@@ -125,11 +125,11 @@ def test_baseten_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
-    requests: list[httpx2.Request] = []
+    requests: list[httpx.Request] = []
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx2.Response(
+        return httpx.Response(
             200,
             json={
                 "id": "chatcmpl-test",
@@ -147,7 +147,7 @@ async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
             },
         )
 
-    http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
         client = AsyncFireworks(
             api_key="dummy",
@@ -185,9 +185,9 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
 
     captured_bodies: list[dict] = []
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
         captured_bodies.append(json.loads(request.content))
-        return httpx2.Response(
+        return httpx.Response(
             200,
             json={
                 "id": "chatcmpl-test",
@@ -205,7 +205,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
             },
         )
 
-    http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
         chat_model = ChatFireworks(
             model="accounts/fireworks/models/glm-5p2",
