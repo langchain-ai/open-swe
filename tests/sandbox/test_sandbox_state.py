@@ -32,6 +32,14 @@ class _FakeSandboxBackend:
     async def adelete(self, file_path: str) -> DeleteResult:
         return DeleteResult(path=file_path)
 
+    async def awrite(self, file_path: str, content: str):  # noqa: ANN201
+        return {"path": file_path, "content": content}
+
+    async def aedit(
+        self, file_path: str, old_string: str, new_string: str, replace_all: bool = False
+    ):  # noqa: ANN201
+        return {"path": file_path, "old": old_string, "new": new_string}
+
     async def agrep(
         self,
         pattern: str,
@@ -129,50 +137,64 @@ async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_returns_faster_indexed_search(
+async def test_sandbox_proxy_returns_indexed_search_without_duplicate_grep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _FakeSandboxBackend()
     proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
-
-    async def slower_grep(*args: object, **kwargs: object) -> GrepResult:
-        await asyncio.sleep(1)
-        return GrepResult(matches=[])
-
-    monkeypatch.setattr(backend, "agrep", slower_grep)
+    fallback = AsyncMock(wraps=backend.agrep)
+    monkeypatch.setattr(backend, "agrep", fallback)
     monkeypatch.setattr(
         backend,
         "aexecute",
         AsyncMock(
             return_value=ExecuteResponse(
-                output='__OPEN_SWE_TGREP_START__\n__OPEN_SWE_TGREP_STATUS__\n{"type":"match","data":{"path":{"text":"/repo/a.py"},"line_number":2,"lines":{"text":"needle\\n"}}}\n__OPEN_SWE_TGREP_SUCCESS__\n__OPEN_SWE_TGREP_END__',
+                output='__OPEN_SWE_TGREP_START__\n__OPEN_SWE_TGREP_FRESH__\n{"type":"match","data":{"path":{"text":"/repo/a.py"},"line_number":2,"lines":{"text":"needle\\n"}}}\n__OPEN_SWE_TGREP_SUCCESS__:0\n__OPEN_SWE_TGREP_END__',
                 exit_code=0,
             )
         ),
     )
 
-    result = await proxy.agrep("selective-needle", "/repo")
+    result = await proxy.agrep("selective-needle", "/repo", max_count=1000)
 
     assert result.matches == [{"path": "/repo/a.py", "line": 2, "text": "needle"}]
+    fallback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_skips_index_for_capped_search(
+async def test_sandbox_proxy_skips_index_for_small_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _FakeSandboxBackend()
     proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
-
-    async def slower_index(*args: object, **kwargs: object) -> ExecuteResponse:
-        await asyncio.sleep(1)
-        return ExecuteResponse(output="", exit_code=1)
-
-    execute = AsyncMock(side_effect=slower_index)
+    execute = AsyncMock()
     monkeypatch.setattr(backend, "aexecute", execute)
 
-    result = await proxy.agrep("selective-needle", "/repo", max_count=1000)
+    assert (await proxy.agrep("selective-needle", "/repo", max_count=30)).matches
+    execute.assert_not_awaited()
 
-    assert result.matches == [{"path": "/repo", "line": 1, "text": "selective-needle"}]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["aexecute", "awrite", "aedit", "adelete"])
+async def test_sandbox_proxy_disables_index_after_possible_mutation(
+    monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    backend = _FakeSandboxBackend()
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+    execute = AsyncMock()
+    monkeypatch.setattr(backend, "aexecute", execute)
+
+    if mutation == "aexecute":
+        await proxy.aexecute("touch /repo/file")
+    elif mutation == "awrite":
+        await proxy.awrite("/repo/file", "content")
+    elif mutation == "aedit":
+        await proxy.aedit("/repo/file", "old", "new")
+    else:
+        await proxy.adelete("/repo/file")
+    execute.reset_mock()
+    await proxy.agrep("selective-needle", "/repo", max_count=100)
+
     execute.assert_not_awaited()
 
 
@@ -188,7 +210,30 @@ async def test_sandbox_proxy_falls_back_when_index_is_unavailable(
         AsyncMock(return_value=ExecuteResponse(output='{"status":"unavailable"}', exit_code=0)),
     )
 
-    result = await proxy.agrep("selective-needle", "/repo")
+    result = await proxy.agrep("selective-needle", "/repo", max_count=30)
+
+    assert result.matches == [{"path": "/repo", "line": 1, "text": "selective-needle"}]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_falls_back_on_truncated_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _FakeSandboxBackend()
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+    monkeypatch.setattr(
+        backend,
+        "aexecute",
+        AsyncMock(
+            return_value=ExecuteResponse(
+                output="__OPEN_SWE_TGREP_START__\n__OPEN_SWE_TGREP_FRESH__\n__OPEN_SWE_TGREP_SUCCESS__:0\n__OPEN_SWE_TGREP_END__",
+                exit_code=0,
+                truncated=True,
+            )
+        ),
+    )
+
+    result = await proxy.agrep("selective-needle", "/repo", max_count=30)
 
     assert result.matches == [{"path": "/repo", "line": 1, "text": "selective-needle"}]
 
@@ -202,7 +247,7 @@ async def test_sandbox_proxy_skips_index_without_a_trigram(
     execute = AsyncMock()
     monkeypatch.setattr(backend, "aexecute", execute)
 
-    assert (await proxy.agrep("id", "/repo")).matches
+    assert (await proxy.agrep("id", "/repo", max_count=30)).matches
     execute.assert_not_awaited()
 
 

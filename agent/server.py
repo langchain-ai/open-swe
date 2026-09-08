@@ -10,7 +10,6 @@ the agent itself is stateless.
 # ruff: noqa: E402
 import hashlib
 import logging
-import posixpath
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -139,7 +138,6 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from agent.sandboxes.tgrep_search import warm_tgrep_server
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.corridor_mcp import (
     CORRIDOR_TOOL_NAMES,
@@ -835,12 +833,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        if prompt_default_repo:
-            async with aphase(self._thread_id, "prepare.tgrep"):
-                await warm_tgrep_server(
-                    sandbox_backend,
-                    posixpath.join(work_dir, prompt_default_repo["name"]),
-                )
         async with aphase(self._thread_id, "prepare.environment"):
             environment = await resolve_environment(_environment_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):

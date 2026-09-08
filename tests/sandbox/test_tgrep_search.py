@@ -12,20 +12,21 @@ from agent.sandboxes.tgrep_search import (
 )
 
 _START = "__OPEN_SWE_TGREP_START__"
-_STATUS = "__OPEN_SWE_TGREP_STATUS__"
+_FRESH = "__OPEN_SWE_TGREP_FRESH__"
 _SUCCESS = "__OPEN_SWE_TGREP_SUCCESS__"
 _END = "__OPEN_SWE_TGREP_END__"
 
 
-def test_tgrep_command_shell_quotes_inputs_and_requires_live_server() -> None:
-    command = build_tgrep_command("$(touch /tmp/pwned)", "/workspace/repo", "*.py'; exit 1")
+def test_tgrep_command_shell_quotes_inputs_and_requires_fresh_server() -> None:
+    command = build_tgrep_command("$(touch /tmp/pwned)", "/workspace/repo", "*.py'; exit 1", 30)
 
     assert "'$(touch /tmp/pwned)'" in command
     assert "'*.py'\"'\"'; exit 1'" in command
     assert "tgrep status" in command
-    assert "awk '/^Server status for/" in command
-    assert 'test "$result" -le 1' in command
-    assert "tmp=$(mktemp)" in command
+    assert "Last successful reconcile:" in command
+    assert "Reconcile overdue: no" in command
+    assert "--max-count 31" in command
+    assert "n <= 31" in command
 
 
 def test_tgrep_server_command_is_idempotent_and_uses_watcher() -> None:
@@ -34,6 +35,7 @@ def test_tgrep_server_command_is_idempotent_and_uses_watcher() -> None:
     assert "'/workspace/repo; touch /tmp/pwned'" in command
     assert "tgrep status" in command
     assert "nohup /usr/local/bin/tgrep serve" in command
+    assert "Last successful reconcile:" in command
     assert "--no-watch" not in command
 
 
@@ -49,7 +51,7 @@ async def test_warm_tgrep_server_executes_startup_command() -> None:
     )
 
 
-def test_parse_tgrep_result() -> None:
+def test_parse_tgrep_result_applies_global_cap() -> None:
     match = {
         "type": "match",
         "data": {
@@ -60,7 +62,8 @@ def test_parse_tgrep_result() -> None:
     }
 
     result = parse_tgrep_result(
-        f"{_START}\n{_STATUS}\n{json.dumps(match)}\n{json.dumps(match)}\n{_SUCCESS}\n{_END}", 1
+        f"{_START}\n{_FRESH}\n{json.dumps(match)}\n{json.dumps(match)}\n{_SUCCESS}:42\n{_END}",
+        1,
     )
 
     assert result is not None
@@ -68,7 +71,16 @@ def test_parse_tgrep_result() -> None:
     assert result.truncated is True
 
 
+def test_parse_tgrep_result_accepts_fresh_empty_result() -> None:
+    result = parse_tgrep_result(f"{_START}\n{_FRESH}\n{_SUCCESS}:0\n{_END}", 30)
+
+    assert result is not None
+    assert result.matches == []
+    assert result.truncated is False
+
+
 def test_parse_tgrep_result_falls_back_on_incomplete_or_malformed_output() -> None:
+    assert parse_tgrep_result(f"{_START}\n{_FRESH}\n{_SUCCESS}:42\n{_END}", None) is None
     assert parse_tgrep_result(f"{_START}\n") is None
     assert parse_tgrep_result(f"{_START}\n{_END}") is None
-    assert parse_tgrep_result(f"{_START}\n{_STATUS}\nnot a match\n{_SUCCESS}\n{_END}") is None
+    assert parse_tgrep_result(f"{_START}\n{_FRESH}\nnot a match\n{_SUCCESS}:0\n{_END}") is None

@@ -57,7 +57,7 @@ install -Dm755 tgrep /usr/local/bin/tgrep
 uv run python scripts/build_tgrep_indexes.py
 ```
 
-Run preparation automatically starts one watcher-backed server for the selected repository; its on-disk index lives in the captured environment and file changes update its in-memory overlay. Searches containing at least one trigram race indexed and normal grep and return the first valid result, while shorter patterns, missing indexes, and server failures use normal grep. Rebuild indexes before each environment capture.
+The on-disk indexes live in the captured environment. A structured fixed-string grep starts the watcher-backed server when needed and uses it only after startup reconciliation reports a complete, non-overdue index and before the agent can mutate the sandbox. Missing indexes, stale or incomplete reconciliation, short patterns, small result caps, malformed output, server failures, and all searches after a possible mutation fall back to normal grep. Results are bounded to the tool cap before crossing the sandbox boundary. Rebuild indexes before each environment capture.
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Sandbox** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 

@@ -74,6 +74,7 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
+        self._indexed_search_allowed = True
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -86,6 +87,7 @@ class SandboxBackendProxy(BaseSandbox):
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
         self._startup_task = None
+        self._indexed_search_allowed = True
 
     @property
     def has_backend(self) -> bool:
@@ -218,35 +220,23 @@ class SandboxBackendProxy(BaseSandbox):
         max_count: int | None = None,
     ) -> GrepResult:
         backend = await self._aget_backend()
-        if len(pattern.encode()) < _TGREP_MIN_PATTERN_BYTES or max_count is not None:
+        if (
+            not self._indexed_search_allowed
+            or len(pattern.encode()) < _TGREP_MIN_PATTERN_BYTES
+            or (max_count is not None and max_count < 100)
+        ):
             return await backend.agrep(pattern, path, glob, max_count=max_count)
-
-        async def indexed_search() -> GrepResult | None:
-            try:
-                response = await backend.aexecute(
-                    build_tgrep_command(pattern, path, glob, max_count), timeout=30
-                )
-                if response.exit_code == 0:
-                    return parse_tgrep_result(response.output, max_count)
-            except Exception:  # noqa: BLE001
-                logger.warning("Indexed sandbox search failed; using default grep", exc_info=True)
-            return None
-
-        tasks = {
-            asyncio.create_task(indexed_search()),
-            asyncio.create_task(backend.agrep(pattern, path, glob, max_count=max_count)),
-        }
         try:
-            for task in asyncio.as_completed(tasks):
-                result = await task
-                if result is not None and result.error is None:
-                    return result
-            return await backend.agrep(pattern, path, glob, max_count=max_count)
-        finally:
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            response = await backend.aexecute(
+                build_tgrep_command(pattern, path, glob, max_count), timeout=30
+            )
+            if response.exit_code == 0 and not response.truncated:
+                indexed = parse_tgrep_result(response.output, max_count)
+                if indexed is not None:
+                    return indexed
+        except Exception:  # noqa: BLE001
+            logger.warning("Indexed sandbox search failed; using default grep", exc_info=True)
+        return await backend.agrep(pattern, path, glob, max_count=max_count)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
@@ -258,6 +248,7 @@ class SandboxBackendProxy(BaseSandbox):
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
+        self._indexed_search_allowed = False
         return await (await self._aget_backend()).awrite(file_path, content)
 
     def edit(
@@ -276,6 +267,7 @@ class SandboxBackendProxy(BaseSandbox):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
+        self._indexed_search_allowed = False
         return await (await self._aget_backend()).aedit(
             file_path, old_string, new_string, replace_all
         )
@@ -284,12 +276,14 @@ class SandboxBackendProxy(BaseSandbox):
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def adelete(self, file_path: str) -> DeleteResult:
+        self._indexed_search_allowed = False
         return await (await self._aget_backend()).adelete(file_path)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        self._indexed_search_allowed = False
         return await (await self._aget_backend()).aupload_files(files)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
@@ -302,6 +296,7 @@ class SandboxBackendProxy(BaseSandbox):
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        self._indexed_search_allowed = False
         return await (await self._aget_backend()).aexecute(command, timeout=timeout)
 
     def execute_with_offload(
@@ -324,6 +319,7 @@ class SandboxBackendProxy(BaseSandbox):
         max_capture_bytes: int | None = None,
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded to backend, not an asyncio contract
     ) -> ExecuteOffloadResult:
+        self._indexed_search_allowed = False
         backend = await self._aget_backend()
         offload = getattr(backend, "aexecute_with_offload", None)
         if offload is None:
