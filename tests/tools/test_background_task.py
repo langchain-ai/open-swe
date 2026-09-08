@@ -1,13 +1,31 @@
 """The one poll tool, across both kinds of background work."""
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langgraph.graph.state import RunnableConfig
 
 from agent.dashboard import environment_refresh as refresh
 from agent.dashboard.environments import Environment, RefreshStep
 from agent.tools.background_task import background_task
+
+
+@pytest.fixture
+def admin(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Environment refreshes are admin-only, so most of these run as one."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    config = cast(RunnableConfig, {"configurable": {"github_login": "ramonn"}})
+    with patch("agent.run_config.get_config", return_value=config):
+        yield
+
+
+@pytest.fixture
+def member(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    config = cast(RunnableConfig, {"configurable": {"github_login": "someone-else"}})
+    with patch("agent.run_config.get_config", return_value=config):
+        yield
 
 
 def _running(**overrides: Any) -> Environment:
@@ -59,7 +77,7 @@ async def test_status_and_stop_need_a_task_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_running_refresh_reports_its_step_and_the_live_trace() -> None:
+async def test_a_running_refresh_reports_its_step_and_the_live_trace(admin: Any) -> None:
     """A rebuild is minutes to an hour, so the step it reached is the answer."""
     with (
         _store(_running()),
@@ -83,7 +101,7 @@ async def test_a_running_refresh_reports_its_step_and_the_live_trace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_unreadable_builder_costs_the_trace_not_the_poll() -> None:
+async def test_an_unreadable_builder_costs_the_trace_not_the_poll(admin: Any) -> None:
     """The box is released at capture; a poll that lands after must still answer."""
     with (
         _store(_running()),
@@ -97,7 +115,7 @@ async def test_an_unreadable_builder_costs_the_trace_not_the_poll() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_settled_refresh_reads_its_log_off_the_record() -> None:
+async def test_a_settled_refresh_reads_its_log_off_the_record(admin: Any) -> None:
     settled = _running(
         refresh_status="failed",
         refresh_error="setup script exited 2",
@@ -116,7 +134,7 @@ async def test_a_settled_refresh_reads_its_log_off_the_record() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_superseded_handle_resolves_to_nothing() -> None:
+async def test_a_superseded_handle_resolves_to_nothing(admin: Any) -> None:
     """Keyed on the run, so a stale id never reports a later refresh's progress."""
     with _store(_running(refresh_run_id="run-2")):
         result = await background_task("status", "env-run-1")
@@ -129,7 +147,7 @@ async def test_a_superseded_handle_resolves_to_nothing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_merges_both_kinds() -> None:
+async def test_list_merges_both_kinds(admin: Any) -> None:
     with (
         _store(_running()),
         patch(
@@ -147,7 +165,7 @@ async def test_list_merges_both_kinds() -> None:
 
 
 @pytest.mark.asyncio
-async def test_one_provider_failing_does_not_blank_the_listing() -> None:
+async def test_one_provider_failing_does_not_blank_the_listing(admin: Any) -> None:
     """No sandbox bound to the thread still leaves refreshes visible."""
     with (
         _store(_running()),
@@ -164,7 +182,7 @@ async def test_one_provider_failing_does_not_blank_the_listing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_never_refreshed_environment_is_not_a_task() -> None:
+async def test_a_never_refreshed_environment_is_not_a_task(admin: Any) -> None:
     with (
         _store(Environment(slug="base"), _running()),
         patch("agent.tools.background_execute.task_list", new_callable=AsyncMock, return_value=[]),
@@ -173,3 +191,58 @@ async def test_a_never_refreshed_environment_is_not_a_task() -> None:
 
     assert [task["environment"] for task in result["tasks"]] == ["base"]
     assert len(result["tasks"]) == 1
+
+
+# --- authorization ---
+
+
+@pytest.mark.asyncio
+async def test_a_non_admin_cannot_read_a_refresh(member: Any) -> None:
+    """Workspace-wide state, and a `bash -x` trace expands its arguments."""
+    with _store(_running()):
+        result = await background_task("status", "env-run-1")
+
+    assert result["success"] is False
+    assert "Only workspace admins" in result["error"]
+    assert "output" not in result
+
+
+@pytest.mark.asyncio
+async def test_a_non_admin_cannot_cancel_a_rebuild(member: Any) -> None:
+    """A stop would cancel a rebuild every other run depends on."""
+    stop = AsyncMock()
+    with _store(_running()), patch.object(refresh, "task_stop", stop):
+        result = await background_task("stop", "env-run-1")
+
+    assert result["success"] is False
+    stop.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_non_admin_lists_only_their_own_commands(member: Any) -> None:
+    """Refreshes drop out of the listing rather than failing it."""
+    with (
+        _store(_running()),
+        patch(
+            "agent.tools.background_execute.task_list",
+            new_callable=AsyncMock,
+            return_value=[{"task_id": "cmd-1", "kind": "sandbox_command", "status": "running"}],
+        ),
+    ):
+        result = await background_task("list")
+
+    assert result["success"] is True
+    assert [task["kind"] for task in result["tasks"]] == ["sandbox_command"]
+
+
+@pytest.mark.asyncio
+async def test_a_non_admin_still_reads_their_own_command(member: Any) -> None:
+    with patch(
+        "agent.tools.background_execute.task_status",
+        new_callable=AsyncMock,
+        return_value={"task_id": "cmd-1", "status": "running", "output": "ok"},
+    ):
+        result = await background_task("status", "cmd-1")
+
+    assert result["success"] is True
+    assert result["output"] == "ok"
