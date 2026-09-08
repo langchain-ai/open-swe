@@ -1,4 +1,4 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
+import { Menu } from "@base-ui/react/menu"
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
@@ -32,7 +32,7 @@ export function ThreadMenuItems({
   return (
     <>
       {thread?.traceUrl && (
-        <ContextMenu.LinkItem
+        <Menu.LinkItem
           href={thread.traceUrl}
           target="_blank"
           rel="noreferrer"
@@ -41,19 +41,19 @@ export function ThreadMenuItems({
         >
           <TreeStructureIcon className="size-3.5" />
           Open trace
-        </ContextMenu.LinkItem>
+        </Menu.LinkItem>
       )}
       {thread?.sourceUrl && (
-        <ContextMenu.LinkItem
+        <Menu.LinkItem
           href={thread.sourceAppUrl ?? thread.sourceUrl}
           closeOnClick
           className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
         >
           <IoLogoSlack className="size-3.5" />
           Open in Slack
-        </ContextMenu.LinkItem>
+        </Menu.LinkItem>
       )}
-      <ContextMenu.Item
+      <Menu.Item
         onClick={onTogglePin}
         className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
       >
@@ -63,9 +63,9 @@ export function ThreadMenuItems({
           <PushPinIcon className="size-3.5" />
         )}
         {pinned ? "Unpin thread" : "Pin thread"}
-      </ContextMenu.Item>
+      </Menu.Item>
       {thread && (
-        <ContextMenu.Item
+        <Menu.Item
           disabled={!thread.sandboxId}
           onClick={() => {
             if (thread.sandboxId) {
@@ -77,9 +77,9 @@ export function ThreadMenuItems({
         >
           <CopyIcon className="size-3.5" />
           Copy sandbox ID
-        </ContextMenu.Item>
+        </Menu.Item>
       )}
-      <ContextMenu.Item
+      <Menu.Item
         onClick={onToggleArchived}
         className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
       >
@@ -89,15 +89,15 @@ export function ThreadMenuItems({
           <ArchiveIcon className="size-3.5" />
         )}
         {archived ? "Unarchive thread" : "Archive thread"}
-      </ContextMenu.Item>
-      <ContextMenu.Item
+      </Menu.Item>
+      <Menu.Item
         onClick={onDelete}
         disabled={isDeleting}
         className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
       >
         <TrashIcon className="size-3.5" />
         Delete thread
-      </ContextMenu.Item>
+      </Menu.Item>
     </>
   )
 }
