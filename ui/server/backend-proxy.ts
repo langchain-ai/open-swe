@@ -27,13 +27,14 @@ const HOP_BY_HOP = new Set([
 // never receives.
 const REFRAMED = new Set(["content-encoding", "content-length"])
 
-// undici rejects a request that carries `transfer-encoding` outright, and the
-// body below is re-framed as a stream, so the inbound framing headers cannot
-// travel with it.
+// undici rejects a request that carries `transfer-encoding` outright; it frames
+// the streamed body itself. `content-length` stays: with it undici sends a
+// fixed-length body, without it a chunked one, and the backend must see the
+// same framing the client used.
 function requestHeaders(incoming: Headers): Headers {
   const headers = new Headers()
   for (const [name, value] of incoming) {
-    if (HOP_BY_HOP.has(name) || name === "content-length") {
+    if (HOP_BY_HOP.has(name)) {
       continue
     }
     headers.set(name, value)
