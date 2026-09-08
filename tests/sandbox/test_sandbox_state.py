@@ -192,7 +192,7 @@ async def test_sandbox_proxy_falls_back_when_index_is_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_skips_index_for_short_or_broad_searches(
+async def test_sandbox_proxy_skips_index_without_a_trigram(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _FakeSandboxBackend()
@@ -201,7 +201,6 @@ async def test_sandbox_proxy_skips_index_for_short_or_broad_searches(
     monkeypatch.setattr(backend, "aexecute", execute)
 
     assert (await proxy.agrep("id", "/repo")).matches
-    assert (await proxy.agrep("LangSmith", "/repo", max_count=1000)).matches
     execute.assert_not_awaited()
 
 

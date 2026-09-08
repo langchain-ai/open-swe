@@ -28,7 +28,7 @@ from agent.sandboxes.providers.registry import create_sandbox
 from agent.sandboxes.tgrep_search import build_tgrep_command, parse_tgrep_result
 
 logger = logging.getLogger(__name__)
-_TGREP_MIN_PATTERN_BYTES = 12
+_TGREP_MIN_PATTERN_BYTES = 3
 
 
 class SandboxUnreachableError(RuntimeError):
