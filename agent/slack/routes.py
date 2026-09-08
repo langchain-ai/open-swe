@@ -147,6 +147,19 @@ async def _process_slack_message_update(
     message_ts: str,
     user_id: str,
 ) -> None:
+    await run_slack_task(
+        SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts),
+        _process_slack_message_update_impl(event_data, channel_id, thread_ts, message_ts, user_id),
+    )
+
+
+async def _process_slack_message_update_impl(
+    event_data: dict[str, Any],
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+    user_id: str,
+) -> None:
     langgraph_client = get_langgraph_client()
     thread_id, delivered_message = await _lookup_delivered_message_update(
         langgraph_client,
@@ -455,15 +468,12 @@ async def slack_webhook(
                     "reply_thread_ts": reply_thread_ts if in_code_channel else "",
                 }
                 background_tasks.add_task(
-                    run_slack_task,
-                    target,
-                    _process_slack_message_update(
-                        event_data,
-                        channel_id,
-                        thread_ts,
-                        original_message_ts,
-                        user_id,
-                    ),
+                    _process_slack_message_update,
+                    event_data,
+                    channel_id,
+                    thread_ts,
+                    original_message_ts,
+                    user_id,
                 )
                 return {"status": "accepted", "message": "Slack update queued"}
             return {"status": "ignored", "reason": "Duplicate Slack event delivery"}

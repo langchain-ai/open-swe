@@ -151,7 +151,7 @@ async def test_slack_plan_button_failure_notifies_user(
 
     await slack_webhook.process_slack_plan_approval(event_data, repo_config)
 
-    notify.assert_awaited_once_with(event_data, repo_config)
+    notify.assert_awaited_once_with(event_data, repo_config, approve.side_effect)
 
 
 def _thread(*users: str) -> list[dict[str, Any]]:
