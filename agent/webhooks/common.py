@@ -94,7 +94,6 @@ from agent.run_config import Repo
 from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
-    _parse_ts,  # noqa: F401
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_channel_context,
@@ -108,6 +107,7 @@ from agent.slack.client import (
     lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
+    parse_slack_ts,  # noqa: F401
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
@@ -178,7 +178,7 @@ __all__ = [
     "SLACK_BOT_USER_ID",
     "SLACK_SIGNING_SECRET",
     "SlackThreadMappingError",
-    "_AGENT_VERSION_METADATA",
+    "AGENT_VERSION_METADATA",
     "describe_open_swe_tags",
     "mentions_open_swe",
     "_GH_PR_AGENT_STATE_ACTIONS",
@@ -197,16 +197,16 @@ __all__ = [
     "_fetch_open_pr_for_branch",
     "_finding_comment_ids",
     "_get_or_resolve_thread_github_token",
-    "_get_slack_channel_context",
+    "resolve_slack_channel_context",
     "_get_thread_metadata_safe",
-    "_get_thread_environment",
-    "_get_thread_plan_mode",
-    "_is_docs_plz_slack_channel",
+    "get_thread_environment",
+    "get_thread_plan_mode",
+    "is_docs_plz_slack_channel",
     "_is_not_found_error",
     "_is_pr_diff_unchanged_since_last_review",
     "_is_repo_allowed",
     "_is_repo_auto_review_enabled",
-    "_post_account_link_prompt",
+    "post_account_link_prompt",
     "_refresh_thread_github_token_after_401",
     "_repo_id_from_payload",
     "_repo_id_from_pr_metadata",
@@ -214,12 +214,12 @@ __all__ = [
     "_repo_private_from_pr_metadata",
     "_review_comment_reply_parent_id",
     "_reviewer_token_for_repo",
-    "_run_id_for_logging",
+    "run_id_for_logging",
     "_set_thread_plan_mode",
     "_store_current_reviewer_run_id",
-    "_thread_exists",
+    "thread_exists",
     "_trigger_or_queue_run",
-    "_upsert_slack_thread_repo_metadata",
+    "upsert_slack_thread_repo_metadata",
     "append_finding_interaction",
     "build_pr_prompt",
     "claim_slack_event",
@@ -342,7 +342,7 @@ DOCS_PLZ_SLACK_GATE_REPLY = (
 
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 
-_AGENT_VERSION_METADATA: dict[str, str] = (
+AGENT_VERSION_METADATA: dict[str, str] = (
     {"LANGSMITH_AGENT_VERSION": ENV.LANGCHAIN_REVISION_ID.require()}
     if ENV.LANGCHAIN_REVISION_ID.optional()
     else {}
@@ -537,7 +537,7 @@ def _is_not_found_error(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 404
 
 
-def _run_id_for_logging(run: Any) -> str:
+def run_id_for_logging(run: Any) -> str:
     """Extract a run id from SDK response shapes for log messages."""
     if isinstance(run, dict):
         run_id = run.get("run_id")
@@ -546,7 +546,9 @@ def _run_id_for_logging(run: Any) -> str:
     return run_id if isinstance(run_id, str) and run_id else "<unknown>"
 
 
-async def _get_slack_channel_context(channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
+async def resolve_slack_channel_context(
+    channel_id: str, *, use_cache: bool = True
+) -> dict[str, Any]:
     """Fetch Slack channel context without blocking Slack-triggered runs on failure."""
     try:
         return await get_slack_channel_context(channel_id, use_cache=use_cache)
@@ -555,7 +557,7 @@ async def _get_slack_channel_context(channel_id: str, *, use_cache: bool = True)
         return normalize_slack_channel_context(channel_id, None)
 
 
-async def _is_docs_plz_slack_channel(
+async def is_docs_plz_slack_channel(
     channel_id: str, channel_context: dict[str, Any] | None = None
 ) -> bool:
     """Check whether a Slack channel is the docs-plz handoff channel."""
@@ -645,7 +647,7 @@ async def _enforce_public_repo_org_gate(
     return _PUBLIC_REPO_GATE_REJECTION
 
 
-async def _upsert_slack_thread_repo_metadata(
+async def upsert_slack_thread_repo_metadata(
     thread_id: str, repo_config: dict[str, str], langgraph_client: LangGraphClient
 ) -> None:
     """Persist the selected repo config on the thread metadata."""
@@ -903,7 +905,7 @@ async def get_slack_repo_config(
     return Repo.model_validate(repo_config) if repo_config else None
 
 
-async def _thread_exists(thread_id: str) -> bool:
+async def thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -927,7 +929,7 @@ async def _ensure_thread_exists_for_metadata(
         return False
 
 
-async def _get_thread_plan_mode(thread_id: str) -> bool | None:
+async def get_thread_plan_mode(thread_id: str) -> bool | None:
     """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -944,7 +946,7 @@ async def _get_thread_plan_mode(thread_id: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-async def _get_thread_environment(thread_id: str) -> str | None:
+async def get_thread_environment(thread_id: str) -> str | None:
     """Return the environment slug persisted for a thread, or ``None`` if unset."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -981,7 +983,7 @@ async def _set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
         logger.exception("Failed to persist plan_mode for thread %s", thread_id)
 
 
-async def _post_account_link_prompt(
+async def post_account_link_prompt(
     channel_id: str,
     thread_ts: str,
     user_id: str,
@@ -1150,7 +1152,7 @@ async def _trigger_or_queue_run(
         },
         source="github",
         input=input,
-        metadata=_AGENT_VERSION_METADATA,
+        metadata=AGENT_VERSION_METADATA,
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
 

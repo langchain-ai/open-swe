@@ -112,7 +112,7 @@ def _interrupts_active_run(
     )
 
 
-async def _slack_thread_allows_untagged_reply(
+async def slack_thread_allows_untagged_reply(
     channel_id: str,
     thread_ts: str,
     text: str,
@@ -130,12 +130,12 @@ async def _slack_thread_allows_untagged_reply(
 
     messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
     bot_last_ts = 0.0
-    current_ts = common._parse_ts(now_ts)
+    current_ts = common.parse_slack_ts(now_ts)
     latest_ts = current_ts
     last_message_ts: dict[str, float] = {}
     human_messages: list[tuple[float, str, str]] = []
     for message in messages:
-        message_ts = common._parse_ts(message.get("ts"))
+        message_ts = common.parse_slack_ts(message.get("ts"))
         latest_ts = max(latest_ts, message_ts)
         author = message.get("user")
         if author == bot_user_id:
@@ -210,14 +210,14 @@ async def _dispatch_or_queue_slack_run(
             configurable,
             source="slack",
             input=run_input,
-            metadata=common._AGENT_VERSION_METADATA,
+            metadata=common.AGENT_VERSION_METADATA,
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
     )
 
 
-async def _slack_user_can_reply_to_ready_plan(
+async def slack_user_can_reply_to_ready_plan(
     channel_id: str, thread_ts: str, slack_user_id: str
 ) -> bool:
     if not channel_id or not thread_ts or not slack_user_id:
@@ -668,7 +668,7 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
         common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
-    is_first_mention = not await common._thread_exists(thread_id)
+    is_first_mention = not await common.thread_exists(thread_id)
     # `env:<name>` on the message that opens a thread picks the environment its
     # sandbox boots from. Only the opening message can: the sandbox is created
     # once, so honoring a later tag would change the prompt but not the image. The
@@ -795,7 +795,7 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
             reason,
         )
         if user_id:
-            await common._post_account_link_prompt(
+            await common.post_account_link_prompt(
                 channel_id,
                 thread_ts,
                 user_id,
@@ -831,21 +831,21 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
     # Later mentions carry no tag, so the thread's environment comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the environment the opening message picked.
-    thread_environment = environment_slug or await common._get_thread_environment(thread_id)
+    thread_environment = environment_slug or await common.get_thread_environment(thread_id)
     if thread_environment:
         configurable["environment"] = thread_environment
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
-    thread_plan_mode = await common._get_thread_plan_mode(thread_id)
+    thread_plan_mode = await common.get_thread_plan_mode(thread_id)
     if thread_plan_mode is not None:
         configurable["plan_mode"] = thread_plan_mode
 
-    is_first_mention = not await common._thread_exists(thread_id)
+    is_first_mention = not await common.thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
     if repo_dict:
-        await common._upsert_slack_thread_repo_metadata(thread_id, repo_dict, langgraph_client)
+        await common.upsert_slack_thread_repo_metadata(thread_id, repo_dict, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
@@ -916,7 +916,7 @@ async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: R
         raise
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
-        common._run_id_for_logging(run),
+        common.run_id_for_logging(run),
         thread_id,
     )
     run_id = run.get("run_id")

@@ -89,7 +89,7 @@ async def test_external_channel_interaction_is_blocked(
     monkeypatch.setattr(slack_routes.common, "lookup_slack_thread_id", lookup)
     monkeypatch.setattr(
         slack_routes.common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": True}),
     )
     background_tasks = BackgroundTasks()
@@ -115,7 +115,7 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     )
     monkeypatch.setattr(
         slack_routes.common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(
             return_value={
                 "name": "proj-open-swe",
@@ -173,7 +173,7 @@ async def test_code_channel_view_action_routes_to_channel_session(
     )
     monkeypatch.setattr(slack_routes.common, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(
-        slack_routes.common, "_get_slack_channel_context", AsyncMock(return_value={})
+        slack_routes.common, "resolve_slack_channel_context", AsyncMock(return_value={})
     )
     monkeypatch.setattr(
         slack_routes.common,

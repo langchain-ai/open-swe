@@ -77,7 +77,7 @@ async def _queue_code_channel_turn(
         if not await common.claim_slack_event(event_id, channel_id, event_ts):
             return {"status": "ignored", "reason": "Duplicate code channel interaction"}
 
-        channel_context = await common._get_slack_channel_context(channel_id)
+        channel_context = await common.resolve_slack_channel_context(channel_id)
         repo_config = await common.get_slack_repo_config(
             channel_id,
             common.CODE_CHANNEL_SESSION_TS,
@@ -132,7 +132,7 @@ async def _lookup_delivered_message_update(
                 or delivered_message.get("agent_thread_id") != thread_id
             ):
                 return None, None
-            if await common._thread_exists(thread_id):
+            if await common.thread_exists(thread_id):
                 return thread_id, delivered_message
         if delay is None:
             break
@@ -175,7 +175,7 @@ async def _process_slack_message_update_impl(
             message_ts,
         )
         return
-    channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+    channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
     if not common.slack_channel_allows_operations(channel_context):
         common.logger.warning("Blocked Slack message update in ineligible channel=%s", channel_id)
         return
@@ -231,7 +231,7 @@ async def slack_webhook(
     channel_id = _event_channel_id(event)
     channel_context: dict[str, Any] | None = None
     if channel_id:
-        channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+        channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
         if not common.slack_channel_allows_operations(channel_context):
             is_external = channel_context.get("is_ext_shared") is True
             event_ts = str(event.get("event_ts") or event.get("ts") or "")
@@ -405,7 +405,7 @@ async def slack_webhook(
         has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
         is_ready_plan_reply = bool(
             not is_direct_message
-            and await service._slack_user_can_reply_to_ready_plan(
+            and await service.slack_user_can_reply_to_ready_plan(
                 channel_id,
                 str(event.get("thread_ts") or ""),
                 user_id,
@@ -416,7 +416,7 @@ async def slack_webhook(
             and not is_direct_message
             and not has_username_mention
             and not has_id_mention
-            and await service._slack_thread_allows_untagged_reply(
+            and await service.slack_thread_allows_untagged_reply(
                 channel_id,
                 str(event.get("thread_ts") or ""),
                 text,
@@ -481,7 +481,7 @@ async def slack_webhook(
         if channel_context is None:
             return {"status": "ignored", "reason": "Slack channel is not eligible"}
 
-        if await common._is_docs_plz_slack_channel(channel_id, channel_context):
+        if await common.is_docs_plz_slack_channel(channel_id, channel_context):
             if await common.claim_slack_event(event_id, channel_id, event_ts):
                 background_tasks.add_task(
                     common.post_slack_thread_reply,
@@ -680,7 +680,7 @@ async def slack_interactivity(
     channel_id = str(channel.get("id") or container.get("channel_id") or "")
     if not channel_id:
         return {"status": "ignored", "reason": "Slack channel is not eligible"}
-    channel_context = await common._get_slack_channel_context(channel_id, use_cache=False)
+    channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
     if not common.slack_channel_allows_operations(channel_context):
         common.logger.warning("Blocked Slack interaction in ineligible channel=%s", channel_id)
         return {"status": "ignored", "reason": "Slack channel is not eligible"}

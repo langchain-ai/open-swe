@@ -38,7 +38,7 @@ def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
-    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -580,7 +580,7 @@ def test_is_docs_plz_slack_channel_matches_name(monkeypatch) -> None:
 
     monkeypatch.setattr(webhook_common, "get_slack_channel_info", fake_get_slack_channel_info)
 
-    assert asyncio.run(webhook_common._is_docs_plz_slack_channel("C_DOCS")) is True
+    assert asyncio.run(webhook_common.is_docs_plz_slack_channel("C_DOCS")) is True
 
 
 def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
@@ -590,7 +590,7 @@ def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
 
     monkeypatch.setattr(webhook_common, "get_slack_channel_info", fake_get_slack_channel_info)
 
-    assert asyncio.run(webhook_common._is_docs_plz_slack_channel("C_DOCS")) is True
+    assert asyncio.run(webhook_common.is_docs_plz_slack_channel("C_DOCS")) is True
 
 
 def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
@@ -630,7 +630,7 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
-        webhook_common, "_get_slack_channel_context", fake_get_slack_channel_context
+        webhook_common, "resolve_slack_channel_context", fake_get_slack_channel_context
     )
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_post_slack_thread_reply)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fail_get_slack_repo_config)
@@ -707,7 +707,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
-        webhook_common, "_get_slack_channel_context", fake_get_slack_channel_context
+        webhook_common, "resolve_slack_channel_context", fake_get_slack_channel_context
     )
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
@@ -976,9 +976,7 @@ def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None
     monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(
-        slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
-    )
+    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
 
@@ -1011,9 +1009,7 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(
-        slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
-    )
+    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
 
     response = _post_slack_webhook(
         TestClient(app),
@@ -1384,7 +1380,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
         webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
     monkeypatch.setattr(
-        webhook_common, "_thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
+        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
     )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
@@ -1464,7 +1460,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
-    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())

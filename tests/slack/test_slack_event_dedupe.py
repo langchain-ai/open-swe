@@ -106,8 +106,8 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     monkeypatch.setattr(slack_events, "get_client", lambda url: client)
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
-    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    monkeypatch.setattr(webhook_common, "is_docs_plz_slack_channel", not_docs_plz)
 
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
     return client
@@ -198,7 +198,7 @@ async def test_external_channel_refuses_without_starting_a_run(
     resolve_thread = cast(AsyncMock, webhook_common.resolve_slack_thread_id)
     monkeypatch.setattr(
         webhook_common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": True}),
     )
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
@@ -224,7 +224,7 @@ async def test_unverified_channel_fails_closed_without_reply_or_run(
     resolve_thread = cast(AsyncMock, webhook_common.resolve_slack_thread_id)
     monkeypatch.setattr(
         webhook_common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": None}),
     )
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)

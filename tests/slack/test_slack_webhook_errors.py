@@ -128,7 +128,7 @@ async def test_non_owner_can_send_untagged_ready_plan_reply(
     lookup_thread = AsyncMock(return_value="t1")
     monkeypatch.setattr(slack_webhook.common, "lookup_slack_thread_id", lookup_thread)
 
-    allowed = await slack_webhook._slack_user_can_reply_to_ready_plan("C1", "123.45", "U2")
+    allowed = await slack_webhook.slack_user_can_reply_to_ready_plan("C1", "123.45", "U2")
 
     assert allowed is True
     lookup_thread.assert_awaited_once()
@@ -168,7 +168,7 @@ async def test_untagged_reply_allowed_for_two_party_thread(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert await slack_webhook._slack_thread_allows_untagged_reply(
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "no worries, keep going", "BOT"
     )
 
@@ -182,7 +182,7 @@ async def test_untagged_reply_blocked_when_mentioning_other_user(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "hey <@UOTHER> can you look?", "BOT"
     )
 
@@ -196,7 +196,7 @@ async def test_untagged_reply_mentioning_only_bot_allowed(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert await slack_webhook._slack_thread_allows_untagged_reply(
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "<@BOT> keep going", "BOT"
     )
 
@@ -210,7 +210,7 @@ async def test_untagged_reply_blocked_for_three_party_thread(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "keep going", "BOT"
     )
 
@@ -224,7 +224,7 @@ async def test_untagged_reply_blocked_when_bot_absent(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "keep going", "BOT"
     )
 
@@ -243,7 +243,7 @@ async def test_untagged_reply_blocked_when_only_third_party_bot_present(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "keep going", "BOT"
     )
 
@@ -322,7 +322,7 @@ async def test_untagged_reply_ignores_a_third_party_who_went_quiet(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert await slack_webhook._slack_thread_allows_untagged_reply(
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "why do you not see this message", "BOT", "URAMON", f"{base + 1423:.6f}"
     )
 
@@ -341,7 +341,7 @@ async def test_untagged_reply_blocked_while_a_third_party_is_still_active(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "how about now", "BOT", "URAMON", f"{base + 1423:.6f}"
     )
 
@@ -361,7 +361,7 @@ async def test_untagged_reply_blocked_when_third_party_spoke_after_the_bot(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "ping", "BOT", "URAMON", f"{base + 9999:.6f}"
     )
 
@@ -380,7 +380,7 @@ async def test_untagged_reply_ignores_joins_and_leaves(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
     )
 
-    assert await slack_webhook._slack_thread_allows_untagged_reply(
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "keep going", "BOT", "URAMON", f"{base + 20:.6f}"
     )
 
@@ -396,7 +396,7 @@ async def test_untagged_reply_blocked_when_bot_never_posted(
         AsyncMock(return_value=[_msg(base, "URAMON")]),
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "hello", "BOT", "URAMON", f"{base + 5:.6f}"
     )
 
@@ -410,7 +410,7 @@ async def test_rapid_follow_up_allowed_before_bot_posts(monkeypatch: pytest.Monk
         AsyncMock(return_value=[_msg(base, "URAMON", text="<@BOT> start this")]),
     )
 
-    assert await slack_webhook._slack_thread_allows_untagged_reply(
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "one more detail", "BOT", "URAMON", f"{base + 60:.6f}"
     )
 
@@ -429,7 +429,7 @@ async def test_each_rapid_follow_up_extends_the_window(monkeypatch: pytest.Monke
         AsyncMock(return_value=messages),
     )
 
-    assert await slack_webhook._slack_thread_allows_untagged_reply(
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "third detail", "BOT", "URAMON", f"{base + 165:.6f}"
     )
 
@@ -449,7 +449,7 @@ async def test_rapid_follow_up_window_expires_after_latest_message(
         AsyncMock(return_value=messages),
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "too late", "BOT", "URAMON", f"{base + 116:.6f}"
     )
 
@@ -465,7 +465,7 @@ async def test_rapid_follow_up_blocked_for_another_sender(
         AsyncMock(return_value=[_msg(base, "URAMON", text="<@BOT> start this")]),
     )
 
-    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "I have a detail", "BOT", "UOTHER", f"{base + 10:.6f}"
     )
 
@@ -493,12 +493,12 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     )
     monkeypatch.setattr(slack_webhook.common, "login_for_slack_id", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "is_bot_token_only_mode", lambda: True)
-    monkeypatch.setattr(slack_webhook.common, "_thread_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_webhook.common, "thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(
-        slack_webhook.common, "_get_thread_environment", AsyncMock(return_value=None)
+        slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
     )
-    monkeypatch.setattr(slack_webhook.common, "_get_thread_plan_mode", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_webhook.common, "_upsert_slack_thread_repo_metadata", AsyncMock())
+    monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_webhook.common, "upsert_slack_thread_repo_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
     thinking = AsyncMock()

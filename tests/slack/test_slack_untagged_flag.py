@@ -123,15 +123,15 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
             }
         ),
     )
-    monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=True))
-    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
+    monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    monkeypatch.setattr(webhook_common, "is_docs_plz_slack_channel", not_docs_plz)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     # The two-party gate would admit these messages on its own.
     monkeypatch.setattr(
-        slack_service, "_slack_thread_allows_untagged_reply", AsyncMock(return_value=True)
+        slack_service, "slack_thread_allows_untagged_reply", AsyncMock(return_value=True)
     )
 
 
@@ -215,7 +215,7 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     ("patch_name", "patch_value"),
     [
         ("lookup_slack_thread_id", None),
-        ("_thread_exists", False),
+        ("thread_exists", False),
         ("lookup_slack_run_mapping", None),
     ],
 )
@@ -309,7 +309,7 @@ async def test_unassociated_message_update_does_not_trigger_docs_gate(
     monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
     is_docs_plz = AsyncMock(return_value=True)
     post_reply = AsyncMock()
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", is_docs_plz)
+    monkeypatch.setattr(webhook_common, "is_docs_plz_slack_channel", is_docs_plz)
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
     background_tasks = _FakeBackgroundTasks()
 
