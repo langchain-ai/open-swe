@@ -132,6 +132,7 @@ from agent.slack.events import (
     claim_slack_event,
     slack_event_already_seen,
 )
+from agent.slack.failures import SlackRequestError
 from agent.slack.feedback import (
     FEEDBACK_REACTIONS,
     process_slack_reaction_added,
@@ -897,9 +898,20 @@ async def get_slack_repo_config(
         repo_config = {"owner": default_owner, "name": default_name}
 
     if not repo_config:
-        raise HTTPException(400, "no default repository configured")
+        raise SlackRequestError(_no_repository_message())
 
     return repo_config
+
+
+def _no_repository_message() -> str:
+    text = (
+        "Open SWE does not know which repository this request is about. Add `repo:owner/name` "
+        "to this channel's topic, set a default repository in your Open SWE profile"
+    )
+    settings_url = build_settings_url()
+    if settings_url:
+        text += f" (<{settings_url}|settings>)"
+    return text + ", or ask an admin to set the team default repository."
 
 
 async def _thread_exists(thread_id: str) -> bool:

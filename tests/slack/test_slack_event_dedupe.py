@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from agent.slack import events as slack_events
+from agent.slack import failures as slack_failures
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
 from agent.webhooks import common as webhook_common
@@ -236,16 +237,46 @@ async def test_unverified_channel_fails_closed_without_reply_or_run(
     resolve_thread.assert_not_awaited()
 
 
-async def test_preprocessing_failure_does_not_claim_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_preprocessing_failure_replies_and_does_not_claim_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     background_tasks = _FakeBackgroundTasks()
+    post_reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
 
     async def failed_repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         raise RuntimeError
 
     original_repo_config = webhook_common.get_slack_repo_config
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", failed_repo_config)
-    with pytest.raises(RuntimeError):
-        await _post(_mention_payload(), background_tasks)
+    response = await _post(_mention_payload(), background_tasks)
+
+    assert response["status"] == "error"
+    assert background_tasks.tasks == []
+    post_reply.assert_awaited_once()
+    await_args = post_reply.await_args
+    assert await_args is not None
+    assert await_args.args[:2] == ("C1", "1786573369.551099")
+    assert f"Error ID: `{response['error_id']}`" in await_args.args[2]
 
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", original_repo_config)
     assert (await _post(_mention_payload(), background_tasks))["status"] == "accepted"
+
+
+async def test_rejected_request_replies_with_its_own_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    background_tasks = _FakeBackgroundTasks()
+    post_reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
+
+    async def no_repo(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+        raise slack_failures.SlackRequestError("Pick a repository first.")
+
+    monkeypatch.setattr(webhook_common, "get_slack_repo_config", no_repo)
+    response = await _post(_mention_payload(), background_tasks)
+
+    assert response["status"] == "error"
+    await_args = post_reply.await_args
+    assert await_args is not None
+    assert await_args.args[2].startswith("⚠️ Pick a repository first.\nError ID: `")

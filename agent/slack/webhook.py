@@ -25,6 +25,7 @@ from agent.input_messages import (
     system_introduction,
 )
 from agent.slack import client as slack_utils
+from agent.slack.failures import SlackRequestTarget, report_slack_failure
 from agent.slack.thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils.json_types import as_json_object
@@ -33,7 +34,6 @@ from agent.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
 from agent.utils.thread_ops import queue_message_for_thread
-from agent.utils.user_messages import warning
 from agent.webhooks import common
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
@@ -459,9 +459,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
         await _process_slack_mention_impl(event_data, repo_config)
-    except Exception:  # noqa: BLE001
-        common.logger.exception("Unexpected error while processing Slack mention")
-        await _notify_slack_processing_error(event_data, repo_config)
+    except Exception as exc:  # noqa: BLE001
+        await _notify_slack_processing_error(event_data, repo_config, exc)
 
 
 async def process_slack_plan_approval(
@@ -481,13 +480,33 @@ async def process_slack_plan_approval(
                 source="slack",
             ),
         )
-    except Exception:  # noqa: BLE001
-        common.logger.exception("Unexpected error while processing Slack plan approval")
-        await _notify_slack_processing_error(event_data, repo_config)
+    except Exception as exc:  # noqa: BLE001
+        await _notify_slack_processing_error(event_data, repo_config, exc)
 
 
 async def _notify_slack_processing_error(
-    event_data: dict[str, Any], repo_config: dict[str, str]
+    event_data: dict[str, Any], repo_config: dict[str, str], exc: BaseException
+) -> None:
+    """Mark the agent thread errored when one exists, then always tell the Slack thread."""
+    channel_id = event_data.get("channel_id", "")
+    thread_ts = event_data.get("thread_ts", "")
+    thread_id = event_data.get("thread_id")
+    if channel_id and thread_ts and not (isinstance(thread_id, str) and thread_id):
+        try:
+            thread_id = await common.lookup_slack_thread_id(
+                get_langgraph_client(), channel_id, thread_ts
+            )
+        except Exception:  # noqa: BLE001
+            thread_id = None
+    if isinstance(thread_id, str) and thread_id:
+        await _mark_slack_thread_errored(thread_id, event_data, repo_config)
+    await report_slack_failure(
+        SlackRequestTarget.model_validate({**event_data, "thread_id": thread_id}), exc
+    )
+
+
+async def _mark_slack_thread_errored(
+    thread_id: str, event_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
@@ -495,19 +514,6 @@ async def _notify_slack_processing_error(
     user_id = event_data.get("user_id", "")
     text = event_data.get("text", "")
     bot_user_id = event_data.get("bot_user_id", "")
-    if not channel_id or not thread_ts:
-        return
-
-    thread_id = event_data.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
-        try:
-            thread_id = await common.lookup_slack_thread_id(
-                get_langgraph_client(), channel_id, thread_ts
-            )
-        except Exception:  # noqa: BLE001
-            thread_id = None
-    if not thread_id:
-        return
     try:
         clean_text = (
             common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
@@ -542,22 +548,6 @@ async def _notify_slack_processing_error(
         )
     except Exception:  # noqa: BLE001
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
-
-    dashboard_url = common.dashboard_thread_url(thread_id)
-    message = warning(
-        "Open SWE hit an unexpected error while handling this Slack thread. "
-        "Send another message and it will try again."
-    )
-    if dashboard_url:
-        message += f" You can view the error in <{dashboard_url}|Open SWE Web>."
-    try:
-        await common.post_slack_thread_reply(
-            channel_id, thread_ts, message, agent_thread_id=thread_id
-        )
-    except Exception:  # noqa: BLE001
-        common.logger.warning(
-            "Could not post Slack error notification for thread %s", thread_id, exc_info=True
-        )
 
 
 async def _process_slack_mention_impl(

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.dashboard import plan_api
+from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
 
 
@@ -20,8 +21,19 @@ class _FakeClient:
         self.threads = _FakeThreads()
 
 
+def _event_data() -> dict[str, Any]:
+    return {
+        "channel_id": "C1",
+        "thread_ts": "123.45",
+        "event_ts": "123.45",
+        "user_id": "U1",
+        "text": "help",
+        "bot_user_id": "BOT",
+    }
+
+
 @pytest.mark.asyncio
-async def test_slack_processing_error_posts_dashboard_link(
+async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fail_processing(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -40,21 +52,10 @@ async def test_slack_processing_error_posts_dashboard_link(
     )
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", upsert)
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
-    monkeypatch.setattr(
-        slack_webhook.common, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
-    )
-    monkeypatch.setattr(slack_webhook.common, "post_slack_thread_reply", post_reply)
+    monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
 
     await slack_webhook.process_slack_mention(
-        {
-            "channel_id": "C1",
-            "thread_ts": "123.45",
-            "event_ts": "123.45",
-            "user_id": "U1",
-            "text": "help",
-            "bot_user_id": "BOT",
-        },
-        {"owner": "langchain-ai", "name": "open-swe"},
+        _event_data(), {"owner": "langchain-ai", "name": "open-swe"}
     )
 
     upsert.assert_awaited_once()
@@ -68,7 +69,34 @@ async def test_slack_processing_error_posts_dashboard_link(
     await_args = post_reply.await_args
     assert await_args is not None
     assert await_args.args[:2] == ("C1", "123.45")
-    assert "<https://ui/t1|Open SWE Web>" in await_args.args[2]
+    assert "Error ID: `" in await_args.args[2]
+    assert await_args.kwargs["agent_thread_id"] == "t1"
+
+
+@pytest.mark.asyncio
+async def test_slack_processing_error_replies_even_without_an_agent_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_processing(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
+        raise RuntimeError("boom")
+
+    post_reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
+    monkeypatch.setattr(
+        slack_webhook.common, "lookup_slack_thread_id", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
+    monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
+
+    await slack_webhook.process_slack_mention(
+        _event_data(), {"owner": "langchain-ai", "name": "open-swe"}
+    )
+
+    post_reply.assert_awaited_once()
+    await_args = post_reply.await_args
+    assert await_args is not None
+    assert await_args.args[:2] == ("C1", "123.45")
+    assert await_args.kwargs["agent_thread_id"] is None
 
 
 async def test_slack_plan_button_uses_verified_actor(monkeypatch: pytest.MonkeyPatch) -> None:
