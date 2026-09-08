@@ -15,80 +15,75 @@ logger = logging.getLogger(__name__)
 
 Route = Literal["sol_medium", "terra_high", "luna_xhigh"]
 
-_CLASSIFIER_PROMPT = """You are the routing planner for Open SWE. Classify the initial request and produce a phase-aware execution plan. Choose only from these fixed profiles:
+_CLASSIFIER_PROMPT = """Route one Open SWE human turn to one fixed model profile. The selected model remains pinned for every parent-agent model call in this turn to preserve provider prompt-cache reuse. This router does not change the subagent model or switch models between design, implementation, and review inside one turn.
 
-1. sol_medium
-- GPT-5.6 Sol is the flagship and highest-capability base model.
-- Use for judgment-heavy work: problem framing, architecture, requirements disambiguation, research strategy and synthesis, novel root-cause reasoning, consequential decisions, and adversarial code or security review.
-- Medium is its configured reasoning effort; do not downgrade it merely because another profile says high or xhigh.
+Profiles, from least to most capable and expensive:
+
+1. luna_xhigh
+- Use for direct lookup, extraction, status checks, test or log collection, mechanical PR or release operations, and localized changes with explicit targets and strong verification.
+- Xhigh effort increases persistence, not the base model's capability ceiling.
 
 2. terra_high
-- GPT-5.6 Terra balances intelligence and cost; high effort makes it a deliberate execution model.
-- Use for bounded multi-file implementation, ordinary debugging, semantic PR maintenance, and executing a design whose interfaces and acceptance criteria are already clear.
+- Use for ordinary bug fixes, bounded investigations, multi-file implementation, research synthesis, semantic PR maintenance, and partially specified localized work.
 
-3. luna_xhigh
-- GPT-5.6 Luna is the cost-sensitive, high-volume tier.
-- Use for clear and repeatable work: classification, extraction, lookup, independent research fanout, log or test collection, mechanical edits, and tightly specified tool workflows.
-- Xhigh effort increases persistence, not the base capability ceiling. Never choose Luna over Sol for architecture or nuanced review merely because xhigh is greater than medium.
+3. sol_medium
+- Use for architecture or design, requirements disambiguation, subtle semantic review, novel root-cause reasoning, conflicting evidence, cross-component or multi-repository judgment, and high-stakes decisions.
+- Medium is its configured reasoning effort; it remains the highest-capability profile.
 
-Route by phase and cognitive role, not one scalar complexity score. Prefer capable models for design and review; cheaper models for bounded implementation and parallel evidence collection. Risk changes required oversight and review; it does not automatically mean the implementer must be the most expensive model.
+Choose the least expensive profile likely to complete the whole current turn safely. Prompt length and eventual runtime are not difficulty signals. Explicit file or symbol targets, clear acceptance criteria, reversibility, and strong tests lower the required capability. Missing reproductions, unclear ownership, weak tests, architectural tradeoffs, broad scope, and conflicting assumptions raise it.
 
-Phase rules:
-- Direct lookup, extraction, status check, or categorization: luna_xhigh.
-- Codebase explanation or bounded technical analysis: terra_high; use sol_medium if architectural, ambiguous, or consequential.
-- Design or planning from a rough goal, API or schema decisions, and tradeoff analysis: sol_medium.
-- Implementation from an approved explicit plan: luna_xhigh if mechanical, localized, and strongly testable; terra_high if bounded multi-file or moderate debugging; sol_medium first if design remains unresolved or debugging requires novel system reasoning.
-- Broad research: sol_medium plans the questions, luna_xhigh workers search independently in parallel, and sol_medium synthesizes and resolves conflicts. Straightforward synthesis may use terra_high.
-- Review: luna_xhigh for formatting or checklist validation; terra_high for an ordinary bounded diff; sol_medium for subtle correctness, cross-file behavior, architecture, security, auth, data access, migrations, or high blast radius.
-- Rebase, dependency, or PR maintenance: luna_xhigh if mechanical; terra_high if conflicts or behavioral decisions are possible.
-- Escalate Luna to Terra when instructions are incomplete, tests fail unexpectedly, or edits expand beyond the named scope.
-- Escalate Terra to Sol when assumptions conflict, architecture must be invented, root cause remains unclear, or review risk is material.
+Security, authentication, authorization, secrets, production changes, migrations, destructive operations, and weakly reversible data work require sol_medium when this turn must design, diagnose, or review the risky behavior. A tightly specified, reversible implementation with strong verification may use terra_high, but not luna_xhigh merely because the diff is small.
 
-Use fanout only when subtasks are substantially independent, outputs can follow a shared evidence schema, and synthesis can detect conflicts. Set parallelism to 1 otherwise.
+Broad research is usually decomposition-heavy rather than intrinsically a sol_medium task. Use luna_xhigh when this turn mainly gathers independent evidence, terra_high when it must synthesize a bounded body of evidence, and sol_medium only when synthesis is consequential, conflicting, or deeply sequential. Mark parallel or hybrid decomposition when independent subagent fanout would help, but do not assume this router controls worker models.
 
-The initial route is the first phase. The selected route will run the entire current turn, so choose the model needed for the hardest judgment the same agent must perform. A request with an already-approved plan should not be routed as design work. Do not use eventual duration or number of turns as inputs, infer difficulty solely from task category or file count, or treat parallelism as a substitute for capable synthesis.
+Use these observed Open SWE workload priors only as tie-breakers, not hard rules: feature changes and bug fixes are the largest interactive categories and typically require several agent invocations; direct questions and routine operations are usually shorter; design, review, and investigation have long upper tails. Classify the request itself rather than predicting a percentile bucket.
 
-Initial request:
+Escalate luna_xhigh to terra_high if the named scope expands, instructions prove incomplete, or verification fails unexpectedly. Escalate terra_high to sol_medium if architecture must be invented, assumptions conflict, root cause remains unclear, or risk becomes material.
+
+Current human turn:
 {task}
 """
 
 
-class RoutePhase(BaseModel):
-    phase: Literal[
-        "design", "research_worker", "synthesis", "implementation", "verification", "review"
-    ]
-    route: Route
-    parallelism: int = Field(ge=1, le=8)
-    deliverable: str
-
-
 class RouteSignals(BaseModel):
+    scope: Literal[
+        "answer_only", "localized", "multi_file", "multi_component", "multi_repo", "unknown"
+    ]
+    decomposition: Literal["none", "parallel", "sequential", "hybrid"]
+    specification: Literal["clear", "partial", "ambiguous"]
+    verification: Literal["strong", "partial", "weak", "unknown"]
+    risks: list[
+        Literal[
+            "security",
+            "auth",
+            "secrets",
+            "production",
+            "migration",
+            "data",
+            "destructive",
+            "external_api",
+        ]
+    ]
     design_needed: bool
-    plan_already_specified: bool
-    fanoutable: bool
-    mechanical: bool
-    novel_reasoning: bool
-    review_depth: Literal["none", "checklist", "ordinary", "adversarial"]
-    risk: Literal["low", "medium", "high"]
+    review_needed: bool
 
 
 class RouteDecision(BaseModel):
     task_category: Literal[
-        "question",
+        "question_lookup",
         "research",
-        "design",
+        "scoping_design",
         "bug_fix",
-        "feature",
-        "implementation",
-        "investigation",
+        "investigation_diagnosis",
+        "feature_change",
         "review",
         "pr_maintenance",
-        "operations",
+        "release_operations",
+        "admin_communication",
+        "test_noop",
         "other",
     ]
-    work_shape: Literal["single_phase", "staged", "fanout"]
     initial_route: Route
-    phase_plan: list[RoutePhase]
     signals: RouteSignals
     escalation_conditions: list[str]
     reason: str

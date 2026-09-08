@@ -8,32 +8,22 @@ from langchain_core.messages import AIMessage, HumanMessage
 from agent.middleware.model_selection import (
     ModelSelectionMiddleware,
     RouteDecision,
-    RoutePhase,
     RouteSignals,
 )
 
 
 def _decision(route: str = "luna_xhigh") -> RouteDecision:
     return RouteDecision(
-        task_category="implementation",
-        work_shape="single_phase",
+        task_category="feature_change",
         initial_route=route,
-        phase_plan=[
-            RoutePhase(
-                phase="implementation",
-                route=route,
-                parallelism=1,
-                deliverable="implemented change",
-            )
-        ],
         signals=RouteSignals(
+            scope="localized",
+            decomposition="none",
+            specification="clear",
+            verification="strong",
+            risks=[],
             design_needed=False,
-            plan_already_specified=True,
-            fanoutable=False,
-            mechanical=True,
-            novel_reasoning=False,
-            review_depth="none",
-            risk="low",
+            review_needed=False,
         ),
         escalation_conditions=["tests fail unexpectedly"],
         reason="The task is explicit and bounded.",
@@ -93,7 +83,7 @@ async def test_before_agent_stores_structured_route_plan_in_state() -> None:
 
     assert state["model_route"] == "luna_xhigh"
     assert state["model_route_for"]
-    assert state["model_route_plan"]["phase_plan"][0]["route"] == "luna_xhigh"
+    assert state["model_route_plan"]["signals"]["scope"] == "localized"
     assert (await _invoke(middleware, state)).model is models["luna_xhigh"]
     classifier.assert_awaited_once()
 
