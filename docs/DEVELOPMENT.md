@@ -48,7 +48,7 @@ Use ngrok with this policy. A different tunnel is only an option if it can restr
 
 ## 4. Create a Slack app for your machine
 
-Slack delivers events to one URL per app, so a local backend needs its own Slack app rather than the one a shared deployment uses. Follow [Create the Slack app](INSTALLATION.md#5-create-the-slack-app) in the installation guide with `https://<name>.ngrok-free.dev` (your domain from step 3) as `<your-url>`, and give it a name that says it is yours, for example `open-swe-<you>`; the bot's handle follows from it. Copy the four values it lists into `.env` in the next step.
+Slack delivers events to one URL per app, so a local backend needs its own Slack app rather than the one a shared deployment uses. Follow [Create the Slack app](INSTALLATION.md#5-create-the-slack-app) in the installation guide with your ngrok domain from step 3, `<name>.ngrok-free.dev`, as `<your-url>` (the manifest supplies the `https://`), and give it a name that says it is yours, for example `open-swe-<you>`; the bot's handle follows from it. Copy the four values it lists into `.env` in the next step.
 
 Slack checks the events Request URL against a running backend. If you create the app before `make dev` is up, open **Event Subscriptions** afterwards and press **Retry**. The same applies whenever you change `SLACK_SIGNING_SECRET`: restart the backend, then Retry.
 

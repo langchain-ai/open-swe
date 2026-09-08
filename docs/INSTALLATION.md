@@ -109,7 +109,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack is how most teams start runs. The app posts events to your deployment's URL, so it needs the same public URL as the GitHub App.
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**, and paste the manifest below with `<your-url>` replaced by that URL.
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**, and paste the manifest below with `<your-url>` replaced by the hostname of `<URL>`, for example `my-open-swe-abc123.us.langgraph.app`; the manifest already supplies the `https://`.
 
 <details>
 <summary>Slack App Manifest</summary>
