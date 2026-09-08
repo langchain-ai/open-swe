@@ -1288,7 +1288,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     model_selection_middleware: list[Any] = []
     if adaptive_model_routing:
         routing_models = {
-            complexity: _make_model_or_defer(
+            route: _make_model_or_defer(
                 routed_model_id,
                 use_gateway=use_gateway,
                 **provider_model_kwargs(
@@ -1297,16 +1297,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 ),
             )
-            for complexity, routed_model_id, effort in (
-                ("small", "openai:gpt-5.6-luna", "low"),
-                ("medium", "openai:gpt-5.6-terra", "medium"),
-                ("complex", "openai:gpt-5.6-sol", "xhigh"),
+            for route, routed_model_id, effort in (
+                ("luna_xhigh", "openai:gpt-5.6-luna", "xhigh"),
+                ("terra_high", "openai:gpt-5.6-terra", "high"),
+                ("sol_medium", "openai:gpt-5.6-sol", "medium"),
             )
         }
         model_selection_middleware.append(
             ModelSelectionMiddleware(
                 routing_models,
-                routing_models["small"],
+                routing_models["luna_xhigh"],
                 initial_plan_mode=plan_mode,
             )
         )
