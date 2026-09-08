@@ -21,7 +21,7 @@ web:
 
 # Public URL for GitHub and Slack webhooks while developing (docs/DEVELOPMENT.md, step 3).
 # ngrok's free plan includes one static domain: NGROK_DOMAIN=<name>.ngrok-free.dev. The policy
-# file exposes only /webhooks/*: GitHub and Slack need nothing else, so nothing else goes public.
+# file exposes only /webhooks/*; langgraph dev has no auth, so the rest of the API stays local.
 # Another tunnel is fine only if it enforces the same /webhooks/* allowlist (or a filtering proxy does).
 tunnel:
 	@test -n "$(NGROK_DOMAIN)" || { echo 'Set NGROK_DOMAIN=<your-domain>.ngrok-free.dev (claim it under Domains at https://dashboard.ngrok.com)' >&2; exit 1; }
