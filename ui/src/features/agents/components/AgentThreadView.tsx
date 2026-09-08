@@ -244,11 +244,7 @@ export function AgentThreadView({
         )}
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <AgentThreadHeader
-          project={thread.repoFullName}
-          target="Cloud"
-          panelCollapsed={panelCollapsed}
-        />
+        <AgentThreadHeader target="Cloud" panelCollapsed={panelCollapsed} />
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">

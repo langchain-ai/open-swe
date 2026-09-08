@@ -1,14 +1,10 @@
-import { FolderOpen } from "lucide-react"
-
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
 
 export function AgentThreadHeader({
-  project,
   target,
   panelCollapsed,
 }: {
-  project?: string | null
   target: "Cloud" | "This Mac"
   panelCollapsed: boolean
 }) {
@@ -28,14 +24,6 @@ export function AgentThreadHeader({
           panelCollapsed && "pr-14"
         )}
       >
-        {project && (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-            <FolderOpen className="size-3.5 shrink-0" />
-            <span className="truncate" title={project}>
-              {project}
-            </span>
-          </span>
-        )}
         <span className="ml-auto shrink-0 text-xs text-muted-foreground">
           {target}
         </span>

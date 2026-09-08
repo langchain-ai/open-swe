@@ -502,11 +502,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <AgentThreadHeader
-          project={thread.cwd}
-          target="This Mac"
-          panelCollapsed={panelCollapsed}
-        />
+        <AgentThreadHeader target="This Mac" panelCollapsed={panelCollapsed} />
         {(error || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">

@@ -448,11 +448,6 @@ export function AgentsHome() {
         {session.data && !routePending && <OnboardingDialog />}
         {optimisticDraftThread && (
           <AgentThreadHeader
-            project={
-              runTarget === "local"
-                ? localProjectPath
-                : optimisticDraftThread.repoFullName
-            }
             target={runTarget === "local" ? "This Mac" : "Cloud"}
             panelCollapsed={panelCollapsed}
           />
