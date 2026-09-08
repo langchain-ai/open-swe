@@ -133,9 +133,6 @@ function updateChannelPath() {
 }
 
 async function configureUpdateFeed(channel: DesktopUpdateChannel) {
-  autoUpdater.allowPrerelease = channel === "nightly";
-  autoUpdater.channel = channel === "nightly" ? "nightly" : "latest";
-  autoUpdater.allowDowngrade = true;
   let url = `${DESKTOP_RELEASES_DOWNLOAD}/latest/download`;
   if (channel === "nightly") {
     const response = await net.fetch(DESKTOP_RELEASES_API, {
@@ -156,6 +153,9 @@ async function configureUpdateFeed(channel: DesktopUpdateChannel) {
     if (!release) throw new Error("No nightly update feed is available");
     url = `${DESKTOP_RELEASES_DOWNLOAD}/download/${encodeURIComponent(release.tag_name)}`;
   }
+  autoUpdater.allowPrerelease = channel === "nightly";
+  autoUpdater.channel = channel === "nightly" ? "nightly" : "latest";
+  autoUpdater.allowDowngrade = true;
   autoUpdater.setFeedURL({ provider: "generic", url });
 }
 
