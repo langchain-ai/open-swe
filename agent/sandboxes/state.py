@@ -24,7 +24,9 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.sandboxes.providers.registry import create_sandbox
+from agent.sandboxes.tgrep_search import build_tgrep_command, parse_tgrep_result
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +217,21 @@ class SandboxBackendProxy(BaseSandbox):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
-        return await (await self._aget_backend()).agrep(pattern, path, glob, max_count=max_count)
+        backend = await self._aget_backend()
+        if (
+            ENV.OPEN_SWE_TGREP_SEARCH.get_bool()
+            and len(pattern.encode()) >= 3
+            and (max_count is None or max_count >= 100)
+        ):
+            try:
+                response = await backend.aexecute(
+                    build_tgrep_command(pattern, path, glob, max_count), timeout=30
+                )
+                if response.exit_code == 0 and (result := parse_tgrep_result(response.output)):
+                    return result
+            except Exception:  # noqa: BLE001
+                logger.warning("Indexed sandbox search failed; using default grep", exc_info=True)
+        return await backend.agrep(pattern, path, glob, max_count=max_count)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)

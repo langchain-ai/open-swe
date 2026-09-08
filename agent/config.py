@@ -388,6 +388,7 @@ ENV.var(
     "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS", "Seconds after stop before deletion; 0 disables."
 )
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
+ENV.var("OPEN_SWE_TGREP_SEARCH", "Use prebuilt tgrep indexes for sandbox grep.")
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
 ENV.var("ENVIRONMENT_SNAPSHOT_PREFIX", "Prefix for environment snapshot names.", default="openswe")
 ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")

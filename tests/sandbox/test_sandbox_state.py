@@ -9,6 +9,7 @@ from deepagents.backends.protocol import (
     DeleteResult,
     ExecuteOffloadResult,
     ExecuteResponse,
+    GrepResult,
     SandboxBackendProtocol,
 )
 from deepagents.backends.sandbox import BaseSandbox
@@ -30,6 +31,16 @@ class _FakeSandboxBackend:
 
     async def adelete(self, file_path: str) -> DeleteResult:
         return DeleteResult(path=file_path)
+
+    async def agrep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
+    ) -> GrepResult:
+        return GrepResult(matches=[{"path": path or ".", "line": 1, "text": pattern}])
 
 
 class _OffloadCapableBackend(BaseSandbox):
@@ -115,6 +126,60 @@ async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
 
     assert result.offloaded is False
     assert result.response.output == "sandbox-1: cmd: None"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_prefers_indexed_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = _FakeSandboxBackend()
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+    monkeypatch.setenv("OPEN_SWE_TGREP_SEARCH", "true")
+    monkeypatch.setattr(
+        backend,
+        "aexecute",
+        AsyncMock(
+            return_value=ExecuteResponse(
+                output='{"status":"ok","matches":[{"path":"/repo/a.py","line":2,"text":"needle"}],"truncated":false}',
+                exit_code=0,
+            )
+        ),
+    )
+
+    result = await proxy.agrep("needle", "/repo")
+
+    assert result.matches == [{"path": "/repo/a.py", "line": 2, "text": "needle"}]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_falls_back_when_index_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _FakeSandboxBackend()
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+    monkeypatch.setenv("OPEN_SWE_TGREP_SEARCH", "true")
+    monkeypatch.setattr(
+        backend,
+        "aexecute",
+        AsyncMock(return_value=ExecuteResponse(output='{"status":"unavailable"}', exit_code=0)),
+    )
+
+    result = await proxy.agrep("needle", "/repo")
+
+    assert result.matches == [{"path": "/repo", "line": 1, "text": "needle"}]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_skips_index_for_short_or_small_capped_searches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _FakeSandboxBackend()
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
+    monkeypatch.setenv("OPEN_SWE_TGREP_SEARCH", "true")
+    execute = AsyncMock()
+    monkeypatch.setattr(backend, "aexecute", execute)
+
+    assert (await proxy.agrep("id", "/repo")).matches
+    assert (await proxy.agrep("needle", "/repo", max_count=10)).matches
+    execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
