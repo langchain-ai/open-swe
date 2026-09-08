@@ -545,21 +545,34 @@ def with_slack_session_cost(
 
 
 def format_slack_web_link_footer(
-    dashboard_url: str | None, usage: RunUsageSummary | None = None
+    dashboard_url: str | None,
+    usage: RunUsageSummary | None = None,
+    *,
+    trace_url: str | None = None,
 ) -> str:
-    """Format the compact Slack Web footer link."""
-    if not dashboard_url:
+    """Format the compact Slack footer links."""
+    if not dashboard_url and not trace_url:
         return ""
-    footer = f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"
+    links = []
+    if dashboard_url:
+        links.append(f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>")
+    if trace_url:
+        links.append(f"<{trace_url}|View trace>")
     usage_text = format_slack_run_usage(usage)
-    return f"{footer} • {usage_text}" if usage_text else footer
+    if usage_text:
+        links.append(usage_text)
+    return " • ".join(links)
 
 
 def append_slack_web_link_footer(
-    text: str, dashboard_url: str | None, usage: RunUsageSummary | None = None
+    text: str,
+    dashboard_url: str | None,
+    usage: RunUsageSummary | None = None,
+    *,
+    trace_url: str | None = None,
 ) -> str:
-    """Append the compact Slack Web footer link to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    """Append the compact Slack footer links to fallback text."""
+    footer = format_slack_web_link_footer(dashboard_url, usage, trace_url=trace_url)
     if not footer or footer in text:
         return text
     stripped = text.rstrip()
@@ -569,9 +582,12 @@ def append_slack_web_link_footer(
 
 
 def _slack_web_link_context_block(
-    dashboard_url: str | None, usage: RunUsageSummary | None = None
+    dashboard_url: str | None,
+    usage: RunUsageSummary | None = None,
+    *,
+    trace_url: str | None = None,
 ) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    footer = format_slack_web_link_footer(dashboard_url, usage, trace_url=trace_url)
     if not footer:
         return None
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
@@ -594,8 +610,10 @@ def _with_slack_web_link_context_block(
     blocks: list[dict[str, Any]] | None,
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    *,
+    trace_url: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url, usage)
+    context_block = _slack_web_link_context_block(dashboard_url, usage, trace_url=trace_url)
     if context_block is None:
         return blocks
     if not blocks:
@@ -629,6 +647,7 @@ async def post_slack_thread_reply_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
+    include_trace_link: bool = False,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
@@ -636,8 +655,15 @@ async def post_slack_thread_reply_with_ts(
     if is_code_channel_session(thread_ts):
         agent_thread_id = None
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    text = append_slack_web_link_footer(text, dashboard_url, usage)
+    trace_url = (
+        await get_langsmith_trace_url(agent_thread_id)
+        if include_trace_link and agent_thread_id
+        else None
+    )
+    blocks = _with_slack_web_link_context_block(
+        text, blocks, dashboard_url, usage, trace_url=trace_url
+    )
+    text = append_slack_web_link_footer(text, dashboard_url, usage, trace_url=trace_url)
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -918,9 +944,10 @@ async def post_slack_thread_reply(
     *,
     blocks: list[dict[str, Any]] | None = None,
     agent_thread_id: str | None = None,
+    include_trace_link: bool = False,
 ) -> bool:
     """Post a reply in a Slack thread."""
-    kwargs: dict[str, Any] = {"blocks": blocks}
+    kwargs: dict[str, Any] = {"blocks": blocks, "include_trace_link": include_trace_link}
     if agent_thread_id is not None:
         kwargs["agent_thread_id"] = agent_thread_id
     message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)

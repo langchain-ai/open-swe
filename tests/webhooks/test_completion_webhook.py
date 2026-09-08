@@ -91,6 +91,7 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
     assert args[0] == "C1"
     assert args[1] == "123.45"
     assert "<https://ui/t1|Open SWE Web>" in args[2]
+    assert await_args.kwargs == {"agent_thread_id": "t1", "include_trace_link": True}
     assert client.threads.updates == [
         {"failure_reply_posted_run_id": "run-1", "failure_reply_posted_run_ids": ["run-1"]}
     ]
