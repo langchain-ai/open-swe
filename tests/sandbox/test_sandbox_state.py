@@ -132,7 +132,6 @@ async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
 async def test_sandbox_proxy_prefers_indexed_search(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _FakeSandboxBackend()
     proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
-    monkeypatch.setenv("OPEN_SWE_TGREP_SEARCH", "true")
     monkeypatch.setattr(
         backend,
         "aexecute",
@@ -155,7 +154,6 @@ async def test_sandbox_proxy_falls_back_when_index_is_unavailable(
 ) -> None:
     backend = _FakeSandboxBackend()
     proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
-    monkeypatch.setenv("OPEN_SWE_TGREP_SEARCH", "true")
     monkeypatch.setattr(
         backend,
         "aexecute",
@@ -173,7 +171,6 @@ async def test_sandbox_proxy_skips_index_for_short_or_small_capped_searches(
 ) -> None:
     backend = _FakeSandboxBackend()
     proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, backend), thread_id="t")
-    monkeypatch.setenv("OPEN_SWE_TGREP_SEARCH", "true")
     execute = AsyncMock()
     monkeypatch.setattr(backend, "aexecute", execute)
 

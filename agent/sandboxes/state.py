@@ -24,7 +24,6 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.config import ENV
 from agent.sandboxes.providers.registry import create_sandbox
 from agent.sandboxes.tgrep_search import build_tgrep_command, parse_tgrep_result
 
@@ -218,11 +217,7 @@ class SandboxBackendProxy(BaseSandbox):
         max_count: int | None = None,
     ) -> GrepResult:
         backend = await self._aget_backend()
-        if (
-            ENV.OPEN_SWE_TGREP_SEARCH.get_bool()
-            and len(pattern.encode()) >= 3
-            and (max_count is None or max_count >= 100)
-        ):
+        if len(pattern.encode()) >= 3 and (max_count is None or max_count >= 100):
             try:
                 response = await backend.aexecute(
                     build_tgrep_command(pattern, path, glob, max_count), timeout=30

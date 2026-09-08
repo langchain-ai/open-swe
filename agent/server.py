@@ -835,7 +835,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        if ENV.OPEN_SWE_TGREP_SEARCH.get_bool() and prompt_default_repo:
+        if prompt_default_repo:
             async with aphase(self._thread_id, "prepare.tgrep"):
                 await warm_tgrep_server(
                     sandbox_backend,
