@@ -13,9 +13,9 @@ may be prompted by multiple users and run only as a shared, least-privilege Open
 Private threads have one owner, are promptable only by that owner, and may use the owner's MCP
 connections. On Slack, private threads run as bot DM threads with that user, and every bot DM thread
 is private. An admin thread is not a separate concept: it is a private thread owned by an admin, so
-private threads created by admins are admin threads by default. An agent may fork a collaborative
-channel thread into a private DM thread when it needs personal authority, preserving safe execution
-context and cache where possible without moving credentials across the boundary.
+private threads created by admins are admin threads by default. When work needs personal authority,
+the agent may start a new private DM thread with an agent-supplied prompt; it does not fork or copy
+the source thread's state.
 
 A private thread may later be made publicly viewable, but viewers cannot prompt it or invoke the
 owner's tools. There is no mode in which personal MCP connections are available to a thread that
@@ -57,25 +57,27 @@ In a collaborative thread, the agent may receive redacted metadata showing which
 connections are available to a participant, such as connection name, capability summary, and
 whether authorization is healthy. It must not receive credentials, tool handles, sensitive
 configuration, or integration data, and it cannot load or invoke those tools there. This lets the
-agent explain that a private fork can perform an otherwise unavailable action without weakening the
-boundary.
+agent explain that a new private thread can perform an otherwise unavailable action without
+weakening the boundary.
 
 A private thread resolves personal MCP access from its fixed owner, not from the latest message
 sender. It cannot combine credentials from multiple users, silently change principal, or fall back
 to another person's credentials when authorization fails.
 
-### Private forks
+### Starting a private thread
 
-The owner or agent acting at the owner's request may fork the current thread into a new private
-thread. Forking is an explicit boundary crossing, not an in-place upgrade of the source thread.
-The source remains collaborative and retains its service identity.
+The owner or agent acting at the owner's request may start a new private thread with an
+agent-supplied initial prompt. The implementation should enhance the existing new-thread mechanism
+rather than introduce thread forking. The new thread has independent state, sandbox, model context,
+and cache; no source transcript, execution state, credentials, tool state, or authorization is
+copied implicitly.
 
-The fork should preserve useful context and model/provider cache when the underlying platform can
-do so safely. Copied state must be treated as potentially visible to the private thread owner. The
-implementation must not copy secret values, credential-bearing tool state, another user's private
-content, or authorization derived from the source environment. If a cache cannot be proven safe
-across the boundary, the fork starts with a new cache. The product should show what context will be
-copied before the fork is created.
+The initial prompt must be visibly marked as agent-supplied content originating in a non-private
+thread and treated as untrusted context rather than direct user authorization. It must instruct the
+new agent to confirm the requested task directly with the owner before loading or invoking any
+personal MCP, admin, or other private-thread-only tool. Until that confirmation arrives from the
+owner in the private thread, those tools remain unavailable. The source thread remains collaborative
+and retains its service identity.
 
 ### Visibility and prompting
 
@@ -89,7 +91,7 @@ personal integrations. Deployments may disable sharing for integrations or data 
 owner-only visibility.
 
 Slack cannot provide a private thread inside a shared channel because channel members can read it.
-Slack private threads therefore use the user's bot DM. Forking from a channel posts no private
+Slack private threads therefore use the user's bot DM. Starting one from a channel posts no private
 content back to the channel; at most it may leave a non-sensitive indication that work continued
 privately. Links and access checks must not make the DM or dashboard thread readable by other Slack
 users.
@@ -111,7 +113,6 @@ exposed to transcripts or sandbox files.
 - Defining the initial shared-service allowlist or exact Datadog and GCP scopes.
 - Solving cost attribution for collaborative threads. Cost accounting is orthogonal to credential
   authority and should be decided separately.
-- Defining the exact private-fork UI or cache implementation.
 - Replacing integration-specific approval, audit, or authorization controls.
 - Allowing collaborative threads to impersonate a participant for convenience.
 
@@ -124,12 +125,12 @@ fixed thread owner rather than client-provided metadata.
 
 Personal MCP secrets must remain encrypted at rest and resolved through existing credential and
 tool-loading controls. Thread state should contain opaque credential references, not secret values.
-Secrets must not enter model context, fork payloads, caches, logs, or sandbox files. Shared Open SWE
-permissions must remain intentionally limited because every collaborative participant can
+Secrets must not enter model context, new-thread prompts, caches, logs, or sandbox files. Shared Open
+SWE permissions must remain intentionally limited because every collaborative participant can
 potentially cause their use.
 
 Audit records should capture the thread kind, credential principal, requesting participant,
-credential source, integration, action, administrative access, fork or visibility change, and result
+credential source, integration, action, administrative access, thread creation or visibility change, and result
 without recording secret material. Public-sharing transitions require explicit confirmation and
 must not expose a private thread through guessable identifiers or unauthenticated links.
 
@@ -163,20 +164,19 @@ explicit, view-only publication option preserves transparency without transferri
 
 ### Disable personal integrations entirely
 
-This avoids ambiguity but prevents legitimate work requiring user-scoped services. Private forks
-provide that capability behind an explicit boundary.
+This avoids ambiguity but prevents legitimate work requiring user-scoped services. Starting a new
+private thread provides that capability behind an explicit boundary.
+
+### Fork the collaborative thread into a private thread
+
+Forking could unintentionally carry transcript data, execution state, caches, or authority across
+the privacy boundary. A fresh private thread with a marked agent-supplied prompt and direct user
+confirmation is easier to reason about and audit.
 
 ## Unresolved questions
 
-- Which context and derived artifacts are eligible for a private fork, and which cache providers can
-  preserve cache without crossing principals?
 - What redacted MCP metadata is useful in collaborative threads without leaking sensitive connection
   details?
-- Should public view-only threads be discoverable, link-accessible, or restricted to named viewers?
-- Which shared Open SWE capabilities form the initial baseline, and what review process governs
-  additions or scope changes?
-- Should private-to-collaborative continuation copy a sanitized transcript into a new thread, and
-  who approves that disclosure?
 
 ## Resolution
 
