@@ -10,6 +10,25 @@ import { cn } from "@/lib/utils"
 
 type RepoOption = { full_name: string }
 
+function fuzzySearchScore(value: string, query: string) {
+  const candidate = value.toLowerCase().replaceAll(/[^a-z0-9]/g, "")
+  const needle = query.toLowerCase().replaceAll(/[^a-z0-9]/g, "")
+  if (!needle) return 0
+
+  const substringIndex = candidate.indexOf(needle)
+  if (substringIndex !== -1) return substringIndex
+
+  let position = -1
+  let gaps = 0
+  for (const character of needle) {
+    const nextPosition = candidate.indexOf(character, position + 1)
+    if (nextPosition === -1) return null
+    gaps += nextPosition - position - 1
+    position = nextPosition
+  }
+  return candidate.length + gaps
+}
+
 interface RepoSelectorProps {
   repos?: Array<RepoOption>
   selectedRepo?: string | null
@@ -48,9 +67,16 @@ export function RepoSelector({
 
   const filteredRepos = useMemo(() => {
     const all = repos ?? []
-    const q = query.trim().toLowerCase()
+    const q = query.trim()
     if (!q) return all
-    return all.filter((repo) => repo.full_name.toLowerCase().includes(q))
+    return all
+      .map((repo) => ({ repo, score: fuzzySearchScore(repo.full_name, q) }))
+      .filter(
+        (match): match is { repo: RepoOption; score: number } =>
+          match.score !== null
+      )
+      .sort((left, right) => left.score - right.score)
+      .map(({ repo }) => repo)
   }, [repos, query])
 
   useEffect(() => {
