@@ -579,3 +579,48 @@ async def test_environment_options_omit_admin_only_settings(fake_store: FakeStor
             "refresh_steps": [],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_publish_writes_definition_and_image_together(fake_store: FakeStore) -> None:
+    """One put carries both, so a record can never show a new definition on an old image."""
+    record = await ENVIRONMENTS.publish(
+        "base",
+        EnvironmentCreate(name="base", prompt="p1", setup_script="make setup"),
+        snapshot_id="snap-1",
+        snapshot_name="openswe-environment-base",
+        source_sandbox_id="sb-1",
+        created_by="ramon",
+    )
+    assert (record.prompt, record.snapshot_id, record.snapshot_status) == ("p1", "snap-1", "ready")
+    assert record.created_by == "ramon"
+
+    updated = await ENVIRONMENTS.publish(
+        "base",
+        EnvironmentUpdate(prompt="p2"),
+        snapshot_id="snap-2",
+        snapshot_name="openswe-environment-base",
+        source_sandbox_id="sb-2",
+        created_by="ramon",
+    )
+    stored = await ENVIRONMENTS.get("base")
+    assert stored is not None
+    assert (stored.prompt, stored.snapshot_id) == ("p2", "snap-2")
+    assert stored.setup_script == "make setup"
+    assert updated.source_sandbox_id == "sb-2"
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_a_create_over_an_existing_environment(
+    fake_store: FakeStore,
+) -> None:
+    await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
+    with pytest.raises(ValueError, match="already exists"):
+        await ENVIRONMENTS.publish(
+            "base",
+            EnvironmentCreate(name="base"),
+            snapshot_id="snap-1",
+            snapshot_name="openswe-environment-base",
+            source_sandbox_id="sb-1",
+            created_by="ramon",
+        )

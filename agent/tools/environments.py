@@ -268,31 +268,22 @@ async def publish_environment(
         logger.exception("Failed to capture sandbox for environment %s", slug)
         return {"ok": False, "error": f"snapshot capture failed: {exc}"}
 
+    # Definition and image pointer land in one write, so a failure here means
+    # nothing was written — and the image nothing points at is discarded.
+    login = _configurable().github_login
     try:
-        if isinstance(definition, store.EnvironmentCreate):
-            login = _configurable().github_login
-            await store.ENVIRONMENTS.create(
-                definition, login if isinstance(login, str) else "open-swe"
-            )
-        else:
-            await store.ENVIRONMENTS.apply_update(slug, definition)
-        record = await store.ENVIRONMENTS.mark_captured(
+        record = await store.ENVIRONMENTS.publish(
             slug,
+            definition,
             snapshot_id=snapshot_id,
             snapshot_name=published_name,
             source_sandbox_id=backend.id,
+            created_by=login if isinstance(login, str) else "open-swe",
         )
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc), "snapshot_id": snapshot_id}
     except Exception as exc:
         logger.exception("Failed to record environment %s after capture", slug)
-        return {
-            "ok": False,
-            "error": f"captured {snapshot_id} but failed to record the environment: {exc}",
-            "snapshot_id": snapshot_id,
-        }
-    if record is None:
-        return {"ok": False, "error": f"environment {name!r} vanished during publish"}
+        await store.discard_unreferenced_snapshot(slug, snapshot_id)
+        return {"ok": False, "error": f"failed to record the environment: {exc}"}
 
     await store.retire_superseded_snapshot(
         slug, existing.snapshot_id if existing is not None else None, snapshot_id

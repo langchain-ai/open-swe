@@ -190,9 +190,8 @@ class _Publish:
         self.saved = saved
         self.calls: list[str] = []
         self.capture = AsyncMock(side_effect=self._capture)
-        self.create = AsyncMock(side_effect=self._create)
-        self.apply_update = AsyncMock(side_effect=self._update)
-        self.mark_captured = AsyncMock(return_value=saved)
+        self.publish = AsyncMock(side_effect=self._publish)
+        self.discard = AsyncMock()
         self.retire = AsyncMock()
         self.ensure_cron = AsyncMock(return_value="cron-1")
         self._stack = ExitStack()
@@ -201,13 +200,14 @@ class _Publish:
         self.calls.append("capture")
         return "snap-new"
 
-    async def _create(self, *_: object, **__: object) -> Environment:
+    async def _publish(self, *_: object, **__: object) -> Environment:
         self.calls.append("write")
         return self.saved
 
-    async def _update(self, *_: object, **__: object) -> Environment:
-        self.calls.append("write")
-        return self.saved
+    @property
+    def definition(self) -> Any:
+        assert self.publish.await_args is not None
+        return self.publish.await_args.args[1]
 
     def __enter__(self) -> _Publish:
         backend = MagicMock()
@@ -230,9 +230,8 @@ class _Publish:
             ),
             patch("agent.sandboxes.state.unwrap_sandbox_backend", side_effect=lambda b: b),
             patch.object(env_tools.store, "capture_sandbox_snapshot", self.capture),
-            patch.object(env_tools.store.ENVIRONMENTS, "create", self.create),
-            patch.object(env_tools.store.ENVIRONMENTS, "apply_update", self.apply_update),
-            patch.object(env_tools.store.ENVIRONMENTS, "mark_captured", self.mark_captured),
+            patch.object(env_tools.store.ENVIRONMENTS, "publish", self.publish),
+            patch.object(env_tools.store, "discard_unreferenced_snapshot", self.discard),
             patch.object(env_tools.store, "retire_superseded_snapshot", self.retire),
             patch.object(env_tools.refresh, "ensure_refresh_cron", self.ensure_cron),
         ):
@@ -262,10 +261,11 @@ async def test_publish_captures_this_sandbox_before_writing_anything(
     seams.capture.assert_awaited_once_with(
         "sb-thread", "openswe-environment-base", timeout=env_tools.refresh.capture_timeout()
     )
-    seams.mark_captured.assert_awaited_once()
-    assert seams.mark_captured.await_args is not None
-    assert seams.mark_captured.await_args.kwargs["snapshot_id"] == "snap-new"
-    assert seams.mark_captured.await_args.kwargs["source_sandbox_id"] == "sb-thread"
+    # Definition and image pointer go in as one write.
+    assert seams.publish.await_args is not None
+    assert isinstance(seams.definition, env_tools.store.EnvironmentCreate)
+    assert seams.publish.await_args.kwargs["snapshot_id"] == "snap-new"
+    assert seams.publish.await_args.kwargs["source_sandbox_id"] == "sb-thread"
     assert result["ok"] is True
     assert result["created"] is True
     assert result["environment"]["snapshot_id"] == "snap-new"
@@ -280,8 +280,24 @@ async def test_a_failed_capture_writes_nothing(monkeypatch: pytest.MonkeyPatch) 
 
     assert result["ok"] is False
     assert "snapshot service unavailable" in result["error"]
-    seams.create.assert_not_awaited()
-    seams.mark_captured.assert_not_awaited()
+    seams.publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_record_write_discards_the_orphaned_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The capture succeeded, the write did not: nothing is left half-written,
+    and the image nothing points at is not left behind either."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with _Publish(existing=None, saved=_saved()) as seams:
+        seams.publish.side_effect = RuntimeError("store unavailable")
+        result = await env_tools.publish_environment("base", "prompt")
+
+    assert result["ok"] is False
+    assert "store unavailable" in result["error"]
+    seams.discard.assert_awaited_once_with("base", "snap-new")
+    seams.retire.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -309,8 +325,7 @@ async def test_publishing_over_an_existing_environment_retires_its_old_image(
         result = await env_tools.publish_environment("base", "prompt")
 
     assert seams.calls == ["capture", "write"]
-    seams.apply_update.assert_awaited_once()
-    seams.create.assert_not_awaited()
+    assert isinstance(seams.definition, env_tools.store.EnvironmentUpdate)
     # The old image goes only after the record points at the new one.
     seams.retire.assert_awaited_once_with("base", "snap-old", "snap-new")
     assert result["created"] is False
@@ -350,8 +365,7 @@ async def test_publish_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) 
             create_params={"_internal_runtime": "v2"},
         )
 
-    assert seams.create.await_args is not None
-    definition = seams.create.await_args.args[0]
+    definition = seams.definition
     assert definition.mem_bytes == 16 * 1024**3
     assert definition.vcpus == 8
     assert definition.fs_capacity_bytes == 256 * 1024**3
@@ -368,8 +382,7 @@ async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch)
             "base", "prompt", clear_sizing=True, clear_create_params=True
         )
 
-    assert seams.apply_update.await_args is not None
-    definition = seams.apply_update.await_args.args[1]
+    definition = seams.definition
     assert {"mem_bytes", "vcpus", "fs_capacity_bytes"} <= definition.model_fields_set
     assert definition.mem_bytes is None
     assert definition.vcpus is None

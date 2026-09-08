@@ -599,30 +599,39 @@ class EnvironmentStore(TypedStore[Environment]):
         record = await self.get(slug)
         if record is None:
             raise ValueError(f"no environment named {slug!r}")
-        if update.name is not None and slugify(update.name) != slug:
-            raise ValueError(
-                "renaming an environment across slugs is not supported; create a new one"
-            )
-        if update.name is not None:
-            record.name = update.name.strip()
-        if update.prompt is not None:
-            record.prompt = update.prompt
-        if update.repos is not None:
-            record.repos = update.repos
-        if update.setup_script is not None:
-            record.setup_script = update.setup_script
-        if update.update_script is not None:
-            record.update_script = update.update_script
-        for field in (
-            "mem_bytes",
-            "vcpus",
-            "fs_capacity_bytes",
-            "create_params",
-            "base_snapshot_id",
-            "snapshot_name",
-        ):
-            if field in update.model_fields_set:
-                setattr(record, field, getattr(update, field))
+        return await self.save(_apply(record, update))
+
+    async def publish(
+        self,
+        slug: str,
+        definition: EnvironmentCreate | EnvironmentUpdate,
+        *,
+        snapshot_id: str,
+        snapshot_name: str,
+        source_sandbox_id: str,
+        created_by: str,
+    ) -> Environment:
+        """Write a definition and the image it was captured from as one store write.
+
+        The image already exists by the time this runs; what must not happen is a
+        record that carries the new definition but still points at the old image,
+        or a new environment with no image at all. One ``put`` cannot land half.
+        """
+        if isinstance(definition, EnvironmentCreate):
+            if await self.get(slug) is not None:
+                raise ValueError(f"environment {definition.name!r} already exists")
+            record = Environment.seed(definition, created_by)
+        else:
+            existing = await self.get(slug)
+            if existing is None:
+                raise ValueError(f"no environment named {slug!r}")
+            record = _apply(existing, definition)
+        _stamp_captured(
+            record,
+            snapshot_id=snapshot_id,
+            snapshot_name=snapshot_name,
+            source_sandbox_id=source_sandbox_id,
+        )
         return await self.save(record)
 
     async def remove(self, slug: str) -> bool:
@@ -667,13 +676,13 @@ class EnvironmentStore(TypedStore[Environment]):
         record = await self.get(slug)
         if record is None:
             return None
-        record.snapshot_status = "ready"
-        record.status_message = None
-        record.snapshot_id = snapshot_id
-        record.snapshot_name = snapshot_name
-        record.snapshot_tag = snapshot_tag
-        record.source_sandbox_id = source_sandbox_id
-        record.last_captured_at = now_iso()
+        _stamp_captured(
+            record,
+            snapshot_id=snapshot_id,
+            snapshot_name=snapshot_name,
+            source_sandbox_id=source_sandbox_id,
+            snapshot_tag=snapshot_tag,
+        )
         return await self.save(record)
 
     async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Environment | None:
@@ -758,6 +767,50 @@ class EnvironmentStore(TypedStore[Environment]):
             for step in record.refresh_steps
         ]
         return await self.save(record)
+
+
+def _apply(record: Environment, update: EnvironmentUpdate) -> Environment:
+    """Apply a partial update in memory; only the fields present are written."""
+    if update.name is not None and slugify(update.name) != record.slug:
+        raise ValueError("renaming an environment across slugs is not supported; create a new one")
+    if update.name is not None:
+        record.name = update.name.strip()
+    if update.prompt is not None:
+        record.prompt = update.prompt
+    if update.repos is not None:
+        record.repos = update.repos
+    if update.setup_script is not None:
+        record.setup_script = update.setup_script
+    if update.update_script is not None:
+        record.update_script = update.update_script
+    for field in (
+        "mem_bytes",
+        "vcpus",
+        "fs_capacity_bytes",
+        "create_params",
+        "base_snapshot_id",
+        "snapshot_name",
+    ):
+        if field in update.model_fields_set:
+            setattr(record, field, getattr(update, field))
+    return record
+
+
+def _stamp_captured(
+    record: Environment,
+    *,
+    snapshot_id: str,
+    snapshot_name: str,
+    source_sandbox_id: str,
+    snapshot_tag: str = SNAPSHOT_TAG,
+) -> None:
+    record.snapshot_status = "ready"
+    record.status_message = None
+    record.snapshot_id = snapshot_id
+    record.snapshot_name = snapshot_name
+    record.snapshot_tag = snapshot_tag
+    record.source_sandbox_id = source_sandbox_id
+    record.last_captured_at = now_iso()
 
 
 ENVIRONMENTS = EnvironmentStore()
@@ -921,6 +974,18 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
         sandbox_id,
     )
     return str(snapshot.id)
+
+
+async def discard_unreferenced_snapshot(slug: str, snapshot_id: str) -> None:
+    """Delete a snapshot that was captured but never made it onto the record.
+
+    Re-reads first so a capture that *did* land — by this caller or a concurrent
+    one — is never deleted from under it.
+    """
+    current = await ENVIRONMENTS.get(slug)
+    if current is not None and current.snapshot_id == snapshot_id:
+        return
+    await _delete_snapshot(snapshot_id)
 
 
 async def retire_superseded_snapshot(slug: str, previous_id: str | None, current_id: str) -> None:
