@@ -13,6 +13,8 @@ export interface DesktopProject {
   cwd: string
   name: string
   addedAt: number
+  /** Terminal/panel scope for the project itself, before a thread exists. */
+  scopeId: string
 }
 
 export interface DesktopLocalThreadSummary {
@@ -112,7 +114,7 @@ export type DesktopTerminalMetadataEvent =
   | (DesktopTerminalTarget & { type: "remove" })
 
 export type DesktopUpdateState = {
-  status: "idle" | "downloading" | "ready"
+  status: "idle" | "downloading" | "ready" | "installing"
   version?: string
 }
 
@@ -225,6 +227,7 @@ declare global {
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getProjectDiff: (cwd: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

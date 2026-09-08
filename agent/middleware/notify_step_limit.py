@@ -8,6 +8,7 @@ from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
 from agent.middleware.message_content import content_to_text
+from agent.middleware.trace import scrub_middleware_inputs
 from agent.run_config import RunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 _LIMIT_MARKER = "Model call limits exceeded"
 
 
+@scrub_middleware_inputs
 @after_agent
 async def notify_step_limit_reached(
     state: AgentState,

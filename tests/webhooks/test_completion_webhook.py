@@ -2,6 +2,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from agent import completion
 
@@ -28,6 +29,44 @@ def _slack_metadata() -> dict[str, Any]:
         "source": "slack",
         "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["error", "timeout", "interrupted"])
+async def test_terminal_status_finalizes_agent_usage(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    client = _FakeClient({"source": "schedule"})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    finalize = AsyncMock()
+    monkeypatch.setattr(completion, "finalize_agent_run_usage", finalize)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": status,
+            "metadata": {"prepare_run_id": "prepare-1"},
+            "values": {
+                "messages": [
+                    {
+                        "type": "ai",
+                        "content": "partial work",
+                        "usage_metadata": {
+                            "input_tokens": 100,
+                            "output_tokens": 10,
+                            "total_tokens": 110,
+                        },
+                    }
+                ]
+            },
+        }
+    )
+
+    finalize.assert_awaited_once()
+    assert finalize.await_args.kwargs["run_id"] == "prepare-1"
+    assert finalize.await_args.kwargs["thread_id"] == "t1"
+    assert isinstance(finalize.await_args.kwargs["state"]["messages"][0], AIMessage)
 
 
 @pytest.mark.asyncio

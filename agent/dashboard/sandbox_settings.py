@@ -12,11 +12,11 @@ base.
 """
 
 import logging
-import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
+from agent.config import ENV
 from agent.store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class SandboxSettingsUpdate(BaseModel):
 
 
 def env_base_snapshot_id() -> str | None:
-    value = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID", "").strip()
+    value = ENV.DEFAULT_SANDBOX_SNAPSHOT_ID.get().strip()
     return value or None
 
 

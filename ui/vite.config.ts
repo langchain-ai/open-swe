@@ -165,8 +165,19 @@ const SHELL_PAGE = {
   sitemap: { exclude: true },
 }
 
+// Where the app is served from. "/" for the dev server and the standalone image;
+// a LangGraph `http.mount_prefix` (plus trailing slash) when the backend bundles
+// the build and serves it under that prefix.
+const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
+
+// The backend can front this dev server (DASHBOARD_DEV_SERVER_URL) so the UI
+// hot-reloads on its origin. HTTP is proxied; the HMR WebSocket is not, so the
+// client is told to open it against this port whatever page origin it loaded from.
+const DEV_PORT = Number(process.env.PORT) || 3000
+
 const config = defineConfig({
-  base: "/",
+  base: BASE_PATH,
+  server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [

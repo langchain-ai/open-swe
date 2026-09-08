@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
@@ -46,7 +47,9 @@ async def test_refresh_writes_run_cost(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_refresh_noops_when_cost_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refresh_noops_when_cost_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.setattr(
         agent_cost,
         "get_langsmith_thread_cost",
@@ -55,18 +58,24 @@ async def test_refresh_noops_when_cost_is_unavailable(monkeypatch: pytest.Monkey
     record = AsyncMock()
     monkeypatch.setattr(agent_cost, "record_agent_run_cost", record)
 
-    result = await agent_cost.run_agent_cost_refresh(_state(0), client=_Client())
+    with caplog.at_level(logging.INFO, logger=agent_cost.__name__):
+        result = await agent_cost.run_agent_cost_refresh(_state(0), client=_Client())
 
     assert result == {"status": "unavailable", "reason": "not configured"}
     record.assert_not_awaited()
+    assert "Agent cost refresh unavailable" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_refresh_gives_up_when_cost_never_appears(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refresh_gives_up_when_cost_never_appears(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.setattr(agent_cost, "get_langsmith_thread_cost", AsyncMock(return_value=None))
     client = _Client()
 
-    result = await agent_cost.run_agent_cost_refresh(_state(4), client=client)
+    with caplog.at_level(logging.INFO, logger=agent_cost.__name__):
+        result = await agent_cost.run_agent_cost_refresh(_state(4), client=client)
 
     assert result == {"status": "exhausted", "reason": "LangSmith cost unavailable"}
     assert client.runs.created == []
+    assert "Agent cost refresh exhausted" in caplog.text

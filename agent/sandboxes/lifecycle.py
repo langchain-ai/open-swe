@@ -6,7 +6,6 @@ reset/recreate rebinds. The registry itself lives in ``state``.
 
 import asyncio
 import logging
-import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -15,6 +14,7 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.dashboard.environment_refresh import is_snapshot_stale, maybe_start_update
 from agent.dashboard.environments import (
     Environment,
@@ -159,7 +159,7 @@ async def _create_sandbox_with_proxy(
         sandbox_backend = await config.boot()
 
     async with git_identity(thread_id, sandbox_backend):
-        if os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith":
+        if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
                 token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
             if not token:
@@ -229,7 +229,7 @@ async def _refresh_github_proxy(
     langsmith_credentials: LangSmithCredentials | None = None,
 ) -> None:
     """Refresh managed proxy credentials for reused LangSmith sandboxes."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
 
     async with aphase(thread_id, "sandbox.proxy_token"):
@@ -500,7 +500,7 @@ async def reset_sandbox_for_thread(
     langsmith_credentials: LangSmithCredentials | None = None,
 ) -> tuple[str, str]:
     """Bind a thread to a fresh sandbox created from raw provider options."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         raise ValueError("sandbox_reset is only supported by the LangSmith sandbox provider")
 
     cached = SANDBOX_BACKENDS.get(thread_id)

@@ -221,17 +221,7 @@ export function groupSidebarThreadsByProject(
   }
 }
 
-export type SidebarSort = "priority" | "updated" | "manual"
-
-/**
- * Priority ranks what still wants the user's attention: live runs first, then
- * anything unread, then everything else. Within a rank it falls back to
- * recency, so the ordering only ever reorders across those three bands.
- */
-function priorityRank(thread: SidebarThreadItem): number {
-  if (thread.status === "running") return 0
-  return thread.viewed ? 2 : 1
-}
+export type SidebarSort = "updated" | "manual"
 
 function byRecency(left: SidebarThreadItem, right: SidebarThreadItem): number {
   return (
@@ -248,11 +238,7 @@ export function sortSidebarThreads(
   // "manual" keeps the order the caller supplied — for pins that is the stored
   // pin order, which is the only manual ordering the user can actually set.
   if (mode === "manual") return [...threads]
-  if (mode === "updated") return [...threads].sort(byRecency)
-  return [...threads].sort(
-    (left, right) =>
-      priorityRank(left) - priorityRank(right) || byRecency(left, right)
-  )
+  return [...threads].sort(byRecency)
 }
 
 function localProjectName(cwd: string): string | null {

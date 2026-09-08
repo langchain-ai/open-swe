@@ -1,5 +1,6 @@
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -106,9 +107,16 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
-let updateState = { status: "idle" };
+type DesktopUpdateState = {
+  status: "idle" | "downloading" | "ready" | "installing";
+  version?: string;
+};
+let updateState: DesktopUpdateState = { status: "idle" };
 
-function setUpdateState(status, version) {
+function setUpdateState(
+  status: DesktopUpdateState["status"],
+  version?: string,
+) {
   updateState = { status, ...(version ? { version } : {}) };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:update-state", updateState);
@@ -152,12 +160,29 @@ function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
 }
 
+/**
+ * Terminal identity for a project itself, so the new-thread screen can open
+ * terminals before a thread exists. Short and stable, unlike the cwd.
+ */
+function projectScopeId(cwd) {
+  return `project-${createHash("sha256").update(cwd).digest("hex").slice(0, 16)}`;
+}
+
+function withScopeId(project) {
+  return { ...project, scopeId: projectScopeId(project.cwd) };
+}
+
 function worktreesPath() {
   return path.join(app.getPath("userData"), "worktrees");
 }
 
 function listProjects() {
-  return readProjects(projectsPath());
+  return readProjects(projectsPath()).map(withScopeId);
+}
+
+function projectScopeSession(scopeId) {
+  const project = listProjects().find((item) => item.scopeId === scopeId);
+  return project ? { id: scopeId, cwd: project.cwd } : null;
 }
 
 function sendProjectsChanged() {
@@ -367,15 +392,24 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
+    if (updateState.status === "installing") return true;
     if (updateState.status !== "ready") return false;
+    const version = updateState.version;
+    setUpdateState("installing", version);
     quitting = true;
-    await Promise.all([
-      closeAllTerminals(),
-      backendSupervisor?.close(),
-      openAiOAuth?.close(),
-    ]);
-    autoUpdater.quitAndInstall(false, true);
-    return true;
+    try {
+      await Promise.all([
+        closeAllTerminals(),
+        backendSupervisor?.close(),
+        openAiOAuth?.close(),
+      ]);
+      autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (error) {
+      quitting = false;
+      setUpdateState("ready", version);
+      throw error;
+    }
   });
 
   ipcMain.handle("desktop:projects", (event) => {
@@ -417,7 +451,7 @@ function configureDesktopIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
     sendProjectsChanged();
-    return project;
+    return withScopeId(project);
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {
@@ -483,7 +517,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
-    if (!openAiOAuth) throw new Error("OpenAI sign-in is unavailable");
+    if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
     return openAiOAuth.login((url) => shell.openExternal(url));
   });
   ipcMain.handle("desktop:start-local-thread", async (event, input) => {
@@ -624,6 +658,23 @@ function configureDesktopIpc() {
       const [diff, repository] = await Promise.all([
         readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
         repositoryMetadata(thread.checkpoint.repo),
+      ]);
+      return { ...diff, repository };
+    } catch {
+      return { status: "error", files: [], truncated: false };
+    }
+  });
+  /** Worktree changes for a project, for screens with no thread yet. */
+  ipcMain.handle("desktop:get-project-diff", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    const repo = project ? await repoRoot(project) : null;
+    if (!repo) return { status: "missing", files: [], truncated: false };
+    try {
+      const branch = await currentBranch(repo);
+      const [diff, repository] = await Promise.all([
+        readDiff(repo, "HEAD"),
+        repositoryMetadata(repo, undefined, branch),
       ]);
       return { ...diff, repository };
     } catch {
@@ -1353,7 +1404,8 @@ if (!hasSingleInstanceLock) {
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
-      getSessionRoot: (id) => threadRoot(localThreadStore.get(id)),
+      getSessionRoot: (id) =>
+        threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd,
       userDataPath: app.getPath("userData"),
     });
 
