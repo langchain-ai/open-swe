@@ -13,7 +13,7 @@ type RepoOption = { full_name: string }
 function fuzzySearchScore(value: string, query: string) {
   const candidate = value.toLowerCase().replaceAll(/[^a-z0-9]/g, "")
   const needle = query.toLowerCase().replaceAll(/[^a-z0-9]/g, "")
-  if (!needle) return 0
+  if (!needle) return null
 
   const substringIndex = candidate.indexOf(needle)
   if (substringIndex !== -1) return substringIndex

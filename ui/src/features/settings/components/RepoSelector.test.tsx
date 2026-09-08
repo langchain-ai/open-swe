@@ -44,4 +44,16 @@ describe("RepoSelector", () => {
 
     expect(screen.getByText("langchain-ai/open-swe")).toBeTruthy()
   })
+
+  it("does not match every repository for separator-only queries", () => {
+    renderSelector()
+
+    fireEvent.change(screen.getByPlaceholderText("Search repositories…"), {
+      target: { value: "-" },
+    })
+
+    expect(screen.getByText("No matches")).toBeTruthy()
+    expect(screen.queryByText("langchain-ai/open-swe")).toBeNull()
+    expect(screen.queryByText("langchain-ai/langchain")).toBeNull()
+  })
 })
