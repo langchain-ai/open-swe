@@ -8,12 +8,14 @@ from langgraph.runtime import Runtime
 
 from agent.agent_cost import schedule_agent_cost_refresh
 from agent.dashboard.agent_usage import record_agent_run_completion
+from agent.middleware.trace import scrub_middleware_inputs
 from agent.run_config import RunConfig
 from agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 
 
+@scrub_middleware_inputs
 @after_agent
 async def record_run_usage(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
     """Persist completed-run tokens and schedule deferred cost enrichment."""

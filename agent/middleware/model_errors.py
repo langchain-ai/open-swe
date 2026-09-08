@@ -14,11 +14,11 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.errors import (
     LAST_MODEL_ERROR_KEY,
     classify_exception,
@@ -50,7 +50,7 @@ def _run_context() -> tuple[str | None, str | None]:
     )
 
 
-class ModelErrorMiddleware(AgentMiddleware):
+class ModelErrorMiddleware(OpenSWEMiddleware):
     """Log a model-call exception in full and record why, then re-raise it unchanged."""
 
     async def awrap_model_call(
