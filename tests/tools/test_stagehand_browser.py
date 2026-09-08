@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from agent.resources import stagehand_runtime
 from agent.tool_loaders import stagehand_browser
 
 
@@ -40,6 +41,62 @@ async def test_browser_navigate_runs_in_thread_sandbox(monkeypatch: pytest.Monke
     assert "eyJvcGVyYXRpb24iOiJoZWFsdGgifQ==" in backend.command
     assert "rm -f /tmp/open-swe-stagehand.sock" in backend.command
     assert "setsid python /opt/open-swe/stagehand_runtime.py serve" in backend.command
+
+
+@pytest.mark.parametrize("ip", ["100.64.0.1", "127.0.0.1"])
+def test_stagehand_resolve_accepts_loopback_and_shared_addresses(
+    monkeypatch: pytest.MonkeyPatch, ip: str
+) -> None:
+    monkeypatch.setattr(
+        stagehand_runtime.socket,
+        "getaddrinfo",
+        lambda host, port: [(None, None, None, None, (ip, 0))],
+    )
+    assert stagehand_runtime._resolve("http://example.test/")[0] is True
+
+
+@pytest.mark.parametrize("ip", ["10.0.0.1", "169.254.1.1", "192.168.1.1"])
+def test_stagehand_resolve_rejects_internal_addresses(
+    monkeypatch: pytest.MonkeyPatch, ip: str
+) -> None:
+    monkeypatch.setattr(
+        stagehand_runtime.socket,
+        "getaddrinfo",
+        lambda host, port: [(None, None, None, None, (ip, 0))],
+    )
+    safe, reason, _ = stagehand_runtime._resolve("http://example.test/")
+    assert safe is False
+    assert reason == f"URL resolves to blocked address: {ip}"
+
+
+@pytest.mark.asyncio
+async def test_stagehand_session_keeps_proxy_and_bypasses_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch_options: dict[str, object] = {}
+
+    class Sessions:
+        async def start(self, *, browser: dict[str, object], model_name: str) -> object:
+            launch_options.update(browser["launch_options"])
+            return object()
+
+    class Client:
+        sessions = Sessions()
+
+    async def fake_proxy() -> int:
+        return 43123
+
+    monkeypatch.setattr(stagehand_runtime, "_SESSION", None)
+    monkeypatch.setattr(stagehand_runtime, "_CLIENT", None)
+    monkeypatch.setattr(stagehand_runtime, "_proxy", fake_proxy)
+    monkeypatch.setattr(stagehand_runtime, "AsyncStagehand", lambda **kwargs: Client())
+
+    await stagehand_runtime._session({"model_name": "test", "headless": True})
+
+    assert launch_options["args"] == [
+        "--proxy-server=http://127.0.0.1:43123",
+        "--proxy-bypass-list=<-loopback>",
+    ]
 
 
 def test_browser_tools_require_secure_supported_configuration(

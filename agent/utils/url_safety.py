@@ -10,6 +10,21 @@ _MAX_REDIRECTS = 5
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
 _ENTITY_HEADERS = {"content-encoding", "content-language", "content-length", "content-type"}
 _SENSITIVE_HEADERS = {"authorization", "cookie", "proxy-authorization"}
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        ip.is_loopback
+        or ip not in _SHARED_ADDRESS_SPACE
+        and (
+            ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+    )
 
 
 def resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
@@ -40,7 +55,7 @@ def resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
 
             if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
                 ip = ip.ipv4_mapped
-            if not ip.is_global:
+            if _is_blocked(ip):
                 return False, f"URL resolves to blocked address: {ip_str}", hostname, None
 
         return True, "", hostname, addr_infos

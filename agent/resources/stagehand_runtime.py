@@ -17,6 +17,21 @@ _CLIENT: Any = None
 _SESSION: Any = None
 _PROXY: asyncio.Server | None = None
 _PROXY_PORT: int | None = None
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        not ip.is_loopback
+        and ip not in _SHARED_ADDRESS_SPACE
+        and (
+            ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+    )
 
 
 def _resolve(url: str) -> tuple[bool, str, str | None]:
@@ -28,7 +43,7 @@ def _resolve(url: str) -> tuple[bool, str, str | None]:
         resolved = []
         for address in addresses:
             ip = ipaddress.ip_address(address[4][0])
-            if not ip.is_loopback and not ip.is_global:
+            if _is_blocked(ip):
                 return False, f"URL resolves to blocked address: {ip}", None
             resolved.append(str(ip))
         return True, "", resolved[0]
@@ -143,24 +158,36 @@ async def _close() -> bool:
 async def _session(request: dict[str, Any]) -> Any:
     global _CLIENT, _SESSION
     if _SESSION is None:
-        proxy_port = await _proxy()
-        _CLIENT = AsyncStagehand(
-            server="local",
-            model_api_key=ENV.MODEL_API_KEY.get("proxy-injected"),
-            local_headless=request.get("headless", True),
-            local_chrome_path=ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
-        )
-        _SESSION = await _CLIENT.sessions.start(
-            model_name=request["model_name"],
-            browser={
-                "type": "local",
-                "launch_options": {
-                    "headless": request.get("headless", True),
-                    "executable_path": ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
-                    "args": [f"--proxy-server=http://127.0.0.1:{proxy_port}"],
+        try:
+            proxy_port = await _proxy()
+        except Exception as exc:
+            raise RuntimeError(f"Stagehand proxy startup failed: {exc}") from exc
+        try:
+            _CLIENT = AsyncStagehand(
+                server="local",
+                model_api_key=ENV.MODEL_API_KEY.get("proxy-injected"),
+                local_headless=request.get("headless", True),
+                local_chrome_path=ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Stagehand browser launch failed: {exc}") from exc
+        try:
+            _SESSION = await _CLIENT.sessions.start(
+                model_name=request["model_name"],
+                browser={
+                    "type": "local",
+                    "launch_options": {
+                        "headless": request.get("headless", True),
+                        "executable_path": ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
+                        "args": [
+                            f"--proxy-server=http://127.0.0.1:{proxy_port}",
+                            "--proxy-bypass-list=<-loopback>",
+                        ],
+                    },
                 },
-            },
-        )
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Stagehand session startup failed: {exc}") from exc
     return _SESSION
 
 

@@ -138,6 +138,17 @@ def test_resolve_and_validate_rejects_private_ranges(monkeypatch, ip: str) -> No
     assert hostname == "evil.test"
 
 
+def test_resolve_and_validate_accepts_shared_address_space(monkeypatch) -> None:
+    monkeypatch.setattr(
+        url_safety.socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [_addr_info("100.64.0.1", port)],
+    )
+    is_safe, reason, _, _ = url_safety.resolve_and_validate("https://sandbox.test/")
+    assert is_safe is True
+    assert reason == ""
+
+
 def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
     monkeypatch.setattr(
         url_safety.socket,

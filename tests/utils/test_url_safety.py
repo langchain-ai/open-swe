@@ -5,6 +5,17 @@ import pytest
 from agent.utils import url_safety
 
 
+@pytest.mark.parametrize("ip", ["127.0.0.1", "100.64.0.1"])
+def test_resolve_and_validate_ip_policy(monkeypatch: pytest.MonkeyPatch, ip: str) -> None:
+    monkeypatch.setattr(
+        url_safety.socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [(None, None, None, None, (ip, 0))],
+    )
+    is_safe, _, _, _ = url_safety.resolve_and_validate("http://example.test/")
+    assert is_safe is (ip == "100.64.0.1")
+
+
 @pytest.mark.asyncio
 async def test_request_with_safe_redirects_applies_custom_validator_to_redirects(
     monkeypatch: pytest.MonkeyPatch,
