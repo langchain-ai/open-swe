@@ -263,6 +263,23 @@ async def test_preprocessing_failure_replies_and_does_not_claim_event(
     assert (await _post(_mention_payload(), background_tasks))["status"] == "accepted"
 
 
+async def test_mention_without_a_repository_is_still_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    background_tasks = _FakeBackgroundTasks()
+    post_reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
+    monkeypatch.setattr(webhook_common, "get_slack_repo_config", AsyncMock(return_value=None))
+
+    response = await _post(_mention_payload(), background_tasks)
+
+    assert response["status"] == "accepted"
+    [(task, args)] = background_tasks.tasks
+    assert task is slack_service.process_slack_mention
+    assert args[1] is None
+    post_reply.assert_not_awaited()
+
+
 async def test_rejected_request_replies_with_its_own_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

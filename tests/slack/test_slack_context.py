@@ -4,6 +4,7 @@ from xml.etree import ElementTree
 
 import pytest
 
+from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import (
@@ -741,7 +742,7 @@ def test_get_slack_repo_config_uses_existing_thread_repo(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == {"owner": "saved-owner", "name": "saved-repo"}
+    assert repo == Repo(owner="saved-owner", name="saved-repo")
     assert threads_client.requested_thread_id == "mapped-thread"
     assert not posted
 
@@ -764,7 +765,7 @@ def test_get_slack_repo_config_new_thread_uses_default(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == {"owner": "default-owner", "name": "default-repo"}
+    assert repo == Repo(owner="default-owner", name="default-repo")
 
 
 def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
@@ -781,7 +782,7 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == {"owner": "default-owner", "name": "default-repo"}
+    assert repo == Repo(owner="default-owner", name="default-repo")
     assert threads_client.requested_thread_id == "mapped-thread"
 
 
@@ -798,7 +799,7 @@ def test_get_slack_repo_config_ignores_repo_syntax_in_message(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == {"owner": "saved-owner", "name": "saved-repo"}
+    assert repo == Repo(owner="saved-owner", name="saved-repo")
 
 
 def test_get_slack_repo_config_applies_profile_default_repo(
@@ -829,7 +830,7 @@ def test_get_slack_repo_config_applies_profile_default_repo(
         )
     )
 
-    assert repo == {"owner": "profile-owner", "name": "profile-repo"}
+    assert repo == Repo(owner="profile-owner", name="profile-repo")
 
 
 def test_get_slack_repo_config_applies_team_default_repo(
@@ -849,7 +850,26 @@ def test_get_slack_repo_config_applies_team_default_repo(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == {"owner": "team-owner", "name": "team-repo"}
+    assert repo == Repo(owner="team-owner", name="team-repo")
+
+
+def test_get_slack_repo_config_is_none_when_nothing_names_a_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+    monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "")
+    monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "")
+    monkeypatch.setattr(webhook_common, "DEFAULT_REPO_OWNER", "")
+    monkeypatch.setattr(webhook_common, "DEFAULT_REPO_NAME", "")
+
+    repo = asyncio.run(
+        webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
+    )
+
+    assert repo is None
 
 
 def _setup_slack_mention_fakes(
@@ -953,6 +973,45 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
 
 
+def test_process_slack_mention_runs_without_a_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> hello",
+                "bot_user_id": "UBOT",
+            },
+            None,
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    kwargs = run_create["kwargs"]
+    assert kwargs["config"]["configurable"]["repo"] is None
+    prompt_message = next(
+        message
+        for message in kwargs["input"]["messages"]
+        if isinstance(message["content"], str)
+        and 'sender="system:slack-context"' in message["content"]
+    )
+    assert "Default Repository Hint" not in prompt_message["content"]
+    assert "metadata_update" not in captured
+
+
 def test_process_slack_mention_preserves_forwarded_attachment_from_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -994,7 +1053,7 @@ def test_process_slack_mention_preserves_forwarded_attachment_from_event(
                 ],
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1033,7 +1092,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
                 "text": "<@UBOT> continue on the branch",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1131,7 +1190,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
                 "bot_user_id": "UBOT",
                 "treat_all_messages_as_mentions": True,
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1185,7 +1244,7 @@ def test_process_slack_mention_skips_trace_reply_on_followup_mention(
                 "text": "<@UBOT> follow up question",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1236,7 +1295,7 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1289,7 +1348,7 @@ def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1338,7 +1397,7 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1378,7 +1437,7 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1427,7 +1486,7 @@ def test_process_slack_mention_bot_only_mode_runs_without_user_token(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1761,7 +1820,7 @@ def test_process_slack_mention_queues_a_message_edit_instead_of_running(
                 "bot_user_id": "UBOT",
                 "message_update": True,
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 
@@ -1804,7 +1863,7 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
                 "bot_user_id": "UBOT",
                 "message_update": True,
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            Repo(owner="langchain-ai", name="open-swe"),
         )
     )
 

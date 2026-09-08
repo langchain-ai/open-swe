@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.dashboard import plan_api
+from agent.run_config import Repo
 from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
 
@@ -55,7 +56,7 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
     monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
 
     await slack_webhook.process_slack_mention(
-        _event_data(), {"owner": "langchain-ai", "name": "open-swe"}
+        _event_data(), Repo(owner="langchain-ai", name="open-swe")
     )
 
     upsert.assert_awaited_once()
@@ -89,7 +90,7 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
     monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
 
     await slack_webhook.process_slack_mention(
-        _event_data(), {"owner": "langchain-ai", "name": "open-swe"}
+        _event_data(), Repo(owner="langchain-ai", name="open-swe")
     )
 
     post_reply.assert_awaited_once()
@@ -147,7 +148,7 @@ async def test_slack_plan_button_failure_notifies_user(
         "user_id": "U1",
         "user_name": "Alice",
     }
-    repo_config = {"owner": "langchain-ai", "name": "open-swe"}
+    repo_config = Repo(owner="langchain-ai", name="open-swe")
 
     await slack_webhook.process_slack_plan_approval(event_data, repo_config)
 
@@ -517,7 +518,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
             "thread_id": "t1",
             "message_update": True,
         },
-        {"owner": "langchain-ai", "name": "open-swe"},
+        Repo(owner="langchain-ai", name="open-swe"),
     )
 
     fetch_messages.assert_not_awaited()

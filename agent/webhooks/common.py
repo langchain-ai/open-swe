@@ -90,6 +90,7 @@ from agent.review.findings import (
 )
 from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from agent.run_config import Repo
 from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
@@ -132,7 +133,6 @@ from agent.slack.events import (
     claim_slack_event,
     slack_event_already_seen,
 )
-from agent.slack.failures import SlackRequestError
 from agent.slack.feedback import (
     FEEDBACK_REACTIONS,
     process_slack_reaction_added,
@@ -816,8 +816,8 @@ async def get_slack_repo_config(
     slack_user_id: str | None = None,
     channel_context: dict[str, Any] | None = None,
     thread_id: str | None = None,
-) -> dict[str, str]:
-    """Resolve repository configuration for Slack-triggered runs.
+) -> Repo | None:
+    """Resolve the default repository hint for a Slack-triggered run, if any source names one.
 
     Priority:
         1. Repo carried over from the existing Slack thread's metadata.
@@ -826,6 +826,9 @@ async def get_slack_repo_config(
            profile and their Slack email maps to a known GitHub login).
         4. Team default repo.
         5. ``SLACK_REPO_*`` env defaults.
+
+    ``None`` is not an error: the agent clones lazily and the message itself
+    usually names the repository when one matters.
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
@@ -897,21 +900,7 @@ async def get_slack_repo_config(
     if not repo_config and default_owner and default_name:
         repo_config = {"owner": default_owner, "name": default_name}
 
-    if not repo_config:
-        raise SlackRequestError(_no_repository_message())
-
-    return repo_config
-
-
-def _no_repository_message() -> str:
-    text = (
-        "Open SWE does not know which repository this request is about. Add `repo:owner/name` "
-        "to this channel's topic, set a default repository in your Open SWE profile"
-    )
-    settings_url = build_settings_url()
-    if settings_url:
-        text += f" (<{settings_url}|settings>)"
-    return text + ", or ask an admin to set the team default repository."
+    return Repo.model_validate(repo_config) if repo_config else None
 
 
 async def _thread_exists(thread_id: str) -> bool:

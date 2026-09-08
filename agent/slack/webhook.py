@@ -24,6 +24,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.failures import SlackRequestTarget, report_slack_failure
 from agent.slack.thinking import stream_slack_thinking_steps
@@ -455,7 +456,7 @@ def _slack_context_input(
     return {"messages": run_messages}
 
 
-async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
+async def process_slack_mention(event_data: dict[str, Any], repo_config: Repo | None) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
         await _process_slack_mention_impl(event_data, repo_config)
@@ -463,9 +464,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         await _notify_slack_processing_error(event_data, repo_config, exc)
 
 
-async def process_slack_plan_approval(
-    event_data: dict[str, Any], repo_config: dict[str, str]
-) -> None:
+async def process_slack_plan_approval(event_data: dict[str, Any], repo_config: Repo | None) -> None:
     from agent.dashboard.plan_api import approve_plan_for_thread
     from agent.dashboard.plan_store import make_plan_approver
 
@@ -485,7 +484,7 @@ async def process_slack_plan_approval(
 
 
 async def _notify_slack_processing_error(
-    event_data: dict[str, Any], repo_config: dict[str, str], exc: BaseException
+    event_data: dict[str, Any], repo_config: Repo | None, exc: BaseException
 ) -> None:
     """Mark the agent thread errored when one exists, then always tell the Slack thread."""
     channel_id = event_data.get("channel_id", "")
@@ -506,7 +505,7 @@ async def _notify_slack_processing_error(
 
 
 async def _mark_slack_thread_errored(
-    thread_id: str, event_data: dict[str, Any], repo_config: dict[str, str]
+    thread_id: str, event_data: dict[str, Any], repo_config: Repo | None
 ) -> None:
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
@@ -522,7 +521,7 @@ async def _mark_slack_thread_errored(
         await common.upsert_agent_thread_metadata(
             thread_id,
             source="slack",
-            repo_config=repo_config,
+            repo_config=repo_config.model_dump() if repo_config else None,
             title=clean_text,
             source_context=SourceContext(
                 slack_thread=SlackThreadRef(
@@ -550,9 +549,8 @@ async def _mark_slack_thread_errored(
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
 
-async def _process_slack_mention_impl(
-    event_data: dict[str, Any], repo_config: dict[str, str]
-) -> None:
+async def _process_slack_mention_impl(event_data: dict[str, Any], repo_config: Repo | None) -> None:
+    repo_dict = repo_config.model_dump() if repo_config else None
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
     event_ts = event_data.get("event_ts", "")
@@ -701,11 +699,16 @@ async def _process_slack_mention_impl(
     slack_thread_section = _format_slack_thread_section(
         channel_id, thread_ts, context_source, channel_context
     )
-    operational_context = (
-        _slack_prompt_preamble(untagged_reply, message_update) + "## Default Repository Hint\n"
-        f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
+    repo_hint_section = (
+        f"## Default Repository Hint\n{repo_config.full_name}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
-        f"## Triggered by\n{trigger_user}\n\n"
+        if repo_config
+        else ""
+    )
+    operational_context = (
+        _slack_prompt_preamble(untagged_reply, message_update)
+        + repo_hint_section
+        + f"## Triggered by\n{trigger_user}\n\n"
         f"{trigger_user_timezone_section}"
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}"
@@ -817,7 +820,7 @@ async def _process_slack_mention_impl(
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     configurable: dict[str, Any] = {
-        "repo": repo_config,
+        "repo": repo_dict,
         "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
@@ -841,14 +844,15 @@ async def _process_slack_mention_impl(
 
     is_first_mention = not await common._thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
-    await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+    if repo_dict:
+        await common._upsert_slack_thread_repo_metadata(thread_id, repo_dict, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
     await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
-        repo_config=repo_config,
+        repo_config=repo_dict,
         github_login=mapped_login or "",
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
@@ -892,7 +896,7 @@ async def _process_slack_mention_impl(
             await common.set_context_bar(
                 channel_id,
                 common.repo_context_bar_items(
-                    repo_config, dashboard_url=common.dashboard_thread_url(thread_id) or ""
+                    repo_dict, dashboard_url=common.dashboard_thread_url(thread_id) or ""
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
