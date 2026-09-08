@@ -74,6 +74,11 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
 
 
 @pytest.fixture(autouse=True)
+def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "test-user,trusted-user,reviewer")
+
+
+@pytest.fixture(autouse=True)
 def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Serve no dashboard build by default, whatever ``ui/.output`` holds locally."""
     monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "no-dashboard-build"))

@@ -262,6 +262,7 @@ ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as inte
 ENV.var(
     "ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and dashboard login."
 )
+ENV.var("ALLOWED_GITHUB_USERS", "Comma-separated GitHub users allowed to log in to the dashboard.")
 ENV.var("ALLOWED_GITHUB_REPOS", "Comma-separated owner/repo pairs allowed for webhooks.")
 ENV.var("PUBLIC_REPO_ORG_GATE", "Single org whose members may trigger runs on public repos.")
 ENV.var(

@@ -39,8 +39,8 @@ local user data. They have no maintainer-hosted default. Use **Open SWE → Back
 deployments; switching clears the previous deployment's local session data.
 
 The backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a callback URL.
-Set `ALLOWED_GITHUB_ORGS` on the backend to prevent GitHub users outside the organization from
-creating dashboard sessions.
+Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on the backend to control which GitHub users
+can create dashboard sessions. The backend will not start if both allowlists are empty.
 
 The desktop sign-in screen also offers **Continue in local mode**. This skips GitHub sign-in and
 limits the Agents workspace to projects and threads on **This Mac**; cloud threads, settings, and
@@ -135,8 +135,8 @@ by the release workflow.
 ## Deployment security
 
 The backend URL is public configuration, not a credential. Dashboard routes require an
-`osw_session` cookie issued after GitHub login, and `ALLOWED_GITHUB_ORGS` controls who may complete
-that login. CORS alone is not access control.
+`osw_session` cookie issued after GitHub login, and `ALLOWED_GITHUB_ORGS` or
+`ALLOWED_GITHUB_USERS` controls who may complete that login. CORS alone is not access control.
 
 Raw LangGraph routes are a separate boundary. A deployment using `LANGGRAPH_AUTH_TYPE=noop` must
 keep those routes behind a private network, authenticated gateway, or custom LangGraph auth. An

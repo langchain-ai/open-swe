@@ -78,7 +78,7 @@ async def test_list_threads_denies_actor_outside_allowed_org(
     )
     monkeypatch.setattr(
         threads_tool,
-        "enforce_org_login_gate",
+        "enforce_github_login_gate",
         AsyncMock(side_effect=HTTPException(403, "not an org member")),
     )
     page = AsyncMock()
