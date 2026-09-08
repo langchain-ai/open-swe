@@ -420,7 +420,7 @@ test.describe("Plan review", () => {
         "I'll wait for your review and approval before implementing.",
       ),
     ).toHaveCount(2, { timeout: 60_000 });
-    await expect(owner.getByTestId("inline-plan-artifact")).toBeVisible({
+    await expect(owner.getByTestId("inline-plan-artifact")).toHaveCount(2, {
       timeout: 60_000,
     });
 
