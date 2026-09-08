@@ -1,9 +1,12 @@
 import base64
 import hashlib
+import json
 from typing import Any
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import jwt
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -382,3 +385,87 @@ def test_web_auth_callback_rejects_missing_state_cookie(monkeypatch) -> None:
 
     assert callback_response.status_code == 400
     assert "oauth state mismatch" in callback_response.json()["detail"]
+
+
+def test_mcp_oauth_encrypted_browser_binding(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    state = "mcp-browser-state"
+    start = AsyncMock(return_value=f"https://mcp.example/authorize?state={state}")
+    finish = AsyncMock()
+    monkeypatch.setattr(routes.mcp_connections, "start_oauth", start)
+    monkeypatch.setattr(routes.mcp_connections, "finish_oauth", finish)
+    session = {"sub": "alice"}
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes.require_session] = lambda: session
+    path = routes._MCP_OAUTH_PATH
+    cookie_name = routes._MCP_STATE_COOKIE
+
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        login = client.get(f"{path}/connection/oauth/login", follow_redirects=False)
+        assert login.status_code == 302
+        cookie = client.cookies[cookie_name]
+        assert state not in cookie and "alice" not in cookie
+        assert json.loads(routes.decrypt_token(cookie)) == {"owner": "alice", "state": state}
+        for attribute in ("HttpOnly", "Secure", "SameSite=lax", f"Path={path}", "Max-Age=600"):
+            assert attribute in login.headers["set-cookie"]
+
+        for supplied, callback_state, owner in (
+            ("", state, "alice"),
+            (cookie[:-5] + "AAAAA", state, "alice"),
+            (cookie, "wrong-state", "alice"),
+            (cookie, state, "bob"),
+            (cookie, "", "alice"),
+            (cookie, "x" * (routes._MCP_STATE_MAX_LENGTH + 1), "alice"),
+            (cookie, "\u00e9", "alice"),
+            ("x" * (routes._MCP_STATE_COOKIE_MAX_LENGTH + 1), state, "alice"),
+            *(
+                (routes.encrypt_token(payload), state, "alice")
+                for payload in (
+                    "not-json",
+                    "[]",
+                    "null",
+                    "{}",
+                    '{"owner":"alice","state":123}',
+                    '{"owner":"alice","state":"\\ud800"}',
+                )
+            ),
+        ):
+            session["sub"] = owner
+            client.cookies.clear()
+            response = client.get(
+                f"{path}/oauth/callback",
+                params={"state": callback_state, "error": "access_denied"},
+                headers={"cookie": f"{cookie_name}={supplied}"},
+                follow_redirects=False,
+            )
+            assert response.status_code == 400
+            assert "state mismatch" in response.json()["detail"]
+            assert "Max-Age=0" in response.headers["set-cookie"]
+            assert response.headers["Cache-Control"] == "no-store"
+            assert response.headers["Referrer-Policy"] == "no-referrer"
+            finish.assert_not_awaited()
+
+        session["sub"] = "alice"
+        for params in ({"error": "access_denied"}, {}, {"code": "oauth-code"}):
+            response = client.get(
+                f"{path}/oauth/callback",
+                params={"state": state, **params},
+                headers={"cookie": f"{cookie_name}={cookie}"},
+                follow_redirects=False,
+            )
+            assert response.status_code == (302 if "code" in params else 400)
+            assert "Max-Age=0" in response.headers["set-cookie"]
+            if "code" not in params:
+                assert "authorization denied or code missing" in response.json()["detail"]
+                finish.assert_not_awaited()
+        assert response.headers["location"] == "https://dashboard.example/plugins"
+        finish.assert_awaited_once_with(state, "oauth-code")
+
+        for query in ("", "state=", "state=a&state=b", "state=a&state=", "state=" + "x" * 1025):
+            start.return_value = f"https://mcp.example/authorize?{query}"
+            response = client.get(f"{path}/connection/oauth/login", follow_redirects=False)
+            assert response.status_code == 502
+            assert cookie_name not in client.cookies

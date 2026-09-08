@@ -183,9 +183,15 @@ async def test_encryption_crud_catalog_owner_and_url_change(environment):
     assert "secret-token" not in json.dumps(record)
     assert "secret-token" not in json.dumps(list(environment.values()))
     assert await mc.list_connections("bob") == []
-    for operation in (mc.connection_config, mc.discover_connection, mc.delete_connection):
+    for operation in (mc.connection_config, mc.discover_connection):
         with pytest.raises(mh.MCPConnectionError, match="not found"):
             await operation("bob", record["id"])
+    await mc.delete_connection("bob", record["id"])
+    await mc.delete_connection("bob", "0" * 32)
+    assert await mc.list_connections("alice") == [record]
+    with pytest.raises(mh.MCPConnectionError, match="not found") as error:
+        await mc.delete_connection("alice", "malformed")
+    assert error.value.status_code == 404
     with pytest.raises(mh.MCPConnectionError, match="not found"):
         await mc.save_connection("bob", {"id": record["id"], "name": "stolen"})
     preserved = await mc.save_connection("alice", {"id": record["id"], "name": "Renamed"})
@@ -203,6 +209,7 @@ async def test_encryption_crud_catalog_owner_and_url_change(environment):
     assert not changed["bearer_token_configured"]
     assert not changed["oauth_client_configured"]
     assert not changed["oauth_client_secret_configured"]
+    await mc.delete_connection("alice", record["id"])
     await mc.delete_connection("alice", record["id"])
     assert await mc.list_connections("alice") == []
 
@@ -666,6 +673,17 @@ async def test_manual_client_fallback_and_stale_callback(environment, monkeypatc
         with pytest.raises(mh.MCPConnectionError, match=message):
             await mo._discover(record["url"], fields["oauth_authorization_server"])
         metadata[field] = original
+    changed = await mc.save_connection(
+        "alice", {"id": record["id"], "oauth_client_id": "replacement"}
+    )
+    assert changed["oauth_client_id"] == "replacement"
+    assert not changed["oauth_client_secret_configured"]
+    assert not changed["oauth_configured"]
+    assert (await mc._get("alice", record["id"]))["oauth_client_secret"] == ""
+    changed = await mc.save_connection(
+        "alice", {"id": record["id"], **fields, "oauth_client_secret": "secret"}
+    )
+    assert changed["oauth_client_secret_configured"]
     url = await mo.start_oauth("alice", record["id"], "https://dashboard.example/callback")
     state = parse_qs(urlsplit(url).query)["state"][0]
     changed = await mc.save_connection(
@@ -673,8 +691,15 @@ async def test_manual_client_fallback_and_stale_callback(environment, monkeypatc
     )
     assert not changed["oauth_authorization_server"]
     assert not changed["oauth_configured"]
+    assert not changed["oauth_client_configured"]
+    assert not changed["oauth_client_secret_configured"]
     with pytest.raises(mh.MCPConnectionError, match="changed"):
         await mo.finish_oauth(state, "code")
+    changed = await mc.save_connection(
+        "alice", {"id": record["id"], **fields, "oauth_client_secret": "replacement-secret"}
+    )
+    assert changed["oauth_client_configured"]
+    assert (await mc._get("alice", record["id"]))["oauth_client_secret"] == "replacement-secret"
 
 
 async def test_metadata_error_redaction(environment, monkeypatch):

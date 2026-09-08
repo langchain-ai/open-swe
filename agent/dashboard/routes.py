@@ -218,6 +218,7 @@ from agent.dashboard.user_mappings import (
     upsert_mapping,
 )
 from agent.dashboard.voice import transcribe_audio
+from agent.encryption import decrypt_token, encrypt_token
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 from agent.review.analyzer_cron import remove_continual_cron
@@ -731,6 +732,8 @@ async def test_mcp_connection(id: str, session: dict[str, Any] = _SESSION_DEP) -
 
 _MCP_STATE_COOKIE = "osw_mcp_oauth_state"
 _MCP_OAUTH_PATH = "/dashboard/api/mcp-connections"
+_MCP_STATE_MAX_LENGTH = 1024
+_MCP_STATE_COOKIE_MAX_LENGTH = 4096
 
 
 @router.get("/mcp-connections/{id}/oauth/login")
@@ -740,14 +743,21 @@ async def mcp_oauth_login(id: str, session: dict[str, Any] = _SESSION_DEP) -> Re
             session["sub"], id, f"{_api_base_url()}{_MCP_OAUTH_PATH}/oauth/callback"
         )
     )
-    states = parse_qs(urlsplit(url).query).get("state", [])
-    if len(states) != 1 or not states[0]:
-        raise HTTPException(502, "MCP OAuth state is missing")
+    states = parse_qs(urlsplit(url).query, keep_blank_values=True).get("state", [])
+    if (
+        len(states) != 1
+        or not 0 < len(states[0]) <= _MCP_STATE_MAX_LENGTH
+        or not states[0].isascii()
+    ):
+        raise HTTPException(502, "MCP OAuth state is missing or invalid")
+    cookie = encrypt_token(json.dumps({"owner": session["sub"], "state": states[0]}))
+    if not 0 < len(cookie) <= _MCP_STATE_COOKIE_MAX_LENGTH:
+        raise HTTPException(502, "MCP OAuth state cookie is invalid")
     response = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
     secure, _ = _cookie_security()
     response.set_cookie(
         _MCP_STATE_COOKIE,
-        hash_state_nonce(f"{session['sub']}:{states[0]}"),
+        cookie,
         max_age=600,
         httponly=True,
         secure=secure,
@@ -765,11 +775,27 @@ async def mcp_oauth_callback(
     error: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
-    expected = hash_state_nonce(f"{session['sub']}:{state}")
     supplied = request.cookies.get(_MCP_STATE_COOKIE, "")
-    if not supplied or not hmac.compare_digest(supplied, expected):
-        raise HTTPException(400, "OAuth state mismatch; restart the connection")
+    binding = None
+    if (
+        0 < len(state) <= _MCP_STATE_MAX_LENGTH
+        and state.isascii()
+        and 0 < len(supplied) <= _MCP_STATE_COOKIE_MAX_LENGTH
+    ):
+        try:
+            binding = json.loads(decrypt_token(supplied))
+        except ValueError, RecursionError:
+            pass
     try:
+        if (
+            not isinstance(binding, dict)
+            or binding.get("owner") != session["sub"]
+            or not isinstance(binding.get("state"), str)
+            or not 0 < len(binding["state"]) <= _MCP_STATE_MAX_LENGTH
+            or not binding["state"].isascii()
+            or not hmac.compare_digest(binding["state"], state)
+        ):
+            raise HTTPException(400, "OAuth state mismatch; restart the connection")
         if error or not code:
             raise HTTPException(400, "MCP OAuth authorization denied or code missing")
         await _mcp_result(mcp_connections.finish_oauth(state, code))

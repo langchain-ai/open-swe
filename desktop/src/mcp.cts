@@ -3,7 +3,7 @@ const path = require("node:path");
 const http = require("node:http");
 const { execFile } = require("node:child_process");
 const { promisify, isDeepStrictEqual } = require("node:util");
-const { randomBytes, createHash, timingSafeEqual } = require("node:crypto");
+const { randomBytes, timingSafeEqual } = require("node:crypto");
 
 function readJson(file, fallback) {
   try {
@@ -289,18 +289,25 @@ class DesktopMcp {
     return true;
   }
   credentialPath(name, server) {
-    const key = createHash("sha256")
-      .update(
-        JSON.stringify([
-          name,
-          server.url,
-          server.oauth_client_id,
-          server.oauth_scope,
-          server.oauth_redirect_uri,
-          server.oauth_token_endpoint_auth_method,
-        ]),
-      )
-      .digest("hex");
+    const configuration = JSON.stringify([
+      name,
+      server.url,
+      server.oauth_client_id,
+      server.oauth_scope,
+      server.oauth_redirect_uri,
+      server.oauth_token_endpoint_auth_method,
+    ]);
+    const indexFile = path.join(this.options.credentialsDir, "index.json");
+    const index = readJson(indexFile, {});
+    if (!object(index)) throw new Error("Invalid MCP credential index");
+    let key = index[configuration];
+    if (key === undefined) {
+      key = randomBytes(32).toString("hex");
+      index[configuration] = key;
+      atomicWrite(indexFile, JSON.stringify(index));
+    }
+    if (typeof key !== "string" || !/^[a-f0-9]{64}$/.test(key))
+      throw new Error("Invalid MCP credential storage ID");
     return path.join(this.options.credentialsDir, `${key}.bin`);
   }
   clearCredentials(name, server) {

@@ -127,6 +127,51 @@ test("MCP broker requires capability, rejects browser origins, and scopes encryp
   assert.equal(fs.existsSync(file), false);
 });
 
+test("credential storage IDs persist and invalidate for each public OAuth setting", (t) => {
+  const manager = fixture(t);
+  const input = {
+    name: "manual",
+    url: "http://localhost:9000/mcp",
+    auth_type: "oauth",
+    oauth_client_id: "client",
+    oauth_scope: "read",
+    oauth_redirect_uri: "http://127.0.0.1:12345/callback",
+    oauth_token_endpoint_auth_method: "none",
+  };
+  manager.save(input);
+  const file = manager.credentialPath(input.name, input);
+  const key = path.basename(file);
+  assert.match(key, /^[a-f0-9]{64}\.bin$/);
+  const restarted = new DesktopMcp(manager.options);
+  assert.equal(restarted.credentialPath(input.name, input), file);
+  manager.credentials(input.name, key, {
+    tokens: { access_token: "private-token" },
+  });
+  const indexFile = path.join(manager.options.credentialsDir, "index.json");
+  assert.equal(
+    fs.readFileSync(indexFile, "utf8").includes("private-token"),
+    false,
+  );
+  for (const [field, value] of Object.entries({
+    url: "http://localhost:9001/mcp",
+    oauth_client_id: "another-client",
+    oauth_scope: "read write",
+    oauth_redirect_uri: "http://127.0.0.1:12346/callback",
+    oauth_token_endpoint_auth_method: "client_secret_post",
+  })) {
+    const { name, ...changed } = { ...input, [field]: value };
+    const document = { mcpServers: { [name]: changed } };
+    fs.writeFileSync(manager.options.configPath, JSON.stringify(document));
+    assert.notEqual(manager.credentialPath(input.name, changed), file);
+    assert.throws(() => manager.credentials(input.name, key), /changed/);
+  }
+  const index = JSON.parse(fs.readFileSync(indexFile, "utf8"));
+  for (const configuration of Object.keys(index))
+    index[configuration] = "../../outside";
+  fs.writeFileSync(indexFile, JSON.stringify(index));
+  assert.throws(() => manager.servers(), /Invalid MCP credential storage ID/);
+});
+
 test("login shell resolution parses null-delimited values without interpolating config", async () => {
   let invocation;
   const result = await resolveLoginEnvironment(

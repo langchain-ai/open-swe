@@ -254,9 +254,18 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
                 record["headers"] = {}
             if "bearer_token" not in data:
                 record["bearer_token"] = ""
+        if existing and any(
+            existing.get(field, "") != record[field]
+            for field in ("url", "oauth_authorization_server")
+        ):
             for field in ("oauth_client_id", "oauth_client_secret"):
                 if field not in data:
                     record[field] = ""
+        if (
+            existing.get("oauth_client_id", "") != record["oauth_client_id"]
+            and "oauth_client_secret" not in data
+        ):
+            record["oauth_client_secret"] = ""
         record["revision"] = uuid.uuid4().hex
         record["updated_at"] = now_iso()
         await _put(login, record)
@@ -264,8 +273,8 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 async def delete_connection(login: str, id: str) -> None:
+    id = _connection_id(id)
     async with _lock(login, id):
-        await _get(login, id)
         await delete_value(_namespace(login), id)
 
 

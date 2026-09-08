@@ -1,8 +1,8 @@
 """Resumable, encrypted MCP OAuth authorization-code flows with PKCE and refresh."""
 
 import asyncio
-import hashlib
 import json
+import re
 import secrets
 import time
 from typing import Any
@@ -33,7 +33,6 @@ from agent.dashboard.mcp_http import (
     safe_client,
     validate_url,
 )
-from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, put_value
 
 _FLOW_NAMESPACE = "mcp_oauth_flows"
@@ -183,12 +182,9 @@ async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
         scope = record.get("oauth_scope") or suggested_scope
         client = await _client(record, metadata, redirect_uri, scope)
         pkce = PKCEParameters.generate()
-        nonce = secrets.token_urlsafe(32)
-        state = encrypt_token(
-            json.dumps({"owner": login, "nonce": nonce, "expires_at": time.time() + _FLOW_TTL})
-        )
-        flow_key = hashlib.sha256(state.encode()).hexdigest()
+        state = secrets.token_urlsafe(32)
         flow = {
+            "state": state,
             "owner": login,
             "id": id,
             "revision": record["revision"],
@@ -199,7 +195,7 @@ async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
             "resource": resource,
             "client": client,
         }
-        await put_value([_FLOW_NAMESPACE, login], flow_key, _seal(flow))
+        await put_value([_FLOW_NAMESPACE], state, _seal(flow))
         return f"{metadata['authorization_endpoint']}?{
             urlencode(
                 {
@@ -255,31 +251,24 @@ def _store_tokens(oauth: dict[str, Any], tokens: dict[str, Any]) -> None:
 
 
 async def finish_oauth(state: str, code: str) -> dict[str, Any]:
-    try:
-        if (
-            not isinstance(state, str)
-            or len(state) > 8192
-            or not isinstance(code, str)
-            or not code
-            or len(code) > 8192
-        ):
-            raise ValueError
-        state_data = json.loads(decrypt_token(state))
-        login = state_data["owner"]
-        if state_data["expires_at"] < time.time() or not isinstance(login, str):
-            raise ValueError
-    except ValueError, TypeError, KeyError, AttributeError:
-        raise MCPConnectionError(400, "OAuth state is invalid or expired") from None
-    flow_key = hashlib.sha256(state.encode()).hexdigest()
-    namespace = [_FLOW_NAMESPACE, login]
-    async with _lock(login, flow_key):
-        stored = await get_value(namespace, flow_key)
+    if (
+        not isinstance(state, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{43}", state)
+        or not isinstance(code, str)
+        or not code
+        or len(code) > 8192
+    ):
+        raise MCPConnectionError(400, "OAuth state is invalid or expired")
+    namespace = [_FLOW_NAMESPACE]
+    async with _lock(_FLOW_NAMESPACE, state):
+        stored = await get_value(namespace, state)
         if stored is None:
             raise MCPConnectionError(400, "OAuth state is invalid or expired")
         flow = _unseal(stored)
-        await delete_value(namespace, flow_key)
-        if flow["owner"] != login or flow["expires_at"] < time.time():
+        await delete_value(namespace, state)
+        if flow["state"] != state or flow["expires_at"] < time.time():
             raise MCPConnectionError(400, "OAuth state is invalid or expired")
+        login = flow["owner"]
         async with _lock(login, flow["id"]):
             record = await _get(login, flow["id"])
             if record["revision"] != flow["revision"] or record["auth_type"] != "oauth":
