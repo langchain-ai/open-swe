@@ -43,6 +43,22 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, d
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
+### Indexed sandbox search
+
+Open SWE can route sandbox grep through a snapshot-persisted [tgrep](https://github.com/microsoft/tgrep) index. Install the pinned Linux binary, verify its checksum, clone repositories at their final snapshot paths, build the indexes, and capture the environment:
+
+```bash
+version=v1.0.5
+archive="tgrep-$version-x86_64-unknown-linux-musl.tar.gz"
+curl -fsSLO "https://github.com/microsoft/tgrep/releases/download/$version/$archive"
+echo "072b8b5db49bd76d19d2466c1494e579baf4d8a7c74397c9e54c11018f79d333  $archive" | sha256sum -c -
+tar xzf "$archive"
+install -Dm755 tgrep /usr/local/bin/tgrep
+uv run python scripts/build_tgrep_indexes.py
+```
+
+Set `OPEN_SWE_TGREP_SEARCH=true` on the deployment. Run preparation starts one watcher-backed server for the selected repository; its on-disk index lives in the captured environment and file changes update its in-memory overlay. Missing indexes, server failures, patterns shorter than one trigram, and small capped searches transparently use the normal sandbox grep path. Rebuild indexes before each environment capture.
+
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Sandbox** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:

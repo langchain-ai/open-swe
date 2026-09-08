@@ -8,6 +8,8 @@ from deepagents.backends.protocol import GrepMatch, GrepResult, SandboxBackendPr
 
 logger = logging.getLogger(__name__)
 _START = "__OPEN_SWE_TGREP_START__"
+_STATUS = "__OPEN_SWE_TGREP_STATUS__"
+_SUCCESS = "__OPEN_SWE_TGREP_SUCCESS__"
 _END = "__OPEN_SWE_TGREP_END__"
 
 
@@ -21,13 +23,14 @@ def build_tgrep_server_command(repo_path: str) -> str:
         'index="/opt/open-swe/tgrep-indexes/$key"; '
         'test -x /usr/local/bin/tgrep -a -f "$index/lookup.bin" || exit 0; '
         'if /usr/local/bin/tgrep status "$root" --index-path "$index" 2>/dev/null '
-        "| grep -q '^Server status for'; then exit 0; fi; "
+        "| awk '/^Server status for/{found=1} END{exit !found}'; then exit 0; fi; "
         'rm -f "$index/serve.json"; '
         'nohup /usr/local/bin/tgrep serve "$root" --index-path "$index" '
         ">>/tmp/open-swe-tgrep.log 2>&1 </dev/null & "
         "for attempt in $(seq 1 100); do "
         '/usr/local/bin/tgrep status "$root" --index-path "$index" 2>/dev/null '
-        "| grep -q '^Server status for' && exit 0; sleep .05; done; exit 1"
+        "| awk '/^Server status for/{found=1} END{exit !found}' && exit 0; "
+        "sleep .05; done; exit 1"
     )
 
 
@@ -71,11 +74,15 @@ def build_tgrep_command(
         r'key=$(printf %s "$root" | sha256sum | cut -d\  -f1); '
         'index="/opt/open-swe/tgrep-indexes/$key"; '
         'test -x /usr/local/bin/tgrep -a -f "$index/lookup.bin" || exit 127; '
-        'test -f "$index/serve.json" || exit 127; '
         f"printf '{_START}\\n'; "
-        f'{search} --index-path "$index" 2>/dev/null '
-        f'| awk \'index($0, "\\"type\\":\\"match\\"")\''
-        f"{limit}; printf '{_END}\\n'"
+        '/usr/local/bin/tgrep status "$root" --index-path "$index" 2>/dev/null '
+        "| awk '/^Server status for/{found=1} END{exit !found}' || exit 127; "
+        f"printf '{_STATUS}\\n'; "
+        f"tmp=$(mktemp) || exit 127; trap 'rm -f \"$tmp\"' EXIT; "
+        f'{search} --index-path "$index" >"$tmp" 2>/dev/null; result=$?; '
+        'if test "$result" -le 1; then '
+        f'awk \'index($0, "\\"type\\":\\"match\\"")\' "$tmp"'
+        f"{limit}; printf '{_SUCCESS}\\n'; fi; printf '{_END}\\n'"
     )
 
 
@@ -84,12 +91,14 @@ def parse_tgrep_result(output: str, max_count: int | None = None) -> GrepResult 
     lines = output.splitlines()
     try:
         start = lines.index(_START)
-        end = lines.index(_END, start + 1)
+        status = lines.index(_STATUS, start + 1)
+        success = lines.index(_SUCCESS, status + 1)
+        lines.index(_END, success + 1)
     except ValueError:
         return None
     matches: list[GrepMatch] = []
     try:
-        for line in lines[start + 1 : end]:
+        for line in lines[status + 1 : success]:
             frame = json.loads(line)
             data = frame["data"]
             matches.append(
