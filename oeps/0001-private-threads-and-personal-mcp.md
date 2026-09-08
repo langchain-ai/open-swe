@@ -53,12 +53,11 @@ principal, and whether its owner grants it admin capabilities before credentiale
 
 ### Personal MCP discovery and invocation
 
-In a collaborative thread, the agent may receive redacted metadata showing which personal MCP
-connections are available to a participant, such as connection name, capability summary, and
-whether authorization is healthy. It must not receive credentials, tool handles, sensitive
-configuration, or integration data, and it cannot load or invoke those tools there. This lets the
-agent explain that a new private thread can perform an otherwise unavailable action without
-weakening the boundary.
+In a collaborative thread, the per-user context that already flows into normal threads includes only
+the list of MCP servers attached to that user. It must not include credentials, tool handles, tool
+schemas, sensitive configuration, integration data, or the ability to load or invoke those servers.
+This lets the agent explain that a new private thread can perform an otherwise unavailable action
+without weakening the boundary.
 
 A private thread resolves personal MCP access from its fixed owner, not from the latest message
 sender. It cannot combine credentials from multiple users, silently change principal, or fall back
@@ -172,11 +171,6 @@ private thread provides that capability behind an explicit boundary.
 Forking could unintentionally carry transcript data, execution state, caches, or authority across
 the privacy boundary. A fresh private thread with a marked agent-supplied prompt and direct user
 confirmation is easier to reason about and audit.
-
-## Unresolved questions
-
-- What redacted MCP metadata is useful in collaborative threads without leaking sensitive connection
-  details?
 
 ## Resolution
 
