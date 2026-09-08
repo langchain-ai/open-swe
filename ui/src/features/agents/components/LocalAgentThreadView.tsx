@@ -251,6 +251,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  const refetchDiff = diff.refetch
+  useEffect(() => {
+    if (!diffVisible) return
+    const onFocus = () => void refetchDiff()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [diffVisible, refetchDiff])
   const messages = useMemo(() => {
     const live = streamMessagesToUi(
       stream.messages,
@@ -628,6 +635,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             pr={pr}
             revealFilePath={revealFilePath}
             fullScreen={fullScreen}
+            listFirst
+            workingTreeLabel="Since session started"
             onRefresh={() => void diff.refetch()}
             scope={scope}
             branchScopeAvailable={branchScopeAvailable}

@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
@@ -43,6 +43,13 @@ export function LocalProjectRightPanel({
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  const refetchDiff = diff.refetch
+  useEffect(() => {
+    if (collapsed || activeSurfaceId !== "diff") return
+    const onFocus = () => void refetchDiff()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [activeSurfaceId, collapsed, refetchDiff])
 
   return (
     <AgentRightPanel
@@ -65,6 +72,7 @@ export function LocalProjectRightPanel({
           branch={diff.data?.repository?.branch}
           pr={diff.data?.repository?.pr}
           fullScreen={fullScreen}
+          listFirst
           onRefresh={() => void diff.refetch()}
           scope="working-tree"
           branchScopeAvailable={false}

@@ -131,6 +131,8 @@ interface DiffFilesViewProps {
   revealFilePath?: string | null
   /** Full-screen panels have room for the file tree alongside the diff. */
   fullScreen: boolean
+  /** Desktop mode uses a compact change list with one selected diff. */
+  listFirst?: boolean
   emptyLabel: string
   /** The change set was capped, so `files` is not everything that changed. */
   truncated?: boolean
@@ -150,6 +152,7 @@ export function DiffFilesView({
   files,
   revealFilePath,
   fullScreen,
+  listFirst,
   emptyLabel,
   truncated,
   hideHeader,
@@ -159,6 +162,8 @@ export function DiffFilesView({
   const isMobile = useIsMobile()
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const selectedFile =
+    files.find((file) => file.treePath === selectedTreePath) ?? files[0]
 
   const totals = useMemo(
     () =>
@@ -176,15 +181,19 @@ export function DiffFilesView({
   useEffect(() => {
     filesRef.current = files
   }, [files])
-  const selectTreePath = useCallback((path: string) => {
-    setSelectedTreePath(path)
-    const target = filesRef.current.find((file) => file.treePath === path)
-    if (!target) return
-    sectionRefs.current[target.filePath]?.scrollIntoView({
-      block: "start",
-      behavior: "smooth",
-    })
-  }, [])
+  const selectTreePath = useCallback(
+    (path: string) => {
+      setSelectedTreePath(path)
+      if (listFirst) return
+      const target = filesRef.current.find((file) => file.treePath === path)
+      if (!target) return
+      sectionRefs.current[target.filePath]?.scrollIntoView({
+        block: "start",
+        behavior: "smooth",
+      })
+    },
+    [listFirst]
+  )
 
   useEffect(() => {
     if (!revealFilePath) return
@@ -227,26 +236,42 @@ export function DiffFilesView({
       )}
 
       <div className="flex min-h-0 flex-1">
+        {listFirst && files.length > 0 && (
+          <div className="w-64 shrink-0 border-r border-border bg-card @max-[560px]:w-44">
+            <FileTreeExplorer
+              files={files}
+              selectedTreePath={selectedTreePath}
+              onSelect={selectTreePath}
+            />
+          </div>
+        )}
+
         {files.length > 0 ? (
           <WorkerPoolContextProvider
             poolOptions={DIFF_WORKER_POOL_OPTIONS}
             highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
           >
-            <Virtualizer
-              className="min-h-0 flex-1 overflow-y-auto"
-              contentClassName="p-0"
-              config={DIFF_VIRTUALIZER_CONFIG}
-            >
-              {files.map((file) => (
-                <FileDiffSection
-                  key={file.filePath}
-                  file={file}
-                  sectionRef={(node) => {
-                    sectionRefs.current[file.filePath] = node
-                  }}
-                />
-              ))}
-            </Virtualizer>
+            {listFirst && selectedFile ? (
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <FileDiffSection file={selectedFile} sectionRef={() => {}} />
+              </div>
+            ) : (
+              <Virtualizer
+                className="min-h-0 flex-1 overflow-y-auto"
+                contentClassName="p-0"
+                config={DIFF_VIRTUALIZER_CONFIG}
+              >
+                {files.map((file) => (
+                  <FileDiffSection
+                    key={file.filePath}
+                    file={file}
+                    sectionRef={(node) => {
+                      sectionRefs.current[file.filePath] = node
+                    }}
+                  />
+                ))}
+              </Virtualizer>
+            )}
           </WorkerPoolContextProvider>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
@@ -254,7 +279,7 @@ export function DiffFilesView({
           </div>
         )}
 
-        {fullScreen && !isMobile && files.length > 0 && (
+        {!listFirst && fullScreen && !isMobile && files.length > 0 && (
           <div className="w-72 shrink-0 border-l border-border bg-card">
             <FileTreeExplorer
               files={files}

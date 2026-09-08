@@ -26,6 +26,8 @@ interface ChangesPanelProps {
   pr?: AgentThread["pr"] | null
   revealFilePath?: string | null
   fullScreen: boolean
+  listFirst?: boolean
+  workingTreeLabel?: string
   onRefresh: () => void
   extraActions?: React.ReactNode
   scope: DiffScopeKind
@@ -64,10 +66,14 @@ const SCOPE_LABELS: Record<DiffScopeKind, string> = {
 function ScopeSwitcher(props: {
   scope: DiffScopeKind
   branchScopeAvailable: boolean
+  workingTreeLabel?: string
   onScopeChange: (scope: DiffScopeKind) => void
 }) {
   const [open, setOpen] = useState(false)
-  const label = SCOPE_LABELS[props.scope]
+  const workingTreeLabel =
+    props.workingTreeLabel ?? SCOPE_LABELS["working-tree"]
+  const label =
+    props.scope === "working-tree" ? workingTreeLabel : SCOPE_LABELS.branch
 
   const branchItem = (
     <MenuItem
@@ -99,7 +105,7 @@ function ScopeSwitcher(props: {
         className="min-w-52"
       >
         <MenuItem onClick={() => props.onScopeChange("working-tree")}>
-          {SCOPE_LABELS["working-tree"]}
+          {workingTreeLabel}
         </MenuItem>
         {props.branchScopeAvailable ? (
           branchItem
@@ -127,6 +133,8 @@ export function ChangesPanel({
   pr,
   revealFilePath,
   fullScreen,
+  listFirst,
+  workingTreeLabel,
   onRefresh,
   extraActions,
   scope,
@@ -182,6 +190,7 @@ export function ChangesPanel({
         files={files}
         revealFilePath={revealFilePath}
         fullScreen={fullScreen}
+        listFirst={listFirst}
         emptyLabel={emptyLabel}
         truncated={truncated}
         leading={
@@ -189,6 +198,7 @@ export function ChangesPanel({
             <ScopeSwitcher
               scope={scope}
               branchScopeAvailable={branchScopeAvailable}
+              workingTreeLabel={workingTreeLabel}
               onScopeChange={onScopeChange}
             />
             {branch && (

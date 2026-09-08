@@ -173,6 +173,26 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       contentType: "image/png",
     });
 
+    writeFileSync(join(project, "local-change.py"), "print('changed')\n");
+    await page.getByRole("heading", { name: /What should we build/ }).click();
+    await page.keyboard.press("Control+d");
+    await expect(
+      page.getByText("local-change.py", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("print('changed')", { exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: join(
+        repoRoot,
+        ".open-swe",
+        "artifacts",
+        "desktop-changes-list.png",
+      ),
+      fullPage: true,
+    });
+    await page.keyboard.press("Control+d");
+
     await typeIntoComposer(
       page,
       "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR",
