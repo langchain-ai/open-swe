@@ -148,7 +148,7 @@ make build-dashboard   # pnpm install + Vite build of the dashboard
 make dev               # http://localhost:2024 serves the API and the dashboard
 ```
 
-Create a GitHub App and fill in `.env` as described in the [development guide](docs/DEVELOPMENT.md), then sign in at `http://localhost:2024`. For UI work, `make dev-ui` starts Vite and the backend fronting it, so the same URL hot-reloads. GitHub comment and Slack triggers need a public webhook URL: locally the static domain of a free ngrok account (`make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev`, which exposes only `/webhooks/*`, since the dev server's LangGraph API has no authentication), on LangGraph Platform the deployment URL.
+Create a GitHub App and fill in `.env` as described in the [development guide](docs/DEVELOPMENT.md), then sign in at `http://localhost:2024`. For UI work, `make dev-ui` starts Vite and the backend fronting it, so the same URL hot-reloads. GitHub comment and Slack triggers need a public webhook URL: locally the static domain of a free ngrok account (`make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev`, which exposes only `/webhooks/*`), on LangGraph Platform the deployment URL.
 
 Production self-hosting uses the standalone LangGraph Agent Server and requires its license key.
 
