@@ -892,7 +892,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
-                source=self._source,
+                source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
             ),

@@ -180,6 +180,7 @@ class RunConfig(BaseModel):
     # Background jobs
     watch_key: str | None = None
     schedule_id: str | None = None
+    background_task_completion: bool | None = None
     automation_slack_notification: AutomationSlackNotification | None = None
 
     @classmethod

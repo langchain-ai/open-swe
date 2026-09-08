@@ -192,6 +192,10 @@ SCHEDULE_SLACK_SOURCE_GUIDANCE = """This is a scheduled automation run with a va
 - After a concrete requested action, call `notify_automation_channel` once with a concise outcome and link.
 - Use Slack thread tools only when the scheduled task explicitly requires interaction in that destination."""
 
+BACKGROUND_TASK_SOURCE_GUIDANCE = """A background sandbox command completed and this run is continuing the existing request.
+- Do not send an initial acknowledgement or treat the completion as a new user request.
+- Inspect the bounded output only if needed, continue the existing work, and communicate only when the existing request requires it."""
+
 GENERIC_SOURCE_GUIDANCE = """No interactive source channel is available.
 - Communicate through normal assistant responses and include the complete answer or final outcome there.
 - When a plan is ready, share its review link in the normal assistant response."""
@@ -209,7 +213,9 @@ conversation back."""
 
 
 def _render_source_guidance(source: str, slack_context: bool) -> str:
-    if source == "slack" and slack_context:
+    if source == "background_task":
+        guidance = BACKGROUND_TASK_SOURCE_GUIDANCE
+    elif source == "slack" and slack_context:
         guidance = SLACK_SOURCE_GUIDANCE
     elif source == "linear":
         guidance = LINEAR_SOURCE_GUIDANCE

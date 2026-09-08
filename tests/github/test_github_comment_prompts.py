@@ -101,6 +101,16 @@ def test_slack_information_only_response_uses_single_output_path() -> None:
     assert "do not repeat it in the final assistant response" in tool_guidance
 
 
+def test_background_task_prompt_continues_without_acknowledging() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/workspace", source="background_task", slack_context=True
+    )
+
+    assert "background sandbox command completed" in prompt
+    assert "Do not send an initial acknowledgement" in prompt
+    assert "Make `slack_thread_reply` your first tool call" not in prompt
+
+
 def test_dashboard_prompt_uses_normal_assistant_responses() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
