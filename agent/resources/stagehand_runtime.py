@@ -1,3 +1,4 @@
+# Installed as a standalone sandbox script; do not import from the agent package.
 import asyncio
 import base64
 import contextlib
@@ -10,8 +11,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from stagehand import AsyncStagehand
-
-from agent.config import ENV
 
 _CLIENT: Any = None
 _SESSION: Any = None
@@ -146,9 +145,9 @@ async def _session(request: dict[str, Any]) -> Any:
         proxy_port = await _proxy()
         _CLIENT = AsyncStagehand(
             server="local",
-            model_api_key=ENV.MODEL_API_KEY.get("proxy-injected"),
+            model_api_key=os.environ.get("MODEL_API_KEY", "proxy-injected"),
             local_headless=request.get("headless", True),
-            local_chrome_path=ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
+            local_chrome_path=os.environ.get("STAGEHAND_LOCAL_CHROME_PATH", "/usr/bin/chromium"),
         )
         _SESSION = await _CLIENT.sessions.start(
             model_name=request["model_name"],
@@ -156,7 +155,9 @@ async def _session(request: dict[str, Any]) -> Any:
                 "type": "local",
                 "launch_options": {
                     "headless": request.get("headless", True),
-                    "executable_path": ENV.STAGEHAND_LOCAL_CHROME_PATH.get(),
+                    "executable_path": os.environ.get(
+                        "STAGEHAND_LOCAL_CHROME_PATH", "/usr/bin/chromium"
+                    ),
                     "args": [f"--proxy-server=http://127.0.0.1:{proxy_port}"],
                 },
             },

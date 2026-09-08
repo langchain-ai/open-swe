@@ -1,5 +1,8 @@
 import base64
+import importlib.util
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +22,25 @@ class Backend:
     async def aexecute(self, command: str, *, timeout: int | None = None) -> Result:
         self.command = command
         return Result('{"success":true,"url":"http://localhost:3000"}')
+
+
+def test_stagehand_runtime_imports_without_repository_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runtime_path = repo_root / "agent" / "resources" / "stagehand_runtime.py"
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [entry for entry in sys.path if Path(entry or ".").resolve() != repo_root],
+    )
+    for module_name in list(sys.modules):
+        if module_name == "agent" or module_name.startswith("agent."):
+            monkeypatch.delitem(sys.modules, module_name)
+
+    spec = importlib.util.spec_from_file_location("stagehand_runtime", runtime_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
 
 
 @pytest.mark.asyncio
