@@ -9,7 +9,7 @@
     "."
   ],
   "auth": {
-    "path": "agent.local_auth:auth",
+    "path": "agent.langgraph_auth:auth",
     "disable_studio_auth": true
   },
   "http": {

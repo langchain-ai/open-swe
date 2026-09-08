@@ -15,6 +15,10 @@
   "http": {
     "app": "agent.webapp:app"
   },
+  "auth": {
+    "path": "agent.langgraph_auth:auth",
+    "disable_studio_auth": true
+  },
   "checkpointer": {
     "ttl": {
       "strategy": "delete",
