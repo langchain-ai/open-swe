@@ -586,7 +586,7 @@ def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
-    usage = RunUsageSummary(models=("model-a",), main_agent_tokens=110)
+    usage = RunUsageSummary(models=("model-a",), total_tokens=110)
 
     async def fake_post_message_with_ts(
         channel_id: str,
@@ -623,7 +623,7 @@ def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(
 
 
 def test_format_slack_web_link_footer_includes_run_usage() -> None:
-    usage = RunUsageSummary(models=("model-a", "model-b"), main_agent_tokens=12_345)
+    usage = RunUsageSummary(models=("model-a", "model-b"), total_tokens=12_345)
 
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
 
@@ -633,7 +633,7 @@ def test_format_slack_web_link_footer_includes_run_usage() -> None:
 
 
 def test_format_slack_web_link_footer_prefers_session_cost() -> None:
-    usage = RunUsageSummary(models=("model-a",), main_agent_tokens=12_345, session_cost_usd=0.42)
+    usage = RunUsageSummary(models=("model-a",), total_tokens=12_345, session_cost_usd=0.42)
 
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
 

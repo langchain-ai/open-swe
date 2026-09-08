@@ -6,15 +6,16 @@ builds the curated tool list plus optional integrations, and wires the
 middleware stack. All per-thread state lives in the sandbox + thread metadata;
 the agent itself is stateless.
 """
-# ruff: noqa: E402
 
+# ruff: noqa: E402
 import hashlib
 import logging
-import os
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
+
+from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ from agent.runtime.constants import (
 from agent.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
-from agent.runtime.execution import graph_loaded_for_execution
+from agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -227,7 +228,6 @@ from agent.utils.thread_settings import (
     normalize_thread_settings,
     store_thread_settings,
 )
-from agent.utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
 
@@ -261,7 +261,7 @@ def _registered_tool_name(value: Any) -> str:
 
 
 def _tool_loader_timeout_seconds() -> float:
-    raw_timeout = os.environ.get("TOOL_LOADER_TIMEOUT_SECONDS")
+    raw_timeout = ENV.TOOL_LOADER_TIMEOUT_SECONDS.optional()
     if not raw_timeout:
         return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
     try:
@@ -395,6 +395,7 @@ def _subagent_middleware(
     if dynamic_tools is not None:
         middleware.append(dynamic_tools)
     middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
+    middleware.append(WorkflowPushGuardMiddleware())
     middleware.extend(_subagent_model_middleware())
     return middleware
 
@@ -529,9 +530,7 @@ async def _allowed_org_member(config: RunnableConfig, profile_login: str | None)
     if not login:
         return False
     orgs = dict.fromkeys(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
+        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
     )
     for org in orgs:
         if await is_user_active_org_member(login, org):
@@ -657,7 +656,7 @@ async def _cached_profile(profile_login: str | None):
 def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
     """Return whether signed sandbox file downloads are available for this run."""
     return (
-        os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+        ENV.SANDBOX_TYPE.get() == "langsmith"
         and cfg.stop_summary is not True
         and not is_desktop_run(cfg)
     )
@@ -917,7 +916,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         return create_deep_agent(
             system_prompt="",
             tools=[],
-        ).with_config(config)
+        ).with_config(bindable_config(config))
 
     profile_login = resolve_github_login(as_json_object(config))
 
@@ -930,7 +929,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             return create_desktop_backend(_cfg)
         credentials = (
             await get_sandbox_langsmith_credentials(_profile_login)
-            if _profile_login and os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+            if _profile_login and ENV.SANDBOX_TYPE.get() == "langsmith"
             else None
         )
         return await ensure_sandbox_for_thread(
@@ -1095,7 +1094,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
-    fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
+    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
     if fallback_model_id and fallback_model_id != model_id:
         fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
@@ -1351,7 +1350,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ModelCallTimeoutMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
-traced_agent = traced_graph_factory(get_agent, AGENT_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_agent = get_agent

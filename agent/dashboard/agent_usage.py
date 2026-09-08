@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import math
+import time
 import weakref
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -111,20 +112,52 @@ async def _mutate(
     namespace: list[str], key: str, update: Callable[[dict[str, Any] | None], dict[str, Any]]
 ) -> None:
     async with _write_lock(namespace, key):
-        await _client().store.put_item(namespace, key, update(await _get(namespace, key)))
+        # An empty result means the callback found nothing to update; writing it
+        # would insert a record with no identity that every reader must skip.
+        value = update(await _get(namespace, key))
+        if not value:
+            return
+        await _client().store.put_item(namespace, key, value)
 
 
 async def _all(namespace: list[str]) -> list[dict[str, Any]]:
+    started_at = time.monotonic()
     values: list[dict[str, Any]] = []
     offset = 0
-    while True:
-        result = await _client().store.search_items(namespace, limit=_PAGE_SIZE, offset=offset)
-        items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-        page = list(items or [])
-        values.extend(value for item in page if (value := _record(item)) is not None)
-        if len(page) < _PAGE_SIZE:
-            return values
-        offset += len(page)
+    pages = 0
+    try:
+        while True:
+            result = await _client().store.search_items(namespace, limit=_PAGE_SIZE, offset=offset)
+            items = (
+                result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
+            )
+            page = list(items or [])
+            pages += 1
+            values.extend(value for item in page if (value := _record(item)) is not None)
+            if len(page) < _PAGE_SIZE:
+                logger.info(
+                    "Usage telemetry scan completed",
+                    extra={
+                        "usage_namespace": "/".join(namespace),
+                        "usage_pages": pages,
+                        "usage_records": len(values),
+                        "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+                    },
+                )
+                return values
+            offset += len(page)
+    except Exception:
+        logger.exception(
+            "Usage telemetry scan failed",
+            extra={
+                "usage_namespace": "/".join(namespace),
+                "usage_pages": pages,
+                "usage_records": len(values),
+                "usage_offset": offset,
+                "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+            },
+        )
+        raise
 
 
 def _login(value: object) -> str:
@@ -334,6 +367,7 @@ async def record_agent_run_usage(
             "output_tokens": 0,
             "total_tokens": 0,
             "cost_usd": None,
+            "cost_refresh_scheduled_at_ms": 0,
             "finished_at_ms": 0,
         }
 
@@ -351,12 +385,41 @@ async def record_agent_run_completion(*, run_id: str, usage: RunUsageSummary | N
             return False
         value = {**existing, "finished_at_ms": _now_ms()}
         if usage is not None:
-            for field in ("input_tokens", "output_tokens", "total_tokens"):
-                amount = getattr(usage, field)
-                if amount is not None:
-                    value[field] = amount
+            counts = {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+            }
+            value.update({field: count for field, count in counts.items() if count is not None})
         await _client().store.put_item(AGENT_RUN_NAMESPACE, key, value)
     return True
+
+
+async def agent_run_needs_cost_refresh(*, run_id: str) -> bool:
+    """Return whether a completed run still needs cost enrichment scheduled."""
+    if not run_id:
+        return False
+    existing = await _get(AGENT_RUN_NAMESPACE, _store_key("run", run_id))
+    return bool(
+        existing
+        and existing.get("finished_at_ms")
+        and existing.get("cost_usd") is None
+        and not existing.get("cost_refresh_scheduled_at_ms")
+    )
+
+
+async def mark_agent_cost_refresh_scheduled(*, run_id: str) -> None:
+    """Persist that deferred cost enrichment was successfully scheduled."""
+    if not run_id:
+        return
+    key = _store_key("run", run_id)
+
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        if not existing or existing.get("cost_refresh_scheduled_at_ms"):
+            return existing or {}
+        return {**existing, "cost_refresh_scheduled_at_ms": _now_ms()}
+
+    await _mutate(AGENT_RUN_NAMESPACE, key, update)
 
 
 async def record_agent_run_cost(*, run_id: str, cost_usd: float) -> None:
@@ -640,12 +703,25 @@ async def list_agent_usage_leaderboard(
     current_email: str | None,
 ) -> dict[str, Any]:
     """Aggregate current usage from complete, paginated telemetry."""
+    started_at = time.monotonic()
     normalized = _normalize_period(period)
+    logger.info(
+        "Usage leaderboard aggregation started",
+        extra={"usage_period": normalized, "usage_limit": limit},
+    )
     cache_key = (normalized, _login(current_login) or _email(current_email))
     cached = _USAGE_CACHE.get(cache_key)
     if cached and _now_ms() - cached[0] < _USAGE_CACHE_TTL_MS:
         payload = dict(cached[1])
         payload["rows"] = _limited_rows(payload["rows"], cached[2], limit)
+        logger.info(
+            "Usage leaderboard cache hit",
+            extra={
+                "usage_period": normalized,
+                "usage_rows": len(payload["rows"]),
+                "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+            },
+        )
         return payload
     await _backfill_legacy_usage()
     cutoff_ms = _period_cutoff_ms(normalized)
@@ -807,4 +883,17 @@ async def list_agent_usage_leaderboard(
     _USAGE_CACHE[cache_key] = (now_ms, payload, current_row)
     result = dict(payload)
     result["rows"] = _limited_rows(rows, current_row, limit)
+    logger.info(
+        "Usage leaderboard aggregation completed",
+        extra={
+            "usage_period": normalized,
+            "usage_runs": len(runs),
+            "usage_prs": len(prs),
+            "usage_reviews": len(review_records),
+            "usage_findings": len(finding_records),
+            "usage_members": len(ordered),
+            "usage_rows": len(result["rows"]),
+            "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+        },
+    )
     return result

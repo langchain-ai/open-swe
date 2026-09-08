@@ -4,7 +4,6 @@ import asyncio
 import base64
 import json
 import logging
-import os
 from abc import ABC, abstractmethod
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -20,6 +19,7 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
+from agent.config import ENV
 from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
@@ -57,10 +57,9 @@ _MANAGED_PROXY_RULE_NAMES = frozenset({"open-swe-langsmith"})
 def _get_langsmith_api_key() -> str | None:
     """Get LangSmith API key from environment.
 
-    Checks LANGSMITH_API_KEY first, then falls back to LANGSMITH_API_KEY_PROD
-    for LangGraph Cloud deployments where LANGSMITH_API_KEY is reserved.
+    Same resolution as the rest of the app (``LANGSMITH_API_KEY``).
     """
-    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+    return ENV.LANGSMITH_API_KEY.optional()
 
 
 def _get_sandbox_api_key() -> str | None:
@@ -70,7 +69,7 @@ def _get_sandbox_api_key() -> str | None:
     LangSmith workspace than the one used for tracing/other API calls; falls
     back to the standard key.
     """
-    return os.environ.get("SANDBOX_LANGSMITH_API_KEY") or _get_langsmith_api_key()
+    return ENV.SANDBOX_LANGSMITH_API_KEY.optional() or _get_langsmith_api_key()
 
 
 def _get_sandbox_endpoint() -> str:
@@ -82,8 +81,8 @@ def _get_sandbox_endpoint() -> str:
     proxy-config URL; the SDK clients take :func:`_get_sandbox_api_endpoint`.
     """
     return (
-        os.environ.get("SANDBOX_LANGSMITH_ENDPOINT")
-        or os.environ.get("LANGSMITH_ENDPOINT")
+        ENV.SANDBOX_LANGSMITH_ENDPOINT.optional()
+        or ENV.LANGSMITH_ENDPOINT.optional()
         or "https://api.smith.langchain.com"
     )
 
@@ -100,7 +99,7 @@ def _get_sandbox_api_endpoint() -> str:
 
 
 def _parse_optional_int(name: str, default: int) -> int:
-    raw = os.environ.get(name)
+    raw = ENV[name].optional()
     if not raw:
         return default
     try:
@@ -119,7 +118,7 @@ def _execute_client_grace_seconds() -> int:
 
 def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
     """Get sandbox snapshot configuration from environment."""
-    snapshot_id = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID")
+    snapshot_id = ENV.DEFAULT_SANDBOX_SNAPSHOT_ID.optional()
     fs_capacity_bytes = _parse_optional_int(
         "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
     )
@@ -145,7 +144,7 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]
 def _get_sandbox_create_extra_fields() -> dict[str, Any]:
     """Parse SANDBOX_CREATE_EXTRA_JSON into extra fields merged into the
     sandbox-create request body, e.g. ``{"_internal_runtime": "v2"}``."""
-    raw = os.environ.get("SANDBOX_CREATE_EXTRA_JSON")
+    raw = ENV.SANDBOX_CREATE_EXTRA_JSON.optional()
     if not raw or not raw.strip():
         return {}
     try:
@@ -251,12 +250,12 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
 
 
 def _stagehand_proxy_rules() -> list[dict[str, Any]]:
-    model = os.getenv("STAGEHAND_MODEL", "anthropic/claude-sonnet-4-5")
+    model = ENV.STAGEHAND_MODEL.get()
     provider = model.split("/", 1)[0].split(":", 1)[0]
     key = (
-        os.getenv("STAGEHAND_MODEL_API_KEY")
-        or os.getenv("MODEL_API_KEY")
-        or os.getenv("ANTHROPIC_API_KEY")
+        ENV.STAGEHAND_MODEL_API_KEY.optional()
+        or ENV.MODEL_API_KEY.optional()
+        or ENV.ANTHROPIC_API_KEY.optional()
     )
     if not key:
         return []
@@ -747,7 +746,7 @@ class LangSmithProvider(SandboxProvider):
         self._api_key = api_key or _get_sandbox_api_key()
         self._api_endpoint = _get_sandbox_api_endpoint()
         if not self._api_key:
-            msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
+            msg = "LANGSMITH_API_KEY not set"
             raise ValueError(msg)
 
     @classmethod
@@ -760,8 +759,8 @@ class LangSmithProvider(SandboxProvider):
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
         ):
-            raw = os.environ.get(name)
-            if raw is None or raw == "":
+            raw = ENV[name].optional()
+            if raw is None:
                 continue
             try:
                 value = int(raw)

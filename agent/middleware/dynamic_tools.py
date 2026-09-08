@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware.types import (
-    AgentMiddleware,
     AgentState,
     ModelRequest,
     ModelResponse,
@@ -19,6 +18,8 @@ from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
 from langgraph.prebuilt import InjectedState
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
+
+from agent.middleware.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class _Resolved:
     done: bool = False
 
 
-class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
+class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     """Expose connected integration schemas only after explicit loading."""
 
     state_schema = DynamicToolState

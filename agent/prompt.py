@@ -1,10 +1,10 @@
 import logging
-import os
 import shlex
 from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
+from agent.config import ENV
 from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -15,7 +15,7 @@ from agent.utils.authorship import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
+DEFAULT_PROMPT_PATH = ENV.DEFAULT_PROMPT_PATH.optional()
 
 
 def _load_default_prompt() -> str:
@@ -274,9 +274,7 @@ Do not create, edit, delete, commit, push, or open/update pull requests in any r
 def _render_repository_scope_section() -> str:
     """Render the configured organization boundary for repository edits."""
     orgs = dict.fromkeys(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
+        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
     )
     if not orgs:
         return ""

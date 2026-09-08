@@ -20,11 +20,7 @@ const PROVIDER_KEYS = {
   google_genai: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
   openai: ["OPENAI_API_KEY"],
 };
-const GATEWAY_KEYS = [
-  "LANGSMITH_GATEWAY_API_KEY",
-  "LANGSMITH_API_KEY_PROD",
-  "LANGSMITH_API_KEY",
-];
+const GATEWAY_KEYS = ["LANGSMITH_GATEWAY_API_KEY", "LANGSMITH_API_KEY"];
 
 function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
   const config = env.OPEN_SWE_LOCAL_BACKEND_CONFIG || "langgraph.desktop.json";

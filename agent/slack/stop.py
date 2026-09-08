@@ -1,7 +1,6 @@
 """Slack emergency-stop reaction handling."""
 
 import logging
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +8,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
 from agent.slack.client import (
     lookup_slack_run_mapping,
@@ -21,9 +21,7 @@ from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 _QUEUE_RECORDS = (
     (("queue",), "pending_messages"),
     (("autofix",), "pending_event"),
@@ -152,7 +150,7 @@ Your first and only user-facing action must be one concise `slack_thread_reply` 
 
 
 def _agent_version_metadata() -> dict[str, str]:
-    revision = os.environ.get("LANGCHAIN_REVISION_ID")
+    revision = ENV.LANGCHAIN_REVISION_ID.optional()
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
 
 

@@ -111,9 +111,7 @@ html.dark[data-agents-theme] {
 
 .agents-ui,
 html[data-agents-theme] {
-  font-family:
-    "IBM Plex Sans Variable", "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
-    sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

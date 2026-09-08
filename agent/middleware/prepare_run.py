@@ -4,7 +4,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, NotRequired, cast
 
 from langchain.agents.middleware.types import (
-    AgentMiddleware,
     AgentState,
     ModelRequest,
     ModelResponse,
@@ -13,6 +12,7 @@ from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from agent.input_messages import wrap_system_prompt
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.startup_trace import flush_phases
 
 
@@ -39,7 +39,7 @@ def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
-class BasePrepareRunMiddleware(AgentMiddleware):
+class BasePrepareRunMiddleware(OpenSWEMiddleware):
     """Checkpointed per-run setup.
 
     Subclasses must keep `_prepare` idempotent. LangGraph checkpoints the

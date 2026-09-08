@@ -8,7 +8,6 @@ user can only ever link their own Slack identity (no self-asserted spoofing).
 """
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -16,14 +15,15 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import HTTPException
 
+from agent.config import ENV
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-SLACK_CLIENT_ID = os.environ.get("SLACK_CLIENT_ID", "")
-SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
+SLACK_CLIENT_ID = ENV.SLACK_CLIENT_ID.get()
+SLACK_CLIENT_SECRET = ENV.SLACK_CLIENT_SECRET.get()
 # Optional: restrict linking to a single workspace (the Slack team id, T...).
-SLACK_TEAM_ID = os.environ.get("SLACK_TEAM_ID", "")
+SLACK_TEAM_ID = ENV.SLACK_TEAM_ID.get()
 
 SLACK_STATE_COOKIE_NAME = "osw_slack_oauth_state"
 SLACK_OIDC_SCOPES = "openid email profile"

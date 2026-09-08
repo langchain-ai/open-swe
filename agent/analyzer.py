@@ -8,16 +8,17 @@ Uses the same sandbox + ``gh`` pattern as the reviewer agent. The dashboard
 user's OAuth token is injected into the LangSmith GitHub proxy so ``gh`` works
 on public repos even when the GitHub App is not installed on them.
 """
-# ruff: noqa: E402
 
+# ruff: noqa: E402
 import logging
-import os
 import warnings
 from typing import Any, cast
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+
+from agent.config import ENV
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -46,6 +47,7 @@ from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
     DEFAULT_RECURSION_LIMIT,
+    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
@@ -59,7 +61,6 @@ from agent.utils import ttl_cache
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from agent.utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ async def _configure_sandbox_github_proxy(
     sandbox_backend: SandboxBackendProtocol,
     github_token: str,
 ) -> None:
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
     await _configure_github_proxy(backend.id, github_token)
@@ -163,7 +164,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     async def reconnect_backend(_thread_id: str = thread_id):
         return await ensure_sandbox_for_thread(_thread_id)
@@ -200,7 +201,8 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
-traced_analyzer = traced_graph_factory(get_analyzer, REVIEW_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_analyzer = get_analyzer
