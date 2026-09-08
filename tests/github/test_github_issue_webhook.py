@@ -573,101 +573,13 @@ def test_github_webhook_ignores_review_requested(monkeypatch) -> None:
     }
 
 
-def test_is_docs_plz_slack_channel_matches_name(monkeypatch) -> None:
-    async def fake_get_slack_channel_info(channel_id: str) -> dict[str, object]:
-        assert channel_id == "C_DOCS"
-        return {"name": "docs-plz"}
-
-    monkeypatch.setattr(webhook_common, "get_slack_channel_info", fake_get_slack_channel_info)
-
-    assert asyncio.run(webhook_common._is_docs_plz_slack_channel("C_DOCS")) is True
-
-
-def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
-    async def fake_get_slack_channel_info(channel_id: str) -> dict[str, object]:
-        assert channel_id == "C_DOCS"
-        return {"name": "Docs Plz", "name_normalized": "docs-plz"}
-
-    monkeypatch.setattr(webhook_common, "get_slack_channel_info", fake_get_slack_channel_info)
-
-    assert asyncio.run(webhook_common._is_docs_plz_slack_channel("C_DOCS")) is True
-
-
-def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_get_slack_channel_context(
-        channel_id: str, *, use_cache: bool = True
-    ) -> dict[str, str | bool]:
-        captured["checked_channel_id"] = channel_id
-        return {
-            "id": channel_id,
-            "name": "Docs Plz",
-            "name_normalized": "docs-plz",
-            "topic": "",
-            "purpose": "",
-            "description": "",
-            "is_ext_shared": False,
-            "is_pending_ext_shared": False,
-        }
-
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        captured["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
-        return True
-
-    async def fail_get_slack_repo_config(
-        channel_id: str, thread_ts: str, slack_user_id: str | None = None, **kwargs: object
-    ) -> dict[str, str]:
-        raise AssertionError("docs-plz gate should skip repo resolution")
-
-    async def fail_process_slack_mention(
-        event_data: dict[str, object], repo_config: dict[str, str]
-    ) -> None:
-        raise AssertionError("docs-plz gate should not start the agent")
-
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(
-        webhook_common, "_get_slack_channel_context", fake_get_slack_channel_context
-    )
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_post_slack_thread_reply)
-    monkeypatch.setattr(webhook_common, "get_slack_repo_config", fail_get_slack_repo_config)
-    monkeypatch.setattr(slack_webhooks, "process_slack_mention", fail_process_slack_mention)
-
-    client = TestClient(app)
-    response = _post_slack_webhook(
-        client,
-        {
-            "type": "event_callback",
-            "event": {
-                "type": "app_mention",
-                "channel": "C_DOCS",
-                "ts": "1700000000.000100",
-                "user": "U123",
-                "text": "<@UBOT> please update docs",
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "accepted", "message": "Slack mention gated for docs-plz"}
-    assert captured["checked_channel_id"] == "C_DOCS"
-    assert captured["reply"] == {
-        "channel_id": "C_DOCS",
-        "thread_ts": "1700000000.000100",
-        "text": webhook_common.DOCS_PLZ_SLACK_GATE_REPLY,
-    }
-
-
-def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
+def test_slack_webhook_routes_docs_plz_channel_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     channel_context = {
         "id": "C123",
-        "name": "eng-open-swe",
-        "name_normalized": "eng-open-swe",
+        "name": "docs-plz",
+        "name_normalized": "docs-plz",
         "topic": "Coordinate work",
         "purpose": "repo:langchain-ai/open-swe",
         "description": "Coordinate work\nrepo:langchain-ai/open-swe",
@@ -722,7 +634,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
                 "channel": "C123",
                 "ts": "1700000000.000100",
                 "user": "U123",
-                "text": "<@UBOT> review https://github.com/langchain-ai/open-swe/pull/1244",
+                "text": "<@UBOT> please update docs",
             },
         },
     )
@@ -740,7 +652,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     event_data = captured["event_data"]
     assert isinstance(event_data, dict)
     assert event_data["channel_context"] == channel_context
-    assert event_data["text"] == "<@UBOT> review https://github.com/langchain-ai/open-swe/pull/1244"
+    assert event_data["text"] == "<@UBOT> please update docs"
 
 
 def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> None:

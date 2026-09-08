@@ -9,8 +9,7 @@ Usage:
     uv run python scripts/purge_wakeup_crons.py
 
 Resolves the deployment URL from ``--url`` or ``LANGGRAPH_URL``, and the API key
-from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``. The deprecated ``_PROD`` aliases
-of both variables are still read through the registry.
+from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``.
 """
 
 import argparse
