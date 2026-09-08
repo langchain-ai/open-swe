@@ -50,6 +50,7 @@ The main agent and middleware stack are assembled in `agent/server.py`. Middlewa
 - Add sandbox providers under `agent/sandboxes/providers/` and register them in `registry.py`.
 - Add dashboard endpoints through `agent/dashboard/routes.py` and graph entrypoints through `langgraph.json`.
 - Do not add tests that only restate static prompt text; test rendering, composition, precedence, or behavior.
+- Use Conventional Commit prefixes in pull request titles (`feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`, or `release:`).
 
 <!-- OPENWIKI:START -->
 
