@@ -143,6 +143,7 @@ export function AgentsHome({
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
+    loaded: localProjectsLoaded,
     addProject,
     removeProject,
   } = useDesktopProjects()
@@ -179,14 +180,14 @@ export function AgentsHome({
   }, [panelCollapsed, stream.threadId])
 
   useEffect(() => {
-    if (!isDesktop) return
+    if (!isDesktop || !localProjectsLoaded) return
     const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
     )
     // oxlint-disable-next-line react/set-state-in-effect
     setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
-  }, [isDesktop, localProjectPath, localProjects])
+  }, [isDesktop, localProjectPath, localProjects, localProjectsLoaded])
 
   const refreshLocalProjectBranch = useCallback(async () => {
     const cwd = localProjectPathRef.current
