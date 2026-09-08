@@ -49,6 +49,8 @@ jobs:
 
   unit-tests:
     name: Agent unit tests
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.agent_unit_tests == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -145,6 +147,7 @@ jobs:
     name: Detect E2E changes
     runs-on: ubuntu-latest
     outputs:
+      agent_unit_tests: ${{ steps.changes.outputs.agent_unit_tests }}
       browser: ${{ steps.changes.outputs.browser }}
       desktop: ${{ steps.changes.outputs.desktop }}
     steps:
@@ -156,9 +159,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
             echo "browser=true" >> "$GITHUB_OUTPUT"
             echo "desktop=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          agent_unit_test_paths=(agent tests pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
+          if git diff --quiet "$BASE_SHA" HEAD -- "${agent_unit_test_paths[@]}"; then
+            echo "agent_unit_tests=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
           paths=(agent ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
