@@ -332,7 +332,7 @@ test.describe("Plan review", () => {
       .toContain("The second artifact is ready.");
 
     await page.context().request.post("/control/login", { data: OWNER });
-    await page.goto(`/agents/${threadId}`);
+    await page.goto(`/agents/${threadId}`, { waitUntil: "commit" });
 
     const artifacts = page.getByTestId("inline-plan-artifact");
     await expect(artifacts).toHaveCount(2);
