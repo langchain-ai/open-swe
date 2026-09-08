@@ -661,7 +661,7 @@ async def _refresh_latest_run_metadata(
     return thread, latest_run_status, latest_run_id
 
 
-_THREADS_SEARCH_PAGE = 100
+_THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
