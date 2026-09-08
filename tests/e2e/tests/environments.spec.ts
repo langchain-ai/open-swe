@@ -305,15 +305,18 @@ test.describe("Environments", () => {
       page.getByText(/environment is captured and live/),
     ).toBeVisible();
 
-    // The rebuild runs as its own background job now, so the agent's reply can
-    // land before the capture does. Wait for the record rather than the message.
+    // Publishing captured this thread's sandbox synchronously, so the image is
+    // ready as soon as the tool returned. The reproducibility rebuild it then
+    // kicked off is a background job; wait for that on the record.
+    expect((await findEnvironment(page, DEFAULT_SLUG))?.snapshot_status).toBe(
+      "ready",
+    );
     await expect
       .poll(
-        async () =>
-          (await findEnvironment(page, DEFAULT_SLUG))?.snapshot_status,
+        async () => (await findEnvironment(page, DEFAULT_SLUG))?.refresh_status,
         { timeout: 60_000 },
       )
-      .toBe("ready");
+      .toBe("success");
 
     // The record the real tools wrote: prompt, repos, and a ready snapshot.
     const record = await findEnvironment(page, DEFAULT_SLUG);
@@ -350,18 +353,24 @@ test.describe("Environments", () => {
     // The builder is released with the refresh, so it is no longer offered.
     expect(record?.refresh_sandbox_id).toBeNull();
 
-    // Published as name:latest, and captured from the refresh's own builder
-    // sandbox rather than this thread's.
+    // Two captures under the same name:latest — the tag moved. The first came
+    // from this thread's own sandbox (the publish); the second from the
+    // reproducibility rebuild's throwaway builder, and it is what the record
+    // points at now.
     const captures = await capturedSnapshots(page);
-    expect(captures.map((c) => c.name)).toEqual([EXPECTED_SNAPSHOT_NAME]);
-    expect(captures.map((c) => c.tag)).toEqual(["latest"]);
-    expect(captures[0]?.snapshot_id).toBe(record?.snapshot_id);
+    expect(captures.map((c) => c.name)).toEqual([
+      EXPECTED_SNAPSHOT_NAME,
+      EXPECTED_SNAPSHOT_NAME,
+    ]);
+    expect(captures.map((c) => c.tag)).toEqual(["latest", "latest"]);
     const threadRes = await page.request.get(
       `/dashboard/api/threads/${threadId}?mark_viewed=false`,
     );
     expect(threadRes.ok()).toBeTruthy();
     const thread = (await threadRes.json()) as { sandboxId?: string | null };
-    expect(captures[0]?.sandbox_id).not.toBe(thread.sandboxId);
+    expect(captures[0]?.sandbox_id).toBe(thread.sandboxId);
+    expect(captures[1]?.sandbox_id).not.toBe(thread.sandboxId);
+    expect(record?.snapshot_id).toBe(captures[1]?.snapshot_id);
 
     // A later run is told about the environment: the prompt is appended verbatim.
     await typeIntoComposer(page, "Thanks — anything else needed?");

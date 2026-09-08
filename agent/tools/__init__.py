@@ -46,7 +46,7 @@ _TOOL_MODULES = {
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
-    "save_environment": ".environments",
+    "publish_environment": ".environments",
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
     "sandbox_reset": ".sandbox_reset",
@@ -110,7 +110,7 @@ __all__ = [
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
-    "save_environment",
+    "publish_environment",
     "save_organization_skill",
     "delete_organization_skill",
     "save_plan",
@@ -168,8 +168,8 @@ if TYPE_CHECKING:
     from agent.tools.environments import (
         delete_environment,
         list_environments,
+        publish_environment,
         refresh_environment_start,
-        save_environment,
     )
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url

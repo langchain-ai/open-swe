@@ -70,6 +70,10 @@ def _seconds(var: EnvVar, default: int) -> int:
     return seconds if seconds > 0 else default
 
 
+def capture_timeout() -> int:
+    return _seconds(ENV.ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS)
+
+
 def _client():
     return get_client()
 
@@ -305,13 +309,7 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
                 }
             await ENVIRONMENTS.finish_refresh_step(slug, label, "success", exit_code=0)
         await ENVIRONMENTS.start_refresh_step(slug, "capture")
-        await capture_environment_snapshot(
-            slug,
-            sandbox_id,
-            timeout=_seconds(
-                ENV.ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS
-            ),
-        )
+        await capture_environment_snapshot(slug, sandbox_id, timeout=capture_timeout())
         await ENVIRONMENTS.finish_refresh_step(slug, "capture", "success")
     except Exception as exc:
         logger.warning("Refresh failed for environment %s", slug, exc_info=True)
@@ -330,9 +328,9 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
 async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None:
     """Kick off a refresh as its own background run and return its id.
 
-    For callers that must not block for minutes — an HTTP request, or a sandbox
-    being created. An admin thread awaits ``refresh_environment`` directly
-    instead, so the model sees the log and can fix the script.
+    Nothing awaits a rebuild in-line: an HTTP request, a sandbox being created
+    and an admin tool call all get the run id back and read progress through
+    ``background_task``.
     """
     try:
         run = await _client().runs.create(

@@ -58,40 +58,23 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
     """Enqueue a refresh and describe the handle, or say why it cannot start."""
     record = await store.ENVIRONMENTS.get(slug)
     if record is None:
-        return {"ok": False, "error": f"no environment named {name!r}; call save_environment first"}
+        return {
+            "status": "error",
+            "error": f"no environment named {name!r}; publish_environment creates one",
+        }
     if not record.setup_script:
-        return {"ok": False, "error": f"environment {name!r} has no setup_script to run"}
+        return {"status": "error", "error": f"environment {name!r} has no setup_script to run"}
     if refresh.is_refresh_in_flight(record):
         return {
-            "ok": False,
+            "status": "error",
             "error": f"a refresh of {name!r} is already running",
             "task_id": refresh.refresh_task_id(record.refresh_run_id or ""),
         }
 
     run_id = await refresh.start_refresh_run(slug)
     if run_id is None:
-        return {"ok": False, "error": "could not start the refresh job"}
-    return {
-        "ok": True,
-        "started": True,
-        "task_id": refresh.refresh_task_id(run_id),
-        "environment": slug,
-    }
-
-
-def _scripts_changed(existing: store.Environment | None, record: store.Environment) -> bool:
-    """Whether this save changed what a rebuild would produce.
-
-    A prompt-only edit must not pay for a rebuild; a script edit must not ship
-    unverified.
-    """
-    if existing is None:
-        return True
-    return (
-        existing.setup_script != record.setup_script
-        or existing.update_script != record.update_script
-        or existing.base_snapshot_id != record.base_snapshot_id
-    )
+        return {"status": "error", "error": "could not start the refresh job"}
+    return {"status": "started", "task_id": refresh.refresh_task_id(run_id)}
 
 
 async def list_environments() -> dict[str, Any]:
@@ -114,7 +97,7 @@ async def list_environments() -> dict[str, Any]:
     }
 
 
-async def save_environment(
+async def publish_environment(
     name: str,
     prompt: str,
     setup_script: str | None = None,
@@ -130,15 +113,24 @@ async def save_environment(
     create_params: dict[str, Any] | None = None,
     clear_create_params: bool = False,
 ) -> dict[str, Any]:
-    """Create an environment, or update an existing one's definition.
+    """Capture this thread's sandbox as the environment's image and record its definition.
 
-    Saving a new or changed script starts a rebuild and returns immediately, with
-    the handle under ``refresh``: the setup script and then the update script run
-    on a throwaway sandbox booted from the base snapshot, and the snapshot is
-    captured only if both succeed. Follow it with ``background_task("status",
-    task_id)`` for the stage it reached and the running script's live trace — a
-    rebuild takes minutes to an hour. A save that leaves the scripts alone
-    rebuilds nothing and returns no handle.
+    Provision the sandbox first with ordinary tools — clone the repos, install
+    toolchains, warm caches — and call this when it works. Everything on its
+    filesystem is captured as ``name:latest``; only once that capture succeeds is
+    the environment created or updated to point at it, so a failed capture leaves
+    nothing half-written and a failed provision is fixed here, interactively,
+    rather than in a script run somewhere you cannot see.
+
+    Boot from the right image before provisioning: ``sandbox_reset`` with the base
+    ``snapshot_id`` for a rebuild from scratch, or with the environment's current
+    snapshot to layer one change onto a working image.
+
+    ``setup_script`` is optional and is the reproducibility contract: when given,
+    a nightly rebuild runs it from the base snapshot on a throwaway sandbox and
+    replaces the image only if it succeeds, so drift between what you did by hand
+    and what the script does shows up as a failed refresh on the Environments page
+    rather than silently. Leave no secrets or tokens on disk.
 
     Args:
         name: Display name. Also the snapshot name stem, so keep it short and
@@ -189,8 +181,9 @@ async def save_environment(
             with ``create_params``.
 
     Returns:
-        ``{"ok": True, "environment": {...}, "created": bool}``, plus ``refresh``
-        with a ``task_id`` when a changed script started a rebuild.
+        ``{"ok": True, "environment": {...}, "created": bool}`` with the new
+        snapshot id on the record, or ``ok: False`` with the capture or
+        validation error and nothing written.
     """
     if error := _require_admin():
         return {"ok": False, "error": error}
@@ -208,30 +201,29 @@ async def save_environment(
             "ok": False,
             "error": "clear_base_snapshot_id cannot be combined with base_snapshot_id",
         }
+    thread_id = _configurable().thread_id
+    if not thread_id:
+        return {"ok": False, "error": "no thread_id in the current run config"}
+
+    # Validate the whole definition before capturing, so a bad name or script
+    # limit is refused in milliseconds rather than after minutes of capture.
     try:
         slug = store.slugify(name)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-
-    existing = await store.ENVIRONMENTS.get(slug)
-    try:
+        existing = await store.ENVIRONMENTS.get(slug)
+        definition: store.EnvironmentCreate | store.EnvironmentUpdate
         if existing is None:
-            login = _configurable().github_login
-            record = await store.ENVIRONMENTS.create(
-                store.EnvironmentCreate(
-                    name=name,
-                    prompt=prompt,
-                    setup_script=setup_script or "",
-                    update_script=update_script or "",
-                    base_snapshot_id=base_snapshot_id,
-                    snapshot_name=snapshot_name,
-                    repos=repos or [],
-                    mem_bytes=mem_bytes,
-                    vcpus=vcpus,
-                    fs_capacity_bytes=fs_capacity_bytes,
-                    create_params=create_params or {},
-                ),
-                login if isinstance(login, str) else "open-swe",
+            definition = store.EnvironmentCreate(
+                name=name,
+                prompt=prompt,
+                setup_script=setup_script or "",
+                update_script=update_script or "",
+                base_snapshot_id=base_snapshot_id,
+                snapshot_name=snapshot_name,
+                repos=repos or [],
+                mem_bytes=mem_bytes,
+                vcpus=vcpus,
+                fs_capacity_bytes=fs_capacity_bytes,
+                create_params=create_params or {},
             )
         else:
             update_values: dict[str, Any] = {"name": name, "prompt": prompt, "repos": repos}
@@ -254,56 +246,90 @@ async def save_environment(
                 update_values["base_snapshot_id"] = base_snapshot_id
             elif clear_base_snapshot_id:
                 update_values["base_snapshot_id"] = None
-            record = await store.ENVIRONMENTS.apply_update(
-                slug,
-                store.EnvironmentUpdate(**update_values),
-            )
+            definition = store.EnvironmentUpdate(**update_values)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+
+    published_name = snapshot_name or (
+        existing.published_snapshot_name
+        if existing is not None
+        else store.default_snapshot_name_for(slug)
+    )
+    try:
+        from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+
+        # ready() reconnects through the provider, which starts a stopped/idle box
+        # before handing it back — so the capture always targets a running sandbox.
+        backend = unwrap_sandbox_backend(await get_sandbox_backend(thread_id))
+        snapshot_id = await store.capture_sandbox_snapshot(
+            backend.id, published_name, timeout=refresh.capture_timeout()
+        )
     except Exception as exc:
-        logger.exception("Failed to save environment %s", slug)
-        return {"ok": False, "error": f"failed to save environment: {exc}"}
+        logger.exception("Failed to capture sandbox for environment %s", slug)
+        return {"ok": False, "error": f"snapshot capture failed: {exc}"}
 
-    if not record.setup_script:
-        return {"ok": True, "environment": _summary(record), "created": existing is None}
+    try:
+        if isinstance(definition, store.EnvironmentCreate):
+            login = _configurable().github_login
+            await store.ENVIRONMENTS.create(
+                definition, login if isinstance(login, str) else "open-swe"
+            )
+        else:
+            await store.ENVIRONMENTS.apply_update(slug, definition)
+        record = await store.ENVIRONMENTS.mark_captured(
+            slug,
+            snapshot_id=snapshot_id,
+            snapshot_name=published_name,
+            source_sandbox_id=backend.id,
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "snapshot_id": snapshot_id}
+    except Exception as exc:
+        logger.exception("Failed to record environment %s after capture", slug)
+        return {
+            "ok": False,
+            "error": f"captured {snapshot_id} but failed to record the environment: {exc}",
+            "snapshot_id": snapshot_id,
+        }
+    if record is None:
+        return {"ok": False, "error": f"environment {name!r} vanished during publish"}
 
-    await refresh.ensure_refresh_cron(slug)
-    result: dict[str, Any] = {
-        "ok": True,
-        "environment": _summary(record),
-        "created": existing is None,
-    }
-    if _scripts_changed(existing, record):
-        result["refresh"] = await _start_refresh(slug, name)
-    return result
+    await store.retire_superseded_snapshot(
+        slug, existing.snapshot_id if existing is not None else None, snapshot_id
+    )
+    if record.setup_script:
+        await refresh.ensure_refresh_cron(slug)
+    return {"ok": True, "environment": _summary(record), "created": existing is None}
 
 
 async def refresh_environment_start(name: str) -> dict[str, Any]:
-    """Start rebuilding an environment's snapshot from its scripts, and return at once.
+    """Rebuild an environment's image from its ``setup_script``, unattended, and return at once.
 
-    A throwaway sandbox boots from the base snapshot, runs the setup script and
-    then the update script, and the result is captured as this environment's
-    snapshot only if both succeed. That takes minutes to an hour, so this
-    returns a ``task_id`` rather than waiting: read it with
-    ``background_task("status", task_id)``, which reports the stage it has
-    reached and a tail of the running script's live ``bash -x`` trace.
+    This is the nightly reproducibility check, run on demand: a throwaway sandbox
+    boots from the base snapshot, runs the setup script and then the update
+    script, and the image is replaced only if both succeed. That takes minutes to
+    an hour, so this returns ``status: "started"`` with a ``task_id`` — the
+    environment is not rebuilt yet. Read progress with
+    ``background_task("status", task_id)``: the stage it reached and a tail of
+    the running script's live ``bash -x`` trace.
 
-    A failed refresh keeps the previous snapshot, so runs never drop to the base
-    image because a script broke. This also runs nightly on its own.
+    To *author* an environment, do not use this — provision this thread's sandbox
+    with ordinary tools and ``publish_environment`` it. A failed refresh keeps the
+    previous image, so runs never drop to the base snapshot because a script broke.
 
     Args:
-        name: Name of an environment whose ``setup_script`` is already saved.
+        name: Name of an environment already published with a ``setup_script``.
 
     Returns:
-        ``{"ok": True, "task_id": ...}``, or ``ok: False`` with the reason it
-        could not start.
+        ``{"status": "started", "task_id": ...}``, or ``status: "error"`` with the
+        reason it could not start.
     """
     if error := _require_admin():
-        return {"ok": False, "error": error}
+        return {"status": "error", "error": error}
     try:
         slug = store.slugify(name)
     except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"status": "error", "error": str(exc)}
     return await _start_refresh(slug, name)
 
 

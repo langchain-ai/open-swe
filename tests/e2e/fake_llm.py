@@ -593,11 +593,10 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
 
 
 def _environment_poll_step(messages: list[BaseMessage]) -> AIMessage:
-    """Follow the rebuild through the one poll tool, on the handle the save returned."""
-    refresh = _tool_payload(messages, "save_environment").get("refresh")
-    task_id = refresh.get("task_id") if isinstance(refresh, dict) else None
+    """Follow the reproducibility rebuild through the one poll tool."""
+    task_id = _tool_payload(messages, "refresh_environment_start").get("task_id")
     if not isinstance(task_id, str):
-        raise ValueError("save_environment did not return a refresh task id")
+        raise ValueError("refresh_environment_start did not return a task id")
     return AIMessage(
         content="Following the rebuild.",
         tool_calls=[
@@ -961,9 +960,16 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),
     "environment": (
+        # Build here, with ordinary tools, then publish this sandbox as the image.
         _tool_step(
-            "Saving the environment definition; this runs its scripts.",
-            "save_environment",
+            "Provisioning this sandbox.",
+            "execute",
+            {"command": ENVIRONMENT_SETUP_SCRIPT},
+            "call-env-provision",
+        ),
+        _tool_step(
+            "Publishing this sandbox as the environment.",
+            "publish_environment",
             {
                 "name": ENVIRONMENT_NAME,
                 "prompt": ENVIRONMENT_PROMPT,
@@ -971,7 +977,14 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "update_script": ENVIRONMENT_UPDATE_SCRIPT,
                 "repos": [f"{OWNER}/{REPO}"],
             },
-            "call-env-save",
+            "call-env-publish",
+        ),
+        # Then prove the script reproduces it, the way the nightly cron will.
+        _tool_step(
+            "Checking the setup script reproduces the image.",
+            "refresh_environment_start",
+            {"name": ENVIRONMENT_NAME},
+            "call-env-refresh",
         ),
         _dynamic_step(_environment_poll_step),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),

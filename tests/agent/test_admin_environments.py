@@ -1,6 +1,7 @@
+from contextlib import ExitStack
 from datetime import UTC, datetime
-from typing import cast
-from unittest.mock import AsyncMock, patch
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langgraph.graph.state import RunnableConfig
@@ -174,32 +175,173 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
             "ok": False,
             "error": "Only workspace admins can manage environments.",
         }
-        result = await env_tools.save_environment("base", "prompt")
+        result = await env_tools.publish_environment("base", "prompt")
         assert result["ok"] is False
 
 
-@pytest.mark.asyncio
-async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    create = AsyncMock(
-        return_value=Environment(
-            slug="base",
-            name="base",
-            prompt="prompt",
-            mem_bytes=16 * 1024**3,
-            vcpus=8,
-            fs_capacity_bytes=256 * 1024**3,
-            create_params={"_internal_runtime": "v2"},
-        )
+# --- publish: capture this sandbox, then record ---
+
+
+class _Publish:
+    """Every seam `publish_environment` crosses, patched, with the calls it made."""
+
+    def __init__(self, existing: Environment | None, saved: Environment) -> None:
+        self.existing = existing
+        self.saved = saved
+        self.calls: list[str] = []
+        self.capture = AsyncMock(side_effect=self._capture)
+        self.create = AsyncMock(side_effect=self._create)
+        self.apply_update = AsyncMock(side_effect=self._update)
+        self.mark_captured = AsyncMock(return_value=saved)
+        self.retire = AsyncMock()
+        self.ensure_cron = AsyncMock(return_value="cron-1")
+        self._stack = ExitStack()
+
+    async def _capture(self, *_: object, **__: object) -> str:
+        self.calls.append("capture")
+        return "snap-new"
+
+    async def _create(self, *_: object, **__: object) -> Environment:
+        self.calls.append("write")
+        return self.saved
+
+    async def _update(self, *_: object, **__: object) -> Environment:
+        self.calls.append("write")
+        return self.saved
+
+    def __enter__(self) -> _Publish:
+        backend = MagicMock()
+        backend.id = "sb-thread"
+        for target in (
+            patch(
+                "agent.run_config.get_config",
+                return_value=_config(github_login="ramonn", thread_id="t-1"),
+            ),
+            patch.object(
+                env_tools.store.ENVIRONMENTS,
+                "get",
+                new_callable=AsyncMock,
+                return_value=self.existing,
+            ),
+            patch(
+                "agent.sandboxes.state.get_sandbox_backend",
+                new_callable=AsyncMock,
+                return_value=backend,
+            ),
+            patch("agent.sandboxes.state.unwrap_sandbox_backend", side_effect=lambda b: b),
+            patch.object(env_tools.store, "capture_sandbox_snapshot", self.capture),
+            patch.object(env_tools.store.ENVIRONMENTS, "create", self.create),
+            patch.object(env_tools.store.ENVIRONMENTS, "apply_update", self.apply_update),
+            patch.object(env_tools.store.ENVIRONMENTS, "mark_captured", self.mark_captured),
+            patch.object(env_tools.store, "retire_superseded_snapshot", self.retire),
+            patch.object(env_tools.refresh, "ensure_refresh_cron", self.ensure_cron),
+        ):
+            self._stack.enter_context(target)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stack.close()
+
+
+def _saved(**fields: Any) -> Environment:
+    return Environment(
+        slug="base", name="base", snapshot_status="ready", snapshot_id="snap-new", **fields
     )
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
-        ),
-        patch.object(env_tools.store.ENVIRONMENTS, "create", create),
-    ):
-        result = await env_tools.save_environment(
+
+
+@pytest.mark.asyncio
+async def test_publish_captures_this_sandbox_before_writing_anything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The record is only ever written once the image it points at exists."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with _Publish(existing=None, saved=_saved(prompt="prompt")) as seams:
+        result = await env_tools.publish_environment("base", "prompt")
+
+    assert seams.calls == ["capture", "write"]
+    seams.capture.assert_awaited_once_with(
+        "sb-thread", "openswe-environment-base", timeout=env_tools.refresh.capture_timeout()
+    )
+    seams.mark_captured.assert_awaited_once()
+    assert seams.mark_captured.await_args is not None
+    assert seams.mark_captured.await_args.kwargs["snapshot_id"] == "snap-new"
+    assert seams.mark_captured.await_args.kwargs["source_sandbox_id"] == "sb-thread"
+    assert result["ok"] is True
+    assert result["created"] is True
+    assert result["environment"]["snapshot_id"] == "snap-new"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_capture_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with _Publish(existing=None, saved=_saved()) as seams:
+        seams.capture.side_effect = RuntimeError("snapshot service unavailable")
+        result = await env_tools.publish_environment("base", "prompt")
+
+    assert result["ok"] is False
+    assert "snapshot service unavailable" in result["error"]
+    seams.create.assert_not_awaited()
+    seams.mark_captured.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_bad_definition_is_refused_before_the_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validation is milliseconds; a capture is minutes. Order them accordingly."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with _Publish(existing=None, saved=_saved()) as seams:
+        result = await env_tools.publish_environment("base", "prompt", snapshot_name="bad:name")
+
+    assert result["ok"] is False
+    seams.capture.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publishing_over_an_existing_environment_retires_its_old_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    existing = Environment(
+        slug="base", name="base", snapshot_id="snap-old", snapshot_status="ready"
+    )
+    with _Publish(existing=existing, saved=_saved()) as seams:
+        result = await env_tools.publish_environment("base", "prompt")
+
+    assert seams.calls == ["capture", "write"]
+    seams.apply_update.assert_awaited_once()
+    seams.create.assert_not_awaited()
+    # The old image goes only after the record points at the new one.
+    seams.retire.assert_awaited_once_with("base", "snap-old", "snap-new")
+    assert result["created"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_setup_script_registers_the_nightly_check_and_its_absence_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with _Publish(existing=None, saved=_saved(setup_script="make setup")) as seams:
+        await env_tools.publish_environment("base", "prompt", setup_script="make setup")
+    seams.ensure_cron.assert_awaited_once_with("base")
+
+    with _Publish(existing=None, saved=_saved()) as seams:
+        await env_tools.publish_environment("base", "prompt")
+    seams.ensure_cron.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    saved = _saved(
+        prompt="prompt",
+        mem_bytes=16 * 1024**3,
+        vcpus=8,
+        fs_capacity_bytes=256 * 1024**3,
+        create_params={"_internal_runtime": "v2"},
+    )
+    with _Publish(existing=None, saved=saved) as seams:
+        result = await env_tools.publish_environment(
             "base",
             "prompt",
             mem_bytes=16 * 1024**3,
@@ -208,55 +350,40 @@ async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.Monk
             create_params={"_internal_runtime": "v2"},
         )
 
-    assert create.await_args is not None
-    saved = create.await_args.args[0]
-    assert saved.mem_bytes == 16 * 1024**3
-    assert saved.vcpus == 8
-    assert saved.fs_capacity_bytes == 256 * 1024**3
-    assert saved.create_params == {"_internal_runtime": "v2"}
+    assert seams.create.await_args is not None
+    definition = seams.create.await_args.args[0]
+    assert definition.mem_bytes == 16 * 1024**3
+    assert definition.vcpus == 8
+    assert definition.fs_capacity_bytes == 256 * 1024**3
+    assert definition.create_params == {"_internal_runtime": "v2"}
     assert result["environment"]["vcpus"] == 8
     assert result["environment"]["create_params"] == {"_internal_runtime": "v2"}
 
 
 @pytest.mark.asyncio
-async def test_save_environment_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    update = AsyncMock(return_value=Environment(slug="base", name="base", prompt="prompt"))
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        patch.object(
-            env_tools.store.ENVIRONMENTS,
-            "get",
-            new_callable=AsyncMock,
-            return_value=Environment(slug="base"),
-        ),
-        patch.object(env_tools.store.ENVIRONMENTS, "apply_update", update),
-    ):
-        result = await env_tools.save_environment(
-            "base",
-            "prompt",
-            clear_sizing=True,
-            clear_create_params=True,
+    with _Publish(existing=Environment(slug="base"), saved=_saved(prompt="prompt")) as seams:
+        result = await env_tools.publish_environment(
+            "base", "prompt", clear_sizing=True, clear_create_params=True
         )
 
-    assert update.await_args is not None
-    saved = update.await_args.args[1]
-    assert {"mem_bytes", "vcpus", "fs_capacity_bytes"} <= saved.model_fields_set
-    assert saved.mem_bytes is None
-    assert saved.vcpus is None
-    assert saved.fs_capacity_bytes is None
-    assert saved.create_params == {}
-    assert "create_params" in saved.model_fields_set
+    assert seams.apply_update.await_args is not None
+    definition = seams.apply_update.await_args.args[1]
+    assert {"mem_bytes", "vcpus", "fs_capacity_bytes"} <= definition.model_fields_set
+    assert definition.mem_bytes is None
+    assert definition.vcpus is None
+    assert definition.fs_capacity_bytes is None
+    assert definition.create_params == {}
+    assert "create_params" in definition.model_fields_set
     assert result["ok"] is True
 
 
 @pytest.mark.asyncio
-async def test_save_environment_rejects_clear_sizing_with_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_publish_rejects_clear_sizing_with_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")):
-        result = await env_tools.save_environment("base", "prompt", vcpus=8, clear_sizing=True)
+        result = await env_tools.publish_environment("base", "prompt", vcpus=8, clear_sizing=True)
 
     assert result == {
         "ok": False,
@@ -278,8 +405,8 @@ async def test_refresh_start_requires_a_saved_environment(monkeypatch: pytest.Mo
     ):
         result = await env_tools.refresh_environment_start("base")
 
-    assert result["ok"] is False
-    assert "save_environment" in result["error"]
+    assert result["status"] == "error"
+    assert "publish_environment" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -300,7 +427,7 @@ async def test_refresh_start_refuses_an_environment_with_no_script(
     ):
         result = await env_tools.refresh_environment_start("base")
 
-    assert result["ok"] is False
+    assert result["status"] == "error"
     assert "setup_script" in result["error"]
     start.assert_not_awaited()
 
@@ -328,7 +455,8 @@ async def test_refresh_start_returns_a_task_id_the_unified_poll_understands(
     ):
         result = await env_tools.refresh_environment_start("base")
 
-    assert result["ok"] is True
+    # Started, not done: the rebuild is still running when this returns.
+    assert result["status"] == "started"
     # Prefixed, so `background_task` routes it to the refresh provider.
     assert result["task_id"] == "env-run-1"
     assert refresh.owns_task(result["task_id"])
@@ -356,65 +484,8 @@ async def test_refresh_start_refuses_while_one_is_running(
     ):
         result = await env_tools.refresh_environment_start("base")
 
-    assert result["ok"] is False
+    assert result["status"] == "error"
     assert result["task_id"] == "env-run-1"
-    start.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_saving_a_setup_script_starts_a_rebuild_and_registers_the_cron(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    record = Environment(slug="base", name="base", setup_script="make setup")
-    ensure_cron = AsyncMock(return_value="cron-1")
-    start = AsyncMock(return_value="run-1")
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        # Once for the create/update decision, once inside the refresh start.
-        patch.object(
-            env_tools.store.ENVIRONMENTS,
-            "get",
-            new_callable=AsyncMock,
-            side_effect=[None, record],
-        ),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "create", new_callable=AsyncMock, return_value=record
-        ),
-        patch.object(env_tools.refresh, "ensure_refresh_cron", ensure_cron),
-        patch.object(env_tools.refresh, "start_refresh_run", start),
-    ):
-        result = await env_tools.save_environment("base", "prompt", setup_script="make setup")
-
-    assert result["ok"] is True
-    assert result["refresh"]["task_id"] == "env-run-1"
-    ensure_cron.assert_awaited_once_with("base")
-
-
-@pytest.mark.asyncio
-async def test_a_prompt_only_save_starts_no_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A rebuild costs minutes; only a changed script has earned one."""
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    existing = Environment(slug="base", name="base", setup_script="make setup")
-    start = AsyncMock()
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=existing
-        ),
-        patch.object(
-            env_tools.store.ENVIRONMENTS,
-            "apply_update",
-            new_callable=AsyncMock,
-            return_value=existing.model_copy(update={"prompt": "new"}),
-        ),
-        patch.object(env_tools.refresh, "ensure_refresh_cron", AsyncMock()),
-        patch.object(env_tools.refresh, "start_refresh_run", start),
-    ):
-        result = await env_tools.save_environment("base", "new")
-
-    assert result["ok"] is True
-    assert "refresh" not in result
     start.assert_not_awaited()
 
 

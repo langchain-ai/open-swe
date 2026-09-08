@@ -864,11 +864,6 @@ async def capture_environment_snapshot(
     Only the langsmith provider can capture; other providers have no snapshot API
     to capture into, so this raises rather than failing deep in the SDK.
     """
-    from agent.sandboxes.providers.langsmith import (
-        capture_snapshot_with_tag,
-        get_async_sandbox_client,
-    )
-
     require_capture_support()
 
     record = await ENVIRONMENTS.get(slug)
@@ -880,10 +875,7 @@ async def capture_environment_snapshot(
     previous_was_ready = record.ready_snapshot_id is not None
     await ENVIRONMENTS.mark_capturing(slug)
     try:
-        async with get_async_sandbox_client() as client:
-            snapshot = await capture_snapshot_with_tag(
-                client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout
-            )
+        snapshot_id = await capture_sandbox_snapshot(sandbox_id, snapshot_name, timeout=timeout)
     except Exception as exc:
         logger.warning("snapshot capture failed for environment %s", slug, exc_info=True)
         await ENVIRONMENTS.mark_capture_settled(
@@ -895,25 +887,50 @@ async def capture_environment_snapshot(
 
     updated = await ENVIRONMENTS.mark_captured(
         slug,
-        snapshot_id=snapshot.id,
+        snapshot_id=snapshot_id,
         snapshot_name=snapshot_name,
         snapshot_tag=SNAPSHOT_TAG,
         source_sandbox_id=sandbox_id,
     )
-    # Re-read before deleting: a concurrent refresh may have captured and pointed
-    # the record at its own snapshot, and deleting ours would strand it.
-    current = await ENVIRONMENTS.get(slug)
-    if (
-        previous_snapshot_id != snapshot.id
-        and current is not None
-        and current.snapshot_id == snapshot.id
-    ):
-        await _delete_snapshot(previous_snapshot_id)
+    await retire_superseded_snapshot(slug, previous_snapshot_id, snapshot_id)
+    return updated or record
+
+
+async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeout: int) -> str:
+    """Capture ``sandbox_id`` as ``snapshot_name:latest`` and return the new snapshot id.
+
+    Touches no record: callers that must not write anything until the image
+    exists — publishing an environment from a live sandbox — capture first and
+    record second.
+    """
+    from agent.sandboxes.providers.langsmith import (
+        capture_snapshot_with_tag,
+        get_async_sandbox_client,
+    )
+
+    require_capture_support()
+    async with get_async_sandbox_client() as client:
+        snapshot = await capture_snapshot_with_tag(
+            client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout
+        )
     logger.info(
-        "Captured snapshot %s as %s:%s for environment %s",
+        "Captured snapshot %s as %s:%s from sandbox %s",
         snapshot.id,
         snapshot_name,
         SNAPSHOT_TAG,
-        slug,
+        sandbox_id,
     )
-    return updated or record
+    return str(snapshot.id)
+
+
+async def retire_superseded_snapshot(slug: str, previous_id: str | None, current_id: str) -> None:
+    """Delete the snapshot ``current_id`` replaced, if the record still points at ours.
+
+    Re-reads first: a concurrent capture may have pointed the record at its own
+    snapshot, and deleting ours then would strand it.
+    """
+    if not previous_id or previous_id == current_id:
+        return
+    current = await ENVIRONMENTS.get(slug)
+    if current is not None and current.snapshot_id == current_id:
+        await _delete_snapshot(previous_id)
