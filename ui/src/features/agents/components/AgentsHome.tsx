@@ -448,6 +448,7 @@ export function AgentsHome() {
         {session.data && !routePending && <OnboardingDialog />}
         {optimisticDraftThread && (
           <AgentThreadHeader
+            title={optimisticDraftThread.title}
             project={
               runTarget === "local"
                 ? localProjectPath

@@ -503,6 +503,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
+          title={thread.title}
           project={thread.cwd}
           target="This Mac"
           panelCollapsed={panelCollapsed}
