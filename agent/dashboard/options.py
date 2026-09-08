@@ -251,9 +251,9 @@ def gate_fable_model(
 DEFAULT_MODEL_ID: str = (
     "anthropic:claude-opus-5"
     if ENV.ANTHROPIC_API_KEY.optional() and not ENV.OPENAI_API_KEY.optional()
-    else "openai:gpt-5.6-sol"
+    else "openai:gpt-5.6-luna"
 )
-DEFAULT_MODEL_EFFORT: str = "medium"
+DEFAULT_MODEL_EFFORT: str = "xhigh"
 
 
 def model_supports_effort(model_id: str, effort: str) -> bool:

@@ -28,6 +28,7 @@ from agent.dashboard.team_settings import (
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
 SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
 SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
+DEFAULT_OPENAI = "openai:gpt-5.6-luna"
 SUPPORTED_ASTRA = "openai:gpt-6-astra"
 SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
@@ -40,9 +41,9 @@ FABLE = "anthropic:claude-fable-5-1"
 @pytest.mark.parametrize(
     ("model", "effort", "expected"),
     [
-        ("", "", (SUPPORTED_OPENAI, "medium")),
-        ("", "high", (SUPPORTED_OPENAI, "high")),
-        (SUPPORTED_ANTHROPIC, "", (SUPPORTED_ANTHROPIC, "medium")),
+        ("", "", (DEFAULT_OPENAI, "xhigh")),
+        ("", "high", (DEFAULT_OPENAI, "high")),
+        (SUPPORTED_ANTHROPIC, "", (SUPPORTED_ANTHROPIC, "xhigh")),
         (" anthropic:claude-haiku-4-5 ", "", ("anthropic:claude-haiku-4-5", "none")),
         (SUPPORTED_ANTHROPIC, " max ", (SUPPORTED_ANTHROPIC, "max")),
     ],
@@ -250,8 +251,8 @@ def test_profile_unknown_provider_defers_to_team_default() -> None:
     ("anthropic_key", "openai_key", "expected"),
     [
         ("key", "", SUPPORTED_ANTHROPIC),
-        ("key", "key", SUPPORTED_OPENAI),
-        ("", "", SUPPORTED_OPENAI),
+        ("key", "key", DEFAULT_OPENAI),
+        ("", "", DEFAULT_OPENAI),
     ],
 )
 def test_global_default_matches_available_credentials(
@@ -260,8 +261,8 @@ def test_global_default_matches_available_credentials(
     monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_key)
     monkeypatch.setenv("OPENAI_API_KEY", openai_key)
     defaults = runpy.run_path(options.__file__)
-    assert defaults["default_model_pair"]() == (expected, "medium")
-    assert defaults["default_vision_model_pair"]() == (expected, "medium")
+    assert defaults["default_model_pair"]() == (expected, "xhigh")
+    assert defaults["default_vision_model_pair"]() == (expected, "xhigh")
 
 
 def test_gate_fable_passthrough_when_enabled() -> None:
