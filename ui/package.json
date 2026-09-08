@@ -12,7 +12,6 @@
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@datadog/browser-rum": "7.9.0",
-    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph-sdk": "^1.9.31",
