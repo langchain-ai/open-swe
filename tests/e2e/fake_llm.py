@@ -387,6 +387,8 @@ def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.html"
+INLINE_ARTIFACT_FIRST_PATH = "/workspace/plans/2026-06-29-first-artifact.html"
+INLINE_ARTIFACT_SECOND_PATH = "/workspace/plans/2026-06-29-second-artifact.html"
 
 PLAN_HTML = """<!doctype html>
 <html lang="en">
@@ -457,6 +459,10 @@ PLAN_HTML = """<!doctype html>
   </body>
 </html>
 """
+
+
+def _inline_artifact_html(title: str) -> str:
+    return PLAN_HTML.replace("Greeting Blueprint", title).replace("Add greet() helper", title)
 
 
 def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
@@ -711,6 +717,51 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             },
             "call-code-channel-followup",
         ),
+    ),
+    "inline_artifacts": (
+        _tool_step(
+            "Writing the first inline artifact.",
+            "write_file",
+            {
+                "file_path": INLINE_ARTIFACT_FIRST_PATH,
+                "content": _inline_artifact_html("First artifact"),
+            },
+            "call-write-first-artifact",
+        ),
+        _tool_step(
+            "Publishing the first inline artifact.",
+            "save_plan",
+            {"plan_file_path": INLINE_ARTIFACT_FIRST_PATH},
+            "call-save-first-artifact",
+        ),
+        _tool_step(
+            "Announcing the first inline artifact.",
+            "slack_thread_reply",
+            {"message": "The first artifact is ready."},
+            "call-first-artifact-reply",
+        ),
+        _tool_step(
+            "Writing the second inline artifact.",
+            "write_file",
+            {
+                "file_path": INLINE_ARTIFACT_SECOND_PATH,
+                "content": _inline_artifact_html("Second artifact"),
+            },
+            "call-write-second-artifact",
+        ),
+        _tool_step(
+            "Publishing the second inline artifact.",
+            "save_plan",
+            {"plan_file_path": INLINE_ARTIFACT_SECOND_PATH},
+            "call-save-second-artifact",
+        ),
+        _tool_step(
+            "Announcing the second inline artifact.",
+            "slack_thread_reply",
+            {"message": "The second artifact is ready."},
+            "call-second-artifact-reply",
+        ),
+        StepSpec(content="Both inline artifacts are ready."),
     ),
     "iframe": (
         _tool_step(
@@ -976,6 +1027,10 @@ def _is_iframe_request(text: str) -> bool:
     return "E2E_IFRAME" in text
 
 
+def _is_inline_artifacts_request(text: str) -> bool:
+    return "E2E_INLINE_ARTIFACTS" in text
+
+
 def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
@@ -1034,6 +1089,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "code_channel",
         lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
+    ),
+    ScriptRule(
+        "inline_artifacts",
+        lambda ctx: ctx.human_count <= 1 and _is_inline_artifacts_request(ctx.first_text),
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
