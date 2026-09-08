@@ -6,6 +6,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
+from agent.dashboard import environment_refresh as refresh
 from agent.dashboard.environments import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.run_config import RunConfig
@@ -305,7 +306,7 @@ async def test_refresh_start_refuses_an_environment_with_no_script(
 
 
 @pytest.mark.asyncio
-async def test_refresh_start_returns_a_handle_and_where_the_logs_land(
+async def test_refresh_start_returns_a_task_id_the_unified_poll_understands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Minutes of work, so the tool hands back a task id instead of blocking."""
@@ -328,11 +329,9 @@ async def test_refresh_start_returns_a_handle_and_where_the_logs_land(
         result = await env_tools.refresh_environment_start("base")
 
     assert result["ok"] is True
-    assert result["task_id"] == "run-1"
-    assert result["poll_with"] == "refresh_environment_poll"
-    # The builder is reclaimed, so say plainly where these are readable.
-    assert set(result["log_paths"]) == {"setup", "update"}
-    assert "not readable from this thread" in result["log_paths_note"]
+    # Prefixed, so `background_task` routes it to the refresh provider.
+    assert result["task_id"] == "env-run-1"
+    assert refresh.owns_task(result["task_id"])
 
 
 @pytest.mark.asyncio
@@ -358,75 +357,8 @@ async def test_refresh_start_refuses_while_one_is_running(
         result = await env_tools.refresh_environment_start("base")
 
     assert result["ok"] is False
-    assert result["task_id"] == "run-1"
+    assert result["task_id"] == "env-run-1"
     start.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_poll_reports_a_refresh_still_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    running = Environment(
-        slug="base",
-        refresh_status="refreshing",
-        refresh_kind="full",
-        refresh_run_id="run-1",
-    )
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=running
-        ),
-    ):
-        result = await env_tools.refresh_environment_poll("base")
-
-    assert result["ok"] is True
-    assert result["status"] == "refreshing"
-    assert result["kind"] == "full"
-    assert result["log"] is None
-
-
-@pytest.mark.asyncio
-async def test_poll_hands_back_the_failure_and_its_log(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    failed = Environment(
-        slug="base",
-        refresh_status="failed",
-        refresh_kind="full",
-        refresh_error="setup script exited 2",
-        refresh_log="gcc: fatal error",
-        refresh_run_id="run-1",
-    )
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=failed
-        ),
-    ):
-        result = await env_tools.refresh_environment_poll("base")
-
-    assert result["ok"] is False
-    assert result["error"] == "setup script exited 2"
-    assert result["log"] == "gcc: fatal error"
-
-
-@pytest.mark.asyncio
-async def test_poll_says_when_a_later_refresh_superseded_the_handle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The environment is the handle, so a stale task id gets an explanation."""
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    latest = Environment(slug="base", refresh_status="success", refresh_run_id="run-2")
-    with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
-        patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=latest
-        ),
-    ):
-        result = await env_tools.refresh_environment_poll("base", task_id="run-1")
-
-    assert result["ok"] is True
-    assert result["task_id"] == "run-2"
-    assert "run-1 is not the latest" in result["superseded"]
 
 
 @pytest.mark.asyncio
@@ -455,8 +387,7 @@ async def test_saving_a_setup_script_starts_a_rebuild_and_registers_the_cron(
         result = await env_tools.save_environment("base", "prompt", setup_script="make setup")
 
     assert result["ok"] is True
-    assert result["refresh"]["task_id"] == "run-1"
-    assert result["refresh"]["poll_with"] == "refresh_environment_poll"
+    assert result["refresh"]["task_id"] == "env-run-1"
     ensure_cron.assert_awaited_once_with("base")
 
 

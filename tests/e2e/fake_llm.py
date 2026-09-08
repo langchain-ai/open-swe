@@ -592,6 +592,24 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
     return thread_id
 
 
+def _environment_poll_step(messages: list[BaseMessage]) -> AIMessage:
+    """Follow the rebuild through the one poll tool, on the handle the save returned."""
+    refresh = _tool_payload(messages, "save_environment").get("refresh")
+    task_id = refresh.get("task_id") if isinstance(refresh, dict) else None
+    if not isinstance(task_id, str):
+        raise ValueError("save_environment did not return a refresh task id")
+    return AIMessage(
+        content="Following the rebuild.",
+        tool_calls=[
+            {
+                "name": "background_task",
+                "args": {"action": "status", "task_id": task_id},
+                "id": "call-env-poll",
+            }
+        ],
+    )
+
+
 def _list_threads_step(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
         content="Finding the target thread.",
@@ -955,12 +973,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             },
             "call-env-save",
         ),
-        _tool_step(
-            "Waiting for the rebuild to finish.",
-            "refresh_environment_poll",
-            {"name": ENVIRONMENT_NAME},
-            "call-env-poll",
-        ),
+        _dynamic_step(_environment_poll_step),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
     "followup": (_dynamic_step(_followup_step),),

@@ -65,24 +65,17 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
         return {
             "ok": False,
             "error": f"a refresh of {name!r} is already running",
-            "task_id": record.refresh_run_id,
+            "task_id": refresh.refresh_task_id(record.refresh_run_id or ""),
         }
 
-    task_id = await refresh.start_refresh_run(slug)
-    if task_id is None:
+    run_id = await refresh.start_refresh_run(slug)
+    if run_id is None:
         return {"ok": False, "error": "could not start the refresh job"}
     return {
         "ok": True,
         "started": True,
-        "task_id": task_id,
-        "poll_with": "refresh_environment_poll",
-        "log_paths": store.script_log_paths(),
-        "log_paths_note": (
-            "Paths inside the throwaway builder sandbox, which is reclaimed once the "
-            "capture lands — not readable from this thread. They are captured into the "
-            "snapshot, so a sandbox booted from it afterwards has them. Until then, "
-            "read the log from refresh_environment_poll."
-        ),
+        "task_id": refresh.refresh_task_id(run_id),
+        "environment": slug,
     }
 
 
@@ -142,9 +135,10 @@ async def save_environment(
     Saving a new or changed script starts a rebuild and returns immediately, with
     the handle under ``refresh``: the setup script and then the update script run
     on a throwaway sandbox booted from the base snapshot, and the snapshot is
-    captured only if both succeed. Poll ``refresh_environment_poll`` for the
-    outcome and the log — a rebuild takes minutes. A save that leaves the scripts
-    alone rebuilds nothing and returns no handle.
+    captured only if both succeed. Follow it with ``background_task("status",
+    task_id)`` for the stage it reached and the running script's live trace — a
+    rebuild takes minutes to an hour. A save that leaves the scripts alone
+    rebuilds nothing and returns no handle.
 
     Args:
         name: Display name. Also the snapshot name stem, so keep it short and
@@ -168,7 +162,7 @@ async def save_environment(
             refreshes the snapshot on a throwaway builder in the background so
             later runs skip it. It also runs at the end of every full rebuild,
             which is where a broken one is caught. Output is traced to
-            ``/openswe/logs/update.log``. A full replacement; empty string
+            ``/open-swe/environment/logs/update.log``. A full replacement; empty string
             clears it.
         base_snapshot_id: Optional snapshot the setup script provisions from,
             when this environment needs something other than the configured base.
@@ -289,9 +283,10 @@ async def refresh_environment_start(name: str) -> dict[str, Any]:
 
     A throwaway sandbox boots from the base snapshot, runs the setup script and
     then the update script, and the result is captured as this environment's
-    snapshot only if both succeed. That takes minutes, so this returns a
-    ``task_id`` rather than waiting — poll ``refresh_environment_poll`` for the
-    outcome and the log.
+    snapshot only if both succeed. That takes minutes to an hour, so this
+    returns a ``task_id`` rather than waiting: read it with
+    ``background_task("status", task_id)``, which reports the stage it has
+    reached and a tail of the running script's live ``bash -x`` trace.
 
     A failed refresh keeps the previous snapshot, so runs never drop to the base
     image because a script broke. This also runs nightly on its own.
@@ -300,8 +295,8 @@ async def refresh_environment_start(name: str) -> dict[str, Any]:
         name: Name of an environment whose ``setup_script`` is already saved.
 
     Returns:
-        ``{"ok": True, "task_id": ..., "log_paths": {...}}``, or ``ok: False``
-        with the reason it could not start.
+        ``{"ok": True, "task_id": ...}``, or ``ok: False`` with the reason it
+        could not start.
     """
     if error := _require_admin():
         return {"ok": False, "error": error}
@@ -310,57 +305,6 @@ async def refresh_environment_start(name: str) -> dict[str, Any]:
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     return await _start_refresh(slug, name)
-
-
-async def refresh_environment_poll(name: str, task_id: str | None = None) -> dict[str, Any]:
-    """Read how an environment's refresh is going, or how the last one went.
-
-    The environment is the handle — one refresh runs at a time — so ``task_id``
-    is optional and only used to tell you when the refresh you started has been
-    superseded by a later one.
-
-    While ``status`` is ``refreshing`` there is nothing to read yet; wait before
-    polling again rather than looping. Once it settles, the log of the run that
-    produced the snapshot is also on disk at ``log_paths`` in any sandbox booted
-    from that snapshot.
-
-    Args:
-        name: Environment to read.
-        task_id: Optional handle from ``refresh_environment_start``.
-
-    Returns:
-        ``{"ok": True, "status": ..., "kind": ..., "log": ...}``; ``ok`` is False
-        when the last refresh failed, with ``error``.
-    """
-    if error := _require_admin():
-        return {"ok": False, "error": error}
-    try:
-        slug = store.slugify(name)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-
-    record = await store.ENVIRONMENTS.get(slug)
-    if record is None:
-        return {"ok": False, "error": f"no environment named {name!r}"}
-
-    status = record.refresh_status
-    result: dict[str, Any] = {
-        "ok": status != "failed",
-        "status": status,
-        "kind": record.refresh_kind,
-        "task_id": record.refresh_run_id,
-        "finished_at": record.refresh_finished_at,
-        "snapshot_status": record.snapshot_status,
-        "log": store.log_excerpt(record.refresh_log, lines=30),
-        "log_paths": store.script_log_paths(),
-    }
-    if task_id and record.refresh_run_id and task_id != record.refresh_run_id:
-        result["superseded"] = (
-            f"{task_id} is not the latest refresh of {name!r}; reporting {record.refresh_run_id}"
-        )
-    if status == "failed":
-        result["error"] = record.refresh_error or "refresh failed"
-    return result
 
 
 async def delete_environment(name: str) -> dict[str, Any]:

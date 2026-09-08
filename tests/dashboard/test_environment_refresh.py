@@ -51,9 +51,11 @@ def test_script_command_traces_into_a_canonical_log_and_keeps_the_exit_code(
     monkeypatch.delenv("OPENSWE_SCRIPT_ROOT", raising=False)
     command = env_store.script_command("git pull", "update")
 
-    assert env_store.script_log_path("update") == "/openswe/logs/update.log"
-    assert "mkdir -p /openswe/logs" in command
-    assert "bash -x /openswe/update.sh > /openswe/logs/update.log" in command
+    assert env_store.script_log_path("update") == "/open-swe/environment/logs/update.log"
+    assert "mkdir -p /open-swe/environment/logs" in command
+    assert (
+        "bash -x /open-swe/environment/update.sh > /open-swe/environment/logs/update.log" in command
+    )
     # The script's own status, captured before `cat` runs.
     assert "rc=$?" in command
     assert command.endswith("exit $rc")
@@ -63,11 +65,13 @@ def test_the_script_root_is_configurable_for_providers_without_a_writable_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`SANDBOX_TYPE=local` runs on a developer's machine, where / is read-only."""
-    monkeypatch.setenv("OPENSWE_SCRIPT_ROOT", "/tmp/e2e/openswe/")
+    monkeypatch.setenv("OPENSWE_SCRIPT_ROOT", "/tmp/e2e/open-swe/environment/")
 
-    assert env_store.script_root() == "/tmp/e2e/openswe"
-    assert env_store.script_log_path("setup") == "/tmp/e2e/openswe/logs/setup.log"
-    assert "mkdir -p /tmp/e2e/openswe/logs" in env_store.script_command("make setup", "setup")
+    assert env_store.script_root() == "/tmp/e2e/open-swe/environment"
+    assert env_store.script_log_path("setup") == "/tmp/e2e/open-swe/environment/logs/setup.log"
+    assert "mkdir -p /tmp/e2e/open-swe/environment/logs" in env_store.script_command(
+        "make setup", "setup"
+    )
 
 
 def test_daily_schedule_is_stable_and_staggered() -> None:
@@ -437,3 +441,82 @@ async def test_deleting_an_environment_removes_its_cron(fake_store: FakeStore) -
         assert await ENVIRONMENTS.remove("base") is True
 
     client.crons.delete.assert_awaited_once_with("cron-1")
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -> None:
+    """A rebuild runs for minutes to an hour; the stage list is how it is followed."""
+    backend = _backend(_Result("provisioned", 0), _Result("Already up to date.", 0))
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_environment_snapshot", AsyncMock()),
+    ):
+        await ENVIRONMENTS.create(
+            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
+            "ramon",
+        )
+        await refresh.refresh_environment("base")
+        record = await ENVIRONMENTS.get("base")
+
+    assert record is not None
+    assert [(step.label, step.status) for step in record.refresh_steps] == [
+        ("boot", "success"),
+        ("setup", "success"),
+        ("update", "success"),
+        ("capture", "success"),
+    ]
+    # The script steps carry where their trace was written, for a live read.
+    paths = {step.label: step.log_path for step in record.refresh_steps}
+    assert paths["setup"] == env_store.script_log_path("setup")
+    assert paths["boot"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_step_that_broke_is_the_one_left_failed(fake_store: FakeStore) -> None:
+    backend = _backend(_Result("gcc: fatal error", 2))
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_environment_snapshot", AsyncMock()),
+    ):
+        await ENVIRONMENTS.create(
+            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
+        )
+        await refresh.refresh_environment("base")
+        record = await ENVIRONMENTS.get("base")
+
+    assert record is not None
+    assert [(step.label, step.status, step.exit_code) for step in record.refresh_steps] == [
+        ("boot", "success", None),
+        ("setup", "failed", 2),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_builder_is_published_while_it_lives_and_cleared_after(
+    fake_store: FakeStore,
+) -> None:
+    """A poll reads the running trace off the builder, so its id must be current."""
+    backend = _backend(_Result("provisioned", 0))
+    published: list[str | None] = []
+
+    async def _capture(slug: str, sandbox_id: str, **_: object) -> None:
+        record = await ENVIRONMENTS.get(slug)
+        published.append(record.refresh_sandbox_id if record else None)
+
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_environment_snapshot", _capture),
+    ):
+        await ENVIRONMENTS.create(
+            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
+        )
+        await refresh.refresh_environment("base")
+        record = await ENVIRONMENTS.get("base")
+
+    assert published == ["sb-builder"]
+    assert record is not None
+    # Released with the refresh, so it stops being offered as a readable source.
+    assert record.refresh_sandbox_id is None

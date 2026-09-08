@@ -6,6 +6,7 @@ import {
   api,
   type EnvironmentOption,
   type EnvironmentRefreshStatus,
+  type EnvironmentRefreshStep,
 } from "@/lib/api"
 import { formatRelativeTime } from "@/lib/utils"
 
@@ -42,6 +43,36 @@ function refreshedAt(timestamp: string | null | undefined): string | null {
   return Number.isNaN(parsed) ? null : formatRelativeTime(parsed)
 }
 
+const STEP_MARK: Record<EnvironmentRefreshStep["status"], string> = {
+  running: "…",
+  success: "✓",
+  failed: "✕",
+}
+
+const STEP_CLASS: Record<EnvironmentRefreshStep["status"], string> = {
+  running: "border-border text-foreground",
+  success: "border-border text-muted-foreground",
+  failed: "border-destructive/40 text-destructive",
+}
+
+// A rebuild runs for minutes to an hour; which stage it reached is the only
+// thing that separates slow from wedged while it is still going.
+function RefreshSteps({ steps }: { steps: Array<EnvironmentRefreshStep> }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {steps.map((step) => (
+        <span
+          key={step.label}
+          className={`rounded-full border px-2 py-0.5 text-[11px] ${STEP_CLASS[step.status]}`}
+        >
+          {STEP_MARK[step.status]} {step.label}
+          {step.exit_code ? ` (exit ${step.exit_code})` : ""}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function EnvironmentRow({
   environment,
   isDefault,
@@ -52,6 +83,7 @@ function EnvironmentRow({
   const status = environment.refresh_status ?? "never"
   const when = refreshedAt(environment.refresh_finished_at)
   const log = environment.refresh_log_excerpt
+  const steps = environment.refresh_steps ?? []
   const detail = [
     isDefault ? "Default environment" : null,
     environment.has_snapshot ? "Snapshot ready" : "No snapshot",
@@ -75,6 +107,7 @@ function EnvironmentRow({
           {status !== "refreshing" && when ? ` ${when}` : ""}
         </span>
       </div>
+      {steps.length > 0 && <RefreshSteps steps={steps} />}
       {environment.refresh_error && (
         <p className="text-xs/relaxed text-destructive">
           {environment.refresh_error}

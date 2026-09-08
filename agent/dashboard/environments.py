@@ -47,6 +47,7 @@ DEFAULT_ENVIRONMENT_SLUG = "default"
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
 RefreshStatus = Literal["never", "refreshing", "success", "failed"]
 RefreshKind = Literal["full", "update"]
+StepStatus = Literal["running", "success", "failed"]
 
 
 class SandboxResources(TypedDict, total=False):
@@ -68,7 +69,7 @@ SNAPSHOT_TAG = "latest"
 # Scripts and their logs live under a fixed root that is captured with the
 # snapshot, so any sandbox booted from an image carries the log of the run that
 # produced it — readable in place, without the dashboard.
-DEFAULT_SCRIPT_ROOT = "/openswe"
+DEFAULT_SCRIPT_ROOT = "/open-swe/environment"
 DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS = 120
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -152,7 +153,8 @@ def default_snapshot_name_for(slug: str) -> str:
 def script_root() -> str:
     """Where an environment's scripts and their logs live inside a sandbox.
 
-    ``/openswe`` in a real sandbox, where the agent runs as root. Configurable
+    ``/open-swe/environment`` in a real sandbox, where the agent runs as root.
+    Configurable
     because ``SANDBOX_TYPE=local`` executes on a developer's own machine, whose
     filesystem root is not writable.
     """
@@ -421,6 +423,24 @@ class EnvironmentUpdate(BaseModel):
         return None if v is None else _validate_create_params(v)
 
 
+class RefreshStep(BaseModel):
+    """One stage of a refresh — booting the builder, a script, the capture.
+
+    Recorded as it happens so a poll mid-rebuild can say how far it got. A
+    rebuild is minutes to an hour, and a single terminal status at the end is
+    not enough to tell slow from wedged.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    label: str
+    status: StepStatus = "running"
+    started_at: str = ""
+    finished_at: str | None = None
+    exit_code: int | None = None
+    log_path: str | None = None
+
+
 class Environment(BaseModel):
     # Assignment is validated because the store mutates records in place, and an
     # unvalidated write here is only caught on the next read — by which point the
@@ -453,6 +473,9 @@ class Environment(BaseModel):
     refresh_log: str | None = None
     refresh_error: str | None = None
     refresh_cron_id: str | None = None
+    refresh_steps: list[RefreshStep] = Field(default_factory=list)
+    # The builder, while it lives: a poll reads the running script's trace off it.
+    refresh_sandbox_id: str | None = None
     created_by: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -549,6 +572,7 @@ class Environment(BaseModel):
             "refresh_finished_at": self.refresh_finished_at,
             "refresh_error": self.refresh_error,
             "refresh_log_excerpt": log_excerpt(self.refresh_log),
+            "refresh_steps": [step.model_dump(mode="json") for step in self.refresh_steps],
         }
 
 
@@ -662,6 +686,45 @@ class EnvironmentStore(TypedStore[Environment]):
         record.refresh_finished_at = None
         record.refresh_log = None
         record.refresh_error = None
+        record.refresh_steps = []
+        record.refresh_sandbox_id = None
+        return await self.save(record)
+
+    async def start_refresh_step(
+        self, slug: str, label: str, *, log_path: str | None = None
+    ) -> Environment | None:
+        """Open a step, replacing any earlier one with the same label."""
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.refresh_steps = [
+            *(step for step in record.refresh_steps if step.label != label),
+            RefreshStep(label=label, started_at=now_iso(), log_path=log_path),
+        ]
+        return await self.save(record)
+
+    async def finish_refresh_step(
+        self, slug: str, label: str, status: StepStatus, *, exit_code: int | None = None
+    ) -> Environment | None:
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.refresh_steps = [
+            step.model_copy(
+                update={"status": status, "finished_at": now_iso(), "exit_code": exit_code}
+            )
+            if step.label == label
+            else step
+            for step in record.refresh_steps
+        ]
+        return await self.save(record)
+
+    async def mark_refresh_builder(self, slug: str, sandbox_id: str | None) -> Environment | None:
+        """Publish (or clear) the builder a poll may read the live trace from."""
+        record = await self.get(slug)
+        if record is None:
+            return None
+        record.refresh_sandbox_id = sandbox_id
         return await self.save(record)
 
     async def mark_refresh_settled(
@@ -685,6 +748,15 @@ class EnvironmentStore(TypedStore[Environment]):
         record.refresh_finished_at = now_iso()
         record.refresh_log = (log or "")[-REFRESH_LOG_MAX_CHARS:] or None
         record.refresh_error = error[:1000] if error else None
+        # The builder is released with the refresh, so its id stops being a
+        # readable source the moment this lands.
+        record.refresh_sandbox_id = None
+        record.refresh_steps = [
+            step.model_copy(update={"status": "failed", "finished_at": now_iso()})
+            if step.status == "running"
+            else step
+            for step in record.refresh_steps
+        ]
         return await self.save(record)
 
 

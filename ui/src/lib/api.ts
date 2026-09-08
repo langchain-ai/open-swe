@@ -400,6 +400,16 @@ export type EnvironmentRefreshStatus =
   | "success"
   | "failed"
 
+/** One stage of a rebuild: booting the builder, a script, the capture. */
+export interface EnvironmentRefreshStep {
+  label: string
+  status: "running" | "success" | "failed"
+  started_at?: string
+  finished_at?: string | null
+  exit_code?: number | null
+  log_path?: string | null
+}
+
 export interface EnvironmentOption {
   slug: string
   name: string
@@ -409,6 +419,7 @@ export interface EnvironmentOption {
   refresh_finished_at?: string | null
   refresh_error?: string | null
   refresh_log_excerpt?: string | null
+  refresh_steps?: Array<EnvironmentRefreshStep>
 }
 
 export interface EnvironmentOptionList {

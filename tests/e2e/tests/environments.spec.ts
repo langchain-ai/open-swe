@@ -33,6 +33,13 @@ interface Environment {
   refresh_status?: string;
   refresh_error?: string | null;
   refresh_log?: string | null;
+  refresh_sandbox_id?: string | null;
+  refresh_steps?: Array<{
+    label: string;
+    status: string;
+    exit_code?: number | null;
+    log_path?: string | null;
+  }>;
 }
 
 async function loginAs(page: Page, user: { login: string; email: string }) {
@@ -327,6 +334,22 @@ test.describe("Environments", () => {
     // The save ran a full rebuild; hourly updates are a separate kind.
     expect(record?.refresh_kind).toBe("full");
 
+    // Every stage is recorded as it happens, which is what the one poll tool
+    // reports while a rebuild is still running.
+    expect(
+      record?.refresh_steps?.map((step) => [step.label, step.status]),
+    ).toEqual([
+      ["boot", "success"],
+      ["setup", "success"],
+      ["update", "success"],
+      ["capture", "success"],
+    ]);
+    // Script steps carry where their live trace was written; the builder does not.
+    const setupStep = record?.refresh_steps?.find((s) => s.label === "setup");
+    expect(setupStep?.log_path).toContain("/logs/setup.log");
+    // The builder is released with the refresh, so it is no longer offered.
+    expect(record?.refresh_sandbox_id).toBeNull();
+
     // Published as name:latest, and captured from the refresh's own builder
     // sandbox rather than this thread's.
     const captures = await capturedSnapshots(page);
@@ -359,6 +382,10 @@ test.describe("Environments", () => {
     // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
     await expect(page.getByText(/^Rebuilt /)).toBeVisible();
     await expect(page.getByText("Refresh log")).toBeVisible();
+    // Each stage is visible to everyone, not only through the agent's tools.
+    for (const label of ["boot", "setup", "update", "capture"]) {
+      await expect(page.getByText(`✓ ${label}`)).toBeVisible();
+    }
     await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     // Leave no default behind: later specs' runs would boot from it.

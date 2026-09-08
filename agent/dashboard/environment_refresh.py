@@ -28,6 +28,7 @@ snapshot in place: runs keep booting from the last image that worked.
 
 import hashlib
 import logging
+import shlex
 from datetime import UTC, datetime
 from typing import Any
 
@@ -41,6 +42,7 @@ from agent.dashboard.environments import (
     capture_environment_snapshot,
     require_capture_support,
     script_command,
+    script_log_path,
 )
 from agent.dashboard.sandbox_settings import resolve_base_snapshot_id
 
@@ -274,14 +276,23 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
     sandbox_id: str | None = None
     log = ""
     try:
+        await ENVIRONMENTS.start_refresh_step(slug, "boot")
         backend = await _create_builder_sandbox(record, base)
         sandbox_id = str(backend.id)
+        await ENVIRONMENTS.finish_refresh_step(slug, "boot", "success")
+        # Published before the first script so a poll can tail the trace while it
+        # runs; cleared when the refresh settles and the builder is released.
+        await ENVIRONMENTS.mark_refresh_builder(slug, sandbox_id)
         # Every script runs before the capture, so a snapshot only ships once the
         # whole of what produced it worked.
         for label, command, timeout in _scripts_to_run(record, kind):
+            await ENVIRONMENTS.start_refresh_step(slug, label, log_path=script_log_path(label))
             result = await backend.aexecute(command, timeout=timeout)
             log = f"{log}\n--- {label} script ---\n{result.output or ''}".strip()
             if result.exit_code != 0:
+                await ENVIRONMENTS.finish_refresh_step(
+                    slug, label, "failed", exit_code=result.exit_code
+                )
                 error = f"{label} script exited {result.exit_code}"
                 await ENVIRONMENTS.mark_refresh_settled(slug, "failed", log=log, error=error)
                 return {
@@ -292,6 +303,8 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
                     "error": error,
                     "log": log,
                 }
+            await ENVIRONMENTS.finish_refresh_step(slug, label, "success", exit_code=0)
+        await ENVIRONMENTS.start_refresh_step(slug, "capture")
         await capture_environment_snapshot(
             slug,
             sandbox_id,
@@ -299,6 +312,7 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
                 ENV.ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS
             ),
         )
+        await ENVIRONMENTS.finish_refresh_step(slug, "capture", "success")
     except Exception as exc:
         logger.warning("Refresh failed for environment %s", slug, exc_info=True)
         await ENVIRONMENTS.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
@@ -340,6 +354,140 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
         record.refresh_run_id = run_id
         await ENVIRONMENTS.save(record)
     return run_id
+
+
+TASK_PREFIX = "env"
+TASK_KIND = "environment_refresh"
+# A trace tail, not the whole log: enough to see the step in flight.
+LIVE_LOG_MAX_BYTES = 4_000
+LIVE_LOG_READ_TIMEOUT_SECONDS = 20
+
+_TASK_STATUS = {
+    "refreshing": "running",
+    "success": "completed",
+    "failed": "failed",
+}
+
+
+def refresh_task_id(run_id: str) -> str:
+    """The unified background-task id for a refresh run."""
+    return f"{TASK_PREFIX}-{run_id}"
+
+
+def owns_task(task_id: str) -> bool:
+    return task_id.startswith(f"{TASK_PREFIX}-")
+
+
+async def _record_for_task(task_id: str) -> Environment | None:
+    """The environment whose *current* refresh this task id names.
+
+    Keyed on the run id rather than the slug so a handle from a superseded
+    refresh resolves to nothing instead of reporting a later run's progress.
+    """
+    run_id = task_id.removeprefix(f"{TASK_PREFIX}-")
+    for record in await ENVIRONMENTS.list_all():
+        if record.refresh_run_id == run_id:
+            return record
+    return None
+
+
+async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
+    """Tail a script's live ``bash -x`` trace off the builder, or ``None``.
+
+    Best-effort by design: the builder is released the moment the capture lands,
+    so an unreachable box means "no live trace", never a failed poll. Goes
+    through the provider registry rather than the LangSmith client so every
+    provider — the local one the E2E runs on included — takes this same path.
+    """
+    from agent.sandboxes.providers.registry import create_sandbox
+
+    try:
+        backend = await create_sandbox(sandbox_id=sandbox_id)
+        result = await backend.aexecute(
+            f"tail -c {LIVE_LOG_MAX_BYTES} {shlex.quote(path)} 2>/dev/null",
+            timeout=LIVE_LOG_READ_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.debug("Builder sandbox %s is not readable", sandbox_id, exc_info=True)
+        return None
+    return (result.output or "").strip() or None
+
+
+def _running_step(record: Environment) -> Any:
+    return next((step for step in record.refresh_steps if step.status == "running"), None)
+
+
+async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, Any]:
+    """One refresh, in the shape ``background_task`` reports every task in."""
+    record = await _record_for_task(task_id)
+    if record is None:
+        return {
+            "error": "task not found",
+            "task_id": task_id,
+            "detail": (
+                "no environment is tracking this refresh — it finished long enough ago "
+                "to be superseded by a later one, or never started"
+            ),
+        }
+    step = _running_step(record)
+    state: dict[str, Any] = {
+        "task_id": task_id,
+        "kind": TASK_KIND,
+        "environment": record.slug,
+        "refresh_kind": record.refresh_kind,
+        "status": _TASK_STATUS.get(record.refresh_status, record.refresh_status),
+        "started_at": record.refresh_started_at,
+        "finished_at": record.refresh_finished_at,
+        "step": step.label if step is not None else None,
+        "steps": [item.model_dump(mode="json") for item in record.refresh_steps],
+        "error": record.refresh_error,
+        "snapshot_status": record.snapshot_status,
+    }
+    if not with_output:
+        return state
+    # While a script runs its trace only exists on the builder; once the refresh
+    # settles the builder is gone and the record holds the whole log.
+    if step is not None and step.log_path and record.refresh_sandbox_id:
+        state["output"] = await _read_builder_log(record.refresh_sandbox_id, step.log_path)
+        state["output_source"] = "builder"
+        state["output_path"] = step.log_path
+        state["output_truncated"] = True
+    else:
+        state["output"] = record.refresh_log
+        state["output_source"] = "record"
+    return state
+
+
+async def task_list() -> list[dict[str, Any]]:
+    """Every environment refresh worth reporting, newest attempt first.
+
+    Skips the live trace read: a list must not open a connection per builder.
+    """
+    tasks = [
+        await task_status(refresh_task_id(record.refresh_run_id), with_output=False)
+        for record in await ENVIRONMENTS.list_all()
+        if record.refresh_run_id and record.refresh_status != "never"
+    ]
+    return sorted(tasks, key=lambda task: task.get("started_at") or "", reverse=True)
+
+
+async def task_stop(task_id: str) -> dict[str, Any]:
+    """Cancel a running refresh. The previous snapshot stays in place."""
+    record = await _record_for_task(task_id)
+    if record is None:
+        return {"error": "task not found", "task_id": task_id}
+    if record.refresh_status != "refreshing":
+        return await task_status(task_id)
+    run_id = task_id.removeprefix(f"{TASK_PREFIX}-")
+    try:
+        await _client().runs.cancel(None, run_id)
+    except Exception:
+        logger.warning("Could not cancel refresh run %s", run_id, exc_info=True)
+        return {"error": "could not cancel the refresh run", "task_id": task_id}
+    await ENVIRONMENTS.mark_refresh_settled(record.slug, "failed", error="cancelled")
+    if record.refresh_sandbox_id:
+        await _release_builder_sandbox(record.refresh_sandbox_id)
+    return await task_status(task_id)
 
 
 async def run_environment_refresh_tick(

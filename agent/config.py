@@ -386,7 +386,7 @@ ENV.var(
     "Where an environment's setup/update scripts and their logs live inside a sandbox. "
     "The default assumes a sandbox where the agent is root; the local provider runs on a "
     "developer's own machine, whose filesystem root is not writable.",
-    default="/openswe",
+    default="/open-swe/environment",
 )
 ENV.var(
     "ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",

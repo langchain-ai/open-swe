@@ -6,7 +6,7 @@ _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
     "background_execute": ".background_execute",
-    "background_task": ".background_execute",
+    "background_task": ".background_task",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "create_sandbox_service_url": ".create_sandbox_service_url",
@@ -40,7 +40,6 @@ _TOOL_MODULES = {
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
-    "refresh_environment_poll": ".environments",
     "refresh_environment_start": ".environments",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": "agent.slack.tools.request_pr_review",
@@ -106,7 +105,6 @@ __all__ = [
     "read_repo_file",
     "read_user_settings",
     "recreate_sandbox",
-    "refresh_environment_poll",
     "refresh_environment_start",
     "report_platform_issue",
     "request_pr_review",
@@ -162,14 +160,14 @@ if TYPE_CHECKING:
         trigger_automation,
         update_automation,
     )
-    from agent.tools.background_execute import background_execute, background_task
+    from agent.tools.background_execute import background_execute
+    from agent.tools.background_task import background_task
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from agent.tools.create_sandbox_service_url import create_sandbox_service_url
     from agent.tools.enter_plan_mode import enter_plan_mode
     from agent.tools.environments import (
         delete_environment,
         list_environments,
-        refresh_environment_poll,
         refresh_environment_start,
         save_environment,
     )
