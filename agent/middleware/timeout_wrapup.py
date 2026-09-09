@@ -8,15 +8,10 @@ from langchain_core.messages import BaseMessage, SystemMessage
 from agent.config import ENV
 from agent.input_messages import wrap_system_prompt
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.prompts import load_prompt
 
 _DEFAULT_TIMEOUT_SECONDS = 45 * 60
-_WRAPUP_INSTRUCTION = """
-<time_limit_warning>
-You have been running for a long time. Wrap up immediately: finish the current
-step, save or report useful state, avoid starting new investigations, and end
-your turn with the best available result.
-</time_limit_warning>
-"""
+_WRAPUP_INSTRUCTION = load_prompt("timeout-wrapup.md")
 
 
 def _configured_timeout_seconds() -> int:

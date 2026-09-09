@@ -121,6 +121,7 @@ from agent.prompt import (
     construct_system_prompt,
     render_open_swe_shared_base,
 )
+from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -428,8 +429,8 @@ def _general_purpose_subagent(
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": (
-            GENERAL_PURPOSE_SUBAGENT["description"]
-            + " It cannot access Slack tools; relay all Slack communication from the main agent."
+            f"{GENERAL_PURPOSE_SUBAGENT['description']} "
+            f"{load_prompt('system/general-purpose-subagent-suffix.md')}"
         ),
         # Deep Agents' default GP prompt covers only task mechanics; the shared
         # base carries the Open SWE identity and conventions (gh proxy usage,
@@ -1242,13 +1243,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
-    if local_run:
-        static_tools = [http_request, fetch_url, web_search]
-    elif stop_summary_mode:
-        static_tools = [slack_read_thread_messages, slack_thread_reply]
-    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    static_tools = apply_tool_descriptions(static_tools)
+    if local_run:
+        static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
+    elif stop_summary_mode:
+        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
+    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Observability": observability_tools,

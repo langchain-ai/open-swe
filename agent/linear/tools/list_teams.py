@@ -4,9 +4,5 @@ from agent.linear.client import list_teams
 
 
 async def linear_list_teams() -> dict[str, Any]:
-    """List all teams in the Linear workspace.
-
-    Returns:
-        Dictionary with 'teams' list, each containing id, name, key, and description.
-    """
+    """Implement the `linear_list_teams` tool."""
     return await list_teams()
