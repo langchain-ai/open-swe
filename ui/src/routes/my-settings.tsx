@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { AccountSection } from "@/features/settings/components/AccountSection"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
+import { DesktopBackendSection } from "@/features/settings/components/DesktopBackendSection"
 import { EnvironmentsSection } from "@/features/settings/components/EnvironmentsSection"
 import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
 import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
@@ -56,6 +57,7 @@ function MySettingsPage() {
       title="Settings"
       description="Personal preferences, connected accounts, and instructions that apply to every run you trigger."
     >
+      <DesktopBackendSection />
       <AccountSection user={session.data} />
       <PreferencesSection />
       <PullRequestsSection />

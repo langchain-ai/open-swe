@@ -416,6 +416,14 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return updateState;
   });
+  ipcMain.handle("desktop:backend-url", (event) => {
+    requireTrustedDesktopIpc(event);
+    return backendUrl;
+  });
+  ipcMain.handle("desktop:set-backend-url", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    return updateBackendUrl(value);
+  });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
     if (updateState.status === "installing") return true;
@@ -787,6 +795,18 @@ function storeBackendUrl(value) {
   return url;
 }
 
+async function updateBackendUrl(value) {
+  if (typeof value !== "string") throw new Error("Enter a backend URL");
+  const previousUrl = backendUrl;
+  backendUrl = storeBackendUrl(value);
+  const changed = previousUrl !== backendUrl;
+  if (previousUrl && changed) {
+    await clearBackendCookies(previousUrl);
+    await session.defaultSession.clearStorageData({ origin: APP_URL });
+  }
+  return { backendUrl, changed };
+}
+
 function iconPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
@@ -977,10 +997,6 @@ async function loadApp(window) {
 }
 
 function createMenu() {
-  const backendSettingsItem = {
-    label: "Backend URL…",
-    click: () => createSetupWindow(),
-  };
   const settingsItem = {
     id: "open-settings",
     label: "Settings…",
@@ -1001,7 +1017,6 @@ function createMenu() {
               { role: "about" },
               settingsItem,
               checkForUpdatesItem,
-              backendSettingsItem,
               { type: "separator" },
               { role: "services" },
               { type: "separator" },
@@ -1030,7 +1045,7 @@ function createMenu() {
         },
         ...(process.platform === "darwin"
           ? []
-          : [{ type: "separator" }, settingsItem, backendSettingsItem]),
+          : [{ type: "separator" }, settingsItem]),
         { type: "separator" },
         { role: process.platform === "darwin" ? "close" : "quit" },
       ],
@@ -1360,13 +1375,7 @@ function createSetupWindow() {
     event.preventDefault();
     try {
       const value = new URL(targetUrl).searchParams.get("url");
-      if (!value) throw new Error("Enter a backend URL");
-      const previousUrl = backendUrl;
-      backendUrl = storeBackendUrl(value);
-      if (previousUrl && previousUrl !== backendUrl) {
-        await clearBackendCookies(previousUrl);
-        await session.defaultSession.clearStorageData({ origin: APP_URL });
-      }
+      await updateBackendUrl(value);
       if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
       window.close();
