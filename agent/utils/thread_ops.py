@@ -61,6 +61,14 @@ async def queue_message_for_thread(
         except Exception:  # noqa: BLE001
             logger.debug("No existing queued messages for thread %s", thread_id)
 
+        queue_id = message_content.get("queue_id") if isinstance(message_content, dict) else None
+        if isinstance(queue_id, str) and any(
+            isinstance(existing.get("content"), dict)
+            and existing["content"].get("queue_id") == queue_id
+            for existing in existing_messages
+        ):
+            return True
+
         existing_messages.append(new_message)
         if len(existing_messages) > MAX_QUEUED_MESSAGES:
             existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]

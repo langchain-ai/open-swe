@@ -15,6 +15,7 @@ from agent.dashboard.threads.access import (
     _readable_thread_metadata,
 )
 from agent.dashboard.threads.runs import (
+    _ASSISTANT_ID,
     _enrich_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
@@ -27,6 +28,7 @@ from agent.dashboard.threads.summary import (
 )
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from agent.utils.json_types import thread_metadata
+from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -103,27 +105,30 @@ async def _observe_dashboard_run_ttft(
     run_id: str,
     started_at_ms: int,
 ) -> None:
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/stream"
-    headers = _langgraph_proxy_headers(accept="text/event-stream")
-    headers["Last-Event-ID"] = "-1"
     detector = AssistantTextEventDetector(run_id)
     try:
-        async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
-            async with client.stream(
-                "GET",
-                url,
-                headers=headers,
-                params={"stream_mode": "messages"},
-            ) as response:
-                response.raise_for_status()
-                async for chunk in response.aiter_bytes():
-                    for observation in detector.feed(chunk):
-                        await record_dashboard_thread_ttft(
-                            observation,
-                            thread_id=thread_id,
-                            started_at_ms=started_at_ms,
-                        )
-                        return
+        async with langgraph_client().threads.stream(
+            thread_id, assistant_id=_ASSISTANT_ID
+        ) as thread_stream:
+            async for event in thread_stream.subscribe(
+                ["lifecycle", "messages"], namespaces=[[]], depth=10
+            ):
+                lifecycle = root_lifecycle(event)
+                if (
+                    lifecycle is not None
+                    and lifecycle[0] == run_id
+                    and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
+                ):
+                    return
+                observation = detector.observe(event)
+                if observation is None:
+                    continue
+                await record_dashboard_thread_ttft(
+                    observation,
+                    thread_id=thread_id,
+                    started_at_ms=started_at_ms,
+                )
+                return
     except Exception:
         logger.warning(
             "Dashboard TTFT observer closed for run %s on thread %s",
@@ -324,32 +329,3 @@ async def proxy_dashboard_thread_run_cancel(
             )
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
-
-
-async def stream_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None, last_event_id: str | None = None
-) -> AsyncIterator[str]:
-    try:
-        thread = await langgraph_client().threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
-
-    stream = await langgraph_client().threads.join_stream(
-        thread_id,
-        last_event_id=last_event_id,
-    )
-    async for part in stream:
-        event = getattr(part, "event", None) or (
-            part.get("event") if isinstance(part, dict) else None
-        )
-        data = getattr(part, "data", None) if not isinstance(part, dict) else part.get("data")
-        event_id = getattr(part, "id", None) if not isinstance(part, dict) else part.get("id")
-        payload: dict[str, Any] = {"event": event, "data": data}
-        if event_id is not None:
-            payload["id"] = event_id
-        chunk = f"data: {json.dumps(payload, default=str)}\n\n"
-        if event_id is not None:
-            chunk = f"id: {event_id}\n{chunk}"
-        yield chunk

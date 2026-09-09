@@ -268,7 +268,9 @@ async def send_dashboard_message(
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
         "surface": "web",
-        "queue_id": f"queued-{uuid.uuid4()}",
+        "queue_id": (
+            str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
+        ),
         "created_at_ms": now_ms,
         "sender": {
             "id": f"github:{login}",

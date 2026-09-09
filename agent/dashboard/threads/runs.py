@@ -61,7 +61,7 @@ from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "agent"
-# Modes required for the v2 event-stream protocol (`POST …/stream/events`).
+# Modes required for the v3 event-stream protocol (`POST …/stream/events`).
 _DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
@@ -91,6 +91,7 @@ class ThreadMessageBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     plan_mode: bool = False
+    client_message_id: uuid.UUID | None = None
 
 
 class ThreadRenameBody(BaseModel):
