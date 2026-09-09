@@ -8,11 +8,11 @@ before-model middleware re-configure the proxy before it goes stale.
 """
 
 import logging
-import os
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from agent.config import ENV
 from agent.github.app import (
     PermissionKey,
     PermissionMap,
@@ -45,7 +45,7 @@ def _parse_expiry(expires_at: Any) -> datetime | None:
     if isinstance(expires_at, int | float):
         try:
             return datetime.fromtimestamp(float(expires_at), tz=UTC)
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             return None
     if isinstance(expires_at, str):
         raw = expires_at.strip()
@@ -130,7 +130,7 @@ async def refresh_proxy_token(
     permissions: PermissionMap | None = None,
 ) -> bool:
     """Re-configure a LangSmith sandbox proxy with a freshly minted token."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith" or not thread_id:
+    if ENV.SANDBOX_TYPE.get() != "langsmith" or not thread_id:
         return False
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)

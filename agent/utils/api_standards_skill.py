@@ -11,11 +11,12 @@ Best-effort: any failure (missing handle, no API key, SDK error) returns
 
 import asyncio
 import logging
-import os
+
+from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
-API_STANDARDS_SKILL_HANDLE = os.environ.get("API_STANDARDS_SKILL_HANDLE", "api-standards")
+API_STANDARDS_SKILL_HANDLE = ENV.API_STANDARDS_SKILL_HANDLE.get()
 
 
 def _pull_api_standards_skill_sync(handle: str) -> str | None:

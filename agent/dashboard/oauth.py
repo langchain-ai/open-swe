@@ -4,7 +4,6 @@ import base64
 import hashlib
 import hmac
 import logging
-import os
 import re
 import secrets
 import time
@@ -13,13 +12,15 @@ from functools import cache
 from typing import Any
 from urllib.parse import quote, urlparse
 
-import httpx
+import httpx2
 import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
+from agent.config import ENV
 from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
+from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -69,12 +70,12 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
     return {"sub": login, "email": email if isinstance(email, str) else None}
 
 
-GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
-GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
+GITHUB_APP_CLIENT_ID = ENV.GITHUB_APP_CLIENT_ID.get()
+GITHUB_APP_CLIENT_SECRET = ENV.GITHUB_APP_CLIENT_SECRET.get()
 
 
 def _secret() -> str:
-    s = os.environ.get("DASHBOARD_JWT_SECRET", "")
+    s = ENV.DASHBOARD_JWT_SECRET.get()
     if not s:
         raise HTTPException(500, "DASHBOARD_JWT_SECRET not configured")
     return s
@@ -88,10 +89,10 @@ def allowed_dashboard_origins() -> set[str]:
     else.
     """
     origins: set[str] = set()
-    base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    base = dashboard_base_url()
     if base:
         origins.add(_origin_of(base))
-    for entry in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(","):
+    for entry in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(","):
         entry = entry.strip()
         if entry:
             origins.add(_origin_of(entry))
@@ -129,7 +130,7 @@ def _is_blocked_redirect_path(path: str) -> bool:
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
     """Return a safe post-login redirect URL."""
-    fallback = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    fallback = dashboard_base_url()
     if not redirect_to:
         return fallback
     trimmed = redirect_to.strip()
@@ -163,9 +164,7 @@ def _allowed_login_orgs() -> frozenset[str]:
     disabled (fail-open) to preserve existing deployments.
     """
     return frozenset(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
+        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
     )
 
 
@@ -297,30 +296,24 @@ def desktop_callback_url(port: int, code: str) -> str:
     return f"http://127.0.0.1:{port}/callback?code={quote(code, safe='')}"
 
 
-def issue_desktop_handoff(
-    *, login: str, email: str | None, avatar_url: str | None, challenge: str
-) -> str:
-    """Mint the code the browser hands back to the desktop app.
+def _mint_handoff(*, challenge: str, claims: dict[str, Any]) -> str:
+    """Sign a PKCE-bound code for the browser to hand back to the desktop app.
 
-    Carries the identity a session will be minted from, never a session
-    itself: a JWT is signed but not encrypted, so anything that sees the
-    loopback URL — browser history, an extension — can read the payload, and a
-    session in there would be a bearer token that makes the verifier pointless.
+    A JWT is signed but not encrypted, and this one rides in a URL the browser
+    records, so its claims have to be inert to whoever reads them: the identity
+    a session is minted from, never a session itself; what was connected, never
+    whose account to connect it to.
     """
     now = int(time.time())
-    payload = {
-        "sub": login,
-        "email": email,
-        "avatar_url": avatar_url,
-        "challenge": challenge,
-        "iat": now,
-        "exp": now + HANDOFF_TTL_SECONDS,
-    }
-    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+    return jwt.encode(
+        {**claims, "challenge": challenge, "iat": now, "exp": now + HANDOFF_TTL_SECONDS},
+        _secret(),
+        algorithm=JWT_ALG,
+    )
 
 
-def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
-    """Mint the session a desktop handoff code was issued for.
+def _decode_handoff(*, code: str, verifier: str) -> dict[str, Any]:
+    """Return a handoff code's claims, proving the caller holds the verifier.
 
     The code reaches a loopback port through the user's browser, so redeeming
     it also requires the verifier the challenge committed to — and that never
@@ -331,11 +324,29 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     except jwt.PyJWTError as e:
         raise HTTPException(400, f"invalid handoff code: {e}") from e
     challenge = payload.get("challenge")
-    login = payload.get("sub")
-    if not isinstance(challenge, str) or not isinstance(login, str) or not login:
+    if not isinstance(challenge, str):
         raise HTTPException(400, "malformed handoff code")
     if not hmac.compare_digest(_s256(verifier), challenge):
         raise HTTPException(400, "handoff verifier mismatch")
+    return payload
+
+
+def issue_desktop_handoff(
+    *, login: str, email: str | None, avatar_url: str | None, challenge: str
+) -> str:
+    """Mint the code the browser hands back after a desktop login."""
+    return _mint_handoff(
+        challenge=challenge,
+        claims={"sub": login, "email": email, "avatar_url": avatar_url},
+    )
+
+
+def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
+    """Mint the session a desktop handoff code was issued for."""
+    payload = _decode_handoff(code=code, verifier=verifier)
+    login = payload.get("sub")
+    if not isinstance(login, str) or not login:
+        raise HTTPException(400, "malformed handoff code")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
     return issue_session(
@@ -343,6 +354,33 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
     )
+
+
+def issue_connect_handoff(*, provider: str, challenge: str, claims: dict[str, Any]) -> str:
+    """Mint the code the browser hands back after a desktop connect flow."""
+    return _mint_handoff(challenge=challenge, claims={**claims, "provider": provider})
+
+
+def redeem_connect_handoff(*, provider: str, code: str, verifier: str) -> dict[str, Any]:
+    """Return a connect code's claims, pinned to the provider that minted them.
+
+    Without the pin, a code from one connect flow could be redeemed by another
+    provider's endpoint.
+    """
+    payload = _decode_handoff(code=code, verifier=verifier)
+    code_provider = payload.get("provider")
+    if not isinstance(code_provider, str) or not hmac.compare_digest(code_provider, provider):
+        raise HTTPException(400, "handoff provider mismatch")
+    return payload
+
+
+def desktop_handoff_from_state(state_payload: dict[str, Any]) -> tuple[str, int] | None:
+    """Return the PKCE challenge and loopback port a desktop flow was started with."""
+    challenge = state_payload.get("handoff_challenge")
+    port = state_payload.get("handoff_port")
+    if isinstance(challenge, str) and isinstance(port, int):
+        return challenge, port
+    return None
 
 
 # Dashboard route where users manage their GitHub↔Slack link.
@@ -356,7 +394,7 @@ def build_settings_url() -> str | None:
     safe to share in a public Slack thread. The user signs in with GitHub from
     their own session and connects Slack via verified OIDC on the settings page.
     """
-    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    frontend_base = dashboard_base_url()
     if not frontend_base:
         return None
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
@@ -457,7 +495,7 @@ def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
 async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
         raise HTTPException(500, "GitHub App OAuth not configured")
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             "https://github.com/login/oauth/access_token",
             headers={"Accept": "application/json"},
@@ -512,7 +550,7 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         u = await client.get("https://api.github.com/user", headers=headers)
         u.raise_for_status()
         user = u.json()

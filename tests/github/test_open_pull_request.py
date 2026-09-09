@@ -42,7 +42,7 @@ class _FakeClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_FakeClient":
+    async def __aenter__(self) -> _FakeClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -64,7 +64,7 @@ class _FakeClient:
 
 
 class _RoutingClient:
-    """Fake httpx client that routes GETs by URL substring."""
+    """Fake httpx2 client that routes GETs by URL substring."""
 
     def __init__(self, *, post: _FakeResponse, get_routes: dict[str, _FakeResponse]) -> None:
         self._post = post
@@ -72,7 +72,7 @@ class _RoutingClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_RoutingClient":
+    async def __aenter__(self) -> _RoutingClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -95,7 +95,7 @@ class _RoutingClient:
 
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
-    monkeypatch.setattr(opr.httpx, "AsyncClient", lambda **_kwargs: client)
+    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:

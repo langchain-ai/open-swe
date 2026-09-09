@@ -4,14 +4,13 @@ import asyncio
 import hmac
 import json
 import logging
-import os
 import posixpath
 import shlex
 from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from fastapi import (
     APIRouter,
     Depends,
@@ -24,6 +23,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
@@ -60,15 +60,18 @@ from agent.dashboard.oauth import (
     decode_state,
     decode_terminal_ticket,
     desktop_callback_url,
+    desktop_handoff_from_state,
     enforce_org_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
+    issue_connect_handoff,
     issue_desktop_handoff,
     issue_session,
     issue_state,
     issue_terminal_ticket,
     new_state_nonce,
+    redeem_connect_handoff,
     redeem_desktop_handoff,
     require_same_origin_for_mutations,
     require_session,
@@ -166,6 +169,7 @@ from agent.dashboard.team_settings import (
 )
 from agent.dashboard.thread_api import (
     ThreadMessageBody,
+    ThreadRenameBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -188,6 +192,7 @@ from agent.dashboard.thread_api import (
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
+    rename_dashboard_thread,
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
@@ -251,6 +256,11 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from agent.utils.dashboard_links import (
+    dashboard_api_base_url,
+    dashboard_base_url,
+    dashboard_is_same_origin,
+)
 from agent.utils.thread_ops import langgraph_url
 from agent.utils.timing import server_timing_header
 
@@ -261,7 +271,7 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
-_GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
 # Module-level so a local harness can point the browser leg at a fake consent
@@ -330,7 +340,7 @@ class _RepoScopedRecord(Protocol):
 RepoRecordT = TypeVar("RepoRecordT", bound=_RepoScopedRecord)
 
 
-async def _filter_repo_models_for_user(
+async def _filter_repo_models_for_user[RepoRecordT: _RepoScopedRecord](
     login: str,
     records: list[RepoRecordT],
 ) -> list[RepoRecordT]:
@@ -347,31 +357,29 @@ async def _filter_repo_models_for_user(
 
 
 def _api_base_url() -> str:
-    v = os.environ.get("DASHBOARD_API_BASE_URL", "").rstrip("/")
-    if not v:
-        raise HTTPException(500, "DASHBOARD_API_BASE_URL not configured")
-    return v
+    return dashboard_api_base_url()
 
 
 def _frontend_base_url() -> str:
-    v = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    v = dashboard_base_url()
     if not v:
         raise HTTPException(500, "DASHBOARD_BASE_URL not configured")
     return v
 
 
 def _cookie_security() -> tuple[bool, Literal["lax", "none"]]:
-    """Cookie ``secure``/``samesite`` flags derived from the API scheme.
+    """Cookie ``secure``/``samesite`` flags derived from where the dashboard is served.
 
-    Production serves the API over HTTPS and the dashboard is a separate
-    (cross-site) origin, so the session cookie must be ``Secure; SameSite=None``.
-    Local dev runs over ``http://localhost`` where ``Secure`` cookies are
-    rejected and the frontend/API are same-site, so fall back to
-    ``SameSite=Lax`` without ``Secure``.
+    On the API's own origin (the bundled dashboard, or local dev) the session
+    cookie is ``SameSite=Lax``, ``Secure`` only over HTTPS since ``Secure``
+    cookies are rejected on ``http://localhost``. A dashboard on another origin
+    (the split deployment) needs ``Secure; SameSite=None`` for the browser to
+    send the cookie cross-site.
     """
-    if os.environ.get("DASHBOARD_API_BASE_URL", "").startswith("https://"):
-        return True, "none"
-    return False, "lax"
+    secure = dashboard_api_base_url().startswith("https://")
+    if not secure or dashboard_is_same_origin():
+        return secure, "lax"
+    return True, "none"
 
 
 def _set_session_cookie(response: Response, jwt_token: str) -> None:
@@ -458,7 +466,7 @@ async def auth_login(
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
-    client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
+    client_id = ENV.GITHUB_APP_CLIENT_ID.get()
     if not client_id:
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
     safe_redirect = sanitize_redirect_to(redirect_to) or _frontend_base_url()
@@ -494,10 +502,8 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
-    is_desktop = isinstance(state_payload.get("handoff_challenge"), str) and isinstance(
-        state_payload.get("handoff_port"), int
-    )
-    if not is_desktop and (
+    handoff = desktop_handoff_from_state(state_payload)
+    if handoff is None and (
         not isinstance(state_nonce_hash, str)
         or not cookie_nonce
         or not hmac.compare_digest(hash_state_nonce(cookie_nonce), state_nonce_hash)
@@ -521,19 +527,18 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
-    challenge = state_payload.get("handoff_challenge")
-    port = state_payload.get("handoff_port")
-    if isinstance(challenge, str) and isinstance(port, int):
+    if handoff is not None:
         # Desktop login runs in the user's own browser, so the session belongs to
         # the app rather than to this browser: hand back a PKCE-bound code the
         # app redeems for one, and leave no session cookie behind here.
-        handoff = issue_desktop_handoff(
+        challenge, port = handoff
+        handoff_code = issue_desktop_handoff(
             login=login,
             email=email,
             avatar_url=user.get("avatar_url"),
             challenge=challenge,
         )
-        response = RedirectResponse(desktop_callback_url(port, handoff), status_code=302)
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         _clear_state_cookie(response)
         return response
 
@@ -646,12 +651,6 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     update.validate_pairing()
-    if not await get_team_fable_enabled():
-        if (
-            update.default_model in FABLE_MODEL_IDS
-            or update.default_subagent_model in FABLE_MODEL_IDS
-        ):
-            raise HTTPException(400, "Fable is disabled for this workspace")
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 
@@ -730,8 +729,17 @@ async def disconnect_my_notion(
     return status.get("notion", {"connected": False})
 
 
+class DesktopConnectExchange(BaseModel):
+    """Body of a desktop connect handoff redemption."""
+
+    code: str
+    verifier: str
+
+
 @router.get("/notion/login")
 async def notion_login(
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     redirect_uri = f"{_api_base_url()}/dashboard/api/notion/callback"
@@ -740,6 +748,8 @@ async def notion_login(
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
         nonce_hash=nonce_hash,
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     try:
         url = await store_notion_oauth_flow(
@@ -762,34 +772,38 @@ async def notion_callback(
     code: str | None = None,
     error: str | None = None,
     error_description: str | None = None,
-    session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     state_payload = decode_state(state)
     nonce_hash = state_payload.get("nonce_hash")
-    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
-    if (
-        not isinstance(nonce_hash, str)
-        or not cookie_nonce
-        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash)
-    ):
+    handoff = desktop_handoff_from_state(state_payload)
+    if not isinstance(nonce_hash, str):
         raise HTTPException(400, "oauth state mismatch — please retry")
-
-    flow = await pop_notion_oauth_flow(session["sub"], nonce_hash)
-    if flow is None:
-        raise HTTPException(400, "oauth flow expired — please retry")
     if error:
         detail = error_description or error
         raise HTTPException(400, f"Notion OAuth failed: {detail}")
     if not code:
         raise HTTPException(400, "Notion OAuth callback missing code")
 
-    try:
-        token_data = await exchange_notion_code(code, flow)
-        await connect_notion(session["sub"], token_data, flow)
-    except NotionOAuthError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    if handoff is not None:
+        # This browser can't prove it is the login the pending flow is stored
+        # under, so carry the code back over the loopback port and exchange it
+        # under the session the desktop app already holds.
+        challenge, port = handoff
+        handoff_code = issue_connect_handoff(
+            provider="notion",
+            challenge=challenge,
+            claims={"nonce_hash": nonce_hash, "code": code},
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        _clear_notion_state_cookie(response)
+        return response
+
+    session = require_session(request)
+    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
+    if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
+        raise HTTPException(400, "oauth state mismatch — please retry")
+
+    await _complete_notion_connection(session["sub"], nonce_hash, code)
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
@@ -797,8 +811,39 @@ async def notion_callback(
     return response
 
 
+async def _complete_notion_connection(login: str, nonce_hash: str, code: str) -> None:
+    flow = await pop_notion_oauth_flow(login, nonce_hash)
+    if flow is None:
+        raise HTTPException(400, "oauth flow expired — please retry")
+    try:
+        token_data = await exchange_notion_code(code, flow)
+        await connect_notion(login, token_data, flow)
+    except NotionOAuthError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/notion/desktop/exchange")
+async def notion_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop Notion connection with the app's own session."""
+    claims = redeem_connect_handoff(provider="notion", code=body.code, verifier=body.verifier)
+    nonce_hash = claims.get("nonce_hash")
+    notion_code = claims.get("code")
+    if not isinstance(nonce_hash, str) or not isinstance(notion_code, str):
+        raise HTTPException(400, "malformed handoff code")
+
+    await _complete_notion_connection(session["sub"], nonce_hash, notion_code)
+    return {"connected": True}
+
+
 @router.get("/slack/login")
 async def slack_login(
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     _session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     """Start the Sign in with Slack flow to link the current GitHub account."""
@@ -809,6 +854,8 @@ async def slack_login(
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
         nonce_hash=hash_state_nonce(nonce),
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     response = RedirectResponse(
         build_authorize_url(redirect_uri=redirect_uri, state=state), status_code=302
@@ -822,7 +869,6 @@ async def slack_callback(
     request: Request,
     code: str,
     state: str,
-    session: dict[str, Any] = _SESSION_DEP,
 ) -> RedirectResponse:
     """Link the verified Slack identity to the logged-in GitHub user.
 
@@ -830,6 +876,23 @@ async def slack_callback(
     user can only ever link their own Slack account — no self-asserted values.
     """
     state_payload = decode_state(state)
+    handoff = desktop_handoff_from_state(state_payload)
+
+    if handoff is not None:
+        # Same as the Notion flow: hand the verified identity back over the
+        # loopback port, for the app to redeem under the session it holds.
+        challenge, port = handoff
+        slack_user_id, work_email = await _verified_slack_identity(code)
+        handoff_code = issue_connect_handoff(
+            provider="slack",
+            challenge=challenge,
+            claims={"slack_user_id": slack_user_id, "email": work_email},
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        _clear_slack_state_cookie(response)
+        return response
+
+    session = require_session(request)
     nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
     if (
@@ -839,26 +902,51 @@ async def slack_callback(
     ):
         raise HTTPException(400, "oauth state mismatch — please retry")
 
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
-
-    access_token = await exchange_slack_code(code, redirect_uri)
-    identity = await fetch_slack_identity(access_token)
-    verify_team(identity)
-    if not identity.email or not identity.email_verified:
-        raise HTTPException(400, "your Slack account has no verified email to link")
-
+    slack_user_id, work_email = await _verified_slack_identity(code)
     await upsert_mapping(
         github_login=session["sub"],
-        work_email=identity.email,
-        slack_user_id=identity.user_id,
+        work_email=work_email,
+        slack_user_id=slack_user_id,
         source="slack_oauth",
         status="active",
     )
 
+    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
     _clear_slack_state_cookie(response)
     return response
+
+
+async def _verified_slack_identity(code: str) -> tuple[str, str]:
+    """Resolve an authorization code to a Slack member id and verified email."""
+    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
+    verify_team(identity)
+    if not identity.email or not identity.email_verified:
+        raise HTTPException(400, "your Slack account has no verified email to link")
+    return identity.user_id, identity.email
+
+
+@router.post("/slack/desktop/exchange")
+async def slack_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop Slack link with the app's own session."""
+    claims = redeem_connect_handoff(provider="slack", code=body.code, verifier=body.verifier)
+    slack_user_id = claims.get("slack_user_id")
+    email = claims.get("email")
+    if not isinstance(slack_user_id, str) or not isinstance(email, str):
+        raise HTTPException(400, "malformed handoff code")
+
+    await upsert_mapping(
+        github_login=session["sub"],
+        work_email=email,
+        slack_user_id=slack_user_id,
+        source="slack_oauth",
+        status="active",
+    )
+    return {"connected": True}
 
 
 @router.get("/team-settings")
@@ -1088,7 +1176,7 @@ def _github_api_http_exception(status_code: int) -> HTTPException:
 
 
 async def _paginate(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     *,
     headers: dict[str, str],
@@ -1109,15 +1197,15 @@ async def _paginate(
         params = {"per_page": "100"} if first else None
         try:
             r = await client.get(next_url, headers=headers, params=params)
-        except httpx.TimeoutException as exc:
+        except httpx2.TimeoutException as exc:
             logger.warning("GitHub API timed out while paginating %s", next_url)
             raise HTTPException(503, "github API request timed out") from exc
-        except httpx.RequestError as exc:
+        except httpx2.RequestError as exc:
             logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
             raise HTTPException(502, "github API request failed") from exc
         try:
             r.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             logger.warning(
                 "GitHub API returned %s while paginating %s",
                 r.status_code,
@@ -1151,7 +1239,7 @@ async def _fetch_user_installations_and_repos(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
         try:
             installations = await _paginate(
                 client,
@@ -2037,7 +2125,7 @@ async def api_thread_terminal_connection(
 
 
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
-    if os.environ.get("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
         return
     try:
@@ -2206,6 +2294,20 @@ async def api_send_thread_message(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
+
+
+@router.patch("/threads/{thread_id}")
+async def api_rename_thread(
+    thread_id: str,
+    body: ThreadRenameBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await rename_dashboard_thread(
+        thread_id,
+        session["sub"],
+        title=body.title,
+        email=session.get("email"),
+    )
 
 
 @router.post("/threads/{thread_id}/resolve")

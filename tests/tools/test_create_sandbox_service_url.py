@@ -12,7 +12,7 @@ class _AsyncClient:
         self.calls: list[tuple[str, int, dict[str, Any]]] = []
         self.closed = False
 
-    async def __aenter__(self) -> "_AsyncClient":
+    async def __aenter__(self) -> _AsyncClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:

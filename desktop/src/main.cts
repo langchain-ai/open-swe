@@ -1,5 +1,6 @@
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -33,6 +34,7 @@ const {
   repositoryMetadata,
   restoreWorktree,
   validBranchName,
+  watchProjectHead,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -54,9 +56,12 @@ const {
   appRedirectUrl,
   backendRequestUrl,
   desktopExchangeUrl,
+  connectExchangeUrl,
+  connectLoginUrl,
   desktopLoginUrl,
   isAppLoginUrl,
   isAppUrl,
+  isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
@@ -97,14 +102,22 @@ let backendUrl = null;
 let mainWindow = null;
 let setupWindow = null;
 let loginFlow = null;
+const connectFlows = new Map();
 let quitting = false;
 let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
-let updateState = { status: "idle" };
+type DesktopUpdateState = {
+  status: "idle" | "downloading" | "ready" | "installing";
+  version?: string;
+};
+let updateState: DesktopUpdateState = { status: "idle" };
 
-function setUpdateState(status, version) {
+function setUpdateState(
+  status: DesktopUpdateState["status"],
+  version?: string,
+) {
   updateState = { status, ...(version ? { version } : {}) };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:update-state", updateState);
@@ -148,12 +161,29 @@ function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
 }
 
+/**
+ * Terminal identity for a project itself, so the new-thread screen can open
+ * terminals before a thread exists. Short and stable, unlike the cwd.
+ */
+function projectScopeId(cwd) {
+  return `project-${createHash("sha256").update(cwd).digest("hex").slice(0, 16)}`;
+}
+
+function withScopeId(project) {
+  return { ...project, scopeId: projectScopeId(project.cwd) };
+}
+
 function worktreesPath() {
   return path.join(app.getPath("userData"), "worktrees");
 }
 
 function listProjects() {
-  return readProjects(projectsPath());
+  return readProjects(projectsPath()).map(withScopeId);
+}
+
+function projectScopeSession(scopeId) {
+  const project = listProjects().find((item) => item.scopeId === scopeId);
+  return project ? { id: scopeId, cwd: project.cwd } : null;
 }
 
 function sendProjectsChanged() {
@@ -363,20 +393,59 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
+    if (updateState.status === "installing") return true;
     if (updateState.status !== "ready") return false;
+    const version = updateState.version;
+    setUpdateState("installing", version);
     quitting = true;
-    await Promise.all([
-      closeAllTerminals(),
-      backendSupervisor?.close(),
-      openAiOAuth?.close(),
-    ]);
-    autoUpdater.quitAndInstall(false, true);
-    return true;
+    try {
+      await Promise.all([
+        closeAllTerminals(),
+        backendSupervisor?.close(),
+        openAiOAuth?.close(),
+      ]);
+      autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (error) {
+      quitting = false;
+      setUpdateState("ready", version);
+      throw error;
+    }
   });
 
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
     return listProjects();
+  });
+
+  const projectHeadWatches = new Map<number, () => void>();
+  ipcMain.handle("desktop:watch-project-head", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const sender = event.sender;
+    projectHeadWatches.get(sender.id)?.();
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    if (!project) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const close = () => {
+      disposed = true;
+      stop?.();
+      projectHeadWatches.delete(sender.id);
+      sender.removeListener("destroyed", close);
+      sender.removeListener("did-start-navigation", close);
+    };
+    projectHeadWatches.set(sender.id, close);
+    sender.once("destroyed", close);
+    sender.once("did-start-navigation", close);
+    try {
+      stop = await watchProjectHead(project, () => {
+        if (!disposed && !sender.isDestroyed())
+          sender.send("desktop:project-head-changed", cwd);
+      });
+      if (disposed) stop();
+    } catch {
+      if (!disposed) close();
+    }
   });
 
   ipcMain.handle("desktop:project-branches", async (event, cwd) => {
@@ -413,7 +482,7 @@ function configureDesktopIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
     sendProjectsChanged();
-    return project;
+    return withScopeId(project);
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {
@@ -436,6 +505,11 @@ function configureDesktopIpc() {
     const removed = removeProject(projectsPath(), project.cwd);
     if (removed) sendProjectsChanged();
     return removed;
+  });
+
+  ipcMain.handle("desktop:connect-service", async (event, provider) => {
+    requireTrustedDesktopIpc(event);
+    return startConnectFlow(provider);
   });
 
   ipcMain.handle("desktop:open-external", async (event, value) => {
@@ -474,7 +548,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
-    if (!openAiOAuth) throw new Error("OpenAI sign-in is unavailable");
+    if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
     return openAiOAuth.login((url) => shell.openExternal(url));
   });
   ipcMain.handle("desktop:start-local-thread", async (event, input) => {
@@ -535,6 +609,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     return localThreadStore.update(input?.threadId, {
+      ...(typeof input?.title === "string" ? { title: input.title } : {}),
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.archived === "boolean"
         ? { archived: input.archived }
@@ -615,6 +690,23 @@ function configureDesktopIpc() {
       const [diff, repository] = await Promise.all([
         readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
         repositoryMetadata(thread.checkpoint.repo),
+      ]);
+      return { ...diff, repository };
+    } catch {
+      return { status: "error", files: [], truncated: false };
+    }
+  });
+  /** Worktree changes for a project, for screens with no thread yet. */
+  ipcMain.handle("desktop:get-project-diff", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    const repo = project ? await repoRoot(project) : null;
+    if (!repo) return { status: "missing", files: [], truncated: false };
+    try {
+      const branch = await currentBranch(repo);
+      const [diff, repository] = await Promise.all([
+        readDiff(repo, "HEAD"),
+        repositoryMetadata(repo, undefined, branch),
       ]);
       return { ...diff, repository };
     } catch {
@@ -1005,6 +1097,86 @@ async function startExternalLogin() {
   }
 }
 
+/**
+ * Link a Slack or Notion account from the desktop app.
+ *
+ * The consent leg has to run in the user's own browser, which carries neither
+ * the app's session cookie nor the flow's state cookie — that mismatch is why
+ * connecting used to fail here. So the app starts the flow itself, sends the
+ * browser only to the provider, and redeems the loopback handoff under its own
+ * session, which is also what decides whose account the connection lands on.
+ */
+async function startConnectFlow(provider) {
+  if (!backendUrl || !isConnectProvider(provider)) return false;
+  connectFlows.get(provider)?.cancel();
+  connectFlows.delete(provider);
+
+  let flow;
+  try {
+    flow = await beginLogin({ connect: true });
+  } catch (error) {
+    dialog.showErrorBox(
+      `${appRuntime.name} could not connect ${provider}`,
+      `Could not open a local listener: ${error.message}`,
+    );
+    return false;
+  }
+  connectFlows.set(provider, flow);
+  try {
+    const started = await backendFetch(
+      connectLoginUrl(backendUrl, provider, flow),
+      { redirect: "manual" },
+    );
+    const location = started.headers.get("location");
+    if (!location) {
+      throw new Error(`Backend did not start the flow (${started.status})`);
+    }
+    await shell.openExternal(location);
+
+    const code = await flow.code;
+    if (connectFlows.get(provider) !== flow) return false;
+    if (!code) return false;
+
+    const exchange = await backendFetch(
+      connectExchangeUrl(backendUrl, provider),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, verifier: flow.verifier }),
+      },
+    );
+    if (!exchange.ok) {
+      throw new Error(`Backend rejected the connection (${exchange.status})`);
+    }
+    return true;
+  } catch (error) {
+    dialog.showErrorBox(
+      `${appRuntime.name} could not connect ${provider}`,
+      error.message,
+    );
+    return false;
+  } finally {
+    if (connectFlows.get(provider) === flow) {
+      flow.cancel();
+      connectFlows.delete(provider);
+    }
+  }
+}
+
+/** Call the backend as the app: its own origin, and the session it holds. */
+async function backendFetch(url, init: any = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("origin", APP_ORIGIN);
+  const cookies = await session.defaultSession.cookies.get({ url });
+  if (cookies.length) {
+    headers.set(
+      "cookie",
+      cookies.map(({ name, value }) => `${name}=${value}`).join("; "),
+    );
+  }
+  return fetch(url, { ...init, headers });
+}
+
 async function completeExternalLogin(verifier, code) {
   const response = await fetch(desktopExchangeUrl(backendUrl), {
     method: "POST",
@@ -1226,7 +1398,6 @@ if (!hasSingleInstanceLock) {
       return;
     }
 
-    if (process.platform === "darwin") app.dock.setIcon(iconPath());
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),
     );
@@ -1265,7 +1436,8 @@ if (!hasSingleInstanceLock) {
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
-      getSessionRoot: (id) => threadRoot(localThreadStore.get(id)),
+      getSessionRoot: (id) =>
+        threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd,
       userDataPath: app.getPath("userData"),
     });
 

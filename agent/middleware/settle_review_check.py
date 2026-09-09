@@ -14,6 +14,7 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
 
 from agent.github.thread_token import get_github_token
+from agent.middleware.trace import scrub_middleware_inputs
 from agent.review.findings import get_thread_metadata
 from agent.review.publish import settle_review_check_run
 from agent.run_config import RunConfig
@@ -21,6 +22,7 @@ from agent.run_config import RunConfig
 logger = logging.getLogger(__name__)
 
 
+@scrub_middleware_inputs
 @after_agent
 async def settle_review_check_on_exit(
     state: AgentState,

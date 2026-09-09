@@ -59,7 +59,11 @@ function AdminPage() {
       title="Admin"
       description="Workspace-wide defaults and user mappings."
     >
-      <GlobalDefaultsSection models={options.data?.models ?? []} />
+      <GlobalDefaultsSection
+        models={(options.data?.models ?? []).filter(
+          (model) => model.can_be_default !== false
+        )}
+      />
 
       <SlackIntegrationSection />
 
@@ -937,12 +941,12 @@ function FableSection() {
   return (
     <SettingsSection
       title="Fable"
-      description="Claude Fable 5 runs safety classifiers that inspect and may retain requests, so it is not compatible with Zero Data Retention (ZDR). Off by default; enable only if your workspace does not require ZDR."
+      description="Claude Fable 5.1 runs safety classifiers that inspect and may retain requests, so it is not compatible with Zero Data Retention (ZDR). Off by default; enable only if your workspace does not require ZDR."
     >
       <div className="divide-y divide-border">
         <SettingsRow
           label="Allow Fable models"
-          description="When on, Fable 5 is selectable in the agent, reviewer, and chat model pickers. When off, it is hidden and any run that resolves to Fable falls back to Opus."
+          description="When on, Fable 5.1 is selectable for individual agent, reviewer, and chat runs, but cannot be saved as a default. When off, it is hidden and any run that resolves to Fable falls back to Opus."
           control={
             <Switch
               checked={!!settings.data?.fable_enabled}

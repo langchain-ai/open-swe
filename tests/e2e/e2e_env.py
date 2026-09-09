@@ -35,6 +35,11 @@ HUMAN_USER = "U_HUMAN"
 PORT = os.environ.setdefault("E2E_PORT", "2024")
 BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
 
+# Where a browser reaches the dashboard: the app's own server, not this harness.
+# It is a separate origin from the backend here only because the two run as
+# separate processes; the browser sees the single origin a deployment gives it.
+APP_URL = os.environ.get("E2E_UI_SERVER", "http://127.0.0.1:3100").rstrip("/")
+
 _GH_DIR = TMP / "github"
 _WORK_DIR = TMP / "work"
 BARE_REMOTE = _GH_DIR / f"{OWNER}__{REPO}.git"
@@ -61,14 +66,19 @@ _DEFAULTS = {
     "DEFAULT_REPO_OWNER": OWNER,
     "DEFAULT_REPO_NAME": REPO,
     # Bot-token-only mode: lets Slack runs proceed without a per-user OAuth token.
-    "LANGSMITH_API_KEY_PROD": "test-bot-mode",
+    # Tracing and the platform metadata loop stay off: the key is not real.
+    "LANGSMITH_API_KEY": "test-bot-mode",
+    "LANGSMITH_TRACING": "false",
+    "LANGSMITH_CONTROL_PLANE_API_KEY": "",
     # SDK client target (same dev server).
     "LANGGRAPH_URL": BASE_URL,
     # Dashboard: the "Open in Web" link target + session-cookie signing. Use
     # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
-    "DASHBOARD_BASE_URL": BASE_URL,
+    # The link points at the app server, so following it lands the browser on
+    # the origin a real user is on rather than on the backend.
+    "DASHBOARD_BASE_URL": APP_URL,
     "DASHBOARD_API_BASE_URL": BASE_URL,
-    "DASHBOARD_ALLOWED_ORIGINS": f"{BASE_URL},open-swe://app",
+    "DASHBOARD_ALLOWED_ORIGINS": f"{APP_URL},{BASE_URL},open-swe://app",
     "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret",
 }
 

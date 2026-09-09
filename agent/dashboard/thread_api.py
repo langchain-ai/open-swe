@@ -5,7 +5,6 @@ import base64
 import binascii
 import json
 import logging
-import os
 import posixpath
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -13,11 +12,12 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.environments import ENVIRONMENTS, slugify
@@ -96,9 +96,9 @@ _DASHBOARD_STREAM_MODES: tuple[str, ...] = (
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
-_PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _DISCOVERY_HISTORY_LIMIT = 5
-_PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
+_PROXY_STREAM_TIMEOUT = httpx2.Timeout(None)
 _THREAD_POST_COMMAND_METHODS = frozenset(
     {"run.start", "input.respond", "input.inject", "state.fork"}
 )
@@ -119,7 +119,7 @@ async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
 
 
 def _agent_version_metadata() -> dict[str, str]:
-    revision = os.environ.get("LANGCHAIN_REVISION_ID")
+    revision = ENV.LANGCHAIN_REVISION_ID.optional()
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
 
 
@@ -135,11 +135,7 @@ def _langgraph_proxy_headers(
     headers = {"Content-Type": content_type}
     if accept:
         headers["Accept"] = accept
-    api_key = (
-        os.environ.get("LANGSMITH_API_KEY")
-        or os.environ.get("LANGCHAIN_API_KEY")
-        or os.environ.get("LANGSMITH_API_KEY_PROD")
-    )
+    api_key = ENV.LANGSMITH_API_KEY.optional()
     if api_key:
         headers["X-API-Key"] = api_key
     return headers
@@ -175,6 +171,12 @@ class ThreadMessageBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     plan_mode: bool = False
+
+
+class ThreadRenameBody(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=80)
 
 
 class ThreadResolveBody(BaseModel):
@@ -665,7 +667,7 @@ async def _refresh_latest_run_metadata(
     return thread, latest_run_status, latest_run_id
 
 
-_THREADS_SEARCH_PAGE = 500
+_THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
@@ -1178,6 +1180,67 @@ async def get_dashboard_terminal_sandbox(
     return sandbox_id, repo_name
 
 
+async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[str, Any]]:
+    try:
+        item = await client.store.get_item(("queue", thread_id), "pending_messages")
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Could not fetch queued messages",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
+        return []
+    value = item.get("value") if isinstance(item, Mapping) else None
+    messages = value.get("messages") if isinstance(value, Mapping) else None
+    if not isinstance(messages, list):
+        return []
+
+    queued: list[dict[str, Any]] = []
+    for entry in messages:
+        content = entry.get("content") if isinstance(entry, Mapping) else None
+        if not isinstance(content, Mapping) or content.get("source") != _DASHBOARD_SOURCE:
+            continue
+        queued_id = content.get("queue_id")
+        text = content.get("text")
+        created_at = content.get("created_at_ms")
+        if (
+            not isinstance(queued_id, str)
+            or not queued_id
+            or not isinstance(text, str)
+            or not isinstance(created_at, (int, float))
+            or isinstance(created_at, bool)
+        ):
+            continue
+        images = []
+        raw_images = content.get("images")
+        if isinstance(raw_images, list):
+            for image in raw_images:
+                if not isinstance(image, Mapping):
+                    continue
+                base64_data = image.get("base64")
+                mime_type = image.get("mime_type")
+                if not isinstance(base64_data, str) or not isinstance(mime_type, str):
+                    continue
+                mapped_image = {
+                    "kind": "image",
+                    "base64": base64_data,
+                    "mimeType": mime_type,
+                }
+                file_name = image.get("file_name")
+                if isinstance(file_name, str) and file_name:
+                    mapped_image["fileName"] = file_name
+                images.append(mapped_image)
+        queued.append(
+            {
+                "id": queued_id,
+                "content": text,
+                "images": images,
+                "createdAt": int(created_at),
+            }
+        )
+    return queued
+
+
 async def get_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
@@ -1214,11 +1277,14 @@ async def get_dashboard_thread(
         )
         thread = {**as_thread_dict(thread), "metadata": metadata}
 
-    return await _thread_summary(
+    summary = await _thread_summary(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
     )
+    if status == "running":
+        summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
+    return summary
 
 
 async def _resolve_requested_environment(requested: Any) -> str | None:
@@ -1805,6 +1871,8 @@ async def send_dashboard_message(
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
         "surface": "web",
+        "queue_id": f"queued-{uuid.uuid4()}",
+        "created_at_ms": now_ms,
         "sender": {
             "id": f"github:{login}",
             "platform": "github",
@@ -1942,6 +2010,24 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
     await client.threads.delete(thread_id)
+
+
+async def rename_dashboard_thread(
+    thread_id: str, login: str, *, title: str, email: str | None = None
+) -> dict[str, Any]:
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata_update = {"title": title, "title_seed": None}
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not rename thread", extra={"thread_id": thread_id}, exc_info=True)
+        raise HTTPException(502, "failed to update thread") from exc
+    thread = {
+        **as_thread_dict(thread),
+        "metadata": {**thread_metadata(thread), **metadata_update},
+    }
+    return await _thread_summary(thread)
 
 
 async def resolve_dashboard_thread(
@@ -2447,7 +2533,7 @@ async def get_dashboard_thread_branch_diff(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
         if pull_request is not None:
             diff = await build_pr_diff_files(client, full_name, pull_request)
         elif head_ref is not None:
@@ -2490,7 +2576,7 @@ async def _stream_thread_events(
     headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
-        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream("POST", url, content=body, headers=headers) as response:
                 if response.status_code >= 400:
                     error_body = await response.aread()
@@ -2516,7 +2602,7 @@ async def _observe_dashboard_run_ttft(
     headers["Last-Event-ID"] = "-1"
     detector = AssistantTextEventDetector(run_id)
     try:
-        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream(
                 "GET",
                 url,
@@ -2615,7 +2701,7 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
     try:
@@ -2691,7 +2777,7 @@ async def proxy_dashboard_thread_history(
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -2709,7 +2795,7 @@ async def proxy_dashboard_thread_run_cancel(
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = _langgraph_proxy_headers()
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(
             url,
             headers=headers,

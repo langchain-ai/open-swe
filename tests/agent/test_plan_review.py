@@ -502,7 +502,7 @@ class _FakeReq:
         self.tools = tools
         self.state = state
 
-    def override(self, **kw: Any) -> "_FakeReq":
+    def override(self, **kw: Any) -> _FakeReq:
         return _FakeReq(kw.get("tools", self.tools), self.state)
 
 

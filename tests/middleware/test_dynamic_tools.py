@@ -25,7 +25,7 @@ class _Request:
     tool_call: dict[str, Any] | None = None
     tool: BaseTool | None = None
 
-    def override(self, **kwargs: Any) -> "_Request":
+    def override(self, **kwargs: Any) -> _Request:
         return replace(self, **kwargs)
 
 

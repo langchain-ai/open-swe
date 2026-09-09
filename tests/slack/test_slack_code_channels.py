@@ -206,7 +206,6 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
         webhook_common,
         "get_slack_repo_config",
@@ -253,7 +252,7 @@ async def test_code_channel_replies_are_posted_top_level(monkeypatch: pytest.Mon
     client.post.return_value = response
 
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(slack_utils.httpx, "AsyncClient", lambda **_kwargs: client)
+    monkeypatch.setattr(slack_utils.httpx2, "AsyncClient", lambda **_kwargs: client)
 
     await slack_utils._post_slack_message_with_ts(
         "C-code", "done", thread_ts=webhook_common.CODE_CHANNEL_SESSION_TS

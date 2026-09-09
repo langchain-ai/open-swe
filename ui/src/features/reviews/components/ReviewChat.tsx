@@ -9,7 +9,6 @@ import {
   useState,
 } from "react"
 import { StreamProvider, useStreamContext } from "@langchain/react"
-import { overrideFetchImplementation } from "@langchain/langgraph-sdk"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowClockwiseIcon,
@@ -30,6 +29,7 @@ import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, reviewChatApiBase } from "@/lib/api"
+import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import {
   collectStructuredEntities,
   parseStructuredInput,
@@ -171,13 +171,6 @@ function AttachmentPill({
     </span>
   )
 }
-
-const dashboardFetch: typeof fetch = (input, init) =>
-  fetch(input, { ...init, credentials: "include" })
-
-// The SDK's internal Client issues some reads (getState, history) outside the
-// transport's fetch; without this they drop the session cookie cross-origin.
-overrideFetchImplementation(dashboardFetch)
 
 const SUGGESTED_PROMPTS = [
   "Summarize the changes in this PR",
@@ -662,6 +655,10 @@ function ChatPanel({
     () => ["review-chat-threads", owner, repo, number] as const,
     [owner, repo, number]
   )
+  const client = useMemo(
+    () => createDashboardClient(reviewChatApiBase(owner, repo, number)),
+    [owner, repo, number]
+  )
   const { conversations, activeId, select, newChat, nameConversation, close } =
     useConversations(storageKey(owner, repo, number))
 
@@ -852,7 +849,7 @@ function ChatPanel({
 
       <StreamProvider
         key={activeId}
-        apiUrl={reviewChatApiBase(owner, repo, number)}
+        client={client}
         assistantId={assistantId}
         fetch={dashboardFetch}
         threadId={activeId}
