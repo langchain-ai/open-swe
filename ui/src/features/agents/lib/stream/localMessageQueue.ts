@@ -79,14 +79,13 @@ export async function enqueueLocalPrompt(
   })
 }
 
-/** Remove and return whatever the agent left undrained, merged into one prompt. */
-export async function takeLocalPromptQueue(
+/** Whatever the agent left undrained, merged into one prompt. */
+export async function readLocalPromptQueue(
   client: Client,
   sessionId: string
 ): Promise<QueuedPrompt | null> {
   const pending = await readQueue(client, sessionId)
   if (pending.length === 0) return null
-  await client.store.deleteItem(namespace(sessionId), QUEUE_KEY)
   const payloads = pending.map((item) => item.content ?? {})
   const text = payloads
     .map((payload) => payload.text?.trim())
@@ -94,4 +93,11 @@ export async function takeLocalPromptQueue(
     .join("\n\n")
   const images = payloads.flatMap(payloadImages)
   return text || images.length > 0 ? { text, images } : null
+}
+
+export async function clearLocalPromptQueue(
+  client: Client,
+  sessionId: string
+): Promise<void> {
+  await client.store.deleteItem(namespace(sessionId), QUEUE_KEY)
 }

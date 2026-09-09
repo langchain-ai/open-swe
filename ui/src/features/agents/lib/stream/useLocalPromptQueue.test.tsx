@@ -31,9 +31,9 @@ function fakeClient() {
   }
 }
 
-function setup(isRunning: boolean) {
+function setup(isRunning: boolean, accepted = true) {
   const { client, items } = fakeClient()
-  const submit = vi.fn(async () => true)
+  const submit = vi.fn(async () => accepted)
   const hook = renderHook(
     (props: { isRunning: boolean }) =>
       useLocalPromptQueue({
@@ -50,7 +50,7 @@ function setup(isRunning: boolean) {
 
 describe("useLocalPromptQueue", () => {
   it("sends what the user queued once the run they stopped is gone", async () => {
-    const { result, rerender, submit } = setup(true)
+    const { result, rerender, submit, items } = setup(true)
 
     await act(() => result.current.enqueue("pick this up next", []))
     expect(result.current.queued.map((item) => item.content)).toEqual([
@@ -64,6 +64,18 @@ describe("useLocalPromptQueue", () => {
       expect(submit).toHaveBeenCalledWith("pick this up next", [])
     )
     expect(result.current.queued).toEqual([])
+    await waitFor(() => expect(items.size).toBe(0))
+  })
+
+  it("keeps the follow-up in the store when the run is not accepted", async () => {
+    const { result, rerender, submit, items } = setup(true, false)
+
+    await act(() => result.current.enqueue("try again later", []))
+    rerender({ isRunning: false })
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce())
+    expect(result.current.queued).toEqual([])
+    expect(items.size).toBe(1)
   })
 
   it("does not resend a follow-up the agent already drained", async () => {

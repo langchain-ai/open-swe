@@ -5,7 +5,11 @@ import type {
   ImageChunk,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
-import { enqueueLocalPrompt, takeLocalPromptQueue } from "./localMessageQueue"
+import {
+  clearLocalPromptQueue,
+  enqueueLocalPrompt,
+  readLocalPromptQueue,
+} from "./localMessageQueue"
 
 /**
  * Follow-ups typed while a local thread is running. They go to the thread's
@@ -23,7 +27,8 @@ export function useLocalPromptQueue({
   sessionId: string
   login: string | undefined
   isRunning: boolean
-  submit: (text: string, images: Array<ImageChunk>) => Promise<unknown>
+  /** Resolves `true` once the run is accepted. */
+  submit: (text: string, images: Array<ImageChunk>) => Promise<boolean>
 }) {
   const [state, setState] = useState<{
     sessionId: string
@@ -53,8 +58,14 @@ export function useLocalPromptQueue({
     handoffRef.current = true
     // oxlint-disable-next-line react/set-state-in-effect
     setState({ sessionId, items: [] })
-    void takeLocalPromptQueue(client, sessionId)
-      .then((pending) => pending && submit(pending.text, pending.images))
+    // The store copy is cleared only once the run is accepted, so a failed
+    // handoff leaves the follow-up for the next run instead of losing it.
+    void readLocalPromptQueue(client, sessionId)
+      .then(async (pending) => {
+        if (pending && (await submit(pending.text, pending.images))) {
+          await clearLocalPromptQueue(client, sessionId)
+        }
+      })
       .catch(setError)
       .finally(() => {
         handoffRef.current = false
