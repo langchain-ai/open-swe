@@ -9,6 +9,7 @@ import { api } from "@/lib/api"
 import type { WorkspaceMCP, WorkspaceMCPUpdate } from "@/lib/api"
 import { WorkspaceMCPImport } from "./WorkspaceMCPImport"
 import type { ImportedMCP } from "./WorkspaceMCPImport"
+import { WorkspaceMCPOAuthFields } from "./WorkspaceMCPOAuthFields"
 
 type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<WorkspaceMCPUpdate, "headers"> & { existing: boolean }
@@ -34,6 +35,9 @@ export function WorkspaceMCPSection() {
   const [pendingImports, setPendingImports] = useState<ImportedMCP[]>([])
   const toolsId = useId()
   const editorId = useId()
+  const savedConnection = connections.data?.find(
+    (connection) => connection.name === draft?.name
+  )
   const toolDescriptions = new Map(
     catalog.map((tool) => [tool.name, tool.description])
   )
@@ -41,9 +45,7 @@ export function WorkspaceMCPSection() {
   const toolNames = [
     ...new Set([
       ...toolDescriptions.keys(),
-      ...(connections.data?.find(
-        (connection) => connection.name === draft?.name
-      )?.allowed_tools ?? []),
+      ...(savedConnection?.allowed_tools ?? []),
       ...selectedTools,
     ]),
   ].sort()
@@ -93,6 +95,8 @@ export function WorkspaceMCPSection() {
     openEditor(
       {
         ...connection,
+        oauth:
+          connection.oauth === undefined ? previous?.oauth : connection.oauth,
         enabled: previous?.enabled ?? true,
         allowed_tools: previous?.allowed_tools ?? [],
         existing: Boolean(previous),
@@ -160,6 +164,7 @@ export function WorkspaceMCPSection() {
         enabled: draft.enabled,
         allowed_tools: draft.allowed_tools,
         headers: replaceHeaders ? authentication : null,
+        oauth: draft.oauth ?? null,
       }
       const discovered = discover ? await api.discoverWorkspaceMCP(update) : []
       const saved = await api.saveWorkspaceMCP(update)
@@ -271,11 +276,55 @@ export function WorkspaceMCPSection() {
             <option value="sse">SSE</option>
           </select>
         </label>
+        <label className="block text-sm">
+          Authentication
+          <select
+            aria-label="Authentication"
+            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+            value={draft.oauth ? "oauth" : "headers"}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                oauth:
+                  event.target.value === "oauth"
+                    ? {
+                        grant_type: "client_credentials",
+                        token_url: "",
+                        client_id: "",
+                        scope: "",
+                        token_endpoint_auth_method: "client_secret_post",
+                      }
+                    : null,
+              })
+            }
+          >
+            <option value="headers">Headers / API key</option>
+            <option value="oauth">OAuth client credentials</option>
+          </select>
+        </label>
+        {draft.oauth && (
+          <WorkspaceMCPOAuthFields
+            key={draft.name}
+            value={draft.oauth}
+            hasSavedSecret={Boolean(
+              draft.existing &&
+              savedConnection?.oauth &&
+              draft.url.trim() === savedConnection.url &&
+              draft.oauth.token_url.trim() ===
+                savedConnection.oauth.token_url &&
+              draft.oauth.client_id === savedConnection.oauth.client_id
+            )}
+            onChange={(oauth) => setDraft({ ...draft, oauth })}
+          />
+        )}
         <div className="space-y-2">
-          <p className="text-sm font-medium">Authentication headers</p>
+          <p className="text-sm font-medium">
+            {draft.oauth ? "Additional headers" : "Authentication headers"}
+          </p>
           <p className="text-xs text-muted-foreground">
-            Values are encrypted and hidden by default. Use a header such as
-            Authorization or X-API-Key.
+            {draft.oauth
+              ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
+              : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
           </p>
           {!replaceHeaders ? (
             <>

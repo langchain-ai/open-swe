@@ -8,6 +8,7 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from agent import server
 from agent.dashboard import workspace_mcps as settings
+from agent.mcp import MCPConnectionUpdate, runtime
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.tool_loaders import workspace_mcp as loader
 from agent.utils import ttl_cache
@@ -20,7 +21,7 @@ def encryption(monkeypatch):
 
 async def save(name="example", **kwargs):
     return await settings.save_workspace_mcp(
-        name, settings.WorkspaceMCPUpdate(name=name, url="https://example.com/mcp", **kwargs)
+        name, MCPConnectionUpdate(name=name, url="https://example.com/mcp", **kwargs)
     )
 
 
@@ -40,7 +41,7 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
         )
         for name in ["search", "delete"]
     ]
-    monkeypatch.setattr(loader, "_discover_tools", AsyncMock(return_value=definitions))
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=definitions))
     tools = await loader.load_workspace_mcp_tools()
     assert [tool.name for tool in tools] == ["mcp_example_search_8245e54055"]
     calls = []
@@ -74,7 +75,7 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
 async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(fake_store, monkeypatch):
     await save(allowed_tools=["search"])
     monkeypatch.setattr(
-        loader,
+        runtime,
         "_discover_tools",
         AsyncMock(return_value=[Tool(name="search", inputSchema={"type": "object"})]),
     )
@@ -88,7 +89,7 @@ async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(fake_sto
 async def test_new_connection_exposes_no_tools_until_admin_selects_them(fake_store, monkeypatch):
     await save()
     monkeypatch.setattr(
-        loader, "_discover_tools", AsyncMock(side_effect=AssertionError("must not connect"))
+        runtime, "_discover_tools", AsyncMock(side_effect=AssertionError("must not connect"))
     )
     assert await loader.load_workspace_mcp_tools() == []
 
@@ -97,12 +98,12 @@ async def test_one_failed_server_does_not_hide_other_servers(fake_store, monkeyp
     await save("broken", allowed_tools=["search"])
     await save("working", allowed_tools=["search"])
 
-    async def discover(record):
+    async def discover(record, namespace):
         if record.name == "broken":
             raise ValueError("secret upstream detail")
         return [Tool(name="search", inputSchema={"type": "object"})]
 
-    monkeypatch.setattr(loader, "_discover_tools", discover)
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
     assert [t.name for t in await loader.load_workspace_mcp_tools()] == [
         "mcp_working_search_0ebe441dc6"
     ]
@@ -113,12 +114,12 @@ async def test_workspace_mcp_catalog_is_reused_until_settings_change(fake_store,
     await save(allowed_tools=["search1", "search2"])
     calls = 0
 
-    async def discover(record):
+    async def discover(record, namespace):
         nonlocal calls
         calls += 1
         return [Tool(name=f"search{calls}", inputSchema={"type": "object"})]
 
-    monkeypatch.setattr(loader, "_discover_tools", discover)
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
     assert (await loader.load_workspace_mcp_tools())[0].name == "mcp_example_search1_882c6b1452"
     assert (await loader.load_workspace_mcp_tools())[0].name == "mcp_example_search1_882c6b1452"
     await save(allowed_tools=["search1", "search2"])
@@ -131,7 +132,7 @@ async def test_duplicate_catalog_is_isolated_from_other_connections(
 ):
     await settings.save_workspace_mcp(
         "broken",
-        settings.WorkspaceMCPUpdate(
+        MCPConnectionUpdate(
             name="broken", url="https://broken.example/mcp", allowed_tools=["search"]
         ),
     )
@@ -155,7 +156,7 @@ async def test_duplicate_catalog_is_isolated_from_other_connections(
     async def session(connection):
         yield Session(connection["url"] == "https://broken.example/mcp")
 
-    monkeypatch.setattr(loader, "create_session", session)
+    monkeypatch.setattr(runtime, "create_session", session)
     tools = await loader.load_workspace_mcp_tools()
     middleware = DynamicToolMiddleware({"Workspace MCPs": tools})
     assert middleware.has_groups
@@ -171,7 +172,7 @@ async def test_expired_catalog_failure_does_not_log_upstream_details(
     now = 0
     monkeypatch.setattr(ttl_cache, "_now", lambda: now)
     monkeypatch.setattr(
-        loader,
+        runtime,
         "_discover_tools",
         AsyncMock(
             side_effect=[
@@ -197,7 +198,7 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
             "required": [argument],
         },
     )
-    monkeypatch.setattr(loader, "_discover_tools", AsyncMock(return_value=[definition]))
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[definition]))
 
     class Session:
         async def initialize(self):
@@ -241,6 +242,6 @@ def test_connection_tool_pairs_cannot_collide():
         ("example", "a_b"),
         ("example", "a" * 128),
     ]
-    names = [loader._tool_name(*pair) for pair in pairs]
+    names = [runtime._tool_name(*pair) for pair in pairs]
     assert len(set(names)) == len(pairs)
     assert all(len(name) <= 64 for name in names)

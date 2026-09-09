@@ -239,7 +239,6 @@ from agent.dashboard.user_mappings import (
 from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
     WorkspaceMCPRoute,
-    WorkspaceMCPUpdate,
     delete_workspace_mcp,
     get_workspace_mcp,
     list_workspace_mcps,
@@ -247,6 +246,7 @@ from agent.dashboard.workspace_mcps import (
 )
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.mcp import MCPConnectionUpdate
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.eval_jobs import (
     get_reviewer_eval_status,
@@ -1006,7 +1006,7 @@ async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[d
 @workspace_mcp_router.put("/workspace-mcps/{name}")
 async def api_save_workspace_mcp(
     name: str,
-    update: WorkspaceMCPUpdate,
+    update: MCPConnectionUpdate,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     try:
@@ -1038,7 +1038,7 @@ async def api_reveal_workspace_mcp_headers(
 @workspace_mcp_router.post("/workspace-mcps/{name}/discover")
 async def api_discover_workspace_mcp(
     name: str,
-    update: WorkspaceMCPUpdate | None = None,
+    update: MCPConnectionUpdate | None = None,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> list[dict[str, str]]:
     try:

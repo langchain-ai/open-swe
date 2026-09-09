@@ -217,6 +217,18 @@ export interface TeamCredentialsStatus {
   langsmith: ProviderCredentialStatus
 }
 
+export interface WorkspaceMCPOAuth {
+  grant_type?: "client_credentials"
+  token_url: string
+  client_id: string
+  scope?: string
+  token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic"
+}
+
+export type WorkspaceMCPOAuthUpdate = WorkspaceMCPOAuth & {
+  client_secret?: string | null
+}
+
 export interface WorkspaceMCP {
   name: string
   url: string
@@ -224,6 +236,7 @@ export interface WorkspaceMCP {
   enabled: boolean
   allowed_tools: string[]
   header_names: string[]
+  oauth?: WorkspaceMCPOAuth | null
   revision: string
   updated_at: string
 }
@@ -235,6 +248,7 @@ export interface WorkspaceMCPUpdate {
   enabled: boolean
   allowed_tools: string[]
   headers?: Record<string, string> | null
+  oauth?: WorkspaceMCPOAuthUpdate | null
 }
 
 export interface DatadogConnectBody {
