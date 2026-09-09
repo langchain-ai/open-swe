@@ -1,6 +1,6 @@
 """Private web feedback on completed agent threads."""
 
-from typing import Any, Literal, Self
+from typing import Any, Self
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
@@ -10,12 +10,9 @@ from agent.dashboard.plan_api import fetch_thread_metadata
 from agent.dashboard.threads.summary import thread_is_readable
 from agent.dashboard.user_mappings import login_for_slack_id
 from agent.source_context import SourceContext
-from agent.store import TypedStore, now_ms
-from agent.thread_feedback import complete_feedback_prompt, feedback_prompt_status
+from agent.thread_feedback import Rating, feedback_prompt_status, feedback_store
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
-
-FeedbackRating = Literal["bad", "good", "other"]
 
 feedback_router = APIRouter(
     prefix="/threads",
@@ -26,7 +23,7 @@ _SESSION_DEP = Depends(require_session)
 
 
 class FeedbackSubmission(BaseModel):
-    rating: FeedbackRating
+    rating: Rating
     comment: str = Field(default="", max_length=3000)
 
     @model_validator(mode="after")
@@ -35,28 +32,6 @@ class FeedbackSubmission(BaseModel):
         if self.rating == "other" and not self.comment:
             raise ValueError("Add a comment when choosing Other.")
         return self
-
-
-class WebThreadFeedback(BaseModel):
-    status: Literal["completed", "dismissed"]
-    rating: FeedbackRating | None = None
-    comment: str = ""
-    submitted_at: int
-
-
-def _store(thread_id: str) -> TypedStore[WebThreadFeedback]:
-    return TypedStore(("web_thread_feedback", thread_id), WebThreadFeedback)
-
-
-def _response(
-    status: str, prompt_at: int | None = None, record: WebThreadFeedback | None = None
-) -> dict[str, Any]:
-    return {
-        "status": status,
-        "promptAt": prompt_at,
-        "rating": record.rating if record else None,
-        "comment": record.comment if record else "",
-    }
 
 
 async def _is_initiator(thread_id: str, login: str) -> bool:
@@ -79,46 +54,37 @@ async def get_thread_feedback(
 ) -> dict[str, Any]:
     login = str(session["sub"]).strip().lower()
     if not await _is_initiator(thread_id, login):
-        return _response("unavailable")
-    record = await _store(thread_id).get(login)
-    if record:
-        await complete_feedback_prompt(thread_id, record.status)
-        return _response(record.status, record=record)
-    status, prompt_at = await feedback_prompt_status(thread_id)
-    return _response(status, prompt_at)
+        return {"status": "unavailable"}
+    record = await feedback_store().get(thread_id)
+    return {
+        "status": await feedback_prompt_status(thread_id),
+        "rating": record.rating if record else None,
+        "comment": record.comment if record else "",
+    }
 
 
 async def _save_feedback(
-    thread_id: str,
-    login: str,
-    submission: FeedbackSubmission | None,
+    thread_id: str, login: str, submission: FeedbackSubmission | None
 ) -> dict[str, Any]:
     if not await _is_initiator(thread_id, login):
         raise HTTPException(403, "Only the thread initiator can give feedback.")
     async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
-        record = await _store(thread_id).get(login)
+        record = await feedback_store().get(thread_id)
         if record is None:
-            status, _ = await feedback_prompt_status(thread_id)
-            if status in {"completed", "dismissed"}:
-                return _response(status)
-            if status != "ready":
+            raise HTTPException(409, "Feedback is not available for this thread yet.")
+        if record.status not in {"completed", "dismissed"}:
+            if await feedback_prompt_status(thread_id) != "ready":
                 raise HTTPException(409, "Feedback is not available for this thread yet.")
-            record = WebThreadFeedback(
-                status="completed" if submission else "dismissed",
-                rating=submission.rating if submission else None,
-                comment=submission.comment if submission else "",
-                submitted_at=now_ms(),
-            )
-            await _store(thread_id).put(login, record)
-    await complete_feedback_prompt(thread_id, record.status)
-    return _response(record.status, record=record)
+            record.status = "completed" if submission else "dismissed"
+            record.rating = submission.rating if submission else None
+            record.comment = submission.comment if submission else ""
+            await feedback_store().put(thread_id, record)
+    return record.model_dump(include={"status", "rating", "comment"})
 
 
 @feedback_router.post("/{thread_id}/feedback")
 async def submit_thread_feedback(
-    thread_id: str,
-    submission: FeedbackSubmission,
-    session: dict[str, Any] = _SESSION_DEP,
+    thread_id: str, submission: FeedbackSubmission, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     return await _save_feedback(thread_id, str(session["sub"]).strip().lower(), submission)
 

@@ -265,8 +265,7 @@ export interface PullRequestSnapshot {
 export type ThreadFeedbackRating = "bad" | "good" | "other"
 
 export interface ThreadFeedback {
-  status: "unavailable" | "waiting" | "ready" | "completed" | "dismissed"
-  promptAt: number | null
+  status: "unavailable" | "ready" | "completed" | "dismissed"
   rating: ThreadFeedbackRating | null
   comment: string
 }

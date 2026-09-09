@@ -185,7 +185,7 @@ async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
 ) -> None:
     client = _FakeClient()
     client.runs.fail_next = True
-    monkeypatch.setattr(thread_feedback, "_now_ms", lambda: 123000)
+    monkeypatch.setattr(thread_feedback, "now_ms", lambda: 123000)
 
     with pytest.raises(RuntimeError, match="dispatch failed"):
         await dispatch.dispatch_agent_run(

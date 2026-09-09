@@ -12,7 +12,6 @@ import {
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import { threadFeedbackKey } from "@/features/agents/lib/threadFeedback"
 import {
   modelConfigurable,
   promptMessage,
@@ -148,9 +147,6 @@ export function useSubmitAgentMessage(threadId: string) {
     },
     onSuccess: () => {
       setAgentThreadStatus(queryClient, threadId, "running")
-      void queryClient.invalidateQueries({
-        queryKey: threadFeedbackKey(threadId),
-      })
     },
   })
 }

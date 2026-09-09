@@ -73,7 +73,7 @@ async def test_emoji_selection_preserves_comment_and_submits_both(
     )
     assert record["choice"] == choice
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == score
-    assert fake_store.values(("thread_feedback_completions",))["thread-1"]["status"] == "completed"
+    assert fake_store.values(("thread_feedback",))["thread-1"]["status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -81,11 +81,11 @@ async def test_emoji_selection_preserves_comment_and_submits_both(
 async def test_other_clears_good_and_requires_comment_on_submit(
     context: Any, fake_store: Any, comment: str
 ) -> None:
-    await feedback._select_feedback_choice(_select_rating("good", timestamp="2.0"))
+    await feedback._select_feedback_rating(_select_rating("good", timestamp="2.0"))
     good_submit = feedback.respond_to_slack_interaction.await_args.args[1]["blocks"][-1][
         "elements"
     ][0]
-    await feedback._select_feedback_choice(_select_rating("other", timestamp="3.0"))
+    await feedback._select_feedback_rating(_select_rating("other", timestamp="3.0"))
     message = feedback.respond_to_slack_interaction.await_args.args[1]
     comment_input = next(block for block in message["blocks"] if block["type"] == "input")
     assert comment_input["optional"] is False
@@ -99,66 +99,23 @@ async def test_other_clears_good_and_requires_comment_on_submit(
     payload["state"] = {"values": {"feedback_comment": {"comment": {"value": comment}}}}
     await feedback._process_submission(payload)
     saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
-    assert saved["rating"] is None and saved["choice"] == "other"
+    assert saved["rating"] is None
     assert saved["completed"] is bool(comment.strip())
     if comment.strip():
+        assert saved["choice"] == "other"
         exported = feedback.create_langsmith_thread_feedback.await_args.kwargs
         assert exported["score"] is None and exported["comment"] == comment
     else:
+        assert saved == draft
         feedback.create_langsmith_thread_feedback.assert_not_awaited()
         assert "comment" in feedback.respond_to_slack_interaction.await_args.args[1]["text"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("comment", ["", "Submitted comment"])
-async def test_delayed_other_requires_fresh_submission_to_correct_saved_good(
-    context: Any, fake_store: Any, comment: str
-) -> None:
-    payload = _inline_submission(5, comment)
-    payload["actions"][0]["action_ts"] = "4.0"
-    await feedback._process_submission(payload)
-    feedback.create_langsmith_thread_feedback.reset_mock()
-    await feedback._select_feedback_choice(_select_rating("other", "Unsubmitted", "3.0"))
-    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
-    assert saved["rating"] == 5 and saved["comment"] == comment and saved["completed"]
-    assert saved["draft_choice"] == "other" and saved["draft_rating"] is None
-    assert saved["correction_pending"]
-    feedback.create_langsmith_thread_feedback.assert_not_awaited()
-    message = feedback.respond_to_slack_interaction.await_args.args[1]
-    assert "Submit again" in message["text"]
-    assert (
-        next(block for block in message["blocks"] if block["type"] == "input")["optional"] is False
-    )
-    responses = feedback.respond_to_slack_interaction.await_count
-    await feedback._acknowledge(feedback.ThreadFeedback(**saved), response_url=_RESPONSE_URL)
-    assert feedback.respond_to_slack_interaction.await_count == responses
-    for timestamp in ("4.0", None):
-        payload["actions"][0]["action_ts"] = timestamp
-        await feedback._process_submission(payload)
-        assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == saved
-    feedback.create_langsmith_thread_feedback.assert_not_awaited()
-
-    submit = message["blocks"][-1]["elements"][0]
-    retry = _action(submit["action_id"], submit["value"])
-    retry["actions"][0]["action_ts"] = "5.0"
-    retry["state"] = {"values": {"feedback_comment": {"comment": {"value": comment}}}}
-    await feedback._process_submission(retry)
-    if not comment:
-        assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == saved
-        feedback.create_langsmith_thread_feedback.assert_not_awaited()
-        retry["actions"][0]["action_ts"] = "6.0"
-        retry["state"]["values"]["feedback_comment"]["comment"]["value"] = "Required comment"
-        await feedback._process_submission(retry)
-    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
-    assert saved["rating"] is None and saved["choice"] == "other" and saved["completed"]
-    assert not saved["correction_pending"]
-    assert saved["comment"] == (comment or "Required comment")
-    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] is None
-
-
-@pytest.mark.asyncio
-async def test_other_selected_after_submit_cannot_change_feedback(
-    context: Any, fake_store: Any
+@pytest.mark.parametrize("selection", ["bad", "good", "other", 1, 5])
+@pytest.mark.parametrize("timestamp", ["3.0", "5.0"])
+async def test_selection_delivered_after_submit_cannot_change_feedback(
+    context: Any, fake_store: Any, selection: str | int, timestamp: str
 ) -> None:
     payload = _inline_submission(5, "Final comment")
     payload["actions"][0]["action_ts"] = "4.0"
@@ -166,7 +123,11 @@ async def test_other_selected_after_submit_cannot_change_feedback(
     previous = dict(fake_store.values(("slack_thread_feedback", "C1"))["run-1"])
     feedback.create_langsmith_thread_feedback.reset_mock()
     feedback.respond_to_slack_interaction.reset_mock()
-    await feedback._select_feedback_choice(_select_rating("other", "Later draft", "5.0"))
+    tasks = BackgroundTasks()
+    await routes.slack_interactivity(
+        _request(_select_rating(selection, "Later draft", timestamp)), tasks
+    )
+    await tasks()
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == previous
     feedback.create_langsmith_thread_feedback.assert_not_awaited()
     feedback.respond_to_slack_interaction.assert_not_awaited()
@@ -215,7 +176,7 @@ async def test_submit_during_emoji_update_uses_latest_selection(
     }
     async with asyncio.timeout(2):
         selection_task = asyncio.create_task(
-            feedback._select_feedback_choice(
+            feedback._select_feedback_rating(
                 _select_rating("good", "Earlier draft", timestamp="3.0")
             )
         )
@@ -301,105 +262,6 @@ async def test_older_invalid_submit_cannot_replace_newer_emoji_selection(
     assert not saved.get("completed")
     feedback.create_langsmith_thread_feedback.assert_not_awaited()
     feedback.post_slack_ephemeral_message.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "old_rating,comment", [(2, "Submitted comment"), (2, ""), (None, "Comment only"), (None, "")]
-)
-async def test_selection_delayed_before_lookup_reconciles_submitted_feedback(
-    context: Any,
-    fake_store: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    old_rating: int | None,
-    comment: str,
-) -> None:
-    started, finish = asyncio.Event(), asyncio.Event()
-    original_load = feedback._load_feedback
-
-    async def load(channel_id: str, run_id: str, user_id: str) -> Any:
-        if not started.is_set():
-            started.set()
-            await finish.wait()
-        return await original_load(channel_id, run_id, user_id)
-
-    monkeypatch.setattr(feedback, "_load_feedback", load)
-    payload = _inline_submission(old_rating, comment)
-    payload["actions"][0]["action_ts"] = "4.0"
-    async with asyncio.timeout(2):
-        selection_task = asyncio.create_task(
-            feedback._select_feedback_rating(
-                _select_rating(5, "Unsubmitted draft", timestamp="3.0")
-            )
-        )
-        await started.wait()
-        await feedback._process_submission(payload)
-        finish.set()
-        await selection_task
-
-    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
-    assert (saved["rating"], saved["comment"], saved["completed"]) == (5, comment, True)
-    assert saved["submitted_at"] == "4.0"
-    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 1.0
-    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["comment"] == (
-        comment or None
-    )
-    message = feedback.respond_to_slack_interaction.await_args.args[1]
-    assert "completed" in message["text"].lower()
-    assert all(block["type"] not in {"input", "actions"} for block in message["blocks"])
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_selection_after_submit_cannot_change_completed_feedback(
-    context: Any, fake_store: Any
-) -> None:
-    payload = _inline_submission(4, "Final comment")
-    payload["actions"][0]["action_ts"] = "4.0"
-    await feedback._process_submission(payload)
-    previous = dict(fake_store.values(("slack_thread_feedback", "C1"))["run-1"])
-    feedback.respond_to_slack_interaction.reset_mock()
-    feedback.create_langsmith_thread_feedback.reset_mock()
-
-    await feedback._select_feedback_rating(_select_rating(1, "Later draft", timestamp="5.0"))
-
-    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == previous
-    feedback.respond_to_slack_interaction.assert_not_awaited()
-    feedback.create_langsmith_thread_feedback.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_older_empty_submit_cannot_replace_newer_pending_submission(
-    context: Any, fake_store: Any
-) -> None:
-    for timestamp in ("5.0", "4.0"):
-        payload = _inline_submission(None, "")
-        payload["actions"][0]["action_ts"] = timestamp
-        await feedback._process_submission(payload)
-    await feedback._select_feedback_rating(_select_rating(5, timestamp="4.5"))
-    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
-    assert (saved["rating"], saved["completed"], saved["submitted_at"]) == (5, True, "5.0")
-
-
-@pytest.mark.asyncio
-async def test_retrying_completed_submit_cannot_extend_selection_cutoff(
-    context: Any, fake_store: Any
-) -> None:
-    original = _inline_submission(4, "Final comment")
-    original["actions"][0]["action_ts"] = "4.0"
-    await feedback._process_submission(original)
-    previous = dict(fake_store.values(("slack_thread_feedback", "C1"))["run-1"])
-
-    retry = _inline_submission(1, "Stale submission")
-    retry["actions"][0]["action_ts"] = "6.0"
-    await feedback._process_submission(retry)
-    await feedback._select_feedback_rating(_select_rating(5, timestamp="5.0"))
-
-    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
-    assert saved == previous
-    assert saved["submitted_at"] == "4.0"
-    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.75
-    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["comment"] == "Final comment"
 
 
 @pytest.mark.asyncio
@@ -855,7 +717,7 @@ async def test_success_completion_only_prompts_for_answered_question(
     assert schedule.await_count == int(should_ask_for_feedback)
     feedback.post_slack_ephemeral_message.assert_not_awaited()
     if should_ask_for_feedback:
-        assert schedule.await_args.kwargs["reason"] == "answer"
+        assert schedule.await_args.kwargs["answer_run_id"] == "run-1"
         assert schedule.await_args.kwargs["slack_run_id"] == "run-1"
 
 
@@ -1124,40 +986,34 @@ async def test_prompt_exception_leaves_feedback_unsent(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["activity", "completed", "dismissed", "generation"])
+@pytest.mark.parametrize("change", ["activity", "completed", "dismissed", "event"])
 async def test_scheduled_prompt_rechecks_readiness_after_channel_lookup(
     context: Any,
     fake_store: Any,
     monkeypatch: pytest.MonkeyPatch,
-    change: Literal["activity", "completed", "dismissed", "generation"],
+    change: Literal["activity", "completed", "dismissed", "event"],
 ) -> None:
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", {**context, "prompted": False})
     prompt = {
-        "thread_id": "thread-1",
-        "run_id": "run-1",
         "event_id": "answer:run-1",
-        "generation": "original",
-        "reason": "answer",
-        "due_at_ms": 301000,
+        "answer_run_id": "run-1",
         "activity_at_ms": 1000,
-        "channel_id": "C1",
-        "slack_run_id": "run-1",
-        "ready": True,
+        "status": "ready",
     }
-    fake_store.seed(("thread_feedback_prompts",), "thread-1", prompt)
+    fake_store.seed(("thread_feedback",), "thread-1", prompt)
     client = feedback.langgraph_client()
     client.threads.get.return_value["metadata"][prompt_scheduler.ACTIVITY_KEY] = 1000
     client.runs.list.return_value = [{"run_id": "run-1", "status": "success"}]
     monkeypatch.setattr(prompt_scheduler, "langgraph_client", lambda: client)
-    monkeypatch.setattr(prompt_scheduler, "_now_ms", lambda: 400000)
-    assert await prompt_scheduler.feedback_generation_is_ready("thread-1", "original")
+    monkeypatch.setattr(prompt_scheduler, "now_ms", lambda: 400000)
+    assert await prompt_scheduler.feedback_event_is_ready("thread-1", "answer:run-1")
 
     async def channel_lookup(*args: Any, **kwargs: Any) -> dict[str, bool]:
         if change == "activity":
             client.threads.get.return_value["metadata"][prompt_scheduler.ACTIVITY_KEY] = 399000
-        elif change == "generation":
+        elif change == "event":
             fake_store.seed(
-                ("thread_feedback_prompts",), "thread-1", {**prompt, "generation": "newer"}
+                ("thread_feedback",), "thread-1", {**prompt, "event_id": "answer:run-2"}
             )
         else:
             await prompt_scheduler.complete_feedback_prompt("thread-1", change)
@@ -1168,7 +1024,7 @@ async def test_scheduled_prompt_rechecks_readiness_after_channel_lookup(
     )
 
     await feedback.post_slack_feedback_prompt(
-        "thread-1", "run-1", "C1", expected_generation="original"
+        "thread-1", "run-1", "C1", expected_event_id="answer:run-1"
     )
     feedback.post_slack_ephemeral_message.assert_not_awaited()
     assert not fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"]

@@ -342,16 +342,15 @@ export function AgentThreadView({
               pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
               footer={
-                <ThreadFeedbackCard
-                  key={`${thread.id}:${session.data?.login ?? ""}`}
-                  threadId={thread.id}
-                  login={session.data?.login ?? null}
-                  isActive={
-                    isStreaming ||
-                    sendMessage.isPending ||
-                    queuedMessages.length > 0
-                  }
-                />
+                !isStreaming &&
+                !sendMessage.isPending &&
+                queuedMessages.length === 0 && (
+                  <ThreadFeedbackCard
+                    key={`${thread.id}:${session.data?.login ?? ""}`}
+                    threadId={thread.id}
+                    login={session.data?.login ?? null}
+                  />
+                )
               }
             />
           )}
