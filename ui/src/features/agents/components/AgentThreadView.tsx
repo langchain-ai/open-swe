@@ -26,7 +26,6 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
-import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -34,6 +33,7 @@ import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitA
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   useAgentSkills,
+  useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
 import {
@@ -45,14 +45,12 @@ import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 
 interface AgentThreadViewProps {
   thread: AgentThread
   autoFocusComposer?: boolean
 }
-
-const EMPTY_MESSAGES: Array<Message> = []
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
 function editedPaths(messages: Array<Message>): Array<string> {
@@ -83,14 +81,13 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-// The stream lives at the `/agents` layout (one persistent provider that
-// survives the home → thread navigation), so this view only consumes it.
 export function AgentThreadView({
   thread,
   autoFocusComposer = false,
 }: AgentThreadViewProps) {
+  const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -184,21 +181,17 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
-  const snapshotMessages =
-    thread.messages.length > 0 ? thread.messages : EMPTY_MESSAGES
-  const baseMessages = useMemo<Array<Message>>(() => {
-    if (snapshotMessages.length > 0) return snapshotMessages
-    return streamMessagesToUi(
-      stream.messages,
-      stream.toolCalls,
-      messageArrivalTimestamp
-    )
-  }, [snapshotMessages, stream.messages, stream.toolCalls])
+  const baseMessages = useMemo<Array<Message>>(
+    () =>
+      streamMessagesToUi(
+        stream.messages,
+        stream.toolCalls,
+        messageArrivalTimestamp
+      ),
+    [stream.messages, stream.toolCalls]
+  )
 
-  const isStreaming =
-    thread.status === "running" ||
-    stream.isLoading ||
-    thread.messages.length > 0
+  const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
@@ -244,10 +237,6 @@ export function AgentThreadView({
 
   return (
     <div className="flex min-w-0 flex-1">
-      <OptimisticThreadHydrationRecovery
-        threadId={thread.id}
-        enabled={thread.messages.length > 0}
-      />
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
@@ -256,9 +245,14 @@ export function AgentThreadView({
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
-          project={thread.repoFullName}
+          key={thread.id}
+          title={thread.title}
+          onRename={(title) =>
+            renameThread.mutateAsync({ threadId: thread.id, title })
+          }
           target="Cloud"
           panelCollapsed={panelCollapsed}
+          thread={thread}
         />
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
@@ -312,6 +306,7 @@ export function AgentThreadView({
             <Messages
               messages={visibleMessages}
               threadId={thread.id}
+              scrollKey={thread.id}
               showPlanArtifact={
                 thread.planStatus === "ready" || thread.planStatus === "shared"
               }

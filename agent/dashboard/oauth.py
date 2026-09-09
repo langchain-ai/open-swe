@@ -12,7 +12,7 @@ from functools import cache
 from typing import Any
 from urllib.parse import quote, urlparse
 
-import httpx
+import httpx2
 import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
@@ -495,7 +495,7 @@ def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
 async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
         raise HTTPException(500, "GitHub App OAuth not configured")
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             "https://github.com/login/oauth/access_token",
             headers={"Accept": "application/json"},
@@ -550,7 +550,7 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         u = await client.get("https://api.github.com/user", headers=headers)
         u.raise_for_status()
         user = u.json()

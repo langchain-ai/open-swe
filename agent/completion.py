@@ -190,7 +190,11 @@ async def _post_failure_reply(
         if location is not None:
             slack_text = _failure_text(status, dashboard_thread_url(thread_id), reason_code)
             return await post_slack_thread_reply(
-                location[0], location[1], slack_text, agent_thread_id=thread_id
+                location[0],
+                location[1],
+                slack_text,
+                agent_thread_id=thread_id,
+                include_trace_link=True,
             )
         return False
 

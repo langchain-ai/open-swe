@@ -2,7 +2,7 @@ import { useToolCalls } from "@langchain/react"
 import { Check, Loader2, X } from "lucide-react"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 
 /**
  * Live status for a single subagent, read straight from the SDK's scoped
@@ -21,7 +21,7 @@ import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamPr
  * the agents layout provider.
  */
 export function SubagentActivity({ namespace }: { namespace: Array<string> }) {
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
   const toolCalls = useToolCalls(stream, { namespace })
 
   const current = toolCalls[toolCalls.length - 1]

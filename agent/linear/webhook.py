@@ -6,7 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from typing import Any, cast
 
-import httpx
+import httpx2
 from langchain_core.messages.content import create_text_block
 
 from agent.input_messages import (
@@ -210,7 +210,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         common.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
         common.logger.debug("Image URLs: %s", image_urls)
 
-        async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, client)
                 if image_block:

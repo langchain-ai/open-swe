@@ -5,7 +5,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-import httpx
+import httpx2
 
 from agent.github.http import (
     GITHUB_API_BASE,
@@ -105,20 +105,20 @@ def _live_state(pull: Mapping[str, Any]) -> str | None:
 
 
 async def _fetch_pull_request(
-    client: httpx.AsyncClient, owner: str, repo: str, number: int
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> dict[str, Any] | None:
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}"
     try:
         response = await github_request(client, "GET", url)
         response.raise_for_status()
         payload = response.json()
-    except httpx.HTTPError, ValueError:
+    except httpx2.HTTPError, ValueError:
         return None
     return payload if isinstance(payload, dict) else None
 
 
 async def _fetch_check_runs(
-    client: httpx.AsyncClient, owner: str, repo: str, sha: str
+    client: httpx2.AsyncClient, owner: str, repo: str, sha: str
 ) -> list[dict[str, Any]] | None:
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/check-runs"
     runs: list[dict[str, Any]] = []
@@ -140,12 +140,12 @@ async def _fetch_check_runs(
             if len(raw_runs) < 100:
                 return runs
             page += 1
-    except httpx.HTTPError, ValueError:
+    except httpx2.HTTPError, ValueError:
         return None
 
 
 async def _fetch_commit_statuses(
-    client: httpx.AsyncClient, owner: str, repo: str, sha: str
+    client: httpx2.AsyncClient, owner: str, repo: str, sha: str
 ) -> list[dict[str, Any]] | None:
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/status"
     statuses: list[dict[str, Any]] = []
@@ -167,7 +167,7 @@ async def _fetch_commit_statuses(
             if len(raw_statuses) < 100:
                 break
             page += 1
-    except httpx.HTTPError, ValueError:
+    except httpx2.HTTPError, ValueError:
         return None
     latest: list[dict[str, Any]] = []
     contexts: set[str] = set()
@@ -227,7 +227,7 @@ def _normalize_checks(
 
 
 async def _fetch_unresolved_review_threads(
-    client: httpx.AsyncClient, owner: str, repo: str, number: int
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> list[dict[str, Any]] | None:
     unresolved: list[dict[str, Any]] = []
     cursor: str | None = None
@@ -293,11 +293,11 @@ async def _fetch_unresolved_review_threads(
                 return None
             seen_cursors.add(next_cursor)
             cursor = next_cursor
-    except httpx.HTTPError, ValueError:
+    except httpx2.HTTPError, ValueError:
         return None
 
 
-async def _pull_request_status(client: httpx.AsyncClient, record: object) -> dict[str, Any]:
+async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> dict[str, Any]:
     identity = _pull_request_identity(record)
     if identity is None:
         return _unavailable_pull_request(record)

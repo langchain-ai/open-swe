@@ -11,20 +11,11 @@ import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
-
-/** Construct the message content for the LangGraph run. */
-function messageContent(vars: SendAgentMessageVariables) {
-  const text = vars.content.trim()
-  const imageBlocks =
-    vars.images?.map((image) => ({
-      type: "image",
-      base64: image.base64,
-      mime_type: image.mimeType,
-      ...(image.fileName ? { file_name: image.fileName } : {}),
-    })) ?? []
-  return [...imageBlocks, ...(text ? [{ type: "text", text }] : [])]
-}
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  modelConfigurable,
+  promptMessage,
+} from "@/features/agents/lib/stream/promptMessage"
 
 function upsertMessage<T extends QueuedThreadMessage>(
   messages: Array<T> | undefined,
@@ -74,7 +65,7 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
 /** Submit user messages through the active-run queue or a new stream run. */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
@@ -136,27 +127,23 @@ export function useSubmitAgentMessage(threadId: string) {
         }
       }
 
-      const configurable: Record<string, unknown> = {}
-      if (vars.model_id && vars.effort) {
-        configurable.agent_model_id = vars.model_id
-        configurable.agent_effort = vars.effort
-      }
+      const configurable: Record<string, unknown> = modelConfigurable({
+        modelId: vars.model_id,
+        effort: vars.effort,
+      })
       if (vars.plan_mode) configurable.plan_mode = true
       const config =
         Object.keys(configurable).length > 0 ? { configurable } : undefined
 
-      const submission = stream.submit(
-        {
-          messages: [{ id, type: "human", content: messageContent(vars) }],
-        },
-        { config }
-      )
-      void submission.catch(() => {
-        updateThread((thread) =>
-          setPendingMessage(thread, { ...pendingMessage, status: "failed" })
-        )
-        setAgentThreadStatus(queryClient, threadId, "error")
-      })
+      const message = promptMessage(vars.content, vars.images)
+      void stream
+        .submit({ messages: [{ ...message, id }] }, { config })
+        .catch(() => {
+          updateThread((thread) =>
+            setPendingMessage(thread, { ...pendingMessage, status: "failed" })
+          )
+          setAgentThreadStatus(queryClient, threadId, "error")
+        })
     },
     onSuccess: () => {
       setAgentThreadStatus(queryClient, threadId, "running")

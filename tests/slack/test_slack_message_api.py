@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 
 from agent.slack import client as slack_utils
@@ -42,7 +42,7 @@ async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatc
     client_cm = _async_client_cm(_ok_response())
     chunks = [{"type": "task_update", "id": "step-1", "title": "Reading", "status": "in_progress"}]
 
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         started = await slack_utils.start_slack_stream(
             "C1", "1.0", chunks, recipient_user_id="U1", recipient_team_id="T1"
         )
@@ -76,7 +76,7 @@ async def test_code_channel_stream_is_top_level(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
     client_cm = _async_client_cm(_ok_response())
 
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         await slack_utils.start_slack_stream("C1", "0", [])
 
     assert "thread_ts" not in client_cm.post.await_args.kwargs["json"]
@@ -90,7 +90,7 @@ async def test_slack_stream_rate_limit_preserves_retry_after(
     client_cm = _async_client_cm(_rate_limited_response(retry_after="30"))
 
     with (
-        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm),
         pytest.raises(slack_utils.SlackStreamError) as raised,
     ):
         await slack_utils.append_slack_stream("C1", "1.0", [])
@@ -106,7 +106,7 @@ async def test_update_slack_message_calls_chat_update(
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.update_slack_message(
             "C1", "1.1", "moved", unfurl_links=False, unfurl_media=False
         )
@@ -130,7 +130,7 @@ async def test_post_slack_thread_reply_with_ts_returns_missing_token_error(
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "")
 
     client_cm = _async_client_cm(_ok_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
 
     assert result == (None, "missing_slack_bot_token")
@@ -144,7 +144,7 @@ async def test_post_slack_thread_reply_with_ts_returns_slack_error(
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("msg_too_long"))
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
 
     assert result == (None, "msg_too_long")
@@ -157,7 +157,7 @@ async def test_post_slack_thread_reply_with_ts_returns_rate_limited_with_retry_a
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_rate_limited_response(retry_after="30"))
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
 
     assert result == (None, "rate_limited: 30")
@@ -170,7 +170,7 @@ async def test_post_slack_thread_reply_with_ts_returns_rate_limited_without_retr
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_rate_limited_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
 
     assert result == (None, "rate_limited")
@@ -183,7 +183,7 @@ async def test_post_slack_thread_reply_with_ts_normalizes_ratelimited_body_error
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("ratelimited"))
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
 
     assert result == (None, "rate_limited")
@@ -196,8 +196,8 @@ async def test_post_slack_thread_reply_with_ts_returns_http_error(
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
-    client_cm.post = AsyncMock(side_effect=slack_utils.httpx.ConnectError("boom"))
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    client_cm.post = AsyncMock(side_effect=slack_utils.httpx2.ConnectError("boom"))
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
 
     assert result == (None, "http_error: ConnectError")
@@ -213,7 +213,7 @@ async def test_post_slack_thread_reply_with_ts_sends_blocks(
 
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Pick"}}]
     client_cm = _async_client_cm(_ok_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts(
             "C1", "1.0", "Pick", blocks=blocks, agent_thread_id="mapped-thread"
         )
@@ -235,7 +235,7 @@ async def test_post_slack_top_level_message_with_ts_omits_thread_ts(
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_top_level_message_with_ts("C1", "hello")
 
     assert result == ("1.0", None)
@@ -252,7 +252,7 @@ async def test_post_slack_top_level_message_with_ts_returns_slack_error(
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("msg_too_long"))
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_top_level_message_with_ts("C1", "hello")
 
     assert result == (None, "msg_too_long")
@@ -264,7 +264,7 @@ async def test_post_slack_thread_reply_preserves_bool_return_on_error(
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("channel_not_found"))
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         ok = await slack_utils.post_slack_thread_reply("C1", "1.0", "hello")
 
     assert ok is False
@@ -315,15 +315,15 @@ async def test_upload_slack_thread_file_completes_external_upload(
     client_cm = AsyncMock()
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(side_effect=[ticket, complete])
-    uploaded = httpx.Response(
+    uploaded = httpx2.Response(
         200,
-        request=httpx.Request("POST", "https://files.slack.com"),
+        request=httpx2.Request("POST", "https://files.slack.com"),
         text="OK - 8",
     )
     safe_request = AsyncMock(return_value=(uploaded, None))
     monkeypatch.setattr(slack_utils, "request_with_safe_redirects", safe_request)
 
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.upload_slack_thread_file(
             "C1", "1.0", "plan.html", b"<html />", title="Plan", initial_comment="Preview"
         )
@@ -364,7 +364,7 @@ async def test_upload_slack_thread_file_handles_malformed_response(
     ticket.json.side_effect = ValueError("invalid JSON")
     client_cm = _async_client_cm(ticket)
 
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
 
     assert result == (None, "invalid_slack_response")
@@ -387,7 +387,7 @@ async def test_upload_slack_thread_file_rejects_unsafe_upload_url(
     safe_request = AsyncMock(return_value=(None, blocked))
     monkeypatch.setattr(slack_utils, "request_with_safe_redirects", safe_request)
 
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
         result = await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
 
     assert result == (None, "unsafe_upload_url")

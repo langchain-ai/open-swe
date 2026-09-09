@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
 from agent.config import ENV
@@ -88,7 +88,7 @@ def verify_team(identity: SlackIdentity) -> None:
 
 async def exchange_slack_code(code: str, redirect_uri: str) -> str:
     """Exchange an authorization code for a user access token."""
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             _TOKEN_URL,
             data={
@@ -108,7 +108,7 @@ async def exchange_slack_code(code: str, redirect_uri: str) -> str:
 
 async def fetch_slack_identity(access_token: str) -> SlackIdentity:
     """Resolve the signed-in Slack user's verified identity."""
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.get(
             _USERINFO_URL,
             headers={"Authorization": f"Bearer {access_token}"},
