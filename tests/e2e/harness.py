@@ -3,7 +3,8 @@
 Mounts, on top of the REAL ``agent.webapp`` app:
   - fake GitHub REST API  (/fake-gh/...)   the real open_pull_request hits this
   - fake Slack API         (/fake-slack/...) the real slack code hits this
-  - mock UIs               (/mock/slack, /mock/github) what the user/Playwright sees
+  - fake Linear GraphQL + OAuth (/fake-linear/...) the real Linear client hits this
+  - mock UIs               (/mock/slack, /mock/github, /mock/linear) what the user sees
   - control + compose      (/control/*, /mock/slack/send) the test driver
 
 Nothing here touches agent logic — it only stands in for the SaaS boundaries
@@ -14,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -37,6 +39,11 @@ from e2e_env import (  # noqa: E402
     BOT_USER_ID,
     DEMO_CHANNEL,
     HUMAN_USER,
+    LINEAR_ACCESS_TOKEN,
+    LINEAR_APP_USER_ID,
+    LINEAR_ORG_ID,
+    LINEAR_TASK_MARKER,
+    LINEAR_TEAM,
     REPO_ROOT,
     TEST_USERS,
 )
@@ -48,6 +55,7 @@ from fastapi.responses import (  # noqa: E402
     RedirectResponse,
     Response,
 )
+from pydantic import BaseModel, Field  # noqa: E402
 
 # Slack-user directory the fake ``users.info`` resolves: the default sender used
 # by the automated tests plus the named manual-test users.
@@ -63,11 +71,14 @@ from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from agent.linear.schema import ActionContent, AgentActivityContent  # noqa: E402
 from agent.slack.client import lookup_slack_thread_id  # noqa: E402
+from agent.thread_ids import linear_issue_thread_id  # noqa: E402
 from agent.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
+LINEAR_WEBHOOK_SECRET = os.environ["LINEAR_WEBHOOK_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
 
 CURRENT_THREAD: dict[str, str | None] = {"channel": DEMO_CHANNEL, "thread_ts": None}
@@ -907,6 +918,474 @@ async def slack_archive_code_channel(request: Request) -> JSONResponse:
 @app.get("/fake-slack/chat.getPermalink")
 async def slack_get_permalink(channel: str = "", message_ts: str = "") -> JSONResponse:  # noqa: ARG001
     return _ok({"permalink": f"{BASE_URL}/mock/slack"})
+
+
+# --- fake Linear (the real Linear client + auth hit this) ------------------
+class _LinearGraphQLError(Exception):
+    """A GraphQL-level error, so an operation we forgot to mock fails loudly."""
+
+
+class _GraphQLRequest(BaseModel):
+    query: str = ""
+    variables: dict[str, Any] = {}
+
+
+class _IdVariables(BaseModel):
+    id: str
+
+
+class _CommentCreateVariables(BaseModel):
+    issue_id: str = Field(alias="issueId")
+    body: str = ""
+    parent_id: str | None = Field(default=None, alias="parentId")
+
+
+class _ReactionCreateVariables(BaseModel):
+    comment_id: str = Field(alias="commentId")
+    emoji: str = ""
+
+
+class _AgentActivityInput(BaseModel):
+    agent_session_id: str = Field(alias="agentSessionId")
+    content: AgentActivityContent
+    ephemeral: bool = False
+    signal: str | None = None
+
+
+class _AgentActivityVariables(BaseModel):
+    input: _AgentActivityInput
+
+
+class _ExternalUrlVariables(BaseModel):
+    id: str
+    url: str
+
+
+_OPERATION_RE = re.compile(r"\b(?:query|mutation)\s+(\w+)")
+
+
+def _linear_comment_json(comment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": comment["id"],
+        "body": comment["body"],
+        "createdAt": comment["created_at"],
+        "user": comment["user"],
+        "botActor": {"id": LINEAR_APP_USER_ID} if comment["bot"] else None,
+    }
+
+
+def _linear_issue_json(issue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": issue["id"],
+        "identifier": issue["identifier"],
+        "title": issue["title"],
+        "description": issue["description"],
+        "url": issue["url"],
+        "team": issue["team"],
+        "project": None,
+        "creator": issue["creator"],
+        "assignee": None,
+        "comments": {"nodes": [_linear_comment_json(item) for item in issue["comments"]]},
+    }
+
+
+def _linear_issue_summary_json(issue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": issue["id"],
+        "identifier": issue["identifier"],
+        "title": issue["title"],
+        "description": issue["description"],
+        "priority": 0,
+        "priorityLabel": "No priority",
+        "state": {"id": "state-todo", "name": "Todo", "type": "unstarted"},
+        "assignee": None,
+        "team": issue["team"],
+        "project": None,
+        "labels": {"nodes": []},
+        "createdAt": issue["created_at"],
+        "updatedAt": issue["created_at"],
+        "url": issue["url"],
+    }
+
+
+def _require_linear_issue(variables: dict[str, Any]) -> dict[str, Any]:
+    issue = fakes.linear_issue(_IdVariables.model_validate(variables).id)
+    if issue is None:
+        raise _LinearGraphQLError("Entity not found: Issue")
+    return issue
+
+
+def _linear_create_comment(variables: dict[str, Any]) -> dict[str, Any]:
+    parsed = _CommentCreateVariables.model_validate(variables)
+    comment = fakes.add_linear_comment(
+        parsed.issue_id,
+        body=parsed.body,
+        user={"id": LINEAR_APP_USER_ID, "name": "Open SWE", "email": ""},
+        bot=True,
+    )
+    if comment is None:
+        raise _LinearGraphQLError("Entity not found: Issue")
+    return {"commentCreate": {"success": True, "comment": {"id": comment["id"]}}}
+
+
+def _linear_create_reaction(variables: dict[str, Any]) -> dict[str, Any]:
+    parsed = _ReactionCreateVariables.model_validate(variables)
+    comment = fakes.linear_comment(parsed.comment_id)
+    if comment is None:
+        raise _LinearGraphQLError("Entity not found: Comment")
+    comment["reactions"].append(parsed.emoji)
+    return {"reactionCreate": {"success": True}}
+
+
+def _linear_create_activity(variables: dict[str, Any]) -> dict[str, Any]:
+    activity = _AgentActivityVariables.model_validate(variables).input
+    content = activity.content
+    fields: dict[str, Any] = (
+        {"action": content.action, "parameter": content.parameter, "result": content.result}
+        if isinstance(content, ActionContent)
+        else {"body": content.body}
+    )
+    stored = fakes.add_linear_activity(
+        activity.agent_session_id,
+        activity_type=content.type,
+        ephemeral=activity.ephemeral,
+        signal=activity.signal,
+        **fields,
+    )
+    if stored is None:
+        raise _LinearGraphQLError("Entity not found: AgentSession")
+    return {"agentActivityCreate": {"success": True}}
+
+
+def _linear_update_external_url(variables: dict[str, Any]) -> dict[str, Any]:
+    parsed = _ExternalUrlVariables.model_validate(variables)
+    if fakes.set_linear_session_external_link(parsed.id, parsed.url) is None:
+        raise _LinearGraphQLError("Entity not found: AgentSession")
+    return {"agentSessionUpdateExternalUrl": {"success": True}}
+
+
+def _linear_issue_search() -> dict[str, Any]:
+    nodes = [_linear_issue_summary_json(issue) for issue in fakes.LINEAR_ISSUES.values()]
+    return {
+        "nodes": nodes,
+        "totalCount": len(nodes),
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+
+
+def _linear_operation(operation: str, variables: dict[str, Any]) -> dict[str, Any]:
+    match operation:
+        case "Viewer":
+            return {"viewer": {"id": LINEAR_APP_USER_ID}}
+        case "IssueDetails":
+            return {"issue": _linear_issue_json(_require_linear_issue(variables))}
+        case "GetIssue":
+            return {"issue": _linear_issue_summary_json(_require_linear_issue(variables))}
+        case "GetIssueComments":
+            issue = _require_linear_issue(variables)
+            return {
+                "issue": {
+                    "comments": {
+                        "nodes": [_linear_comment_json(item) for item in issue["comments"]]
+                    }
+                }
+            }
+        case "GetIssueParticipants":
+            issue = _require_linear_issue(variables)
+            return {
+                "issue": {
+                    "creator": {"email": issue["creator"]["email"]},
+                    "assignee": None,
+                    "comments": {
+                        "nodes": [
+                            {"user": {"email": item["user"].get("email")}}
+                            for item in issue["comments"]
+                        ]
+                    },
+                }
+            }
+        case "SearchIssues":
+            return {"searchIssues": _linear_issue_search()}
+        case "FilterIssues":
+            return {"issues": _linear_issue_search()}
+        case "Teams":
+            return {"teams": {"nodes": [{**LINEAR_TEAM, "description": "E2E team"}]}}
+        case "CommentCreate":
+            return _linear_create_comment(variables)
+        case "ReactionCreate":
+            return _linear_create_reaction(variables)
+        case "AgentActivityCreate":
+            return _linear_create_activity(variables)
+        case "AgentSessionUpdateExternalUrl":
+            return _linear_update_external_url(variables)
+    raise _LinearGraphQLError(f"fake Linear has no mock for operation '{operation}'")
+
+
+@app.post("/fake-linear/oauth/token")
+async def fake_linear_token(request: Request) -> JSONResponse:
+    """Linear's OAuth token endpoint, for the app-actor (client_credentials) grant."""
+    form = await request.form()
+    fakes.record_linear_token_request({key: str(value) for key, value in form.items()})
+    return JSONResponse(
+        {
+            "access_token": LINEAR_ACCESS_TOKEN,
+            "token_type": "Bearer",
+            "expires_in": 2591999,
+            "scope": str(form.get("scope") or ""),
+        }
+    )
+
+
+@app.post("/fake-linear/graphql")
+async def fake_linear_graphql(request: Request) -> JSONResponse:
+    if request.headers.get("Authorization") != f"Bearer {LINEAR_ACCESS_TOKEN}":
+        return JSONResponse({"errors": [{"message": "Authentication required"}]}, status_code=401)
+    parsed = _GraphQLRequest.model_validate(await request.json())
+    match = _OPERATION_RE.search(parsed.query)
+    operation = match.group(1) if match else ("Teams" if "teams" in parsed.query else "")
+    try:
+        return JSONResponse({"data": _linear_operation(operation, parsed.variables)})
+    except _LinearGraphQLError as error:
+        return JSONResponse({"errors": [{"message": str(error)}]})
+
+
+# --- Linear control endpoints (the test driver) ----------------------------
+_LINEAR_ISSUE_TITLE = "Add a greet() helper"
+_LINEAR_ISSUE_DESCRIPTION = (
+    "The demo repo has no greeting helper. Please add `greet(name)` and open a pull "
+    f"request for it. {LINEAR_TASK_MARKER}"
+)
+_LINEAR_MENTION = (
+    f"@open-swe please add a `greet()` helper and open a pull request. {LINEAR_TASK_MARKER}"
+)
+
+
+class _WebhookAck(BaseModel):
+    status: str = ""
+    reason: str = ""
+
+
+class LinearDelegateBody(BaseModel):
+    issue_title: str = _LINEAR_ISSUE_TITLE
+    issue_description: str = _LINEAR_ISSUE_DESCRIPTION
+    prompt: str | None = None
+    delivery_id: str | None = None
+    webhook_timestamp: int | None = None
+
+
+class LinearPromptBody(BaseModel):
+    session_id: str
+    body: str
+
+
+class LinearCommentBody(BaseModel):
+    body: str = _LINEAR_MENTION
+    issue_id: str = ""
+    issue_title: str = _LINEAR_ISSUE_TITLE
+    issue_description: str = _LINEAR_ISSUE_DESCRIPTION
+    user_email: str = ""
+
+
+def _linear_now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _linear_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+async def _deliver_linear_event(
+    payload: dict[str, Any], *, delivery_id: str
+) -> tuple[int, _WebhookAck]:
+    """POST a signed delivery to the real /webhooks/linear route, over real HTTP.
+
+    Not the in-process ASGI transport the Slack helper uses: this route hands its
+    work to a FastAPI background task, which that transport would run before
+    returning — so a delegate call would block for the whole agent run.
+    """
+    raw = json.dumps(payload).encode()
+    headers = {
+        "Linear-Signature": hmac.new(
+            LINEAR_WEBHOOK_SECRET.encode(), raw, hashlib.sha256
+        ).hexdigest(),
+        "Linear-Delivery": delivery_id,
+        "Content-Type": "application/json",
+    }
+    async with httpx2.AsyncClient(base_url=BASE_URL, timeout=30) as client:
+        response = await client.post("/webhooks/linear", content=raw, headers=headers)
+    return response.status_code, _WebhookAck.model_validate(response.json())
+
+
+def _linear_session_payload(session: dict[str, Any], issue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": session["id"],
+        "status": session["status"],
+        "createdAt": session["created_at"],
+        "appUserId": LINEAR_APP_USER_ID,
+        "creator": dict(fakes.LINEAR_REQUESTER),
+        "issue": _linear_issue_json(issue),
+    }
+
+
+def _linear_ack(
+    status_code: int, ack: _WebhookAck, extra: dict[str, Any] | None = None
+) -> JSONResponse:
+    return JSONResponse(
+        {
+            "status": ack.status or "rejected",
+            "reason": ack.reason,
+            "webhook_status": status_code,
+            **(extra or {}),
+        }
+    )
+
+
+@app.post("/control/linear/delegate")
+async def control_linear_delegate(body: LinearDelegateBody) -> JSONResponse:
+    """Delegate an issue to Open SWE, the way Linear's own "assign to agent" does."""
+    issue = fakes.create_linear_issue(title=body.issue_title, description=body.issue_description)
+    session = fakes.create_linear_session(issue["id"])
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "created",
+        "createdAt": _linear_iso(),
+        "organizationId": LINEAR_ORG_ID,
+        "webhookTimestamp": body.webhook_timestamp or _linear_now_ms(),
+        "agentSession": _linear_session_payload(session, issue),
+        "promptContext": body.prompt or f"{issue['title']}\n\n{issue['description']}",
+        "guidance": [],
+        "previousComments": [],
+    }
+    status_code, ack = await _deliver_linear_event(
+        payload, delivery_id=body.delivery_id or str(uuid.uuid4())
+    )
+    return _linear_ack(
+        status_code,
+        ack,
+        {
+            "session_id": session["id"],
+            "issue_id": issue["id"],
+            "thread_id": linear_issue_thread_id(issue["id"]),
+        },
+    )
+
+
+@app.post("/control/linear/prompt")
+async def control_linear_prompt(body: LinearPromptBody) -> JSONResponse:
+    """Send a follow-up prompt into an existing agent session."""
+    session = fakes.linear_session(body.session_id)
+    if session is None:
+        raise HTTPException(404, "Agent session not found")
+    issue = fakes.linear_issue(session["issue_id"])
+    if issue is None:
+        raise HTTPException(404, "Issue not found")
+    activity = fakes.add_linear_activity(session["id"], activity_type="prompt", body=body.body)
+    assert activity is not None
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "prompted",
+        "createdAt": _linear_iso(),
+        "organizationId": LINEAR_ORG_ID,
+        "webhookTimestamp": _linear_now_ms(),
+        "agentSession": _linear_session_payload(session, issue),
+        "agentActivity": {
+            "id": activity["id"],
+            "content": {"type": "prompt", "body": body.body},
+            "createdAt": activity["created_at"],
+            "user": dict(fakes.LINEAR_REQUESTER),
+        },
+        "guidance": [],
+        "previousComments": [],
+    }
+    status_code, ack = await _deliver_linear_event(payload, delivery_id=str(uuid.uuid4()))
+    return _linear_ack(status_code, ack, {"activity_id": activity["id"]})
+
+
+@app.post("/control/linear/comment")
+async def control_linear_comment(body: LinearCommentBody) -> JSONResponse:
+    """Mention Open SWE in an issue comment — the trigger that predates sessions."""
+    user = {**fakes.LINEAR_REQUESTER, **({"email": body.user_email} if body.user_email else {})}
+    issue = (
+        fakes.linear_issue(body.issue_id)
+        if body.issue_id
+        else fakes.create_linear_issue(title=body.issue_title, description=body.issue_description)
+    )
+    if issue is None:
+        raise HTTPException(404, "Issue not found")
+    comment = fakes.add_linear_comment(issue["id"], body=body.body, user=user)
+    assert comment is not None
+    payload = {
+        "type": "Comment",
+        "action": "create",
+        "createdAt": _linear_iso(),
+        "organizationId": LINEAR_ORG_ID,
+        "webhookTimestamp": _linear_now_ms(),
+        "data": {
+            "id": comment["id"],
+            "body": comment["body"],
+            "createdAt": comment["created_at"],
+            "issueId": issue["id"],
+            "issue": _linear_issue_json(issue),
+            "user": user,
+        },
+        "actor": {"id": user["id"], "type": "user", "name": user["name"], "email": user["email"]},
+    }
+    status_code, ack = await _deliver_linear_event(payload, delivery_id=str(uuid.uuid4()))
+    return _linear_ack(
+        status_code,
+        ack,
+        {
+            "comment_id": comment["id"],
+            "issue_id": issue["id"],
+            "thread_id": linear_issue_thread_id(issue["id"]),
+        },
+    )
+
+
+@app.get("/mock/linear/data")
+async def mock_linear_data() -> JSONResponse:
+    return JSONResponse(
+        {
+            "issues": [
+                {
+                    "id": issue["id"],
+                    "identifier": issue["identifier"],
+                    "title": issue["title"],
+                    "description": issue["description"],
+                    "url": issue["url"],
+                    "team": issue["team"]["name"],
+                    "creator": issue["creator"]["name"],
+                    "comments": [
+                        {
+                            "id": item["id"],
+                            "body": item["body"],
+                            "author": item["user"]["name"],
+                            "bot": item["bot"],
+                            "reactions": item["reactions"],
+                        }
+                        for item in issue["comments"]
+                    ],
+                    "sessions": [
+                        {
+                            "id": session["id"],
+                            "status": session["status"],
+                            "external_link": session["external_link"],
+                            "activities": session["activities"],
+                        }
+                        for session in fakes.LINEAR_SESSIONS.values()
+                        if session["issue_id"] == issue["id"]
+                    ],
+                }
+                for issue in fakes.LINEAR_ISSUES.values()
+            ],
+            "token_requests": fakes.LINEAR_TOKEN_REQUESTS,
+        }
+    )
+
+
+@app.get("/mock/linear", response_class=HTMLResponse)
+async def mock_linear_page() -> str:
+    return (STATIC_DIR / "linear.html").read_text()
 
 
 # A dashboard build under ui/.output puts the UI catch-all on the app before the

@@ -1,5 +1,6 @@
 import socket
 from typing import Any, cast
+from unittest.mock import AsyncMock
 from urllib.parse import urlparse
 
 import httpx2
@@ -170,6 +171,7 @@ def _patch_image_dns(monkeypatch: Any) -> None:
             "example.com",
             "files.slack.com",
             "private.files.slack.com",
+            "uploads.linear.app",
         }
         ip = "93.184.216.34" if host in public_hosts else host
         return [_addr_info(ip, port)]
@@ -374,3 +376,29 @@ async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch
     assert all(
         call["headers"]["Authorization"] == "Bearer test-slack-token" for call in client.calls
     )
+
+
+async def test_fetch_image_block_authenticates_linear_uploads_with_an_app_token(
+    monkeypatch: Any,
+) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setattr(
+        multimodal, "linear_authorization_header", AsyncMock(return_value="Bearer app-token")
+    )
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png-bytes",
+        )
+
+    client = FakeImageClient(responder)
+
+    result = await fetch_image_block(
+        "https://uploads.linear.app/a/b.png", cast(httpx2.AsyncClient, client)
+    )
+
+    assert result is not None
+    assert client.calls[0]["headers"]["Authorization"] == "Bearer app-token"

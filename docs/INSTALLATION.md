@@ -246,11 +246,16 @@ Open a section when you want that feature; everything above keeps working withou
 <details id="linear">
 <summary><strong>Linear</strong></summary>
 
-Open SWE listens for Linear comments that mention `@openswe`.
+Open SWE runs in Linear as an agent: @-mention it on an issue or delegate the issue to it, and Linear opens an **agent session** that Open SWE streams its thoughts, its actions, and a final response carrying the pull request link into. Follow-up messages typed into the session are delivered to the running thread, and the session links out to the dashboard thread. A comment mentioning one of the deployment's handles (`@openswe`, `@open-swe`) also still starts a run and answers with a plain comment.
 
-1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** only **Comments → Create**.
-2. **Settings → API → Personal API keys → New API key** with **All access**, saved as `LINEAR_API_KEY`.
-3. Map Linear teams and projects to repositories in `agent/linear/team_repo_map.py`:
+Agent sessions require the OAuth application below; the API key path further down is a fallback for the comment trigger alone. Creating and installing the application needs workspace admin permission.
+
+1. **Settings → API → Applications → Create new**: name it `Open SWE` and give it any redirect URL — the form requires one, the `client_credentials` grant does not use it. Save the **Client ID** as `LINEAR_OAUTH_CLIENT_ID` and the **Client secret** as `LINEAR_OAUTH_CLIENT_SECRET`. Open SWE mints an app-actor token from them, valid for 30 days and re-minted automatically on a 401, so comments and session activities appear as the app rather than as a person.
+2. Allow the application the `app:assignable` and `app:mentionable` scopes, which is what lets it be delegated issues and @-mentioned. `LINEAR_OAUTH_SCOPES` overrides the scopes Open SWE requests; the default is `read,write,app:assignable,app:mentionable`. The `admin` scope is not available to app actors.
+3. In the application's webhook settings, enable webhooks with the URL `<URL>/webhooks/linear`, tick **Agent session events**, and under **Data change events** tick **Comments** for the mention trigger. Save the signing secret as `LINEAR_WEBHOOK_SECRET`.
+4. Install the application in the workspace.
+
+**Repository routing.** Open SWE resolves the repository for an issue in this order: an `owner/name` (a `repo:owner/name` token or a GitHub URL) in the triggering message; the requesting user's dashboard default repository, matched by email; a team or workspace **guidance** rule that names `owner/name`, set under the team's **Agents → guidance** settings; the `LINEAR_TEAM_TO_REPO` map in `agent/linear/team_repo_map.py`, by team name and then project name; the team-wide default repository. Guidance rules are the only step that needs no deploy, so prefer them for pinning a team to a repository.
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -265,7 +270,13 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
-A `repo:owner/name` token or GitHub URL in the comment overrides the mapping. **Verify:** comment `@openswe what files are in this repo?` on an issue in a mapped team.
+When nothing resolves, Open SWE answers in the session with an error naming what to set.
+
+**Timing.** Linear expects the webhook answered within 5 seconds and the first session activity within 10; Open SWE does both on its own. A deployment that is cold-starting — scale-to-zero hosting, for instance — can miss those windows, and Linear then shows the session as unresponsive.
+
+**API key instead of an application (legacy).** Without an OAuth application, Open SWE can act with a personal API key: **Settings → API → Personal API keys → New API key** with **All access**, saved as `LINEAR_API_KEY`, plus a webhook under **Settings → API → Webhooks → New webhook** with the same URL, a secret from `openssl rand -hex 32` as `LINEAR_WEBHOOK_SECRET`, and only **Comments → Create** under **Data change events**. This supports the comment trigger only — no agent sessions and no delegation — and every comment appears as the key's owner.
+
+**Verify:** @-mention the app on an issue in a routed team, or delegate the issue to it. Within a few seconds the session should show activity, and it ends with the pull request link.
 
 </details>
 
@@ -341,8 +352,9 @@ A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_O
 ### Webhook not receiving events
 
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear.
+- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Agent session events and Comments → Create for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Linear deliveries are also rejected with 401 when their `webhookTimestamp` is more than 60 seconds old, so the deployment's clock has to be roughly right; a delivery id Open SWE has already seen is dropped as a duplicate.
 
 ### GitHub authentication errors
 
@@ -371,7 +383,7 @@ A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_O
 ### Agent not responding to comments
 
 - GitHub: the comment must contain a configured handle (`@openswe` by default, case-insensitive), and the commenter must have signed in to the dashboard once; otherwise the log says `No email mapping for GitHub user`.
-- Linear: the comment must contain the handle; Slack: the bot must be in the channel and `@`-mentioned.
+- Linear: agent sessions need `LINEAR_OAUTH_CLIENT_ID` / `LINEAR_OAUTH_CLIENT_SECRET` and the **Agent session events** webhook; with only `LINEAR_API_KEY` the comment must contain the handle. Slack: the bot must be in the channel and `@`-mentioned.
 - Check the server log for webhook processing errors.
 
 ### Token encryption errors

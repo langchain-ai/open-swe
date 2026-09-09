@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock Linear</title>
+    <style>
+      :root { color-scheme: light; font-family: "Inter var", system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: #f7f8f8; color: #1f2023; }
+      .app { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+      .sidebar { background: #fbfbfb; border-right: 1px solid #e6e6e6; padding: 18px 12px; }
+      .workspace { padding: 0 10px 14px; border-bottom: 1px solid #e6e6e6; font-size: 15px; font-weight: 700; }
+      .section-label { margin: 20px 10px 8px; color: #8a8f98; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+      .issue-link { width: 100%; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; color: #3c4149; text-align: left; font: inherit; cursor: pointer; }
+      .issue-link:hover, .issue-link.active { background: #eceef1; }
+      .issue-link .key { color: #8a8f98; margin-right: 6px; font-variant-numeric: tabular-nums; }
+      main { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; background: #fff; }
+      header { padding: 16px 24px 12px; border-bottom: 1px solid #e6e6e6; }
+      h1 { margin: 0 0 6px; font-size: 18px; }
+      .meta { color: #6b7076; font-size: 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+      .badge { border: 1px solid #e0e0e0; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 700; text-transform: capitalize; color: #5e6ad2; }
+      .badge.complete { color: #0f7b45; border-color: #b6e3c9; background: #f0faf4; }
+      .badge.error { color: #b3241d; border-color: #f0c0bd; background: #fdf3f2; }
+      .badge.awaitingInput { color: #9a6700; border-color: #eedc9a; background: #fdf9ef; }
+      .content { padding: 18px 24px 28px; overflow-y: auto; }
+      .empty { color: #8a8f98; text-align: center; margin-top: 80px; }
+      section { margin-bottom: 26px; }
+      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #8a8f98; margin: 0 0 10px; }
+      .description { white-space: pre-wrap; line-height: 1.5; font-size: 13px; color: #3c4149; }
+      .session { border: 1px solid #e6e6e6; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+      .session-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+      .session-id { color: #8a8f98; font-size: 11px; font-family: ui-monospace, monospace; }
+      .activity { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid #f1f1f1; }
+      .activity:first-of-type { border-top: 0; }
+      .kind { border-radius: 5px; padding: 2px 7px; background: #eceef1; color: #3c4149; font-size: 11px; font-weight: 700; height: fit-content; text-align: center; }
+      .kind.thought { background: #eef0fb; color: #5e6ad2; }
+      .kind.action { background: #f2f0ff; color: #6c4fd8; }
+      .kind.response { background: #f0faf4; color: #0f7b45; }
+      .kind.error { background: #fdf3f2; color: #b3241d; }
+      .activity-body { white-space: pre-wrap; line-height: 1.5; font-size: 13px; }
+      .activity-note { color: #8a8f98; font-size: 11px; margin-top: 3px; }
+      .comment { border: 1px solid #e6e6e6; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+      .comment .who { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+      .comment .text { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+      a { color: #5e6ad2; }
+      @media (max-width: 700px) { .app { grid-template-columns: 150px minmax(0, 1fr); } }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="workspace">E2E Workspace</div>
+        <div class="section-label">Issues</div>
+        <div id="issues"></div>
+      </aside>
+      <main>
+        <header>
+          <h1 id="issue-title">No issue selected</h1>
+          <div class="meta" id="issue-meta"></div>
+        </header>
+        <div class="content" id="content">
+          <p class="empty">No issues yet.</p>
+        </div>
+      </main>
+    </div>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let selectedIssueId = "";
+
+      function linkify(text) {
+        const fragment = document.createDocumentFragment();
+        let cursor = 0;
+        for (const match of text.matchAll(/https?:\/\/[^\s<>()\]]+/g)) {
+          fragment.append(document.createTextNode(text.slice(cursor, match.index)));
+          const link = document.createElement("a");
+          link.href = match[0];
+          link.textContent = match[0];
+          fragment.appendChild(link);
+          cursor = match.index + match[0].length;
+        }
+        fragment.append(document.createTextNode(text.slice(cursor)));
+        return fragment;
+      }
+
+      function renderActivity(activity) {
+        const row = document.createElement("div");
+        row.className = "activity";
+        row.dataset.testid = "linear-activity";
+        row.dataset.type = activity.type;
+        row.dataset.ephemeral = String(activity.ephemeral);
+        const kind = document.createElement("span");
+        kind.className = `kind ${activity.type}`;
+        kind.dataset.testid = "linear-activity-type";
+        kind.textContent = activity.type;
+        const body = document.createElement("div");
+        const text = document.createElement("div");
+        text.className = "activity-body";
+        text.dataset.testid = "linear-activity-body";
+        text.append(linkify(activity.body || activity.action || ""));
+        body.appendChild(text);
+        const note = [activity.parameter, activity.ephemeral ? "ephemeral" : ""].filter(Boolean);
+        if (note.length) {
+          const meta = document.createElement("div");
+          meta.className = "activity-note";
+          meta.textContent = note.join(" · ");
+          body.appendChild(meta);
+        }
+        row.append(kind, body);
+        return row;
+      }
+
+      function renderSession(session) {
+        const card = document.createElement("article");
+        card.className = "session";
+        card.dataset.testid = "linear-session";
+        card.dataset.sessionId = session.id;
+        card.dataset.status = session.status;
+        const head = document.createElement("div");
+        head.className = "session-head";
+        const badge = document.createElement("span");
+        badge.className = `badge ${session.status}`;
+        badge.dataset.testid = "linear-session-status";
+        badge.textContent = session.status;
+        const id = document.createElement("span");
+        id.className = "session-id";
+        id.textContent = session.id;
+        head.append(badge, id);
+        if (session.external_link) {
+          const link = document.createElement("a");
+          link.href = session.external_link;
+          link.dataset.testid = "linear-session-external-link";
+          link.textContent = "Open in Open SWE Web";
+          head.appendChild(link);
+        }
+        card.appendChild(head);
+        const timeline = document.createElement("div");
+        timeline.dataset.testid = "linear-activity-timeline";
+        for (const activity of session.activities) timeline.appendChild(renderActivity(activity));
+        card.appendChild(timeline);
+        return card;
+      }
+
+      function renderComment(comment) {
+        const card = document.createElement("article");
+        card.className = "comment";
+        card.dataset.testid = "linear-comment";
+        card.dataset.bot = String(comment.bot);
+        const who = document.createElement("div");
+        who.className = "who";
+        who.textContent = comment.author || "Unknown";
+        const text = document.createElement("div");
+        text.className = "text";
+        text.append(linkify(comment.body || ""));
+        card.append(who, text);
+        return card;
+      }
+
+      function renderIssue(issue) {
+        $("issue-title").textContent = issue.title;
+        $("issue-meta").replaceChildren(
+          ...[`${issue.identifier}`, issue.team, `Filed by ${issue.creator}`].map((value) => {
+            const item = document.createElement("span");
+            item.textContent = value;
+            return item;
+          }),
+        );
+        const content = $("content");
+        content.replaceChildren();
+        const description = document.createElement("section");
+        const descriptionHeading = document.createElement("h2");
+        descriptionHeading.textContent = "Description";
+        const descriptionBody = document.createElement("div");
+        descriptionBody.className = "description";
+        descriptionBody.textContent = issue.description;
+        description.append(descriptionHeading, descriptionBody);
+        content.appendChild(description);
+
+        const sessions = document.createElement("section");
+        const sessionsHeading = document.createElement("h2");
+        sessionsHeading.textContent = `Agent sessions (${issue.sessions.length})`;
+        sessions.appendChild(sessionsHeading);
+        for (const session of issue.sessions) sessions.appendChild(renderSession(session));
+        content.appendChild(sessions);
+
+        const comments = document.createElement("section");
+        const commentsHeading = document.createElement("h2");
+        commentsHeading.textContent = `Comments (${issue.comments.length})`;
+        comments.appendChild(commentsHeading);
+        for (const comment of issue.comments) comments.appendChild(renderComment(comment));
+        content.appendChild(comments);
+      }
+
+      async function poll() {
+        let data;
+        try {
+          data = await (await fetch("/mock/linear/data")).json();
+        } catch (_) {
+          return;
+        }
+        const issues = data.issues || [];
+        if (!issues.some((issue) => issue.id === selectedIssueId)) {
+          selectedIssueId = issues.length ? issues[issues.length - 1].id : "";
+        }
+        $("issues").replaceChildren(
+          ...issues.map((issue) => {
+            const button = document.createElement("button");
+            button.className = `issue-link ${issue.id === selectedIssueId ? "active" : ""}`;
+            button.dataset.testid = "linear-issue-link";
+            button.dataset.issueId = issue.id;
+            const key = document.createElement("span");
+            key.className = "key";
+            key.textContent = issue.identifier;
+            button.append(key, document.createTextNode(issue.title));
+            button.addEventListener("click", () => {
+              selectedIssueId = issue.id;
+              void poll();
+            });
+            return button;
+          }),
+        );
+        const selected = issues.find((issue) => issue.id === selectedIssueId);
+        if (!selected) {
+          $("issue-title").textContent = "No issue selected";
+          $("issue-meta").replaceChildren();
+          const empty = document.createElement("p");
+          empty.className = "empty";
+          empty.textContent = "No issues yet.";
+          $("content").replaceChildren(empty);
+          return;
+        }
+        renderIssue(selected);
+      }
+
+      poll();
+      setInterval(poll, 700);
+    </script>
+  </body>
+</html>

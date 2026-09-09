@@ -431,7 +431,15 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 ### Customizing Linear routing
 
-The `LINEAR_TEAM_TO_REPO` dict in `agent/linear/team_repo_map.py` maps Linear teams and projects to GitHub repos:
+Linear repo resolution checks, in order:
+
+1. An `owner/name` in the triggering message — `repo:owner/name` or a GitHub URL.
+2. The requesting user's dashboard `default_repo`, matched by their email.
+3. A team or workspace **guidance** rule that names `owner/name`, set in Linear under the team's **Agents → guidance** settings.
+4. The `LINEAR_TEAM_TO_REPO` dict in `agent/linear/team_repo_map.py`, by team name and then project name.
+5. The team default repo.
+
+Guidance rules are the only step that needs no code change or deploy, so prefer them for pinning a team to a repo; `LINEAR_TEAM_TO_REPO` is for mappings you want checked into the repository:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -445,7 +453,7 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
-Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+If nothing resolves, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used, and if those are unset too the agent answers in the Linear agent session with an error saying how to fix it.
 
 ### Customizing Slack routing
 

@@ -12,6 +12,7 @@ from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
 from agent.slack.request import SlackRequest
+from agent.webhooks import claims as webhook_claims
 from agent.webhooks import common as webhook_common
 
 
@@ -105,7 +106,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: _FakeClient())
+    monkeypatch.setattr(webhook_claims, "get_client", lambda url: _FakeClient())
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))

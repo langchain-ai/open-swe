@@ -516,3 +516,98 @@ def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
     assert completion.verify_run_complete_token("s3cret") is True
     assert completion.verify_run_complete_token("wrong") is False
     assert completion.verify_run_complete_token(None) is False
+
+
+def _linear_session_metadata() -> dict[str, Any]:
+    return {
+        "source": "linear",
+        "pr_url": "https://github.com/langchain-ai/open-swe/pull/7",
+        "source_context": {"linear_issue": {"id": "iss_1", "agent_session_id": "session-1"}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_linear_session_failure_emits_an_error_activity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_linear_session_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    comment = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "comment_on_linear_issue", comment)
+    linear = AsyncMock()
+    monkeypatch.setattr(completion, "linear_client", lambda: linear)
+
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    assert result["status"] == "ok"
+    comment.assert_not_called()
+    linear.create_agent_activity.assert_awaited_once()
+    args = linear.create_agent_activity.await_args
+    assert args is not None
+    assert args.args[0] == "session-1"
+    assert args.args[1].type == "error"
+
+
+@pytest.mark.asyncio
+async def test_linear_session_success_responds_with_the_pull_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_linear_session_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "dashboard_thread_url", lambda thread_id: "https://web/t/t1")
+    linear = AsyncMock()
+    monkeypatch.setattr(completion, "linear_client", lambda: linear)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": "success",
+            "values": {"messages": [AIMessage(content="Opened the PR.").model_dump()]},
+        }
+    )
+
+    linear.create_agent_activity.assert_awaited_once()
+    content = linear.create_agent_activity.await_args.args[1]
+    assert content.type == "response"
+    assert "Opened the PR." in content.body
+    assert "https://github.com/langchain-ai/open-swe/pull/7" in content.body
+    assert "https://web/t/t1" in content.body
+    assert client.threads.updates == [{"linear_response_run_ids": ["run-1"]}]
+
+
+@pytest.mark.asyncio
+async def test_linear_session_success_is_posted_once_per_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = _linear_session_metadata()
+    metadata["linear_response_run_ids"] = ["run-1"]
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    linear = AsyncMock()
+    monkeypatch.setattr(completion, "linear_client", lambda: linear)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "success"}
+    )
+
+    linear.create_agent_activity.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_linear_without_a_session_still_comments(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient({"source": "linear", "source_context": {"linear_issue": {"id": "iss_1"}}})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    linear = AsyncMock()
+    monkeypatch.setattr(completion, "linear_client", lambda: linear)
+    comment = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "comment_on_linear_issue", comment)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    comment.assert_awaited_once()
+    linear.create_agent_activity.assert_not_called()

@@ -11,6 +11,7 @@ from agent.slack import events as slack_events
 from agent.slack import failures as slack_failures
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.webhooks import claims as webhook_claims
 from agent.webhooks import common as webhook_common
 
 
@@ -100,7 +101,7 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: client)
+    monkeypatch.setattr(webhook_claims, "get_client", lambda url: client)
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
@@ -144,9 +145,9 @@ async def test_mention_and_message_deliveries_start_one_run(
     assert second["status"] == "ignored"
     assert len(background_tasks.tasks) == 1
     assert _patch_slack_webhook.threads.ids == {
-        slack_events._claim_thread_id("Ev1"),
-        slack_events._claim_thread_id("Ev2"),
-        slack_events._claim_thread_id("C1:1786573369.551099"),
+        slack_events.slack_claim_thread_id("Ev1"),
+        slack_events.slack_claim_thread_id("Ev2"),
+        slack_events.slack_claim_thread_id("C1:1786573369.551099"),
     }
 
 

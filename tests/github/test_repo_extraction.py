@@ -1,10 +1,11 @@
 """Tests for agent.utils.repo and Linear webhook repo override behavior."""
 
-import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.linear import sessions
+from agent.linear.schema import LinearIssue
 from agent.slack.client import extract_channel_description_text
 from agent.utils.repo import extract_repo_from_text
 
@@ -84,106 +85,46 @@ class TestExtractChannelDescriptionText:
         }
 
 
-class TestLinearWebhookRepoOverride:
-    """Test that the Linear webhook handler checks comment body for repo config first."""
+class TestLinearRepoResolution:
+    """The precedence a Linear trigger uses to choose a repository."""
 
-    @pytest.fixture()
-    def _base_payload(self) -> dict:
-        return {
-            "type": "Comment",
-            "action": "create",
-            "data": {
-                "id": "comment-123",
-                "body": "@openswe please fix this repo:custom-org/custom-repo",
-                "issue": {
-                    "id": "issue-456",
-                    "title": "Test issue",
-                },
-                "user": {"id": "user-1", "name": "Test User", "email": "test@test.com"},
-            },
-        }
+    def _issue(self) -> LinearIssue:
+        return LinearIssue.model_validate({"id": "issue-456", "team": {"name": "Open SWE"}})
 
-    @pytest.mark.asyncio
-    async def test_comment_repo_overrides_team_mapping(self, _base_payload: dict) -> None:
-        from agent.linear.routes import linear_webhook
+    async def test_text_named_repo_beats_the_team_mapping(self) -> None:
+        repo_config = await sessions.resolve_repo_config(
+            trigger_text="@openswe please fix this repo:custom-org/custom-repo",
+            requester_email="",
+            issue=self._issue(),
+        )
 
-        with (
-            patch("agent.webhooks.common.verify_linear_signature", return_value=True),
-            patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": "issue-456",
-                    "title": "Test issue",
-                    "identifier": "TEST-1",
-                    "url": "https://linear.app/test/issue/TEST-1",
-                    "team": {"id": "t1", "name": "Some Team", "key": "ST"},
-                    "project": {"id": "p1", "name": "Some Project"},
-                    "comments": {"nodes": []},
-                },
-            ),
-            patch("agent.webhooks.common._is_repo_allowed", return_value=True),
-            patch("agent.webhooks.common.BackgroundTasks"),
-        ):
-            mock_request = AsyncMock()
-            mock_request.body.return_value = json.dumps(_base_payload).encode()
-            mock_request.headers = {"Linear-Signature": "valid"}
+        assert repo_config == {"owner": "custom-org", "name": "custom-repo"}
 
-            bg_tasks = AsyncMock()
-            result = await linear_webhook(mock_request, bg_tasks)
+    async def test_falls_back_to_the_team_mapping(self) -> None:
+        repo_config = await sessions.resolve_repo_config(
+            trigger_text="@openswe please fix this bug",
+            requester_email="",
+            issue=self._issue(),
+        )
 
-            assert result["status"] == "accepted"
-            assert "custom-org/custom-repo" in result["message"]
+        assert repo_config == {"owner": "langchain-ai", "name": "open-swe"}
 
-            call_args = bg_tasks.add_task.call_args
-            repo_config = call_args[0][2]
-            assert repo_config == {"owner": "custom-org", "name": "custom-repo"}
+    async def test_dashboard_default_beats_the_team_mapping(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            sessions, "resolve_login_from_email_async", AsyncMock(return_value="zhen")
+        )
+        monkeypatch.setattr(
+            sessions,
+            "get_profile_default_repo",
+            AsyncMock(return_value={"owner": "zhen", "name": "profile-repo"}),
+        )
 
-    @pytest.mark.asyncio
-    async def test_falls_back_to_team_mapping_when_no_repo_in_comment(self) -> None:
-        from agent.linear.routes import linear_webhook
+        repo_config = await sessions.resolve_repo_config(
+            trigger_text="@openswe please fix this bug",
+            requester_email="zhen@example.com",
+            issue=self._issue(),
+        )
 
-        payload = {
-            "type": "Comment",
-            "action": "create",
-            "data": {
-                "id": "comment-123",
-                "body": "@openswe please fix this bug",
-                "issue": {
-                    "id": "issue-456",
-                    "title": "Test issue",
-                },
-                "user": {"id": "user-1", "name": "Test User", "email": "test@test.com"},
-            },
-        }
-
-        with (
-            patch("agent.webhooks.common.verify_linear_signature", return_value=True),
-            patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": "issue-456",
-                    "title": "Test issue",
-                    "identifier": "TEST-1",
-                    "url": "https://linear.app/test/issue/TEST-1",
-                    "team": {"id": "t1", "name": "Open SWE", "key": "OS"},
-                    "project": None,
-                    "comments": {"nodes": []},
-                },
-            ),
-            patch("agent.webhooks.common._is_repo_allowed", return_value=True),
-        ):
-            mock_request = AsyncMock()
-            mock_request.body.return_value = json.dumps(payload).encode()
-            mock_request.headers = {"Linear-Signature": "valid"}
-
-            bg_tasks = AsyncMock()
-            result = await linear_webhook(mock_request, bg_tasks)
-
-            assert result["status"] == "accepted"
-            assert "langchain-ai/open-swe" in result["message"]
-
-            call_args = bg_tasks.add_task.call_args
-            repo_config = call_args[0][2]
-            assert repo_config == {"owner": "langchain-ai", "name": "open-swe"}
+        assert repo_config == {"owner": "zhen", "name": "profile-repo"}

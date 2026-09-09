@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
-from pathlib import PurePath
 from time import monotonic
 from typing import Any, Literal
 
@@ -17,6 +16,7 @@ from agent.slack.client import (
     stop_slack_stream,
     store_slack_run_mapping,
 )
+from agent.utils.tool_steps import tool_event, tool_step
 
 logger = logging.getLogger(__name__)
 
@@ -49,67 +49,9 @@ class Step:
         return chunk
 
 
-def _text_arg(value: Any, key: str) -> str:
-    if not isinstance(value, dict):
-        return ""
-    item = value.get(key)
-    return item if isinstance(item, str) else ""
-
-
-def _basename(value: str) -> str:
-    return PurePath(value).name if value else "file"
-
-
-def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
-    if name in {"read_file", "write_file", "edit_file", "delete"}:
-        action = {
-            "read_file": "Reading",
-            "write_file": "Writing",
-            "edit_file": "Editing",
-            "delete": "Removing",
-        }[name]
-        return f"{action} {_basename(_text_arg(tool_input, 'file_path'))}", "Repository file"
-    if name in {"glob", "grep"}:
-        return "Searching repository files", "Search details hidden"
-    if name in {"web_search", "fetch_url"}:
-        return "Searching external documentation", "External source lookup"
-    if name in {"execute", "background_execute"}:
-        return "Running a development command", _text_arg(tool_input, "command")
-    if name == "task":
-        agent = _text_arg(tool_input, "subagent_type").replace("-", " ")
-        return f"Delegating to {agent or 'a specialist'}", "Specialized agent task"
-    labels = {
-        "ls": ("Inspecting repository files", "Repository directory"),
-        "open_pull_request": ("Opening pull request", "GitHub operation"),
-        "request_pr_review": ("Starting pull request review", "GitHub operation"),
-        "save_plan": ("Publishing implementation plan", "Plan artifact"),
-        "analyzePlan": ("Checking implementation security", "Security analysis"),
-    }
-    return labels.get(name, (f"Using {name.replace('_', ' ')}", "Tool call"))
-
-
 def _step_id(run_id: str, namespace: tuple[str, ...], call_id: str) -> str:
     value = "\0".join((run_id, *namespace, call_id))
     return f"step-{hashlib.sha256(value.encode()).hexdigest()[:24]}"
-
-
-def _part_value(part: Any, key: str) -> Any:
-    return part.get(key) if isinstance(part, dict) else getattr(part, key, None)
-
-
-def _event_data(part: Any) -> tuple[tuple[str, ...], dict[str, Any]] | None:
-    event = _part_value(part, "event")
-    raw = _part_value(part, "data")
-    if not isinstance(event, str) or not event.startswith("tools") or not isinstance(raw, dict):
-        return None
-    namespace = tuple(segment for segment in event.split("|")[1:] if segment)
-    params = raw.get("params")
-    if isinstance(params, dict):
-        nested_namespace = params.get("namespace")
-        if isinstance(nested_namespace, list):
-            namespace = tuple(str(value) for value in nested_namespace)
-        raw = params.get("data")
-    return (namespace, raw) if isinstance(raw, dict) else None
 
 
 class SlackThinkingStream:
@@ -171,38 +113,28 @@ class SlackThinkingStream:
         return True
 
     def consume(self, part: Any) -> None:
-        parsed = _event_data(part)
-        if parsed is None:
+        event = tool_event(part)
+        if event is None:
             return
-        namespace, data = parsed
-        event = data.get("event")
-        call_id = data.get("tool_call_id")
-        if not isinstance(call_id, str) or not call_id:
-            return
-        key = (namespace, call_id)
-        if event == "tool-started":
-            name = data.get("tool_name")
-            if not isinstance(name, str):
+        key = (event.namespace, event.call_id)
+        step_id = _step_id(self.run_id, event.namespace, event.call_id)
+        if event.kind == "tool-started":
+            if not event.tool_name:
                 return
             startup = self.steps.get(((), "startup"))
             if startup and startup.status == "in_progress":
                 startup.status = "complete"
                 self.pending[startup.task_id] = startup
-            title, details = _tool_step(name, data.get("input"))
-            step = Step(
-                _step_id(self.run_id, namespace, call_id),
-                title,
-                "in_progress",
-                details,
-            )
+            title, details = tool_step(event.tool_name, event.tool_input)
+            step = Step(step_id, title, "in_progress", details)
             self.steps[key] = step
             self.pending[step.task_id] = step
-        elif event in {"tool-finished", "tool-error"}:
+        elif event.kind in {"tool-finished", "tool-error"}:
             step = self.steps.get(key)
             if step is None:
-                step = Step(_step_id(self.run_id, namespace, call_id), "Agent step", "complete")
+                step = Step(step_id, "Agent step", "complete")
                 self.steps[key] = step
-            step.failed = event == "tool-error"
+            step.failed = event.kind == "tool-error"
             step.status = "complete"
             step.output = "Failed" if step.failed else "Completed"
             self.pending[step.task_id] = step

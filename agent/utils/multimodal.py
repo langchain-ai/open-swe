@@ -15,6 +15,7 @@ from langchain_core.messages.content import (
 )
 
 from agent.config import ENV
+from agent.linear.auth import linear_authorization_header
 from agent.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
@@ -61,16 +62,17 @@ def _image_provider(image_url: str) -> str | None:
     return None
 
 
-def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str, str] | None:
+def _image_auth_headers_for_url(
+    original_url: str, current_url: str, linear_authorization: str | None
+) -> dict[str, str] | None:
     provider = _image_provider(original_url)
     if provider is None or _image_provider(current_url) != provider:
         return None
     if provider == "linear":
-        linear_api_key = ENV.LINEAR_API_KEY.get()
-        if linear_api_key:
-            return {"Authorization": linear_api_key}
+        if linear_authorization:
+            return {"Authorization": linear_authorization}
         logger.warning(
-            "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
+            "No Linear credentials; cannot authenticate image fetch for %s",
             current_url,
         )
     else:
@@ -89,13 +91,18 @@ async def fetch_image_block(
     client: httpx2.AsyncClient,
 ) -> ImageContentBlock | TextContentBlock | None:
     """Fetch image bytes and build a model content block."""
+    linear_authorization = (
+        await linear_authorization_header() if _image_provider(image_url) == "linear" else None
+    )
     try:
         logger.debug("Fetching image from %s", image_url)
         response, blocked = await request_with_safe_redirects(
             client,
             "GET",
             image_url,
-            headers_for_url=_image_auth_headers_for_url,
+            headers_for_url=lambda original, current: _image_auth_headers_for_url(
+                original, current, linear_authorization
+            ),
         )
         if blocked:
             logger.warning(

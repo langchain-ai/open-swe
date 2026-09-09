@@ -78,9 +78,16 @@ SLACK_BOT_USERNAME=""           # the bot's handle, e.g. open_swe_you
 TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
+
+# Linear, only if you use it
+LINEAR_OAUTH_CLIENT_ID=""       # the Linear application's Client ID; required for agent sessions
+LINEAR_OAUTH_CLIENT_SECRET=""   # the Linear application's Client secret
+LINEAR_OAUTH_SCOPES=""          # optional override; default read,write,app:assignable,app:mentionable
+LINEAR_WEBHOOK_SECRET=""        # the application's webhook signing secret
+LINEAR_API_KEY=""               # legacy alternative to the OAuth application; comment trigger only
 ```
 
-`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
+`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). The Linear application, its scopes, and its webhook come from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
 ## 6. Run
 
@@ -104,7 +111,7 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 | `/` | Dashboard |
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
-| `POST /webhooks/linear` | Linear comment webhooks |
+| `POST /webhooks/linear` | Linear agent session and comment webhooks |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |
@@ -176,6 +183,7 @@ Development connects to `http://localhost:2024`. For a hosted backend run `pnpm 
 - The tunnel must be running (`make tunnel`) against port 2024, and the URL in GitHub or Slack must be your ngrok domain. Do not swap in a tunnel that forwards the whole port; see step 3. GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived. With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime. Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Linear also rejects with 401 any delivery whose `webhookTimestamp` is more than 60 seconds old, so a machine with a skewed clock fails every delivery, and replaying a delivery id Open SWE has already handled is dropped as a duplicate rather than run twice.
 
 ### Dashboard login fails or won't stay logged in
 

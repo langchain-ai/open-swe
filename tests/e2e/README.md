@@ -22,6 +22,9 @@ code runs for real.
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
+| Linear GraphQL + OAuth app-token mint                            | **fake** (`/fake-linear/...`), issue rendered at `/mock/linear`            |
+| Linear webhook → agent session / comment trigger → run dispatch  | **real** (`agent.api.app`)                                                 |
+| Run-completion webhook (terminal Linear activity, failure reply) | **real** — the dev server calls this harness back                          |
 | Environment tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
 | Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
@@ -36,15 +39,17 @@ so what Playwright asserts on is exactly what the real agent produced.
 - `e2e_env.py` — env + constants set before any `agent.*` import (sandbox=local,
   fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
 - `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
-- `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
+- `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack/Linear URLs,
+  token mint, the completion-webhook URL the platform calls back on).
 - `agent_entrypoint.py` — langgraph `agent` graph: applies patches, re-exports the
   real `traced_agent`.
 - `harness.py` — langgraph `http.app`: the real `agent.webapp` plus the fake
   GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
 - `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote.
 - `langgraph.e2e.json` — dev-server config pointing at the two entrypoints above.
-- `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't
-  run locally). The dashboard is **not** mocked — it's the real `ui/` app.
+- `static/{slack,github,linear}.html` — the mock Slack/GitHub/Linear UIs (external
+  SaaS we can't run locally). The dashboard is **not** mocked — it's the real
+  `ui/` app.
 - `global-setup.ts` — builds the real `ui/` SPA (once) so the harness can serve it.
 - `playwright.desktop.config.ts` + `tests/desktop.spec.ts` — launch Electron and drive
   the real pinned dcode ACP flow against the same fake model and GitHub state.
@@ -115,5 +120,25 @@ Poke at it by hand (from the repo root):
 ```bash
 uv run langgraph dev --config tests/e2e/langgraph.e2e.json --port 2024 \
   --no-browser --allow-blocking --no-reload
-# open http://127.0.0.1:2024/mock/slack  and  /mock/github
+# open http://127.0.0.1:2024/mock/slack, /mock/github  and  /mock/linear
 ```
+
+## Linear
+
+`/mock/linear` renders the fake Linear workspace: each issue with its comments,
+its agent sessions, and each session's activity timeline. Drive it through the
+control endpoints rather than the page (Linear has no compose box here):
+
+```bash
+# Delegate an issue to the agent, as Linear's own "assign to agent" does.
+curl -sX POST localhost:2024/control/linear/delegate -H 'content-type: application/json' -d '{}'
+# Follow up on the session it returns, or mention the bot in a comment.
+curl -sX POST localhost:2024/control/linear/prompt  -d '{"session_id":"…","body":"also add farewell()"}'
+curl -sX POST localhost:2024/control/linear/comment -d '{}'
+```
+
+Each control call signs a real `Linear-Signature` and posts to the real
+`/webhooks/linear`. The terminal `response` activity is not the observer's: it
+comes from the platform's run-completion webhook, so `langgraph.e2e.json` opts
+this dev server into loopback webhook targets and `patches.py` points the
+completion URL back at the harness.

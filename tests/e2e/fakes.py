@@ -8,17 +8,20 @@ sees in the UI is exactly what the agent produced.
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from e2e_env import (
     BARE_REMOTE,
     BASE_BRANCH,
+    LINEAR_TEAM,
     OWNER,
     REPO,
     SECOND_BARE_REMOTE,
     SECOND_OWNER,
     SECOND_REPO,
+    TEST_USERS,
     TMP,
 )
 
@@ -384,6 +387,141 @@ def repo_private() -> bool:
     return REPO_PRIVATE[0]
 
 
+# --- Linear ----------------------------------------------------------------
+# issue id -> issue record (its comments live on it); session id -> session
+# record (its activities live on it). The fake GraphQL API and the mock Linear
+# UI both read these, so a spec sees exactly what the agent posted.
+LINEAR_ISSUES: dict[str, dict[str, Any]] = {}
+LINEAR_SESSIONS: dict[str, dict[str, Any]] = {}
+LINEAR_TOKEN_REQUESTS: list[dict[str, str]] = []
+_linear_issue_seq = [0]
+_linear_comment_seq = [0]
+_linear_activity_seq = [0]
+
+# The Linear identity that files the issues: the same person as the default
+# Slack sender and dashboard login, so one human owns the thread either way.
+LINEAR_REQUESTER: dict[str, str] = {
+    "id": f"linear-user-{TEST_USERS[0]['login']}",
+    "name": TEST_USERS[0]["name"],
+    "email": TEST_USERS[0]["email"],
+}
+
+_ACTIVITY_STATUS = {"response": "complete", "error": "error", "elicitation": "awaitingInput"}
+
+
+def _linear_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def create_linear_issue(*, title: str, description: str) -> dict[str, Any]:
+    _linear_issue_seq[0] += 1
+    identifier = f"{LINEAR_TEAM['key']}-{_linear_issue_seq[0]}"
+    issue = {
+        "id": str(uuid.uuid4()),
+        "identifier": identifier,
+        "title": title,
+        "description": description,
+        "url": f"https://linear.app/e2e/issue/{identifier}",
+        "team": dict(LINEAR_TEAM),
+        "creator": dict(LINEAR_REQUESTER),
+        "created_at": _linear_timestamp(),
+        "comments": [],
+    }
+    LINEAR_ISSUES[issue["id"]] = issue
+    return issue
+
+
+def linear_issue(issue_id: str) -> dict[str, Any] | None:
+    return LINEAR_ISSUES.get(issue_id)
+
+
+def add_linear_comment(
+    issue_id: str, *, body: str, user: dict[str, str], bot: bool = False
+) -> dict[str, Any] | None:
+    issue = LINEAR_ISSUES.get(issue_id)
+    if issue is None:
+        return None
+    _linear_comment_seq[0] += 1
+    comment = {
+        "id": f"linear-comment-{_linear_comment_seq[0]}",
+        "body": body,
+        "created_at": _linear_timestamp(),
+        "user": dict(user),
+        "bot": bot,
+        "reactions": [],
+    }
+    issue["comments"].append(comment)
+    return comment
+
+
+def linear_comment(comment_id: str) -> dict[str, Any] | None:
+    for issue in LINEAR_ISSUES.values():
+        for comment in issue["comments"]:
+            if comment["id"] == comment_id:
+                return comment
+    return None
+
+
+def create_linear_session(issue_id: str) -> dict[str, Any]:
+    session = {
+        "id": str(uuid.uuid4()),
+        "issue_id": issue_id,
+        "status": "pending",
+        "external_link": None,
+        "created_at": _linear_timestamp(),
+        "activities": [],
+    }
+    LINEAR_SESSIONS[session["id"]] = session
+    return session
+
+
+def linear_session(session_id: str) -> dict[str, Any] | None:
+    return LINEAR_SESSIONS.get(session_id)
+
+
+def add_linear_activity(
+    session_id: str,
+    *,
+    activity_type: str,
+    body: str = "",
+    action: str = "",
+    parameter: str = "",
+    result: str | None = None,
+    ephemeral: bool = False,
+    signal: str | None = None,
+) -> dict[str, Any] | None:
+    """Append one agent activity and move the session to the status it implies."""
+    session = LINEAR_SESSIONS.get(session_id)
+    if session is None:
+        return None
+    _linear_activity_seq[0] += 1
+    activity = {
+        "id": f"linear-activity-{_linear_activity_seq[0]}",
+        "type": activity_type,
+        "body": body,
+        "action": action,
+        "parameter": parameter,
+        "result": result,
+        "ephemeral": ephemeral,
+        "signal": signal,
+        "created_at": _linear_timestamp(),
+    }
+    session["activities"].append(activity)
+    session["status"] = _ACTIVITY_STATUS.get(activity_type, "active")
+    return activity
+
+
+def set_linear_session_external_link(session_id: str, url: str) -> dict[str, Any] | None:
+    session = LINEAR_SESSIONS.get(session_id)
+    if session is not None:
+        session["external_link"] = url
+    return session
+
+
+def record_linear_token_request(values: dict[str, str]) -> None:
+    LINEAR_TOKEN_REQUESTS.append(values)
+
+
 # --- LangSmith snapshots ---------------------------------------------------
 # Captures the environment tools asked for: {"snapshot_id", "name", "sandbox_id"}.
 # The E2E sandbox is the local provider, so there is no real snapshot service —
@@ -408,6 +546,10 @@ def reset() -> None:
     SLACK_MESSAGES.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
+    LINEAR_ISSUES.clear()
+    LINEAR_SESSIONS.clear()
+    # LINEAR_TOKEN_REQUESTS is deliberately kept: the app token is minted once
+    # per process, so clearing the log would hide it from every later spec.
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
     REPO_PRIVATE[0] = False

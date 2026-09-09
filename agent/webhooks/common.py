@@ -76,7 +76,10 @@ from agent.github.token import (
     is_bot_token_only_mode,
     resolve_github_token_from_email,
 )
-from agent.linear.client import post_linear_trace_comment  # noqa: F401
+from agent.linear.client import (  # noqa: F401
+    post_linear_trace_comment,
+    react_to_linear_comment,
+)
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.linear.team_repo_map import LINEAR_TEAM_TO_REPO
 from agent.review.findings import (
@@ -233,7 +236,6 @@ __all__ = [
     "fetch_github_pr_metadata",
     "fetch_image_block",
     "fetch_issue_comments",
-    "fetch_linear_issue_details",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
@@ -351,8 +353,6 @@ ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     repo.strip().lower() for repo in ENV.ALLOWED_GITHUB_REPOS.get().split(",") if repo.strip()
 )
 
-LINEAR_API_KEY = ENV.LINEAR_API_KEY.get()
-
 _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🔐 **GitHub Authentication Required**",
     "✅ **Pull Request Created**",
@@ -389,117 +389,6 @@ def get_repo_config_from_team_mapping(
         return default
 
     return fallback
-
-
-async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
-    """Add an emoji reaction to a Linear comment.
-
-    Args:
-        comment_id: The Linear comment ID
-        emoji: The emoji to react with (default: eyes 👀)
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not LINEAR_API_KEY:
-        return False
-
-    url = "https://api.linear.app/graphql"
-
-    mutation = """
-    mutation ReactionCreate($commentId: String!, $emoji: String!) {
-        reactionCreate(input: { commentId: $commentId, emoji: $emoji }) {
-            success
-        }
-    }
-    """
-
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"commentId": comment_id, "emoji": emoji},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
-
-
-async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
-    """Fetch full issue details from Linear API including description and comments.
-
-    Args:
-        issue_id: The Linear issue ID
-
-    Returns:
-        Full issue data dict, or None if fetch failed
-    """
-    if not LINEAR_API_KEY:
-        return None
-
-    url = "https://api.linear.app/graphql"
-
-    query = """
-    query GetIssue($issueId: String!) {
-        issue(id: $issueId) {
-            id
-            identifier
-            title
-            description
-            url
-            project {
-                id
-                name
-            }
-            team {
-                id
-                name
-                key
-            }
-            comments {
-                nodes {
-                    id
-                    body
-                    createdAt
-                    user {
-                        id
-                        name
-                        email
-                    }
-                }
-            }
-        }
-    }
-    """
-
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": query,
-                    "variables": {"issueId": issue_id},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            return result.get("data", {}).get("issue")
-        except httpx2.HTTPError:
-            return None
 
 
 def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:

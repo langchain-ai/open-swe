@@ -12,5 +12,11 @@
   },
   "http": {
     "disable_ui": true
+  },
+  "webhooks": {
+    "url": {
+      "disable_loopback": false,
+      "require_https": false
+    }
   }
 }

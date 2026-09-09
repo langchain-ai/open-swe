@@ -274,6 +274,13 @@ ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack."
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
 ENV.var("LINEAR_API_KEY", "Linear API key.", secret=True)
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
+ENV.var("LINEAR_OAUTH_CLIENT_ID", "Linear OAuth application client id, for acting as the app.")
+ENV.var("LINEAR_OAUTH_CLIENT_SECRET", "Linear OAuth application client secret.", secret=True)
+ENV.var(
+    "LINEAR_OAUTH_SCOPES",
+    "Comma-separated scopes requested for the Linear app token.",
+    default="read,write,app:assignable,app:mentionable",
+)
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(

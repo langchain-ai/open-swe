@@ -32,6 +32,17 @@ BOT_USERNAME = "open-swe"
 DEMO_CHANNEL = "C_DEMO"
 HUMAN_USER = "U_HUMAN"
 
+# Fixed Linear identifiers. The team name is deliberately absent from
+# LINEAR_TEAM_TO_REPO so a Linear trigger resolves the repo the way an unmapped
+# workspace does: through the team-wide default (DEFAULT_REPO_OWNER/NAME below).
+LINEAR_ORG_ID = "org-e2e"
+LINEAR_TEAM = {"id": "team-e2e", "name": "E2E Delivery", "key": "E2E"}
+LINEAR_APP_USER_ID = "linear-app-user"
+LINEAR_ACCESS_TOKEN = "linear-e2e-token"
+# Marker the harness puts in the text that triggers a Linear run, so the scripted
+# model recognises the turn it should implement a change for.
+LINEAR_TASK_MARKER = "E2E_LINEAR"
+
 PORT = os.environ.setdefault("E2E_PORT", "2024")
 BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
 
@@ -57,6 +68,15 @@ _DEFAULTS = {
     "E2E_SECOND_REMOTE": str(SECOND_BARE_REMOTE),
     # Webhook signing + bot identity.
     "GITHUB_WEBHOOK_SECRET": "test-github-secret",
+    "LINEAR_WEBHOOK_SECRET": "test-linear-secret",
+    # App mode: the Linear client mints an actor token instead of sending an API key.
+    "LINEAR_OAUTH_CLIENT_ID": "linear-e2e-client",
+    "LINEAR_OAUTH_CLIENT_SECRET": "linear-e2e-client-secret",
+    # The platform's run-completion webhook, which is where a Linear session's
+    # terminal response/error activity comes from. langgraph.e2e.json opts the
+    # dev server into loopback webhook targets so it can reach this harness.
+    "RUN_COMPLETE_WEBHOOK_SECRET": "test-run-complete-secret",
+    "COMPLETION_WEBHOOK_URL": f"{BASE_URL}/webhooks/run-complete",
     "SLACK_SIGNING_SECRET": "test-slack-secret",
     "SLACK_BOT_TOKEN": "xoxb-test-token",
     "SLACK_BOT_USER_ID": BOT_USER_ID,
@@ -110,3 +130,4 @@ for _d in (TMP, _GH_DIR, _WORK_DIR):
 
 FAKE_GITHUB_API = f"{BASE_URL}/fake-gh"
 FAKE_SLACK_API = f"{BASE_URL}/fake-slack"
+FAKE_LINEAR_API = f"{BASE_URL}/fake-linear"

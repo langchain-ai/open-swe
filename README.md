@@ -109,7 +109,7 @@ Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE ad
 - **Dashboard** — Start and continue tasks, inspect work, manage pull requests, and configure user or team settings.
 - **GitHub** — Start tasks from issues, request changes from pull request conversations, run reviews, and continue work on the same branch.
 - **Slack** — Start from a channel, thread, or code channel and receive progress and delivery updates in context.
-- **Linear** — Invoke Open SWE from an issue and post results back to the issue.
+- **Linear** — Mention Open SWE on an issue or delegate the issue to it; progress streams into the Linear agent session and the pull request lands back on the issue.
 - **Desktop (experimental)** — Run the same agent against local projects. Packaged releases currently target macOS; source builds also support Windows and Linux.
 
 ## Control and safety
@@ -131,7 +131,7 @@ Sandboxes can have network access and powerful tools. Deployments should use lea
 
 Open SWE includes a LangGraph backend, a web dashboard, and an experimental desktop client.
 
-- **[Installation Guide](docs/INSTALLATION.md)** — Deploy Open SWE for a team: LangGraph Platform or Docker, the GitHub and Slack apps, model providers, environment variables, and the optional Linear trigger
+- **[Installation Guide](docs/INSTALLATION.md)** — Deploy Open SWE for a team: LangGraph Platform or Docker, the GitHub and Slack apps, model providers, environment variables, and the optional Linear agent
 - **[Development Guide](docs/DEVELOPMENT.md)** — Run it on your machine, with hot reload for the dashboard and an ngrok tunnel for webhooks
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
 - **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions

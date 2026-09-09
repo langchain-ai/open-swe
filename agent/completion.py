@@ -15,14 +15,16 @@ import hmac
 import logging
 from typing import Any
 
-from langchain_core.messages import convert_to_messages
+import httpx2
+from langchain_core.messages import AIMessage, convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
 from agent.agent_cost import finalize_agent_run_usage
 from agent.config import ENV
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
-from agent.linear.client import comment_on_linear_issue
+from agent.linear.client import LinearError, comment_on_linear_issue, linear_client
+from agent.linear.schema import ErrorContent, ResponseContent
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
@@ -46,6 +48,8 @@ _FAILURE_REPLY_FLAG = "failure_reply_posted"
 _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
 _MAX_FAILURE_REPLY_RUN_IDS = 20
+_LINEAR_RESPONSE_RUN_IDS = "linear_response_run_ids"
+_MAX_LINEAR_RESPONSE_RUN_IDS = 20
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
@@ -177,6 +181,73 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
         )
 
 
+async def _emit_linear_activity(session_id: str, content: ResponseContent | ErrorContent) -> bool:
+    try:
+        await linear_client().create_agent_activity(session_id, content)
+    except LinearError, httpx2.HTTPError:
+        logger.warning(
+            "Linear terminal activity failed",
+            extra={"linear_session_id": session_id, "linear_activity_type": content.type},
+            exc_info=True,
+        )
+        return False
+    return True
+
+
+def _final_agent_text(payload: dict[str, Any]) -> str:
+    """The agent's last spoken turn in the completion payload, if it carries one."""
+    values = payload.get("values")
+    messages = values.get("messages") if isinstance(values, dict) else None
+    if not isinstance(messages, list):
+        return ""
+    try:
+        converted = convert_to_messages(messages)
+    except _MESSAGE_CONVERSION_ERRORS:
+        return ""
+    for message in reversed(converted):
+        if isinstance(message, AIMessage) and not message.tool_calls and message.text.strip():
+            return message.text.strip()
+    return ""
+
+
+def _linear_success_body(thread_id: str, metadata: dict[str, Any], payload: dict[str, Any]) -> str:
+    parts = [_final_agent_text(payload) or "Finished working on this issue."]
+    pr_url = metadata.get("pr_url")
+    if isinstance(pr_url, str) and pr_url:
+        parts.append(f"Pull request: {pr_url}")
+    dashboard_url = dashboard_thread_url(thread_id)
+    if dashboard_url:
+        parts.append(f"[Open in Open SWE Web]({dashboard_url})")
+    return "\n\n".join(parts)
+
+
+async def _post_linear_success_response(
+    client: LangGraphClient,
+    thread_id: str,
+    metadata: dict[str, Any],
+    run_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """Complete the Linear agent session a successful run belongs to. Best-effort."""
+    session_id = SourceContext.from_metadata(metadata).linear_issue
+    session_id = session_id.agent_session_id if session_id is not None else None
+    if not session_id or run_id is None:
+        return
+    if run_id in _posted_linear_response_run_ids(metadata):
+        return
+    if not await _emit_linear_activity(
+        session_id, ResponseContent(body=_linear_success_body(thread_id, metadata, payload))
+    ):
+        return
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata=_linear_response_metadata(metadata, run_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+
+
 async def _post_failure_reply(
     thread_id: str, metadata: dict[str, Any], status: str, reason_code: str | None = None
 ) -> bool:
@@ -199,9 +270,12 @@ async def _post_failure_reply(
         return False
 
     if source == "linear":
-        if ctx.linear_issue and ctx.linear_issue.id:
-            return await comment_on_linear_issue(ctx.linear_issue.id, text)
-        return False
+        if ctx.linear_issue is None or not ctx.linear_issue.id:
+            return False
+        session_id = ctx.linear_issue.agent_session_id
+        if session_id:
+            return await _emit_linear_activity(session_id, ErrorContent(body=text))
+        return await comment_on_linear_issue(ctx.linear_issue.id, text)
 
     if source in ("github", "github_issue"):
         repo_config = metadata.get("repo")
@@ -236,6 +310,17 @@ def _failure_reply_metadata(metadata: dict[str, Any], run_id: str | None) -> dic
         _FAILURE_REPLY_RUN_ID: run_id,
         _FAILURE_REPLY_RUN_IDS: ids[-_MAX_FAILURE_REPLY_RUN_IDS:],
     }
+
+
+def _posted_linear_response_run_ids(metadata: dict[str, Any]) -> list[str]:
+    raw = metadata.get(_LINEAR_RESPONSE_RUN_IDS)
+    return [item for item in raw if isinstance(item, str) and item] if isinstance(raw, list) else []
+
+
+def _linear_response_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, Any]:
+    ids = [item for item in _posted_linear_response_run_ids(metadata) if item != run_id]
+    ids.append(run_id)
+    return {_LINEAR_RESPONSE_RUN_IDS: ids[-_MAX_LINEAR_RESPONSE_RUN_IDS:]}
 
 
 def _scheduled_cost_run_ids(metadata: dict[str, Any]) -> list[str]:
@@ -305,9 +390,10 @@ async def _settle_code_channel_session(
     await set_session_status(slack_thread.channel_id, "active")
 
 
-async def _schedule_success_cost_refresh(
+async def _handle_successful_run(
     thread_id: str, run_id: str | None, payload: dict[str, Any]
 ) -> dict[str, str]:
+    """Close out a successful run: complete its Linear session, enqueue cost enrichment."""
     if run_id is None:
         return {"status": "ignored", "reason": "missing run_id"}
 
@@ -322,6 +408,7 @@ async def _schedule_success_cost_refresh(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
+    await _post_linear_success_response(client, thread_id, metadata, run_id, payload)
     prepare_run_id = _prepare_run_id(payload)
     if prepare_run_id is None:
         return {"status": "ignored", "reason": "missing prepare_run_id"}
@@ -371,7 +458,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     if status == "success":
-        return await _schedule_success_cost_refresh(thread_id, run_id, payload)
+        return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
     if (
         status in _TERMINAL_FAILURE_STATUSES

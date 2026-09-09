@@ -4,6 +4,8 @@ Everything patched here is an *external boundary*, not agent logic:
   - the LLM (model factory) -> scripted fake
   - GitHub App token mint + GitHub REST base URL -> dummy token + fake GitHub
   - Slack API base URL -> fake Slack
+  - Linear GraphQL + OAuth token URLs -> fake Linear
+  - the completion webhook URL -> this harness (see below)
   - the api.github.com/user identity lookup -> offline (falls back to config)
 
 Applied at import of both the graph entrypoint and the HTTP harness (same dev
@@ -27,8 +29,12 @@ def apply() -> None:
 
     import importlib
 
-    from agent import server
+    from agent import dispatch, server
+    from agent.config import ENV
     from agent.github import token as auth
+    from agent.linear import activities as linear_activities
+    from agent.linear import auth as linear_auth
+    from agent.linear import client as linear_client
     from agent.slack import client as slack_utils
     from agent.slack import code_channels as slack_code_channels
     from agent.utils import authorship
@@ -38,7 +44,7 @@ def apply() -> None:
     # actual module object by name instead.
     opr = importlib.import_module("agent.tools.open_pull_request")
 
-    from e2e_env import FAKE_GITHUB_API, FAKE_SLACK_API
+    from e2e_env import BASE_URL, FAKE_GITHUB_API, FAKE_LINEAR_API, FAKE_SLACK_API
 
     # The LLM is the only agent-internal piece we fake, and only by default.
     # Set E2E_REAL_LLM=1 to drive the harness (mock Slack/GitHub, real agent)
@@ -63,10 +69,38 @@ def apply() -> None:
     auth.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
     opr.__dict__["get_github_app_installation_token"] = _dummy_install_token
 
-    # Point the real PR/Slack code at the in-process fakes.
+    # Point the real PR/Slack/Linear code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
     slack_code_channels.SLACK_API_BASE_URL = FAKE_SLACK_API
+    # The GraphQL client and the token provider are process-wide singletons that
+    # capture their URL at construction, so seed both rather than rebind the
+    # module constants: the real client, auth flow and token minting still run.
+    linear_client._client = linear_client.LinearClient(url=f"{FAKE_LINEAR_API}/graphql")  # noqa: SLF001
+    linear_credentials = (
+        os.environ["LINEAR_OAUTH_CLIENT_ID"],
+        os.environ["LINEAR_OAUTH_CLIENT_SECRET"],
+        ENV.LINEAR_OAUTH_SCOPES.get(),
+    )
+    linear_auth._provider = linear_auth.LinearAppTokenProvider(  # noqa: SLF001
+        client_id=linear_credentials[0],
+        client_secret=linear_credentials[1],
+        scopes=linear_credentials[2],
+        token_url=f"{FAKE_LINEAR_API}/oauth/token",
+    )
+    linear_auth._provider_credentials = linear_credentials  # noqa: SLF001
+
+    # Run completion is a platform callback, and its URL is a deployment
+    # setting. The agent refuses to register a loopback one because the hosted
+    # platform rejects it; langgraph.e2e.json opts this dev server into loopback
+    # webhook targets, so point it at the harness the platform can actually
+    # reach. Everything the callback then does — the Linear terminal activity,
+    # the failure replies — runs for real.
+    completion_webhook_url = (
+        f"{BASE_URL}/webhooks/run-complete?token={os.environ['RUN_COMPLETE_WEBHOOK_SECRET']}"
+    )
+    dispatch.COMPLETION_WEBHOOK_URL = completion_webhook_url
+    linear_activities.COMPLETION_WEBHOOK_URL = completion_webhook_url
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.

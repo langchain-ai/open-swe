@@ -21,6 +21,7 @@ from e2e_env import (
     FAKE_GITHUB_API,
     FEATURE_BRANCH,
     FEATURE_FILE,
+    LINEAR_TASK_MARKER,
     OWNER,
     PR_TITLE,
     REPO,
@@ -177,6 +178,7 @@ _THREAD_TOOLS_RE = re.compile(
 )
 _THREAD_TOOLS_TARGET_TITLE = "E2E Thread Tools Target"
 DELEGATE_MARKER = "E2E_DELEGATE"
+LINEAR_ACK_MARKER = f"{LINEAR_TASK_MARKER}_ACK"
 SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
@@ -355,6 +357,40 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
             "output_tokens": 345,
             "total_tokens": 12_345,
         },
+    )
+
+
+def _linear_ticket_id(messages: list[BaseMessage]) -> str:
+    """The Linear issue id, read out of the structured issue block a Linear run opens with."""
+    matches = re.findall(
+        r"<issue>\s*<id>([^<]+)</id>", "\n".join(_text(message.content) for message in messages)
+    )
+    return matches[-1] if matches else ""
+
+
+def _linear_comment_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content="Letting the Linear ticket know the pull request is up.",
+        tool_calls=[
+            {
+                "name": "linear_comment",
+                "args": {
+                    "comment_body": f"I implemented the change and opened a PR: {url}",
+                    "ticket_id": _linear_ticket_id(messages),
+                },
+                "id": "call-linear-comment",
+            }
+        ],
+    )
+
+
+def _linear_done_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content=(f"Added `{FEATURE_FILE}` with a `greet()` helper and opened {url} for review."),
+        response_metadata={"model_name": "fake-scripted-model"},
+        usage_metadata={"input_tokens": 12_000, "output_tokens": 345, "total_tokens": 12_345},
     )
 
 
@@ -825,6 +861,51 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
+    # A Linear ticket that needs no code change, for the specs that assert on how
+    # a delivery is handled rather than on what a whole run produces.
+    "linear_ack": (StepSpec(content="Picked this up — nothing to change on this ticket."),),
+    # A Linear-triggered run: the same implement → push → PR path, but Slack's
+    # tools are not wired into a Linear run, so it reports back on the ticket.
+    "linear": (
+        _tool_step(
+            "Setting up the repository.",
+            "execute",
+            {"command": _SETUP_SCRIPT},
+            "call-linear-setup",
+        ),
+        _tool_step(
+            "Implementing the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'def greet(name):\n    return "Hello!"',
+                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+            },
+            "call-linear-edit",
+        ),
+        _tool_step(
+            "Committing and pushing the change.",
+            "execute",
+            {"command": _COMMIT_SCRIPT},
+            "call-linear-commit",
+        ),
+        _tool_step(
+            "Opening a pull request.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": PR_TITLE,
+                "body": "Adds a `greet()` helper as requested on the Linear ticket.",
+                "draft": True,
+            },
+            "call-linear-pr",
+        ),
+        _dynamic_step(_linear_comment_step),
+        _dynamic_step(_linear_done_step),
+    ),
     "multi_pr": (
         _tool_step(
             "Acknowledging the cross-repository request before starting work.",
@@ -1015,6 +1096,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and SUBAGENT_TASK_MARKER in ctx.first_text,
     ),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
+    # Only the triggering turn carries the marker, so a later prompt on the same
+    # Linear thread falls through to the follow-up script instead of re-running.
+    ScriptRule("linear_ack", lambda ctx: LINEAR_ACK_MARKER in ctx.last_text),
+    ScriptRule("linear", lambda ctx: LINEAR_TASK_MARKER in ctx.last_text),
     ScriptRule(
         "slack_reply_grouped_order",
         lambda ctx: SLACK_REPLY_GROUPED_ORDER_MARKER in ctx.first_text,

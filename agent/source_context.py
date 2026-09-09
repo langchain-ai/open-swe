@@ -63,6 +63,7 @@ class LinearIssueRef(BaseModel):
     id: str = ""
     identifier: str = ""
     url: str = ""
+    agent_session_id: str | None = None
 
 
 class GitHubIssueRef(BaseModel):
