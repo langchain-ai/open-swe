@@ -550,6 +550,30 @@
         "title": "FeedbackResponse",
         "type": "object"
       },
+      "FeedbackSubmission": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 3000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "enum": [
+              "bad",
+              "good",
+              "other"
+            ],
+            "title": "Rating",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rating"
+        ],
+        "title": "FeedbackSubmission",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -7078,6 +7102,164 @@
         "summary": "Api Thread Commands",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/feedback": {
+      "get": {
+        "operationId": "get_thread_feedback_dashboard_api_threads__thread_id__feedback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Thread Feedback Dashboard Api Threads  Thread Id  Feedback Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Thread Feedback",
+        "tags": [
+          "dashboard",
+          "thread-feedback"
+        ]
+      },
+      "post": {
+        "operationId": "submit_thread_feedback_dashboard_api_threads__thread_id__feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Thread Feedback Dashboard Api Threads  Thread Id  Feedback Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Submit Thread Feedback",
+        "tags": [
+          "dashboard",
+          "thread-feedback"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/feedback/dismiss": {
+      "post": {
+        "operationId": "dismiss_thread_feedback_dashboard_api_threads__thread_id__feedback_dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Dismiss Thread Feedback Dashboard Api Threads  Thread Id  Feedback Dismiss Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Dismiss Thread Feedback",
+        "tags": [
+          "dashboard",
+          "thread-feedback"
         ]
       }
     },

@@ -267,7 +267,11 @@ async def _create_dashboard_thread_record(
         metadata["repo_explicitly_none"] = True
 
     client = langgraph_client()
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    await client.threads.create(
+        thread_id=thread_id,
+        metadata={**metadata, "feedback_initiator_login": login},
+        if_exists="do_nothing",
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
