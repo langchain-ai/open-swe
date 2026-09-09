@@ -13,18 +13,7 @@ from agent.review.findings import (
 
 
 async def list_findings(status_filter: str | None = None) -> dict[str, Any]:
-    """List findings on the reviewer thread, optionally filtered by status.
-
-    Most useful on a re-review run to inspect what existed before deciding
-    which findings the new commits resolved.
-
-    Args:
-        status_filter: One of ``open``, ``resolved``, ``dismissed``. ``None``
-            (default) returns every finding regardless of status.
-
-    Returns:
-        Dictionary with ``findings`` (list) and ``count`` (int).
-    """
+    """Implement the `list_findings` tool."""
     if status_filter is not None and status_filter not in {"open", "resolved", "dismissed"}:
         return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
 

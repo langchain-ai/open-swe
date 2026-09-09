@@ -47,13 +47,7 @@ async def _settings_for_login(login: str) -> dict[str, Any]:
 
 
 async def read_user_settings() -> dict[str, Any]:
-    """Read server-backed settings for every verified participant in this thread.
-
-    This tool accepts no user, thread, or source identifiers. It derives the active
-    thread from trusted runtime context and returns only mapped human participants.
-    Connection data is redacted status metadata; credentials and tokens are never
-    returned. Browser-local theme and notification preferences are not server-backed.
-    """
+    """Implement the `read_user_settings` tool."""
     config = get_config()
     if not isinstance(config, Mapping):
         return {"success": False, "error": "Missing run config"}

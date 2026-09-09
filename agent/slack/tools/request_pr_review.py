@@ -28,7 +28,7 @@ async def trigger_pr_review_from_ref(
 
 
 async def request_pr_review(pr_url: str) -> dict[str, Any]:
-    """Start the reviewer agent for a GitHub pull request URL."""
+    """Implement the `request_pr_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if not pr_ref:
         return {
