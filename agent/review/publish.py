@@ -1,7 +1,7 @@
 """GitHub Reviews API + GraphQL resolveReviewThread for the reviewer agent.
 
 The reviewer agent calls ``publish_review`` at the end of a run. That tool
-batches eligible findings (severity ≥ threshold, status=open) into a
+batches eligible findings (severity ≥ threshold, status=open, capped) into a
 single GitHub PR Review:
 
 - Review body: a fixed, host-formatted summary line. The agent never writes

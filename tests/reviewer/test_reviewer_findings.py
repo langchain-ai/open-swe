@@ -114,11 +114,10 @@ def test_filter_findings_for_publish_drops_below_threshold_and_resolved() -> Non
     assert [f["id"] for f in surfaced] == ["f_c", "f_a"]
 
 
-def test_filter_findings_for_publish_is_uncapped_by_default() -> None:
+def test_filter_findings_for_publish_caps_results() -> None:
     findings = [_f(id=f"f_{i}", severity="high", file=f"f{i}.py") for i in range(20)]
-    surfaced = filter_findings_for_publish(findings, severity_threshold="medium")
-    assert len(surfaced) == 20
-    assert len(filter_findings_for_publish(findings, cap=5)) == 5
+    surfaced = filter_findings_for_publish(findings, severity_threshold="medium", cap=5)
+    assert len(surfaced) == 5
 
 
 @pytest.mark.asyncio
