@@ -1126,9 +1126,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     plan_mode = cfg.plan_mode is True
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
-    plan_mode_middleware: list[Any] = [
-        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
-    ]
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
@@ -1357,7 +1354,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 notify_step_limit_reached,
                 record_run_usage,
                 *fallback_middleware,
-                *plan_mode_middleware,
+                PlanModeMiddleware(
+                    excluded=PLAN_MODE_EXCLUDED_TOOLS
+                    | frozenset(tool.name for tool in workspace_mcp_tools),
+                    initial=plan_mode,
+                ),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),

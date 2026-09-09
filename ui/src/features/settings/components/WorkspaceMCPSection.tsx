@@ -169,7 +169,14 @@ export function WorkspaceMCPSection() {
         ),
         saved,
       ])
-      setDraft({ ...saved, existing: true })
+      setDraft({
+        ...saved,
+        existing: true,
+        allowed_tools:
+          discover && !draft.existing
+            ? discovered.map((tool) => tool.name)
+            : saved.allowed_tools,
+      })
       setHeaders([])
       setSavedHeaders(null)
       setReplaceHeaders(false)
@@ -415,8 +422,8 @@ export function WorkspaceMCPSection() {
         <div className="space-y-2">
           <p className="text-sm font-medium">Allowed tools</p>
           <p className="text-xs text-muted-foreground">
-            Save and discover the catalog, then select the tools this workspace
-            may use.
+            Discover tools, review the selection, then save. All discovered
+            tools are selected by default for new connections.
           </p>
           {toolNames.length > 0 && (
             <>
@@ -529,7 +536,7 @@ export function WorkspaceMCPSection() {
   return (
     <SettingsSection
       title="Workspace MCPs"
-      description="Connect remote MCP servers for authorized coding-agent runs. Choose the tools each connection can use; new connections start with no tools enabled."
+      description="Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them."
     >
       <div className="space-y-4 p-4">
         {connections.isLoading && (

@@ -245,9 +245,11 @@ and remote coding-agent threads. The existing `CONFIGURED_ADMINS` and
    then the crossed-out eye to clear them from the editor. Entered or imported
    values also have an eye icon to show or hide them. Use headers
    for credentials, rather than URL query parameters.
-3. Choose **Save and discover tools**, select the tools to allow, then choose
-   **Save connection**. A connection with no selected tools exposes none. Newly
-   added tools on the remote server require explicit selection.
+3. Choose **Save and discover tools**. For new connections, all discovered tools
+   are selected by default. Review the selection, then choose **Save connection**
+   to enable those tools. Rediscovering an existing connection preserves its
+   selected tools, including an intentionally empty selection. Newly added tools
+   on the remote server require explicit selection.
    Discovery checks the draft before saving; if it fails, no connection is
    created and existing settings stay unchanged. Discovery only lists tools.
 

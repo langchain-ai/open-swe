@@ -108,7 +108,7 @@ export function WorkspaceMCPImport({
       <p className="text-sm font-medium">Import MCP JSON</p>
       <p className="text-xs text-muted-foreground">
         Paste a Claude-style mcpServers configuration. Review each connection
-        before saving; new connections start with no tools enabled.
+        before saving. New connections preselect all tools after discovery.
       </p>
       <Textarea
         aria-label="MCP configuration JSON"
