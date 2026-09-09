@@ -5,7 +5,6 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import BackgroundTasks
@@ -32,6 +31,9 @@ logger = logging.getLogger(__name__)
 _RATE_PREFIX = "open_swe_feedback_rate_"
 _COMMENT_ACTION = "open_swe_feedback_comment"
 _DISMISS_ACTION = "open_swe_feedback_dismiss"
+_SUBMIT_ACTION = "open_swe_feedback_submit"
+_RATING_ACTION = "open_swe_feedback_rating"
+_RATING_BLOCK = "feedback_rating"
 _COMMENT_BLOCK = "feedback_comment"
 _RATINGS = ("😡 Very Bad", "🙁 Bad", "😐 Okay", "🙂 Good", "😍 Great")
 
@@ -47,7 +49,7 @@ class ThreadFeedback(BaseModel):
     dismissed: bool = False
     rating: int | None = Field(default=None, ge=1, le=5)
     comment: str = Field(default="", max_length=3000)
-    last_rating_ts: Decimal = Decimal(0)
+    completed: bool = False
 
 
 def _store(channel_id: str) -> TypedStore[ThreadFeedback]:
@@ -76,35 +78,78 @@ def _dismiss_button(run_id: str) -> dict[str, Any]:
     }
 
 
-def rating_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
+def _feedback_inputs(rating: int | None = None, comment: str = "") -> list[dict[str, Any]]:
+    options = [
+        {"text": {"type": "plain_text", "text": label, "emoji": True}, "value": str(value)}
+        for value, label in enumerate(_RATINGS, start=1)
+    ]
+    rating_element: dict[str, Any] = {
+        "type": "radio_buttons",
+        "action_id": _RATING_ACTION,
+        "options": options,
+    }
+    if rating is not None:
+        rating_element["initial_option"] = options[rating - 1]
+    comment_element: dict[str, Any] = {
+        "type": "plain_text_input",
+        "action_id": "comment",
+        "multiline": True,
+        "max_length": 3000,
+        "placeholder": {"type": "plain_text", "text": "What worked well? What could be better?"},
+    }
+    if comment:
+        comment_element["initial_value"] = comment
+    return [
+        {
+            "type": "input",
+            "block_id": _RATING_BLOCK,
+            "optional": True,
+            "dispatch_action": False,
+            "label": {"type": "plain_text", "text": "Rating"},
+            "element": rating_element,
+        },
+        {
+            "type": "input",
+            "block_id": _COMMENT_BLOCK,
+            "optional": True,
+            "dispatch_action": False,
+            "label": {"type": "plain_text", "text": "Comments"},
+            "element": comment_element,
+        },
+    ]
+
+
+def rating_blocks(
+    run_id: str, thread_id: str, *, rating: int | None = None, comment: str = "", error: str = ""
+) -> list[dict[str, Any]]:
     url = dashboard_thread_url(thread_id)
     thread_link = f"<{url}|this thread>" if url else "this thread"
-    return [
+    blocks = [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
                 "text": f"How did Open SWE do on {thread_link}?",
             },
-            "accessory": {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "Add comments"},
-                "action_id": _COMMENT_ACTION,
-                "value": run_id,
-            },
-        },
+        }
+    ]
+    if error:
+        blocks.append({"type": "section", "text": {"type": "plain_text", "text": error}})
+    return [
+        *blocks,
+        *_feedback_inputs(rating, comment),
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": label, "emoji": True},
-                    "action_id": f"{_RATE_PREFIX}{rating}",
+                    "text": {"type": "plain_text", "text": "Submit feedback"},
+                    "action_id": _SUBMIT_ACTION,
                     "value": run_id,
-                }
-                for rating, label in enumerate(_RATINGS, start=1)
-            ]
-            + [_dismiss_button(run_id)],
+                    "style": "primary",
+                },
+                _dismiss_button(run_id),
+            ],
         },
     ]
 
@@ -170,7 +215,7 @@ async def post_slack_feedback_prompt(
             posted = await post_slack_ephemeral_message(
                 channel_id,
                 record.user_id,
-                "How did Open SWE do on this thread? Choose a rating or add comments.",
+                "How did Open SWE do on this thread? Add a rating or comment, then submit feedback.",
                 thread_ts=record.thread_ts if record.thread_ts != "0" else None,
                 blocks=rating_blocks(run_id, thread_id),
             )
@@ -215,7 +260,7 @@ def _action(payload: dict[str, Any]) -> dict[str, Any]:
             action_id = action.get("action_id")
             if isinstance(action_id, str) and (
                 action_id.startswith(_RATE_PREFIX)
-                or action_id in {_COMMENT_ACTION, _DISMISS_ACTION}
+                or action_id in {_COMMENT_ACTION, _DISMISS_ACTION, _SUBMIT_ACTION, _RATING_ACTION}
             ):
                 return action
     return {}
@@ -239,44 +284,21 @@ async def _load_feedback(channel_id: str, run_id: str, user_id: str) -> ThreadFe
 
 
 def comment_modal(record: ThreadFeedback, response_url: str = "") -> dict[str, Any]:
-    element: dict[str, Any] = {
-        "type": "plain_text_input",
-        "action_id": "comment",
-        "multiline": True,
-        "max_length": 3000,
-        "placeholder": {"type": "plain_text", "text": "What worked well? What could be better?"},
-    }
-    if record.comment:
-        element["initial_value"] = record.comment
+    """Let already-posted rating/comment buttons open the combined feedback form."""
     return {
         "type": "modal",
         "callback_id": _COMMENT_ACTION,
         "private_metadata": json.dumps(
-            {"channel_id": record.channel_id, "run_id": record.run_id, "response_url": response_url}
+            {
+                "channel_id": record.channel_id,
+                "run_id": record.run_id,
+                "response_url": response_url,
+            }
         ),
         "title": {"type": "plain_text", "text": "Open SWE feedback"},
-        "submit": {"type": "plain_text", "text": "Save"},
+        "submit": {"type": "plain_text", "text": "Submit feedback"},
         "close": {"type": "plain_text", "text": "Cancel"},
-        "blocks": [
-            {
-                "type": "section",
-                "text": {
-                    "type": "plain_text",
-                    "text": (
-                        f"Your rating: {_RATINGS[record.rating - 1]}"
-                        if record.rating is not None
-                        else "Share your feedback on this thread. A rating is optional."
-                    ),
-                },
-            },
-            {
-                "type": "input",
-                "block_id": _COMMENT_BLOCK,
-                "optional": record.rating is not None,
-                "label": {"type": "plain_text", "text": "Comments"},
-                "element": element,
-            },
-        ],
+        "blocks": _feedback_inputs(record.rating, record.comment),
     }
 
 
@@ -296,7 +318,7 @@ async def _export_feedback(record: ThreadFeedback) -> None:
 
 
 async def _export_current_feedback(record: ThreadFeedback) -> None:
-    if record.rating is None and not record.comment:
+    if not record.completed:
         return
     synced = await create_langsmith_thread_feedback(
         record.agent_thread_id,
@@ -318,57 +340,26 @@ async def _export_current_feedback(record: ThreadFeedback) -> None:
         )
 
 
-async def _acknowledge(
-    record: ThreadFeedback, *, with_comment_button: bool, response_url: str
-) -> None:
+async def _acknowledge(record: ThreadFeedback, *, response_url: str) -> None:
     try:
         async with _locked_feedback(record, purpose="feedback_response") as current:
-            record = current or record
-            if record.dismissed:
+            if current is None or current.dismissed or not current.completed or not response_url:
                 return
+            text = "✅ Feedback completed. Thanks!"
             async with asyncio.timeout(8):
-                await _update_prompt(
-                    record,
-                    with_comment_button=with_comment_button and not record.comment,
-                    response_url=response_url,
+                await respond_to_slack_interaction(
+                    response_url,
+                    {
+                        "replace_original": True,
+                        "response_type": "ephemeral",
+                        "text": text,
+                        "blocks": [
+                            {"type": "section", "text": {"type": "plain_text", "text": text}}
+                        ],
+                    },
                 )
     except Exception:
         logger.warning("Could not acknowledge saved Slack feedback")
-
-
-async def _update_prompt(
-    record: ThreadFeedback, *, with_comment_button: bool, response_url: str
-) -> None:
-    text = "Thanks — your feedback was saved."
-    block: dict[str, Any] = {"type": "section", "text": {"type": "plain_text", "text": text}}
-    if with_comment_button:
-        block["accessory"] = {
-            "type": "button",
-            "text": {"type": "plain_text", "text": "Add comments"},
-            "action_id": _COMMENT_ACTION,
-            "value": record.run_id,
-        }
-    blocks = [block]
-    if with_comment_button:
-        blocks.append({"type": "actions", "elements": [_dismiss_button(record.run_id)]})
-    if response_url:
-        await respond_to_slack_interaction(
-            response_url,
-            {
-                "replace_original": True,
-                "response_type": "ephemeral",
-                "text": text,
-                "blocks": blocks,
-            },
-        )
-        return
-    await post_slack_ephemeral_message(
-        record.channel_id,
-        record.user_id,
-        text,
-        thread_ts=record.thread_ts if record.thread_ts != "0" else None,
-        blocks=blocks,
-    )
 
 
 async def _dismiss_feedback(payload: dict[str, Any]) -> None:
@@ -391,49 +382,109 @@ async def _dismiss_feedback(payload: dict[str, Any]) -> None:
                 return
     except Exception:
         logger.warning("Could not dismiss Slack feedback prompt")
-    await post_slack_ephemeral_message(
-        channel_id, user_id, "The prompt could not be dismissed. Please click Dismiss again."
+    logger.warning("Could not dismiss Slack feedback prompt")
+
+
+class _FeedbackInputError(ValueError):
+    pass
+
+
+def _form_values(
+    values: dict[str, Any], default_rating: int | None = None
+) -> tuple[int | None, str]:
+    selected = _object(_object(values.get(_RATING_BLOCK)).get(_RATING_ACTION)).get(
+        "selected_option"
     )
+    value = _object(selected).get("value")
+    if selected is not None and (
+        not isinstance(value, str) or value not in {"1", "2", "3", "4", "5"}
+    ):
+        raise _FeedbackInputError("Choose a rating from 1 to 5.")
+    rating = int(value) if value is not None else default_rating
+    comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
+    if comment is not None and (not isinstance(comment, str) or len(comment) > 3000):
+        raise _FeedbackInputError("Comments must be at most 3,000 characters.")
+    comment = comment.strip() if isinstance(comment, str) else ""
+    if rating is None and not comment:
+        raise _FeedbackInputError("Choose a rating or enter a comment before submitting.")
+    return rating, comment
 
 
-async def _process_rating(payload: dict[str, Any]) -> None:
-    action = _action(payload)
-    suffix = str(action.get("action_id", "")).removeprefix(_RATE_PREFIX)
-    if suffix not in {"1", "2", "3", "4", "5"}:
-        return
+async def _save_submission(
+    record: ThreadFeedback, values: dict[str, Any], *, legacy_modal: bool = False
+) -> ThreadFeedback:
+    async with _locked_feedback(record) as current:
+        if current is None:
+            raise _FeedbackInputError("This feedback is unavailable. Please reopen the prompt.")
+        if current.completed or current.dismissed:
+            return current
+        default_rating = current.rating if legacy_modal and _RATING_BLOCK not in values else None
+        rating, comment = _form_values(values, default_rating)
+        current.rating = rating
+        current.comment = comment
+        current.completed = True
+        await _store(current.channel_id).put(current.run_id, current)
+        return current
+
+
+async def _show_submission_error(
+    record: ThreadFeedback, values: dict[str, Any], response_url: str, error: str
+) -> None:
+    selected = _object(
+        _object(_object(values.get(_RATING_BLOCK)).get(_RATING_ACTION)).get("selected_option")
+    ).get("value")
+    rating = (
+        int(selected)
+        if isinstance(selected, str) and selected in {"1", "2", "3", "4", "5"}
+        else None
+    )
+    comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
+    comment = comment[:3000] if isinstance(comment, str) else ""
+    async with _locked_feedback(record, purpose="feedback_response") as current:
+        if current is None or current.completed or current.dismissed or not response_url:
+            return
+        await respond_to_slack_interaction(
+            response_url,
+            {
+                "replace_original": True,
+                "response_type": "ephemeral",
+                "text": error,
+                "blocks": rating_blocks(
+                    record.run_id,
+                    record.agent_thread_id,
+                    rating=rating,
+                    comment=comment,
+                    error=error,
+                ),
+            },
+        )
+
+
+async def _process_submission(payload: dict[str, Any]) -> None:
     channel_id = str(_object(payload.get("channel")).get("id") or "")
     user_id = str(_object(payload.get("user")).get("id") or "")
-    run_id = str(action.get("value") or "")
+    response_url = str(payload.get("response_url") or "")
+    values = _object(_object(payload.get("state")).get("values"))
+    record = None
+    error = "Your feedback could not be saved. Please submit again."
     try:
-        action_ts = Decimal(str(action.get("action_ts") or "0"))
-    except InvalidOperation:
-        return
-    if not action_ts.is_finite() or action_ts <= 0:
-        return
-    try:
-        record = await _load_feedback(channel_id, run_id, user_id)
+        record = await _load_feedback(channel_id, str(_action(payload).get("value") or ""), user_id)
         if record is None:
             return
-        async with _locked_feedback(record) as current:
-            if current is None or action_ts <= current.last_rating_ts:
-                return
-            record = current
-            record.rating = int(suffix)
-            record.last_rating_ts = action_ts
-            await _store(channel_id).put(run_id, record)
+        record = await _save_submission(record, values)
+    except _FeedbackInputError as exc:
+        error = str(exc)
     except Exception:
-        logger.warning(
-            "Could not save Slack rating", extra={"feedback_run_id": run_id}, exc_info=True
-        )
-        if channel_id and user_id:
-            await post_slack_ephemeral_message(
-                channel_id, user_id, "Your rating could not be saved. Please try again."
-            )
+        logger.warning("Could not save Slack feedback submission")
+    else:
+        await _acknowledge(record, response_url=response_url)
+        await _export_feedback(record)
         return
-    await _acknowledge(
-        record, with_comment_button=True, response_url=str(payload.get("response_url") or "")
-    )
-    await _export_feedback(record)
+    if record is not None:
+        try:
+            await _show_submission_error(record, values, response_url, error)
+        except Exception:
+            logger.warning("Could not show Slack feedback submission error")
 
 
 def _comment_error(text: str) -> FeedbackResponse:
@@ -458,45 +509,48 @@ async def handle_slack_feedback_interaction(
                         "This feedback is unavailable. Please reopen the form from the prompt."
                     )
                 values = _object(_object(view.get("state")).get("values"))
-                comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
-                if comment is not None and (not isinstance(comment, str) or len(comment) > 3000):
-                    return _comment_error("Comments must be at most 3,000 characters.")
-                async with _locked_feedback(record) as current:
-                    if current is None:
-                        return _comment_error(
-                            "This feedback is unavailable. Please reopen the form from the prompt."
-                        )
-                    record = current
-                    record.comment = comment.strip() if isinstance(comment, str) else ""
-                    if record.rating is None and not record.comment:
-                        return _comment_error("Enter a comment or choose a rating in the prompt.")
-                    await _store(record.channel_id).put(record.run_id, record)
+                record = await _save_submission(record, values, legacy_modal=True)
+        except _FeedbackInputError as exc:
+            return _comment_error(str(exc))
         except Exception:
-            logger.warning("Could not save Slack feedback comment", exc_info=True)
-            return _comment_error("Your comment could not be saved. Please try again.")
+            logger.warning("Could not save Slack feedback submission")
+            return _comment_error("Your feedback could not be saved. Please try again.")
         background_tasks.add_task(
-            _acknowledge,
-            record,
-            with_comment_button=False,
-            response_url=str(metadata.get("response_url") or ""),
+            _acknowledge, record, response_url=str(metadata.get("response_url") or "")
         )
         background_tasks.add_task(_export_feedback, record)
         return {}
 
     action = _action(payload)
-    if action.get("action_id") == _DISMISS_ACTION:
+    action_id = action.get("action_id")
+    if action_id == _DISMISS_ACTION:
         background_tasks.add_task(_dismiss_feedback, payload)
         return {}
-    if action.get("action_id") != _COMMENT_ACTION:
-        background_tasks.add_task(_process_rating, payload)
+    if action_id == _SUBMIT_ACTION:
+        background_tasks.add_task(_process_submission, payload)
         return {}
+    if action_id == _RATING_ACTION:
+        return {}
+    selected_rating = None
+    if isinstance(action_id, str) and action_id.startswith(_RATE_PREFIX):
+        suffix = action_id.removeprefix(_RATE_PREFIX)
+        if suffix not in {"1", "2", "3", "4", "5"}:
+            return {}
+        selected_rating = int(suffix)
     channel_id = str(_object(payload.get("channel")).get("id") or "")
     user_id = str(_object(payload.get("user")).get("id") or "")
     try:
         async with asyncio.timeout(2.5):
             record = await _load_feedback(channel_id, str(action.get("value") or ""), user_id)
-            if record is None:
+            if record is None or record.dismissed:
                 return {}
+            if record.completed:
+                background_tasks.add_task(
+                    _acknowledge, record, response_url=str(payload.get("response_url") or "")
+                )
+                return {}
+            if selected_rating is not None:
+                record = record.model_copy(update={"rating": selected_rating})
             trigger_id = payload.get("trigger_id")
             if (
                 isinstance(trigger_id, str)
@@ -507,12 +561,5 @@ async def handle_slack_feedback_interaction(
             ):
                 return {}
     except Exception:
-        logger.warning("Could not open Slack feedback modal", exc_info=True)
-    if channel_id and user_id:
-        background_tasks.add_task(
-            post_slack_ephemeral_message,
-            channel_id,
-            user_id,
-            "The comment form could not be opened. Please click Add comments again.",
-        )
+        logger.warning("Could not open Slack feedback form")
     return {}
