@@ -67,6 +67,7 @@ from agent.tools import (
     list_review_findings,
     read_repo_file,
     search_repo_code,
+    show_in_diff,
     web_search,
 )
 from agent.utils import ttl_cache
@@ -122,9 +123,14 @@ PR head). Use it to inspect callers, definitions, and neighboring code beyond th
 - `list_review_findings(status_filter)` — the live findings (open/resolved/dismissed) \
 with severity, confidence, and resolution notes.
 - `web_search`, `fetch_url` — for external docs or standards.
+- `show_in_diff(path, line, side)` — scroll the diff the user is reading to a file and \
+line. Only files in this PR's diff can be shown.
 
 Guidance:
 - Be concrete and cite specific files and line numbers from the diff.
+- When you point at a specific location in the diff, call `show_in_diff` for it so the \
+user is looking at the code you describe. Show one location per answer — the one the \
+answer is about — and keep writing the explanation either way.
 - Ground claims about the review in the actual findings; don't invent issues.
 - If repository access fails, disclose it and qualify claims that require unread source.
 - When you propose a change, describe it precisely — you cannot apply it yourself.
@@ -234,6 +240,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             read_repo_file,
             search_repo_code,
             list_review_findings,
+            show_in_diff,
             web_search,
             fetch_url,
         ],

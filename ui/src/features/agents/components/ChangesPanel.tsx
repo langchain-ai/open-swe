@@ -9,6 +9,7 @@ import { GitBranchIcon } from "@phosphor-icons/react"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
 import type { PanelFile } from "@/features/agents/components/DiffFilesView"
+import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
 import { DiffFilesView } from "@/features/agents/components/DiffFilesView"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
@@ -24,7 +25,7 @@ interface ChangesPanelProps {
   truncated?: boolean
   branch?: string | null
   pr?: AgentThread["pr"] | null
-  revealFilePath?: string | null
+  revealTarget?: ShowInDiffTarget | null
   fullScreen: boolean
   onRefresh: () => void
   extraActions?: React.ReactNode
@@ -125,7 +126,7 @@ export function ChangesPanel({
   truncated,
   branch,
   pr,
-  revealFilePath,
+  revealTarget,
   fullScreen,
   onRefresh,
   extraActions,
@@ -180,7 +181,7 @@ export function ChangesPanel({
       )}
       <DiffFilesView
         files={files}
-        revealFilePath={revealFilePath}
+        revealTarget={revealTarget}
         fullScreen={fullScreen}
         emptyLabel={emptyLabel}
         truncated={truncated}

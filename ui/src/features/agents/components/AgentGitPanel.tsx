@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { DownloadIcon } from "lucide-react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
+import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   useAgentThreadBranchDiff,
@@ -22,16 +23,14 @@ import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 
 interface AgentGitPanelProps {
   thread: AgentThread
-  revealFilePath?: string | null
-  revealChangesKey?: number
+  revealTarget?: ShowInDiffTarget | null
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
 }
 
 export function AgentGitPanel({
   thread,
-  revealFilePath,
-  revealChangesKey = 0,
+  revealTarget,
   collapsed,
   onCollapsedChange,
 }: AgentGitPanelProps) {
@@ -49,8 +48,8 @@ export function AgentGitPanel({
       selectThreadRightPanelState(state.byThreadKey, threadRef).activeSurfaceId
   )
   useEffect(() => {
-    if (revealChangesKey > 0) openSurface(threadRef, "diff")
-  }, [openSurface, revealChangesKey, threadRef])
+    if (revealTarget) openSurface(threadRef, "diff")
+  }, [openSurface, revealTarget, threadRef])
 
   const terminalAvailable = Boolean(thread.sandboxId)
 
@@ -158,7 +157,7 @@ export function AgentGitPanel({
           truncated={diff.truncated}
           branch={thread.branch}
           pr={thread.pr}
-          revealFilePath={revealFilePath}
+          revealTarget={revealTarget}
           fullScreen={fullScreen}
           onRefresh={() => void diff.refetch()}
           scope={scope}

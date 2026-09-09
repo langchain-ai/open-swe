@@ -11,9 +11,11 @@ import {
 } from "@pierre/trees/react"
 import { CaretDownIcon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
+import type { SelectionSide } from "@pierre/diffs"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
+import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import {
   DIFF_VIRTUALIZER_CONFIG,
@@ -36,6 +38,64 @@ export interface PanelFile {
   status: GitStatus
   patch?: string | null
   unrenderable?: boolean
+}
+
+// How long to poll for a reveal target: the file may still be windowed out of
+// the virtualizer, and its diff renders a frame or two after that.
+const REVEAL_MAX_FRAMES = 120
+// Rows above the target keep measuring while the smooth scroll runs, so the
+// offset is re-read once the animation has had time to land.
+const REVEAL_SETTLE_MS = 600
+
+interface PositionedDiff {
+  getLinePosition: (
+    lineNumber: number,
+    side?: SelectionSide
+  ) => { top: number; height: number } | undefined
+}
+
+// A file's rendered diff, captured on paint so a reveal can ask it where a line
+// sits. The instance only exposes getLinePosition once it has laid out.
+interface RegisteredDiff {
+  host: HTMLElement
+  instance: unknown
+}
+
+function hasLinePosition(instance: unknown): instance is PositionedDiff {
+  return (
+    typeof (instance as { getLinePosition?: unknown } | null)
+      ?.getLinePosition === "function"
+  )
+}
+
+// Absolute scrollTop that centers a diff line, or null while the diff has no
+// position for it yet.
+function diffLineCenterTarget(
+  registered: RegisteredDiff,
+  lineNumber: number,
+  side: SelectionSide,
+  scroller: HTMLElement
+): number | null {
+  if (!hasLinePosition(registered.instance)) return null
+  const line = registered.instance.getLinePosition(lineNumber, side)
+  if (!line) return null
+  const hostTop =
+    registered.host.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top +
+    scroller.scrollTop
+  const top = hostTop + line.top - (scroller.clientHeight - line.height) / 2
+  return Math.max(
+    0,
+    Math.min(top, scroller.scrollHeight - scroller.clientHeight)
+  )
+}
+
+function findScroller(node: HTMLElement | null): HTMLElement | null {
+  for (let el = node?.parentElement ?? null; el; el = el.parentElement) {
+    const overflowY = getComputedStyle(el).overflowY
+    if (overflowY === "auto" || overflowY === "scroll") return el
+  }
+  return null
 }
 
 function prFileStatus(file: ThreadPrDiffFile): GitStatus {
@@ -127,8 +187,12 @@ export function treeThemeStyle(): React.CSSProperties {
 
 interface DiffFilesViewProps {
   files: Array<PanelFile>
-  /** Path to select and scroll to, set when a transcript row is clicked. */
-  revealFilePath?: string | null
+  /**
+   * File (and optionally line) to select and scroll to, set when a transcript
+   * row is clicked or the agent calls `show_in_diff`. A new object re-reveals,
+   * so pointing twice at the same place still moves the view.
+   */
+  revealTarget?: ShowInDiffTarget | null
   /** Full-screen panels have room for the file tree alongside the diff. */
   fullScreen: boolean
   emptyLabel: string
@@ -148,7 +212,7 @@ interface DiffFilesViewProps {
  */
 export function DiffFilesView({
   files,
-  revealFilePath,
+  revealTarget,
   fullScreen,
   emptyLabel,
   truncated,
@@ -159,6 +223,22 @@ export function DiffFilesView({
   const isMobile = useIsMobile()
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const diffRefs = useRef<Record<string, RegisteredDiff>>({})
+  const scrollerRef = useRef<HTMLElement | null>(null)
+
+  // The Virtualizer doesn't forward a ref, so a hidden probe inside it finds the
+  // scroll element that line reveals have to align against.
+  const scrollerProbe = useCallback((node: HTMLDivElement | null) => {
+    scrollerRef.current = findScroller(node)
+  }, [])
+
+  const registerDiff = useCallback(
+    (filePath: string, registered: RegisteredDiff | null) => {
+      if (registered) diffRefs.current[filePath] = registered
+      else delete diffRefs.current[filePath]
+    },
+    []
+  )
 
   const totals = useMemo(
     () =>
@@ -176,26 +256,80 @@ export function DiffFilesView({
   useEffect(() => {
     filesRef.current = files
   }, [files])
-  const selectTreePath = useCallback((path: string) => {
-    setSelectedTreePath(path)
-    const target = filesRef.current.find((file) => file.treePath === path)
-    if (!target) return
-    sectionRefs.current[target.filePath]?.scrollIntoView({
+  const revealFile = useCallback((file: PanelFile) => {
+    setSelectedTreePath(file.treePath)
+    sectionRefs.current[file.filePath]?.scrollIntoView({
       block: "start",
       behavior: "smooth",
     })
   }, [])
 
+  const selectTreePath = useCallback(
+    (path: string) => {
+      setSelectedTreePath(path)
+      const target = filesRef.current.find((file) => file.treePath === path)
+      if (target) revealFile(target)
+    },
+    [revealFile]
+  )
+
   useEffect(() => {
-    if (!revealFilePath) return
-    // Transcript rows carry absolute paths; diff files are repo-relative.
-    const target = filesRef.current.find(
-      (file) =>
-        file.filePath === revealFilePath ||
-        revealFilePath.endsWith(`/${file.filePath}`)
-    )
-    if (target) selectTreePath(target.treePath)
-  }, [revealFilePath, files, selectTreePath])
+    if (!revealTarget) return
+    const { path, line } = revealTarget
+    const side: SelectionSide =
+      revealTarget.side === "old" ? "deletions" : "additions"
+    let cancelled = false
+    let revealed = false
+    let frames = 0
+    let settleTimer: number | undefined
+    // The file may still be windowed out and its diff unrendered, so poll: bring
+    // the card into view as soon as it exists, then scroll to the line as soon
+    // as the diff can place it.
+    const step = () => {
+      if (cancelled) return
+      // Transcript rows carry absolute paths; diff files are repo-relative.
+      const file = filesRef.current.find(
+        (candidate) =>
+          candidate.filePath === path || path.endsWith(`/${candidate.filePath}`)
+      )
+      if (file) {
+        if (!revealed) {
+          revealed = true
+          revealFile(file)
+        }
+        if (line === null) return
+        const scroller = scrollerRef.current
+        const registered = diffRefs.current[file.filePath]
+        if (scroller && registered) {
+          const top = diffLineCenterTarget(registered, line, side, scroller)
+          if (top !== null) {
+            scroller.scrollTo({ top, behavior: "smooth" })
+            settleTimer = window.setTimeout(() => {
+              if (cancelled) return
+              const settled = diffLineCenterTarget(
+                registered,
+                line,
+                side,
+                scroller
+              )
+              if (
+                settled !== null &&
+                Math.abs(settled - scroller.scrollTop) > 2
+              )
+                scroller.scrollTo({ top: settled, behavior: "auto" })
+            }, REVEAL_SETTLE_MS)
+            return
+          }
+        }
+      }
+      if (frames++ < REVEAL_MAX_FRAMES) requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+    return () => {
+      cancelled = true
+      if (settleTimer !== undefined) window.clearTimeout(settleTimer)
+    }
+  }, [revealTarget, revealFile])
 
   return (
     <>
@@ -237,10 +371,12 @@ export function DiffFilesView({
               contentClassName="p-0"
               config={DIFF_VIRTUALIZER_CONFIG}
             >
+              <div ref={scrollerProbe} aria-hidden className="hidden" />
               {files.map((file) => (
                 <FileDiffSection
                   key={file.filePath}
                   file={file}
+                  registerDiff={registerDiff}
                   sectionRef={(node) => {
                     sectionRefs.current[file.filePath] = node
                   }}
@@ -271,13 +407,27 @@ export function DiffFilesView({
 const FileDiffSection = memo(
   function FileDiffSection({
     file,
+    registerDiff,
     sectionRef,
   }: {
     file: PanelFile
+    registerDiff: (filePath: string, registered: RegisteredDiff | null) => void
     sectionRef: (node: HTMLDivElement | null) => void
   }) {
     const [open, setOpen] = useState(true)
-    const diffOptions = useDiffOptions()
+    const baseDiffOptions = useDiffOptions()
+    const diffOptions = useMemo(
+      () => ({
+        ...baseDiffOptions,
+        onPostRender: (node: HTMLElement, instance: unknown) =>
+          registerDiff(file.filePath, { host: node, instance }),
+      }),
+      [baseDiffOptions, file.filePath, registerDiff]
+    )
+    useEffect(
+      () => () => registerDiff(file.filePath, null),
+      [file.filePath, registerDiff]
+    )
     const oldFile = useMemo<FileContents>(
       () => ({
         name: file.treePath,
