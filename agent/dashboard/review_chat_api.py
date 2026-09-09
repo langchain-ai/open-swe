@@ -4,7 +4,7 @@ A dedicated, sandbox-less ``chat`` graph (``agent/chat.py``) answers questions
 about one PR. This module mints a per-user chat thread, seeds the PR diff,
 review findings, and an overview as virtual files on the first run, and proxies
 the LangGraph stream/commands/state/history protocol the frontend SDK speaks —
-the chat counterpart of ``thread_api``'s agent proxy, pinned to assistant
+the chat counterpart of ``threads.proxy``'s agent proxy, pinned to assistant
 ``chat`` and scoped to the review's PR.
 """
 
@@ -19,12 +19,12 @@ from fastapi import HTTPException
 
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.review_api import classify_finding, get_pr_head_sha, get_review
-from agent.dashboard.thread_api import (
-    _DASHBOARD_STREAM_MODES,
+from agent.dashboard.threads.proxy import (
     _langgraph_proxy_headers,
     _require_json_content_type,
     _stream_thread_events,
 )
+from agent.dashboard.threads.runs import _DASHBOARD_STREAM_MODES
 from agent.github.app import get_github_app_installation_token
 from agent.review.diff import fetch_pr_diff
 from agent.review.findings import REVIEWER_THREAD_KIND

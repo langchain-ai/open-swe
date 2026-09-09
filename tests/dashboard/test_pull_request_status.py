@@ -5,8 +5,10 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import thread_api
+from agent.dashboard.threads import access as thread_access
+from agent.dashboard.threads import api as thread_api
 from agent.github import pull_request_status
+from tests.conftest import patch_thread_module
 
 
 def _response(status: int, payload: object) -> httpx2.Response:
@@ -350,9 +352,9 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
         return "oauth-token"
 
     statuses = AsyncMock(return_value=[{"number": 1}, {"number": 2}])
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", readable)
-    monkeypatch.setattr(thread_api, "_github_token_for_login", token)
-    monkeypatch.setattr(thread_api, "get_pull_request_statuses", statuses)
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
+    patch_thread_module(monkeypatch, "_github_token_for_login", token)
+    patch_thread_module(monkeypatch, "get_pull_request_statuses", statuses)
 
     result = await thread_api.get_dashboard_thread_pull_request_status(
         "thread-1", "teammate", email="teammate@example.com"
@@ -367,10 +369,10 @@ async def test_thread_status_requires_the_users_oauth_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     token = AsyncMock(return_value=None)
-    monkeypatch.setattr(thread_api, "get_valid_access_token", token)
+    patch_thread_module(monkeypatch, "get_valid_access_token", token)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api._github_token_for_login("owner")
+        await thread_access._github_token_for_login("owner")
 
     assert exc_info.value.status_code == 401
     token.assert_awaited_once_with("owner")
@@ -383,8 +385,8 @@ async def test_thread_status_read_denial_does_not_resolve_oauth_token(
         raise HTTPException(403, "thread is not readable")
 
     token = AsyncMock(return_value="oauth-token")
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", denied)
-    monkeypatch.setattr(thread_api, "_github_token_for_login", token)
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", denied)
+    patch_thread_module(monkeypatch, "_github_token_for_login", token)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.get_dashboard_thread_pull_request_status("thread-1", "intruder")

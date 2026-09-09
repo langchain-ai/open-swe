@@ -18,17 +18,17 @@ from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_org_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
-from agent.dashboard.thread_api import (
-    ThreadMessageBody,
+from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_thread,
-    list_dashboard_threads_page,
-    proxy_dashboard_thread_commands,
     resolve_dashboard_thread,
     send_dashboard_message,
 )
+from agent.dashboard.threads.listing import list_dashboard_threads_page
+from agent.dashboard.threads.proxy import proxy_dashboard_thread_commands
+from agent.dashboard.threads.runs import ThreadMessageBody
 from agent.dashboard.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
