@@ -1102,14 +1102,14 @@ async def test_failed_prompt_can_be_retried(
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", {**context, "prompted": False})
     post = AsyncMock(side_effect=[False, True])
     monkeypatch.setattr(feedback, "post_slack_ephemeral_message", post)
-    assert await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1") is False
+    await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
     assert not fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"]
-    assert await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1") is True
+    await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"]
 
 
 @pytest.mark.asyncio
-async def test_prompt_exception_reports_retryable_failure(
+async def test_prompt_exception_leaves_feedback_unsent(
     context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", {**context, "prompted": False})
@@ -1119,7 +1119,7 @@ async def test_prompt_exception_reports_retryable_failure(
         AsyncMock(side_effect=RuntimeError("Slack unavailable")),
     )
 
-    assert await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1") is False
+    await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
     assert not fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"]
 
 
@@ -1142,7 +1142,7 @@ async def test_scheduled_prompt_rechecks_readiness_after_channel_lookup(
         "activity_at_ms": 1000,
         "channel_id": "C1",
         "slack_run_id": "run-1",
-        "scheduled": True,
+        "ready": True,
     }
     fake_store.seed(("thread_feedback_prompts",), "thread-1", prompt)
     client = feedback.langgraph_client()
@@ -1167,10 +1167,9 @@ async def test_scheduled_prompt_rechecks_readiness_after_channel_lookup(
         feedback, "get_slack_channel_context", AsyncMock(side_effect=channel_lookup)
     )
 
-    result = await feedback.post_slack_feedback_prompt(
+    await feedback.post_slack_feedback_prompt(
         "thread-1", "run-1", "C1", expected_generation="original"
     )
-    assert result is False
     feedback.post_slack_ephemeral_message.assert_not_awaited()
     assert not fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"]
 

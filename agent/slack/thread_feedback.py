@@ -203,7 +203,7 @@ async def post_slack_feedback_prompt(
     *,
     require_answer: bool = False,
     expected_generation: str | None = None,
-) -> bool | None:
+) -> None:
     """Prompt the thread initiator once, using the qualifying run's response mapping."""
     try:
         store = _store(channel_id)
@@ -263,7 +263,7 @@ async def post_slack_feedback_prompt(
                 from agent.thread_feedback import feedback_generation_is_ready
 
                 if not await feedback_generation_is_ready(thread_id, expected_generation):
-                    return False
+                    return
             posted = await post_slack_ephemeral_message(
                 channel_id,
                 record.user_id,
@@ -274,13 +274,11 @@ async def post_slack_feedback_prompt(
             if posted:
                 record.prompted = True
                 await store.put(run_id, record)
-            return bool(posted)
     except Exception:
         # Feedback must not prevent the remaining completion hooks from running.
         logger.warning(
             "Could not post Slack feedback prompt", extra={"feedback_run_id": run_id}, exc_info=True
         )
-        return False
 
 
 def _object(value: Any) -> dict[str, Any]:

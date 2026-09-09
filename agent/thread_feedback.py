@@ -1,9 +1,9 @@
 """Qualify feedback prompts and deliver them after the conversation is quiet."""
 
 import logging
-import math
 import time
 import uuid
+from asyncio import Task, create_task, sleep
 from datetime import datetime
 from typing import Any, Literal
 
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 FEEDBACK_DELAY_MS = 5 * 60 * 1000
 ACTIVITY_KEY = "feedback_last_activity_at_ms"
+_pending_tasks: set[Task[None]] = set()
 
 
 class FeedbackPrompt(BaseModel):
@@ -30,11 +31,7 @@ class FeedbackPrompt(BaseModel):
     activity_at_ms: int = 0
     channel_id: str = ""
     slack_run_id: str = ""
-    scheduled: bool = False
-
-
-class AnswerMarker(BaseModel):
-    run_id: str
+    ready: bool = False
 
 
 class FeedbackCompletion(BaseModel):
@@ -58,10 +55,6 @@ def _prompts() -> TypedStore[FeedbackPrompt]:
     return TypedStore(("thread_feedback_prompts",), FeedbackPrompt)
 
 
-def _answers(thread_id: str) -> TypedStore[AnswerMarker]:
-    return TypedStore(("thread_feedback_answers", thread_id), AnswerMarker)
-
-
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -78,7 +71,6 @@ def _timestamp_ms(value: Any) -> int:
 
 
 async def mark_answered_question(thread_id: str, run_id: str) -> None:
-    await _answers(thread_id).put(run_id, AnswerMarker(run_id=run_id))
     thread = await langgraph_client().threads.get(thread_id)
     metadata = thread.get("metadata") or {}
     await _schedule(
@@ -98,21 +90,6 @@ async def note_feedback_activity(thread_id: str, *, client: Any = None) -> None:
         )
     except Exception:
         logger.warning("Could not record feedback activity", extra={"thread_id": thread_id})
-
-
-async def _enqueue(prompt: FeedbackPrompt, due_at_ms: int) -> None:
-    await langgraph_client().runs.create(
-        None,
-        "scheduler",
-        input={
-            "task": "thread_feedback",
-            "agent_thread_id": prompt.thread_id,
-            "feedback_generation": prompt.generation,
-        },
-        metadata={"kind": "thread_feedback_prompt"},
-        after_seconds=max(1, math.ceil((due_at_ms - _now_ms()) / 1000)),
-        on_completion="delete",
-    )
 
 
 async def _schedule(
@@ -145,9 +122,6 @@ async def _schedule(
             if channel_id and slack_run_id and not current.channel_id:
                 current.channel_id = channel_id
                 current.slack_run_id = slack_run_id
-            if current.channel_id and not current.scheduled:
-                await _enqueue(current, current.due_at_ms)
-                current.scheduled = True
                 await _prompts().put(thread_id, current)
             return
         prompt = FeedbackPrompt(
@@ -162,10 +136,9 @@ async def _schedule(
             slack_run_id=slack_run_id,
         )
         await _prompts().put(thread_id, prompt)
-        if channel_id and slack_run_id:
-            await _enqueue(prompt, prompt.due_at_ms)
-            prompt.scheduled = True
-            await _prompts().put(thread_id, prompt)
+        task = create_task(_wait_for_feedback(prompt))
+        _pending_tasks.add(task)
+        task.add_done_callback(_pending_tasks.discard)
 
 
 async def schedule_answer_feedback(thread_id: str, run_id: str, metadata: dict[str, Any]) -> None:
@@ -174,7 +147,8 @@ async def schedule_answer_feedback(thread_id: str, run_id: str, metadata: dict[s
 
         origin = SourceContext.from_metadata(metadata).slack_thread
         channel_id = origin.channel_id if origin else ""
-        eligible = await _answers(thread_id).get(run_id) is not None
+        prompt = await _prompts().get(thread_id)
+        eligible = prompt is not None and prompt.reason == "answer" and prompt.run_id == run_id
         if channel_id:
             mapping = await lookup_slack_run_message_mapping(langgraph_client(), channel_id, run_id)
             eligible = (
@@ -224,7 +198,9 @@ async def schedule_pr_feedback(thread_id: str, metadata: dict[str, Any], pr_url:
         logger.warning("Could not schedule merged-PR feedback", extra={"thread_id": thread_id})
 
 
-async def feedback_prompt_status(thread_id: str) -> tuple[str, int | None]:
+async def feedback_prompt_status(
+    thread_id: str, *, include_pending: bool = False
+) -> tuple[str, int | None]:
     completed = await _completions().get(thread_id)
     if completed is not None:
         return completed.status, None
@@ -253,37 +229,43 @@ async def feedback_prompt_status(thread_id: str) -> tuple[str, int | None]:
         due_at = max(due_at, _timestamp_ms(latest.get("updated_at")) + FEEDBACK_DELAY_MS)
     elif thread.get("status") == "busy":
         return "waiting", max(due_at, _now_ms() + FEEDBACK_DELAY_MS)
+    # Only the live timer can activate a prompt; elapsed time cannot revive it after a restart.
+    if not prompt.ready and not include_pending and _now_ms() >= due_at:
+        return "unavailable", None
     return ("ready" if _now_ms() >= due_at else "waiting"), due_at
 
 
-async def run_feedback_prompt(state: dict[str, Any]) -> dict[str, str]:
-    thread_id = str(state.get("agent_thread_id") or "")
-    generation = state.get("feedback_generation")
-    prompt = await _prompts().get(thread_id) if thread_id else None
-    if prompt is None or prompt.generation != generation:
-        return {"status": "superseded"}
-    status, due_at = await feedback_prompt_status(thread_id)
-    if status == "waiting" and due_at is not None:
-        await _enqueue(prompt, due_at)
-        return {"status": "postponed"}
-    if status != "ready":
-        return {"status": status}
-    current = await _prompts().get(thread_id)
-    if current is None or current.generation != generation:
-        return {"status": "superseded"}
-    if prompt.channel_id and prompt.slack_run_id:
-        from agent.slack.thread_feedback import post_slack_feedback_prompt
+async def _wait_for_feedback(prompt: FeedbackPrompt) -> None:
+    due_at = prompt.due_at_ms
+    try:
+        while True:
+            await sleep(max(0, (due_at - _now_ms()) / 1000))
+            async with agent_thread_pr_state_lock(langgraph_client(), prompt.thread_id):
+                current = await _prompts().get(prompt.thread_id)
+                if current is None or current.generation != prompt.generation:
+                    return
+                status, next_due = await feedback_prompt_status(
+                    prompt.thread_id, include_pending=True
+                )
+                if status == "waiting" and next_due is not None:
+                    due_at = next_due
+                    continue
+                if status != "ready":
+                    return
+                current.ready = True
+                await _prompts().put(prompt.thread_id, current)
+            if current.channel_id and current.slack_run_id:
+                from agent.slack.thread_feedback import post_slack_feedback_prompt
 
-        delivered = await post_slack_feedback_prompt(
-            thread_id,
-            prompt.slack_run_id,
-            prompt.channel_id,
-            expected_generation=prompt.generation,
-        )
-        if delivered is False:
-            await _enqueue(prompt, _now_ms() + 60_000)
-            return {"status": "retrying"}
-    return {"status": "ready"}
+                await post_slack_feedback_prompt(
+                    current.thread_id,
+                    current.slack_run_id,
+                    current.channel_id,
+                    expected_generation=current.generation,
+                )
+            return
+    except Exception:
+        logger.warning("Could not deliver feedback prompt", extra={"thread_id": prompt.thread_id})
 
 
 async def feedback_generation_is_ready(thread_id: str, generation: str) -> bool:
