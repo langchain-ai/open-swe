@@ -32,6 +32,10 @@ const HANDOFF_ORIGIN = "open-swe://app"
 // Re-login rather than hand Vite a session that dies mid-afternoon.
 const MIN_REMAINING_MS = 60 * 60 * 1000
 
+function devServerUrl() {
+  return `http://localhost:${process.env.PORT || 3000}`
+}
+
 function fail(message) {
   process.stderr.write(`dev-prod: ${message}\n`)
   process.exit(1)
@@ -131,6 +135,64 @@ function openBrowser(url) {
   child.unref()
 }
 
+function page(heading, detail, script = "") {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Open SWE</title>
+<style>
+  :root { color-scheme: light dark }
+  body {
+    font: 16px/1.5 system-ui, -apple-system, sans-serif;
+    margin: 0; min-height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 2rem;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 .5rem }
+  p { margin: 0; opacity: .7 }
+</style>
+</head>
+<body>
+<h1>${heading}</h1>
+<p id="detail">${detail}</p>
+${script}
+</body>
+</html>
+`
+}
+
+// This tab lands here before Vite is listening — the session it just handed
+// back is what the dev server is started with. So wait for the port rather than
+// redirecting into a closed one. `no-cors` makes the probe a liveness check the
+// browser will not block; its opaque response is never read.
+const SIGNED_IN_PAGE = page(
+  "You're signed in",
+  "Waiting for the dev server…",
+  `<script>
+const target = ${JSON.stringify(devServerUrl())}
+;(async () => {
+  for (let attempt = 0; attempt < 240; attempt++) {
+    try {
+      await fetch(target, { mode: "no-cors", cache: "no-store" })
+      location.replace(target)
+      return
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+  document.getElementById("detail").innerHTML =
+    'The dev server did not come up. <a href="' + target + '">' + target + '</a>'
+})()
+</script>`
+)
+
+const FAILED_PAGE = page(
+  "Sign-in failed",
+  "No sign-in code arrived. Try again from your terminal."
+)
+
 /** Bind a loopback listener for one browser handoff and resolve its code. */
 async function awaitHandoffCode() {
   let resolveCode = () => {}
@@ -145,13 +207,10 @@ async function awaitHandoffCode() {
       return
     }
     const value = url.searchParams.get("code")
-    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" })
-    response.end(
-      value
-        ? "Signed in. Close this tab and return to your terminal."
-        : "Sign-in failed. Try again from your terminal."
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+    response.end(value ? SIGNED_IN_PAGE : FAILED_PAGE, () =>
+      finish(value || null)
     )
-    finish(value || null)
   })
 
   let timer = null
@@ -225,9 +284,7 @@ async function main() {
   }
 
   const days = Math.round(remainingMs(session) / 86_400_000)
-  log(
-    `serving http://localhost:${process.env.PORT || 3000} against ${backendUrl}`
-  )
+  log(`serving ${devServerUrl()} against ${backendUrl}`)
   log(
     `this is a real session (${days}d left) — runs you start and settings you change are real`
   )
