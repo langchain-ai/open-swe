@@ -1,8 +1,8 @@
-"""Best-effort feedback prompts after five quiet minutes."""
+"""Feedback prompts delivered by LSD after five quiet minutes."""
 
 import logging
-from asyncio import Task, create_task, sleep
 from datetime import datetime
+from math import ceil
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -15,7 +15,6 @@ from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 logger = logging.getLogger(__name__)
 DELAY_MS = 5 * 60 * 1000
 ACTIVITY_KEY = "feedback_last_activity_at_ms"
-_pending_tasks: set[Task[None]] = set()
 Rating = Literal["bad", "good", "other"]
 
 
@@ -92,33 +91,45 @@ async def feedback_event_is_ready(thread_id: str, event_id: str) -> bool:
     )
 
 
-async def _wait_for_feedback(
-    thread_id: str, record: Feedback, channel_id: str, slack_run_id: str
-) -> None:
-    due = now_ms() + DELAY_MS
-    try:
-        while True:
-            await sleep(max(0, (due - now_ms()) / 1000))
-            async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
-                current = await feedback_store().get(thread_id)
-                if current != record:
-                    return
-                due = await _quiet_until(thread_id, record)
-                if due is None:
-                    return
-                if due > now_ms():
-                    continue
-                record.status = "ready"
-                await feedback_store().put(thread_id, record)
-            if channel_id and slack_run_id:
-                from agent.slack.thread_feedback import post_slack_feedback_prompt
+async def _enqueue_feedback(payload: dict[str, Any], delay_seconds: int = 300) -> None:
+    await langgraph_client().runs.create(
+        None,
+        "scheduler",
+        input=payload,
+        metadata={"kind": "thread_feedback", "agent_thread_id": payload["agent_thread_id"]},
+        after_seconds=delay_seconds,
+        on_completion="delete",
+    )
 
-                await post_slack_feedback_prompt(
-                    thread_id, slack_run_id, channel_id, expected_event_id=record.event_id
-                )
-            return
+
+async def run_feedback_prompt(payload: dict[str, Any]) -> dict[str, str]:
+    thread_id = payload.get("agent_thread_id", "")
+    try:
+        record = Feedback.model_validate(payload["feedback"])
+        async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
+            current = await feedback_store().get(thread_id)
+            if current != record:
+                return {"status": "skipped"}
+            due = await _quiet_until(thread_id, record)
+            if due is None:
+                return {"status": "skipped"}
+            delay_seconds = ceil((due - now_ms()) / 1000)
+            if delay_seconds > 0:
+                await _enqueue_feedback(payload, delay_seconds)
+                return {"status": "deferred"}
+            record.status = "ready"
+            await feedback_store().put(thread_id, record)
+        channel_id, slack_run_id = payload.get("channel_id"), payload.get("run_id")
+        if channel_id and slack_run_id:
+            from agent.slack.thread_feedback import post_slack_feedback_prompt
+
+            await post_slack_feedback_prompt(
+                thread_id, slack_run_id, channel_id, expected_event_id=record.event_id
+            )
+        return {"status": "ready"}
     except Exception:
         logger.warning("Could not deliver feedback prompt", extra={"thread_id": thread_id})
+        return {"status": "failed"}
 
 
 async def _schedule(
@@ -146,10 +157,16 @@ async def _schedule(
                 or (answer_run_id and current.event_id.startswith("merged_pr:"))
             ):
                 return
+            await _enqueue_feedback(
+                {
+                    "task": "thread_feedback",
+                    "agent_thread_id": thread_id,
+                    "feedback": record.model_dump(),
+                    "channel_id": channel_id,
+                    "run_id": slack_run_id,
+                }
+            )
             await feedback_store().put(thread_id, record)
-            task = create_task(_wait_for_feedback(thread_id, record, channel_id, slack_run_id))
-            _pending_tasks.add(task)
-            task.add_done_callback(_pending_tasks.discard)
     except Exception:
         logger.warning("Could not schedule feedback prompt", extra={"thread_id": thread_id})
 
