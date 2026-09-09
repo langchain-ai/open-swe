@@ -149,6 +149,7 @@ from agent.tool_loaders.datadog_mcp import load_datadog_tools
 from agent.tool_loaders.langsmith import load_langsmith_tools
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
+from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
 from agent.tools import (
     approve_plan,
     background_execute,
@@ -603,6 +604,12 @@ async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any],
     return currents_tools, notion_tools
 
 
+async def _workspace_mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
+    if not await _observability_authorized(config, profile_login):
+        return []
+    return await load_workspace_mcp_tools()
+
+
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
     async with aphase(thread_id, name):
         return await loader()
@@ -845,6 +852,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 user_custom_instructions=sender_instructions,
                 draft_prs=self._draft_prs,
                 thread_url=dashboard_thread_url(self._thread_id),
+                model_id=self._model_id,
+                reasoning_effort=self._effort,
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
                 participant_identities=participant_identities,
             )
@@ -892,7 +901,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
-                source=self._source,
+                source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
             ),
@@ -1119,9 +1128,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     plan_mode = cfg.plan_mode is True
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
-    plan_mode_middleware: list[Any] = [
-        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
-    ]
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
@@ -1131,14 +1137,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     observability_tools: list[Any] = []
+    workspace_mcp_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        observability_tools, (currents_tools, notion_tools) = await asyncio.gather(
+        (
+            observability_tools,
+            workspace_mcp_tools,
+            (currents_tools, notion_tools),
+        ) = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.observability_tools",
                 lambda: _observability_tools_for(config, profile_login),
+            ),
+            _phase_result(
+                thread_id,
+                "factory.workspace_mcp_tools",
+                lambda: _workspace_mcp_tools_for(config, profile_login),
             ),
             _phase_result(
                 thread_id,
@@ -1211,6 +1227,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Observability": observability_tools,
+        "Workspace MCPs": workspace_mcp_tools,
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
@@ -1339,7 +1356,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 notify_step_limit_reached,
                 record_run_usage,
                 *fallback_middleware,
-                *plan_mode_middleware,
+                PlanModeMiddleware(
+                    excluded=PLAN_MODE_EXCLUDED_TOOLS
+                    | frozenset(tool.name for tool in workspace_mcp_tools),
+                    initial=plan_mode,
+                ),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),

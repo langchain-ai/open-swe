@@ -152,7 +152,7 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
     "openai": "langchain_openai.chat_models.base",
 }
 CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
-    "openai:gpt-6-astra": 1_050_000,
+    "openai:gpt-6-astra": 272_000,
     "openai:gpt-5.6-sol": 272_000,
     "openai:gpt-5.6-terra": 272_000,
     "openai:gpt-5.6-luna": 272_000,

@@ -77,7 +77,7 @@ def _slack_auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
 
 
-def _parse_ts(ts: str | None) -> float:
+def parse_slack_ts(ts: str | None) -> float:
     try:
         return float(ts or "0")
     except TypeError, ValueError:
@@ -236,9 +236,9 @@ def select_slack_context_messages(
     if not messages:
         return [], "thread_start"
 
-    current_ts = _parse_ts(current_message_ts)
-    ordered = sorted(messages, key=lambda item: _parse_ts(item.get("ts")))
-    up_to_current = [item for item in ordered if _parse_ts(item.get("ts")) <= current_ts]
+    current_ts = parse_slack_ts(current_message_ts)
+    ordered = sorted(messages, key=lambda item: parse_slack_ts(item.get("ts")))
+    up_to_current = [item for item in ordered if parse_slack_ts(item.get("ts")) <= current_ts]
     if not up_to_current:
         up_to_current = ordered
 
@@ -1301,7 +1301,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             if not cursor:
                 break
 
-    messages.sort(key=lambda item: _parse_ts(item.get("ts")))
+    messages.sort(key=lambda item: parse_slack_ts(item.get("ts")))
     if truncated:
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
     return messages
