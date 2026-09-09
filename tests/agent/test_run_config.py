@@ -73,7 +73,7 @@ def test_is_eval_covers_both_flags():
 
 
 def test_engine_validation_requires_explicit_flag():
-    assert RunConfig.parse({"engine_validation": True}).is_engine_validation
+    assert RunConfig.parse({"langsmith_engine_issue_validation": True}).is_engine_validation
     assert not RunConfig.parse({"source": "engine_validation"}).is_engine_validation
     assert not RunConfig.parse({}).is_engine_validation
 

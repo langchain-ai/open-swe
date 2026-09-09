@@ -285,7 +285,7 @@ def test_engine_validation_uses_repository_scoped_read_only_token(
     )
     config = {
         "configurable": {
-            "engine_validation": True,
+            "langsmith_engine_issue_validation": True,
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
         }
     }
@@ -302,7 +302,7 @@ def test_engine_validation_uses_repository_scoped_read_only_token(
 def test_engine_validation_rejects_other_repositories() -> None:
     config = {
         "configurable": {
-            "engine_validation": True,
+            "langsmith_engine_issue_validation": True,
             "repo": {"owner": "private", "name": "repo"},
         }
     }

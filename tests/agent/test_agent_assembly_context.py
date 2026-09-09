@@ -249,7 +249,7 @@ async def test_engine_validation_wraps_default_backend_as_read_only() -> None:
     config = _base_config()
     config["configurable"].update(
         {
-            "engine_validation": True,
+            "langsmith_engine_issue_validation": True,
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
         }
     )
