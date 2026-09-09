@@ -37,7 +37,7 @@ _SUBMIT_ACTION = "open_swe_feedback_submit"
 _RATING_ACTION = "open_swe_feedback_rating"
 _RATING_BLOCK = "feedback_rating"
 _COMMENT_BLOCK = "feedback_comment"
-_RATINGS = ("😡 Very Bad", "🙁 Bad", "😐 Okay", "🙂 Good", "😍 Great")
+_RATINGS = ("😡 Very Bad", "💩 Bad", "😐 Okay", "🙂 Good", "😍 Great")
 
 
 class ThreadFeedback(BaseModel):

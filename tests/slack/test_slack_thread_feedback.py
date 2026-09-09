@@ -36,7 +36,7 @@ async def test_emoji_selection_preserves_comment_and_submits_both(
     assert all(element["type"] == "button" for element in ratings)
     assert [element["text"]["text"].split()[0] for element in ratings] == [
         "😡",
-        "🙁",
+        "💩",
         "😐",
         "🙂",
         "😍",
