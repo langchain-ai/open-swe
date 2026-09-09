@@ -925,7 +925,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         return create_deep_agent(
             system_prompt="",
             tools=[],
-        ).with_config(bindable_config(config))
+        ).with_config(bindable_config(config, graph="agent"))
 
     profile_login = resolve_github_login(as_json_object(config))
 
@@ -1371,7 +1371,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ModelCallTimeoutMiddleware(),
             ],
         ),
-    ).with_config(bindable_config(config))
+    ).with_config(bindable_config(config, graph="agent"))
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.

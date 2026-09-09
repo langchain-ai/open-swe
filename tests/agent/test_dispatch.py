@@ -91,7 +91,14 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         "agent",
         input={"messages": [{"role": "user", "content": "hi"}]},
         source="test",
-        config={"configurable": {"thread_id": "thread-1"}, "metadata": {"kind": "test"}},
+        config={
+            "configurable": {
+                "thread_id": "thread-1",
+                "github_login": "octocat",
+                "user_email": "octocat@example.com",
+            },
+            "metadata": {"kind": "test"},
+        },
         client=client,
     )
 
@@ -119,6 +126,22 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["config"]["metadata"] == {
         "kind": "test",
         "prepare_run_id": prepare_run_id,
+        "open_swe.graph": "agent",
+        "open_swe.thread_id": "thread-1",
+        "open_swe.prepare_run_id": prepare_run_id,
+        "open_swe.source": "test",
+        "open_swe.trigger_surface": "automation",
+        "open_swe.client": "automation",
+        "open_swe.execution": "cloud",
+        "open_swe.thread_origin": "test",
+        "open_swe.thread_origin_surface": "automation",
+        "open_swe.thread_category": "automation",
+        "open_swe.trigger_kind": "automation",
+        "open_swe.actor_id": "github:octocat",
+        "open_swe.actor_platform": "github",
+        "open_swe.actor_github_login": "octocat",
+        "open_swe.actor_email": "octocat@example.com",
+        "open_swe.actor_account_linked": True,
     }
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"

@@ -426,8 +426,11 @@ export function AgentsHome({
     setSubmittedDraft(draft)
     setLocalError(null)
 
-    const configurable: Record<string, unknown> =
-      modelConfigurable(activeSelection)
+    const configurable: Record<string, unknown> = {
+      ...modelConfigurable(activeSelection),
+      client: window.openSweDesktop ? "desktop" : "web",
+      execution: "cloud",
+    }
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
     if (planMode) configurable.plan_mode = true

@@ -1,13 +1,14 @@
 from langgraph.graph.state import RunnableConfig
 
 from agent.run_config import RunConfig
+from agent.utils.trace_metadata import searchable_trace_metadata
 
 
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     return RunConfig.from_config(config).get("__is_for_execution__") is True
 
 
-def bindable_config(config: RunnableConfig) -> RunnableConfig:
+def bindable_config(config: RunnableConfig, *, graph: str | None = None) -> RunnableConfig:
     """``config`` without LangGraph's runtime-internal keys, for ``graph.with_config``.
 
     The server hands a graph factory a config whose ``configurable`` carries its
@@ -24,4 +25,12 @@ def bindable_config(config: RunnableConfig) -> RunnableConfig:
         for key, value in (config.get("configurable") or {}).items()
         if not str(key).startswith("__pregel_")
     }
-    return {**config, "configurable": configurable}
+    return {
+        **config,
+        "configurable": configurable,
+        "metadata": searchable_trace_metadata(
+            configurable,
+            config.get("metadata") if isinstance(config.get("metadata"), dict) else None,
+            graph=graph,
+        ),
+    }

@@ -57,6 +57,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from agent.utils.trace_metadata import searchable_trace_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +290,10 @@ async def _build_dashboard_configurable(
         "github_login": login,
         "user_email": await _resolve_run_email(login, profile),
     }
+    for key in ("origin", "thread_category", "trigger_kind", "client", "execution"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            configurable[key] = value
     repo_config = _repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
@@ -440,7 +445,11 @@ async def _enrich_run_start_command(
     content = _command_message_content(params)
     command_images = _dashboard_images_from_content(content)
     prepare_run_id = str(uuid.uuid4())
-    overrides: dict[str, Any] = {"prepare_run_id": prepare_run_id}
+    overrides: dict[str, Any] = {
+        "prepare_run_id": prepare_run_id,
+        "client": client_configurable.get("client") or "web",
+        "execution": client_configurable.get("execution") or "cloud",
+    }
     run_model: str | None = None
     run_effort: str | None = None
 
@@ -610,11 +619,16 @@ async def _enrich_run_start_command(
     run_metadata = params.get("metadata")
     if not isinstance(run_metadata, dict):
         run_metadata = {}
-    run_metadata = {
-        **run_metadata,
-        **_agent_version_metadata(),
-        "prepare_run_id": prepare_run_id,
-    }
+    run_metadata = searchable_trace_metadata(
+        merged_configurable,
+        {
+            **run_metadata,
+            **_agent_version_metadata(),
+            "prepare_run_id": prepare_run_id,
+        },
+        source=_DASHBOARD_SOURCE,
+        graph=_ASSISTANT_ID,
+    )
 
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))

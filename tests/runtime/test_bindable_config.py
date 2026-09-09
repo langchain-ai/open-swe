@@ -24,6 +24,8 @@ def test_bindable_config_drops_langgraph_internal_keys() -> None:
 
     assert bound["recursion_limit"] == 7
     assert bound["configurable"] == {"thread_id": "t1", "model": "anthropic:claude-opus-5"}
+    assert bound["metadata"]["open_swe.thread_id"] == "t1"
+    assert bound["metadata"]["open_swe.source"] == "automation"
     # The caller's config is left alone.
     assert "__pregel_runtime" in config["configurable"]
 

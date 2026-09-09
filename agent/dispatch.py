@@ -44,6 +44,7 @@ from agent.input_messages import (
     build_run_input,
 )
 from agent.run_config import RunConfig
+from agent.utils.trace_metadata import searchable_trace_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +217,7 @@ def prepare_run_config(
     if metadata is not None:
         merged_metadata.update(metadata)
     merged_metadata["prepare_run_id"] = configurable["prepare_run_id"]
-    run_config["metadata"] = merged_metadata
+    run_config["metadata"] = searchable_trace_metadata(configurable, merged_metadata)
     return run_config
 
 
@@ -238,6 +239,9 @@ async def create_durable_run(
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
     run_config = prepare_run_config(config, metadata)
+    run_config["metadata"] = searchable_trace_metadata(
+        run_config["configurable"], run_config["metadata"], source=source, graph=assistant_id
+    )
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,
