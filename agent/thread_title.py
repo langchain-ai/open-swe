@@ -8,12 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from agent.input_messages import (
-    dynamic_context_hash,
-    human_input,
-    input_message_text,
-    wrap_system_prompt,
-)
+from agent.input_messages import dynamic_context_hash, human_input, input_message_text
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, rename_session
 from agent.source_context import SourceContext
 
@@ -106,7 +101,7 @@ async def generate_and_store_thread_title(
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
         result = await structured.ainvoke(
             [
-                SystemMessage(content=wrap_system_prompt(_TITLE_SYSTEM_PROMPT)),
+                SystemMessage(content=_TITLE_SYSTEM_PROMPT),
                 HumanMessage(content=title_input),
             ],
             # Empty callbacks, so this call cannot inherit the run's handlers and

@@ -9,7 +9,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from agent.desktop import is_desktop_worktree
-from agent.input_messages import dynamic_context_hash, input_message_text, wrap_system_prompt
+from agent.input_messages import dynamic_context_hash, input_message_text
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ async def rename_temporary_worktree_branch(
     async with asyncio.timeout(BRANCH_GENERATION_TIMEOUT_SECONDS):
         result = await structured.ainvoke(
             [
-                SystemMessage(content=wrap_system_prompt(_BRANCH_SYSTEM_PROMPT)),
+                SystemMessage(content=_BRANCH_SYSTEM_PROMPT),
                 HumanMessage(content=request),
             ],
             # Empty callbacks, so this call cannot inherit the run's handlers and
