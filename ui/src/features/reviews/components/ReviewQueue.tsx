@@ -32,6 +32,8 @@ const MAX_SUGGESTIONS = 50
 
 const REPOS_QUERY_KEY = ["reviewQueueRepos"] as const
 const QUEUE_QUERY_KEY = ["reviewQueue"] as const
+// Mirrors the `first: 100` on the backend's GitHub search.
+const QUEUE_SEARCH_LIMIT = 100
 
 const DECISION_LABELS: Record<string, string> = {
   APPROVED: "Approved",
@@ -317,6 +319,7 @@ export function ReviewQueue() {
   })
 
   const items = queue.data?.items ?? []
+  const totalOpen = queue.data?.total_open ?? 0
 
   return (
     <div className="mt-3 space-y-3">
@@ -375,14 +378,17 @@ export function ReviewQueue() {
             review.
           </p>
         )}
-        {repos.length > 0 && queue.isLoading && (
+        {repos.length > 0 && queue.isPending && (
           <div className="p-4">
             <Skeleton className="h-24 w-full" />
           </div>
         )}
-        {repos.length > 0 && queue.error && (
-          <p className="px-4 py-3 text-xs text-destructive">
-            {queue.error.message}
+        {repos.length > 0 && queue.isError && (
+          <p
+            data-testid="review-queue-error"
+            className="px-4 py-3 text-xs text-destructive"
+          >
+            {queue.error.message || "Could not load pull requests."}
           </p>
         )}
         {repos.length > 0 && queue.data && items.length === 0 && (
@@ -466,6 +472,15 @@ export function ReviewQueue() {
             </Link>
           ))}
         </div>
+        {totalOpen > QUEUE_SEARCH_LIMIT && (
+          <p
+            data-testid="review-queue-truncated"
+            className="border-t border-border px-4 py-2 text-xs text-muted-foreground"
+          >
+            Showing the {QUEUE_SEARCH_LIMIT} most recently updated of{" "}
+            {totalOpen} open pull requests.
+          </p>
+        )}
       </div>
     </div>
   )

@@ -1,15 +1,20 @@
 """Ready-for-me review queue: open PRs in the user's followed repos that are actually reviewable.
 
-The list is fetched with the signed-in user's own OAuth token through a single
-GitHub search, so the authorization boundary is GitHub itself and the TTL cache
-is keyed by login — a cached row for a private PR is never served to an account
+The list is fetched with the signed-in user's own OAuth token through a GitHub
+search, so the authorization boundary is GitHub itself and the TTL cache is
+keyed by login — a cached row for a private PR is never served to an account
 that lacks access.
+
+Changed files come from a second batched query: asking for `files` inside a
+100-result search is expensive enough that GitHub answers HTTP 502 once the
+followed repos hold a few hundred open PRs.
 """
 
 import asyncio
 import logging
 import re
 import time
+from collections.abc import Sequence
 from typing import Any, Literal
 
 import httpx2
@@ -36,6 +41,7 @@ _MAX_REPOS = 50
 _MAX_PATHS_PER_REPO = 20
 _MAX_PATH_LENGTH = 200
 _FILE_PAGE_SIZE = 100
+_FILES_BATCH_SIZE = 20
 _CACHE_TTL_SECONDS = 60.0
 _CACHE_MAX_ENTRIES = 500
 _REVIEW_LOOKUP_CONCURRENCY = 10
@@ -45,10 +51,10 @@ _SEARCH_PREFIX = "is:pr is:open draft:false archived:false -author:@me sort:upda
 _SEARCH_QUERY = """
 query ReviewQueueSearch($q: String!) {
   search(type: ISSUE, query: $q, first: 100) {
+    issueCount
     nodes { ... on PullRequest {
       number title url isDraft mergeable reviewDecision updatedAt
       additions deletions changedFiles
-      files(first: 100) { totalCount nodes { path } }
       author { login }
       repository { nameWithOwner }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -91,6 +97,7 @@ class ReviewQueueItem(BaseModel):
 class ReviewQueuePayload(BaseModel):
     repos: list[ReviewQueueRepo] = Field(default_factory=list)
     items: list[ReviewQueueItem] = Field(default_factory=list)
+    total_open: int = 0
     fetched_at: str = Field(default_factory=now_iso)
 
 
@@ -153,10 +160,12 @@ class _SearchPullRequest(BaseModel):
     author: _SearchAuthor | None = None
     repository: _SearchRepository
     commits: _SearchCommits = Field(default_factory=_SearchCommits)
-    files: _SearchFiles = Field(default_factory=_SearchFiles)
 
 
 class _SearchResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    issue_count: int = Field(default=0, alias="issueCount")
     nodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -169,9 +178,32 @@ class _SearchResponse(BaseModel):
     errors: list[Any] | None = None
 
 
+class _FilesPullRequest(BaseModel):
+    files: _SearchFiles = Field(default_factory=_SearchFiles)
+
+
+class _FilesRepository(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pull_request: _FilesPullRequest | None = Field(default=None, alias="pullRequest")
+
+
+class _FilesResponse(BaseModel):
+    data: dict[str, _FilesRepository | None] | None = None
+    errors: list[Any] | None = None
+
+
+class _ReadyQueue(BaseModel):
+    items: list[ReviewQueueItem] = Field(default_factory=list)
+    total_open: int = 0
+
+
+_PullKey = tuple[str, int]
+_PullIdentity = tuple[str, str, int]
+
 _CacheKey = tuple[str, tuple[tuple[str, tuple[str, ...]], ...]]
 
-_cache: dict[_CacheKey, tuple[float, list[ReviewQueueItem]]] = {}
+_cache: dict[_CacheKey, tuple[float, _ReadyQueue]] = {}
 
 
 def _evict_expired(now: float) -> None:
@@ -260,11 +292,11 @@ def _is_ready(pull: _SearchPullRequest) -> bool:
     return not pull.is_draft and pull.mergeable == "MERGEABLE" and _checks_pass(pull)
 
 
-def _path_match(pull: _SearchPullRequest, paths: list[str]) -> tuple[list[str], bool] | None:
+def _path_match(files: _SearchFiles, paths: list[str]) -> tuple[list[str], bool] | None:
     """The configured prefixes this PR touches, or ``None`` when it touches none."""
     if not paths:
         return [], False
-    changed = [node.path for node in pull.files.nodes]
+    changed = [node.path for node in files.nodes]
     matched = [
         path
         for path in paths
@@ -272,7 +304,7 @@ def _path_match(pull: _SearchPullRequest, paths: list[str]) -> tuple[list[str], 
     ]
     if matched:
         return matched, False
-    if pull.files.total_count > _FILE_PAGE_SIZE:
+    if files.total_count > _FILE_PAGE_SIZE:
         return [], True
     return None
 
@@ -302,9 +334,74 @@ def _to_item(
     )
 
 
-async def _search_ready_items(
-    login: str, repos: list[ReviewQueueRepo], token: str
-) -> list[ReviewQueueItem]:
+def _fetch_failed(login: str, phase: str, count: int) -> HTTPException:
+    logger.warning(
+        "review queue github request failed",
+        extra={"login": login, "phase": phase, "count": count},
+    )
+    return HTTPException(502, "could not fetch pull requests from GitHub")
+
+
+def _build_files_query(identities: Sequence[_PullIdentity]) -> tuple[str, dict[str, Any]]:
+    declarations: list[str] = []
+    selections: list[str] = []
+    variables: dict[str, Any] = {}
+    for index, (owner, repo, number) in enumerate(identities):
+        declarations.append(f"$o{index}:String!,$r{index}:String!,$n{index}:Int!")
+        selections.append(
+            f"p{index}: repository(owner:$o{index}, name:$r{index}) {{"
+            f" pullRequest(number:$n{index}) {{"
+            f" files(first: {_FILE_PAGE_SIZE}) {{ totalCount nodes {{ path }} }} }} }}"
+        )
+        variables[f"o{index}"] = owner
+        variables[f"r{index}"] = repo
+        variables[f"n{index}"] = number
+    query = f"query ReviewQueueFiles({','.join(declarations)}) {{ {' '.join(selections)} }}"
+    return query, variables
+
+
+def _pull_key(pull: _SearchPullRequest) -> _PullKey:
+    return pull.repository.name_with_owner.lower(), pull.number
+
+
+def _pull_identity(pull: _SearchPullRequest) -> _PullIdentity:
+    owner, repo = pull.repository.name_with_owner.split("/", 1)
+    return owner, repo, pull.number
+
+
+async def _fetch_files(
+    login: str, pulls: list[_SearchPullRequest], token: str
+) -> dict[_PullKey, _SearchFiles]:
+    """Changed paths for the given PRs, batched into aliased queries of `_FILES_BATCH_SIZE`."""
+    files: dict[_PullKey, _SearchFiles] = {}
+    async with github_client(token=token) as client:
+        for start in range(0, len(pulls), _FILES_BATCH_SIZE):
+            chunk = pulls[start : start + _FILES_BATCH_SIZE]
+            query, variables = _build_files_query([_pull_identity(pull) for pull in chunk])
+            try:
+                response = await github_request(
+                    client,
+                    "POST",
+                    GITHUB_GRAPHQL,
+                    json={"query": query, "variables": variables},
+                )
+                response.raise_for_status()
+                payload = _FilesResponse.model_validate(response.json())
+            except (httpx2.HTTPError, ValueError, ValidationError) as exc:
+                raise _fetch_failed(login, "files", len(pulls)) from exc
+
+            if payload.errors or payload.data is None:
+                raise _fetch_failed(login, "files", len(pulls))
+
+            for index, pull in enumerate(chunk):
+                repository = payload.data.get(f"p{index}")
+                pull_request = repository.pull_request if repository is not None else None
+                if pull_request is not None:
+                    files[_pull_key(pull)] = pull_request.files
+    return files
+
+
+async def _search_ready_items(login: str, repos: list[ReviewQueueRepo], token: str) -> _ReadyQueue:
     query = _SEARCH_PREFIX + " ".join(f"repo:{repo.full_name}" for repo in repos)
     paths_by_repo = {repo.full_name.lower(): repo.paths for repo in repos}
     try:
@@ -318,48 +415,45 @@ async def _search_ready_items(
             response.raise_for_status()
             payload = _SearchResponse.model_validate(response.json())
     except (httpx2.HTTPError, ValueError, ValidationError) as exc:
-        logger.warning(
-            "review queue search request failed",
-            extra={"login": login, "repo_count": len(repos)},
-        )
-        raise HTTPException(502, "could not fetch pull requests from GitHub") from exc
+        raise _fetch_failed(login, "search", len(repos)) from exc
 
     if payload.errors or payload.data is None:
-        logger.warning(
-            "review queue search returned errors",
-            extra={"login": login, "repo_count": len(repos)},
-        )
-        raise HTTPException(502, "could not fetch pull requests from GitHub")
+        raise _fetch_failed(login, "search", len(repos))
 
-    items: list[ReviewQueueItem] = []
+    ready: list[_SearchPullRequest] = []
     for node in payload.data.search.nodes:
         try:
             pull = _SearchPullRequest.model_validate(node)
         except ValidationError:
             continue
-        if not _is_ready(pull):
-            continue
-        match = _path_match(pull, paths_by_repo.get(pull.repository.name_with_owner.lower(), []))
+        if _is_ready(pull) and _valid_full_name(pull.repository.name_with_owner):
+            ready.append(pull)
+
+    filtered = [pull for pull in ready if paths_by_repo.get(_pull_key(pull)[0])]
+    files = await _fetch_files(login, filtered, token) if filtered else {}
+
+    items: list[ReviewQueueItem] = []
+    for pull in ready:
+        key = _pull_key(pull)
+        match = _path_match(files.get(key, _SearchFiles()), paths_by_repo.get(key[0], []))
         if match is None:
             continue
         item = _to_item(pull, *match)
         if item is not None:
             items.append(item)
-    return items
+    return _ReadyQueue(items=items, total_open=payload.data.search.issue_count)
 
 
-async def _ready_items(
-    login: str, repos: list[ReviewQueueRepo], token: str
-) -> list[ReviewQueueItem]:
+async def _ready_items(login: str, repos: list[ReviewQueueRepo], token: str) -> _ReadyQueue:
     now = time.monotonic()
     _evict_expired(now)
     key: _CacheKey = (login, tuple((repo.full_name, tuple(repo.paths)) for repo in repos))
     cached = _cache.get(key)
     if cached and cached[0] > now:
         return cached[1]
-    items = await _search_ready_items(login, repos, token)
-    _cache[key] = (time.monotonic() + _CACHE_TTL_SECONDS, items)
-    return items
+    ready = await _search_ready_items(login, repos, token)
+    _cache[key] = (time.monotonic() + _CACHE_TTL_SECONDS, ready)
+    return ready
 
 
 async def _ai_review(item: ReviewQueueItem) -> ReviewQueueAiReview | None:
@@ -392,12 +486,13 @@ async def get_review_queue(login: str) -> ReviewQueuePayload:
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
 
-    items = await _ready_items(login, record.repos, token)
-    reviews = await _ai_reviews(items)
+    ready = await _ready_items(login, record.repos, token)
+    reviews = await _ai_reviews(ready.items)
     return ReviewQueuePayload(
         repos=record.repos,
         items=[
             item.model_copy(update={"ai_review": review})
-            for item, review in zip(items, reviews, strict=True)
+            for item, review in zip(ready.items, reviews, strict=True)
         ],
+        total_open=ready.total_open,
     )

@@ -74,7 +74,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   })
   if (!res.ok) {
-    let message = res.statusText
+    // HTTP/2 has no reason phrase, so `statusText` is empty on every deployed
+    // response — without the status fallback a non-JSON error renders blank.
+    let message = res.statusText || `request failed (${res.status})`
     try {
       const body = await res.json()
       if (body?.detail)
@@ -566,6 +568,7 @@ export interface ReviewQueueReposPayload {
 export interface ReviewQueuePayload {
   repos: Array<ReviewQueueRepo>
   items: Array<ReviewQueueItem>
+  total_open: number
   fetched_at: string
 }
 

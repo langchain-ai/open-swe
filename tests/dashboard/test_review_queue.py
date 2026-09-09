@@ -65,9 +65,26 @@ class _Response:
         return self._payload
 
 
+def _search_nodes(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = payload.get("data")
+    search = data.get("search") if isinstance(data, dict) else None
+    nodes = search.get("nodes") if isinstance(search, dict) else None
+    return nodes if isinstance(nodes, list) else []
+
+
 def _patch_github(
-    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any], calls: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+    calls: list[dict[str, Any]],
+    files_payload: dict[str, Any] | None = None,
 ) -> None:
+    """Answer both review queue phases; ``files`` on a node feeds the second one."""
+    files = {
+        (node["repository"]["nameWithOwner"].lower(), node["number"]): node.pop("files")
+        for node in _search_nodes(payload)
+        if "files" in node
+    }
+
     class _Client:
         async def __aenter__(self) -> _Client:
             return self
@@ -80,10 +97,35 @@ def _patch_github(
 
     async def request(_client: object, _method: str, _url: str, *, json: Any, **_kwargs: object):
         calls.append(json)
-        return _Response(payload)
+        if "ReviewQueueFiles" not in json["query"]:
+            return _Response(payload)
+        if files_payload is not None:
+            return _Response(files_payload)
+        variables = json["variables"]
+        data: dict[str, Any] = {}
+        for index in range(len(variables) // 3):
+            repo = f"{variables[f'o{index}']}/{variables[f'r{index}']}".lower()
+            node_files = files.get((repo, variables[f"n{index}"]))
+            data[f"p{index}"] = {"pullRequest": {"files": node_files} if node_files else None}
+        return _Response({"data": data})
 
     monkeypatch.setattr(review_queue, "github_client", client)
     monkeypatch.setattr(review_queue, "github_request", request)
+
+
+def _files_requests(calls: list[dict[str, Any]]) -> list[list[tuple[str, int]]]:
+    requested: list[list[tuple[str, int]]] = []
+    for call in calls:
+        if "ReviewQueueFiles" not in call["query"]:
+            continue
+        variables = call["variables"]
+        requested.append(
+            [
+                (f"{variables[f'o{index}']}/{variables[f'r{index}']}", variables[f"n{index}"])
+                for index in range(len(variables) // 3)
+            ]
+        )
+    return requested
 
 
 @pytest.fixture(autouse=True)
@@ -111,6 +153,7 @@ async def test_keeps_only_ready_pulls_and_maps_fields(
         {
             "data": {
                 "search": {
+                    "issueCount": 314,
                     "nodes": [
                         _pull("acme/alpha", 1, review_decision="REVIEW_REQUIRED"),
                         _pull("acme/beta", 2, has_rollup=False, author=None),
@@ -120,7 +163,7 @@ async def test_keeps_only_ready_pulls_and_maps_fields(
                         _pull("acme/alpha", 5, mergeable="UNKNOWN"),
                         _pull("acme/alpha", 6, rollup="FAILURE"),
                         _pull("acme/alpha", 7, rollup="PENDING"),
-                    ]
+                    ],
                 }
             }
         },
@@ -128,6 +171,8 @@ async def test_keeps_only_ready_pulls_and_maps_fields(
     )
 
     payload = await get_review_queue("octocat")
+
+    assert payload.total_open == 314
 
     assert [(item.repo_full_name, item.number) for item in payload.items] == [
         ("acme/alpha", 1),
@@ -146,7 +191,108 @@ async def test_keeps_only_ready_pulls_and_maps_fields(
     assert "repo:acme/alpha" in search
     assert "repo:acme/beta" in search
     assert "-author:@me" in search
+    assert "files" not in calls[0]["query"]
     assert [repo.full_name for repo in payload.repos] == ["acme/alpha", "acme/beta"]
+
+
+async def test_files_are_not_fetched_when_no_repo_has_paths(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos("octocat", _repos("acme/alpha"))
+    calls: list[dict[str, Any]] = []
+    _patch_github(
+        monkeypatch,
+        {"data": {"search": {"nodes": [_pull("acme/alpha", 1), _pull("acme/alpha", 2)]}}},
+        calls,
+    )
+
+    payload = await get_review_queue("octocat")
+
+    assert [item.number for item in payload.items] == [1, 2]
+    assert [call["query"].strip().startswith("query ReviewQueueSearch") for call in calls] == [True]
+
+
+async def test_files_are_fetched_only_for_ready_pulls_of_path_filtered_repos(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos(
+        "octocat",
+        [
+            ReviewQueueRepo(full_name="acme/alpha", paths=["ui/"]),
+            ReviewQueueRepo(full_name="acme/beta"),
+        ],
+    )
+    calls: list[dict[str, Any]] = []
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        _pull("acme/alpha", 1, file_paths=["ui/src/a.tsx"]),
+                        _pull("acme/alpha", 2, rollup="FAILURE"),
+                        _pull("acme/alpha", 3, is_draft=True),
+                        _pull("acme/beta", 4),
+                        _pull("acme/alpha", 5, file_paths=["ui/src/b.tsx"]),
+                    ]
+                }
+            }
+        },
+        calls,
+    )
+
+    payload = await get_review_queue("octocat")
+
+    assert [item.number for item in payload.items] == [1, 4, 5]
+    assert _files_requests(calls) == [[("acme/alpha", 1), ("acme/alpha", 5)]]
+
+
+async def test_files_are_batched_twenty_pulls_at_a_time(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos(
+        "octocat", [ReviewQueueRepo(full_name="acme/alpha", paths=["ui/"])]
+    )
+    calls: list[dict[str, Any]] = []
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        _pull("acme/alpha", number, file_paths=["ui/a.tsx"])
+                        for number in range(1, 26)
+                    ]
+                }
+            }
+        },
+        calls,
+    )
+
+    payload = await get_review_queue("octocat")
+
+    assert len(payload.items) == 25
+    assert [len(batch) for batch in _files_requests(calls)] == [20, 5]
+
+
+async def test_files_phase_errors_surface_as_bad_gateway(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos(
+        "octocat", [ReviewQueueRepo(full_name="acme/alpha", paths=["ui/"])]
+    )
+    _patch_github(
+        monkeypatch,
+        {"data": {"search": {"nodes": [_pull("acme/alpha", 1, file_paths=["ui/a.tsx"])]}}},
+        [],
+        files_payload={"errors": [{"message": "nope"}]},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_review_queue("octocat")
+
+    assert exc.value.status_code == 502
+    assert not review_queue._cache
 
 
 async def test_ai_review_summary_is_attached(

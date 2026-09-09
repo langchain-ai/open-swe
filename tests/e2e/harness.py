@@ -736,10 +736,6 @@ def _search_node(pr: dict[str, Any]) -> dict[str, Any]:
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changedFiles": len(pr["files"]),
-        "files": {
-            "totalCount": len(pr["files"]),
-            "nodes": [{"path": file["filename"]} for file in pr["files"]],
-        },
         "author": {"login": pr["author"]},
         "repository": {"nameWithOwner": f"{pr['owner']}/{pr['repo']}"},
         "commits": {"nodes": [{"commit": {"statusCheckRollup": _status_check_rollup(pr)}}]},
@@ -763,7 +759,31 @@ async def gh_graphql(request: Request) -> JSONResponse:
             for pull in fakes.PULLS
             if pull["state"] == "open" and f"{pull['owner']}/{pull['repo']}".lower() in wanted
         ]
-        return JSONResponse({"data": {"search": {"nodes": nodes}}})
+        return JSONResponse({"data": {"search": {"issueCount": len(nodes), "nodes": nodes}}})
+    if "ReviewQueueFiles" in query:
+        data: dict[str, Any] = {}
+        for index in range(len(variables) // 3):
+            owner = variables.get(f"o{index}")
+            repo = variables.get(f"r{index}")
+            number = variables.get(f"n{index}")
+            if (
+                not isinstance(owner, str)
+                or not isinstance(repo, str)
+                or not isinstance(number, int)
+            ):
+                return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)
+            pull = fakes.find_pull(number, owner, repo)
+            data[f"p{index}"] = {
+                "pullRequest": None
+                if pull is None
+                else {
+                    "files": {
+                        "totalCount": len(pull["files"]),
+                        "nodes": [{"path": file["filename"]} for file in pull["files"]],
+                    }
+                }
+            }
+        return JSONResponse({"data": data})
     owner = variables.get("owner")
     repo = variables.get("repo")
     number = variables.get("number")
