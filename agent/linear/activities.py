@@ -16,7 +16,8 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL
 from agent.linear.client import LinearError, linear_client
-from agent.linear.schema import ActionContent, ErrorContent
+from agent.linear.schema import ActionContent, ErrorContent, ResponseContent
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.tool_steps import tool_event, tool_step
 
@@ -28,11 +29,13 @@ _FLUSH_INTERVAL_SECONDS = 2.0
 _RUN_FAILED = (
     "The run stopped before it could finish. Send another message and I'll pick it back up."
 )
+_RUN_FINISHED = "Finished working on this issue."
 
 
 class LinearActivityStream:
-    def __init__(self, *, session_id: str, run_id: str) -> None:
+    def __init__(self, *, session_id: str, thread_id: str, run_id: str) -> None:
         self.session_id = session_id
+        self.thread_id = thread_id
         self.run_id = run_id
         self.pending: ActionContent | None = None
         self.last_flush = 0.0
@@ -47,7 +50,9 @@ class LinearActivityStream:
             action=action, parameter=parameter or event.tool_name.replace("_", " ")
         )
 
-    async def _emit(self, content: ActionContent | ErrorContent, *, ephemeral: bool) -> None:
+    async def _emit(
+        self, content: ActionContent | ErrorContent | ResponseContent, *, ephemeral: bool
+    ) -> None:
         try:
             await linear_client().create_agent_activity(
                 self.session_id, content, ephemeral=ephemeral
@@ -73,12 +78,19 @@ class LinearActivityStream:
 
     async def finish(self, status: str) -> None:
         self.pending = None
-        if self.disabled or status == "success" or COMPLETION_WEBHOOK_URL:
+        if self.disabled or COMPLETION_WEBHOOK_URL:
+            return
+        if status == "success":
+            await self._emit(ResponseContent(body=self._success_body()), ephemeral=False)
             return
         # "interrupted" means a follow-up replaced this run, which is not a failure.
         if status == "interrupted":
             return
         await self._emit(ErrorContent(body=_RUN_FAILED), ephemeral=False)
+
+    def _success_body(self) -> str:
+        url = dashboard_thread_url(self.thread_id)
+        return f"{_RUN_FINISHED}\n\n[Open in Open SWE Web]({url})" if url else _RUN_FINISHED
 
 
 async def stream_linear_activities(
@@ -89,7 +101,7 @@ async def stream_linear_activities(
     session_id: str,
 ) -> None:
     """Mirror one run's tool lifecycle into a Linear agent session."""
-    stream = LinearActivityStream(session_id=session_id, run_id=run_id)
+    stream = LinearActivityStream(session_id=session_id, thread_id=thread_id, run_id=run_id)
     status = "error"
     try:
         active = False

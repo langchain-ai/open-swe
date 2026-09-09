@@ -163,13 +163,19 @@ class LinearClient:
         if signal is not None:
             activity_input["signal"] = signal
         data = await self.execute(_AGENT_ACTIVITY_CREATE, {"input": activity_input})
-        AgentActivityCreateData.model_validate(data)
+        payload = AgentActivityCreateData.model_validate(data).agent_activity_create
+        if not payload.success:
+            raise LinearError([{"message": "agentActivityCreate rejected the activity"}])
 
     async def update_agent_session_external_url(self, session_id: str, url: str) -> None:
         data = await self.execute(
             _AGENT_SESSION_UPDATE_EXTERNAL_URL, {"id": session_id, "url": url}
         )
-        AgentSessionUpdateExternalUrlData.model_validate(data)
+        payload = AgentSessionUpdateExternalUrlData.model_validate(
+            data
+        ).agent_session_update_external_url
+        if not payload.success:
+            raise LinearError([{"message": "agentSessionUpdateExternalUrl rejected the update"}])
 
 
 _client: LinearClient | None = None

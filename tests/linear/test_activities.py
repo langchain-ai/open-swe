@@ -92,7 +92,9 @@ async def test_rapid_steps_coalesce_to_the_latest(
 ) -> None:
     clock = 100.0
     monkeypatch.setattr(activities, "monotonic", lambda: clock)
-    stream = activities.LinearActivityStream(session_id="session-1", run_id="run-1")
+    stream = activities.LinearActivityStream(
+        session_id="session-1", thread_id="thread-1", run_id="run-1"
+    )
 
     stream.consume(_started("call-1", "read_file", {"file_path": "a.py"}))
     stream.consume(_started("call-2", "read_file", {"file_path": "b.py"}))
@@ -113,7 +115,9 @@ async def test_rapid_steps_coalesce_to_the_latest(
 
 async def test_a_linear_failure_disables_emission_without_raising(linear: AsyncMock) -> None:
     linear.create_agent_activity.side_effect = LinearError([{"message": "nope"}])
-    stream = activities.LinearActivityStream(session_id="session-1", run_id="run-1")
+    stream = activities.LinearActivityStream(
+        session_id="session-1", thread_id="thread-1", run_id="run-1"
+    )
 
     stream.consume(_started("call-1", "read_file", {"file_path": "a.py"}))
     await stream.flush(force=True)
@@ -128,7 +132,9 @@ async def test_the_completion_webhook_owns_the_terminal_activity(
     linear: AsyncMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(activities, "COMPLETION_WEBHOOK_URL", "https://open-swe/complete")
-    stream = activities.LinearActivityStream(session_id="session-1", run_id="run-1")
+    stream = activities.LinearActivityStream(
+        session_id="session-1", thread_id="thread-1", run_id="run-1"
+    )
 
     await stream.finish("error")
 
@@ -139,7 +145,9 @@ async def test_a_failure_is_reported_when_no_completion_webhook_is_wired(
     linear: AsyncMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(activities, "COMPLETION_WEBHOOK_URL", None)
-    stream = activities.LinearActivityStream(session_id="session-1", run_id="run-1")
+    stream = activities.LinearActivityStream(
+        session_id="session-1", thread_id="thread-1", run_id="run-1"
+    )
 
     await stream.finish("error")
 
@@ -147,11 +155,28 @@ async def test_a_failure_is_reported_when_no_completion_webhook_is_wired(
     assert linear.create_agent_activity.await_args.args[1].type == "error"
 
 
+async def test_a_success_is_reported_when_no_completion_webhook_is_wired(
+    linear: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(activities, "COMPLETION_WEBHOOK_URL", None)
+    stream = activities.LinearActivityStream(
+        session_id="session-1", thread_id="thread-1", run_id="run-1"
+    )
+
+    await stream.finish("success")
+
+    linear.create_agent_activity.assert_awaited_once()
+    assert linear.create_agent_activity.await_args.args[1].type == "response"
+    assert linear.create_agent_activity.await_args.kwargs["ephemeral"] is False
+
+
 async def test_an_interrupted_run_is_not_reported_as_a_failure(
     linear: AsyncMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(activities, "COMPLETION_WEBHOOK_URL", None)
-    stream = activities.LinearActivityStream(session_id="session-1", run_id="run-1")
+    stream = activities.LinearActivityStream(
+        session_id="session-1", thread_id="thread-1", run_id="run-1"
+    )
 
     await stream.finish("interrupted")
 

@@ -601,8 +601,11 @@ async def continue_session(event: AgentSessionEvent) -> None:
         return
 
     thread_id = linear_issue_thread_id(session.issue.id)
-    if await get_thread_active_status(thread_id):
-        await queue_message_for_thread(thread_id, body)
+    # A failed enqueue falls through to a run of its own, which interrupts the
+    # active one rather than dropping the follow-up.
+    if await get_thread_active_status(thread_id) and await queue_message_for_thread(
+        thread_id, body
+    ):
         await emit_activity(session.id, ThoughtContent(body=_QUEUED_THOUGHT), ephemeral=True)
         return
 
