@@ -566,6 +566,7 @@ export function AgentsSidebar({
     updatedAt: recents[0]?.updatedAt ?? 0,
     threads: recents,
   }
+  const noProjectAvailable = recents.length > 0 || recentsQuery.hasMore
   const noProjectPinned = pinnedProjectKeys.has(NO_PROJECT_GROUP_KEY)
 
   const renderProjectGroup = (group: HydratedProjectGroup) => (
@@ -755,7 +756,7 @@ export function AgentsSidebar({
 
             {(filteredPinnedItems.length > 0 ||
               pinnedGroups.length > 0 ||
-              (projectMode && noProjectPinned && recents.length > 0)) && (
+              (projectMode && noProjectPinned && noProjectAvailable)) && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Pinned"
@@ -790,7 +791,7 @@ export function AgentsSidebar({
                     {pinnedGroups.map(renderProjectGroup)}
                     {projectMode &&
                       noProjectPinned &&
-                      recents.length > 0 &&
+                      noProjectAvailable &&
                       renderProjectGroup(noProjectGroup)}
                   </>
                 )}
@@ -799,7 +800,7 @@ export function AgentsSidebar({
 
             {projectMode &&
               (unpinnedGroups.length > 0 ||
-                recents.length > 0 ||
+                noProjectAvailable ||
                 isDesktop) && (
                 <section className="mb-3">
                   <SidebarSectionHeader
@@ -826,7 +827,7 @@ export function AgentsSidebar({
                     <>
                       {unpinnedGroups.map(renderProjectGroup)}
                       {!noProjectPinned &&
-                        recents.length > 0 &&
+                        noProjectAvailable &&
                         renderProjectGroup(noProjectGroup)}
                     </>
                   )}

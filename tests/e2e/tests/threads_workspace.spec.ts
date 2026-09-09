@@ -734,6 +734,11 @@ test.describe("threads workspace", () => {
     await page.goto("/agents/threads");
 
     const sidebar = page.locator("[data-sidebar-frame]");
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await page
+      .getByRole("menuitemradio", { name: "Last updated", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
     const workspaceLinks = sidebar.locator(
       `a[href^="/agents/"]:has-text("${WORKSPACE_QUERY}")`,
     );
