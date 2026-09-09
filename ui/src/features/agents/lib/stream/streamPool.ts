@@ -11,28 +11,35 @@ export interface StreamPoolEntry {
   transport: AgentThreadTransport
   /** `null` until the first submit mints a thread id. */
   threadId: string | null
+  /** Created without a thread; its first accepted run is the thread's creation. */
+  awaitingCreation: boolean
   lastActiveAt: number
 }
-
-export const IDLE_STREAM_TTL_MS = 60_000
-export const MAX_IDLE_STREAMS = 8
 
 export interface StreamBinding {
   transport: AgentThreadTransport
   threadId: string | null
 }
 
-interface StreamPoolState {
+export const IDLE_STREAM_TTL_MS = 60_000
+export const MAX_IDLE_STREAMS = 8
+
+export interface StreamPoolState {
   entries: Array<StreamPoolEntry>
   handles: Record<string, AgentStream | undefined>
   activeId: string | null
   /** What the route last asked for; stays `null`-threaded while a lazy thread awaits navigation. */
   binding: StreamBinding | null
+  /** A lazily created thread the server just accepted, until the UI consumes it. */
+  createdThreadId: string | null
   /** Bind the pool to a thread, reusing a retained instance when there is one. */
   activate(transport: AgentThreadTransport, threadId: string | null): void
   publish(id: string, handle: AgentStream): void
   /** A lazily created thread received its server id. */
   rekey(id: string, threadId: string): void
+  /** The server accepted a run on this instance. */
+  runAccepted(id: string): void
+  consumeCreatedThread(): void
   /** Drop idle instances past the TTL or cap; active and running ones stay. */
   sweep(now: number): void
 }
@@ -56,6 +63,7 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
   handles: {},
   activeId: null,
   binding: null,
+  createdThreadId: null,
 
   activate(transport, threadId) {
     const now = Date.now()
@@ -82,6 +90,7 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
       id: `stream-${++nextId}`,
       transport,
       threadId,
+      awaitingCreation: threadId === null,
       lastActiveAt: now,
     }
     set((state) => ({
@@ -112,6 +121,31 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
     })
   },
 
+  runAccepted(id) {
+    set((state) => {
+      const entry = state.entries.find((candidate) => candidate.id === id)
+      if (!entry?.awaitingCreation) return state
+      // Only the cloud thread the user is still looking at may steer
+      // navigation; a draft they left behind finishes creating quietly.
+      const announce =
+        entry.transport === "cloud" &&
+        entry.id === state.activeId &&
+        entry.threadId
+      return {
+        createdThreadId: announce ? entry.threadId : state.createdThreadId,
+        entries: state.entries.map((candidate) =>
+          candidate.id === id
+            ? { ...candidate, awaitingCreation: false }
+            : candidate
+        ),
+      }
+    })
+  },
+
+  consumeCreatedThread() {
+    set({ createdThreadId: null })
+  },
+
   sweep(now) {
     const state = get()
     const kept = state.entries.filter((entry) => isRetained(entry, state, now))
@@ -137,3 +171,30 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
     })
   },
 }))
+
+/**
+ * The stream serving a route's request. A retained thread is found by id in
+ * the same render it is asked for; a thread-less request (home, lazily
+ * creating) is whatever `activate` bound for it. Never the previous route's
+ * handle by accident.
+ */
+export function selectStreamFor(
+  state: StreamPoolState,
+  transport: AgentThreadTransport,
+  threadId: string | null
+): AgentStream | undefined {
+  const retained =
+    threadId === null
+      ? undefined
+      : state.entries.find(
+          (entry) =>
+            entry.transport === transport && entry.threadId === threadId
+        )
+  const bound =
+    state.binding?.transport === transport &&
+    state.binding.threadId === threadId
+      ? state.entries.find((entry) => entry.id === state.activeId)
+      : undefined
+  const entry = retained ?? bound
+  return entry ? state.handles[entry.id] : undefined
+}

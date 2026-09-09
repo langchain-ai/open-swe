@@ -28,6 +28,7 @@ beforeEach(() => {
     handles: {},
     activeId: null,
     binding: null,
+    createdThreadId: null,
   })
 })
 

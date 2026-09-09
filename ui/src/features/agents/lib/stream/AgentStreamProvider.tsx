@@ -1,11 +1,9 @@
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
 } from "react"
 import { useStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
@@ -20,7 +18,7 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
-import { useStreamPool } from "./streamPool"
+import { selectStreamFor, useStreamPool } from "./streamPool"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
@@ -41,60 +39,39 @@ export function useAgentStream(): AgentStream {
   return stream
 }
 
-function PooledStream({
-  entry,
-  onThreadCreated,
-}: {
-  entry: StreamPoolEntry
-  onThreadCreated: (threadId: string) => void
-}) {
+/** One SDK stream, kept mounted for as long as the pool retains its entry. */
+function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   const queryClient = useQueryClient()
+  const cloud = entry.transport === "cloud"
   const client = useMemo(
     () =>
-      entry.transport === "local"
-        ? createLocalGraphClient()
-        : createDashboardClient(agentsApi.langGraphApiUrl),
-    [entry.transport]
+      cloud
+        ? createDashboardClient(agentsApi.langGraphApiUrl)
+        : createLocalGraphClient(),
+    [cloud]
   )
-  // The SDK captures these once per controller; they read live pool state.
-  const lifecycle = useMemo(() => {
-    const currentThreadId = () =>
-      useStreamPool.getState().entries.find((e) => e.id === entry.id)?.threadId
-    const cloud = entry.transport === "cloud"
-    // Only the first accepted run of a lazily created thread is a creation;
-    // follow-ups on retained background threads must not steal navigation.
-    let awaitingCreation = entry.threadId === null
-    return {
-      onThreadId: (threadId: string) =>
-        useStreamPool.getState().rekey(entry.id, threadId),
-      onCreated: () => {
-        if (!cloud) return
-        const threadId = currentThreadId()
-        const active = useStreamPool.getState().activeId === entry.id
-        if (awaitingCreation && threadId && active) onThreadCreated(threadId)
-        awaitingCreation = false
-        invalidateAgentThreadLists(queryClient)
-      },
-      onCompleted: () => {
-        if (!cloud) return
-        const threadId = currentThreadId()
-        if (threadId) {
-          void queryClient.invalidateQueries({
-            queryKey: agentThreadKeys.detail(threadId),
-          })
-        }
-        invalidateAgentThreadLists(queryClient)
-      },
-    }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- threadId is read at construction only
-  }, [entry.id, entry.transport, onThreadCreated, queryClient])
+  const pool = useStreamPool.getState
 
   const stream = useStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
-    ...lifecycle,
+    onThreadId: (threadId) => pool().rekey(entry.id, threadId),
+    onCreated: () => {
+      pool().runAccepted(entry.id)
+      if (cloud) invalidateAgentThreadLists(queryClient)
+    },
+    onCompleted: () => {
+      if (!cloud) return
+      const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
+      if (threadId) {
+        void queryClient.invalidateQueries({
+          queryKey: agentThreadKeys.detail(threadId),
+        })
+      }
+      invalidateAgentThreadLists(queryClient)
+    },
   })
 
   const publish = useStreamPool((state) => state.publish)
@@ -122,55 +99,38 @@ export function AgentStreamProvider({
 }) {
   const activate = useStreamPool((state) => state.activate)
   const sweep = useStreamPool((state) => state.sweep)
+  const consumeCreatedThread = useStreamPool(
+    (state) => state.consumeCreatedThread
+  )
+  const entries = useStreamPool((state) => state.entries)
+  const createdThreadId = useStreamPool((state) => state.createdThreadId)
+  const stream = useStreamPool((state) =>
+    selectStreamFor(state, transport, threadId)
+  )
+
   useLayoutEffect(
     () => activate(transport, threadId),
     [activate, threadId, transport]
   )
+
   useEffect(() => {
     const timer = setInterval(() => sweep(Date.now()), SWEEP_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [sweep])
 
-  const onThreadCreatedRef = useRef(onThreadCreated)
   useEffect(() => {
-    onThreadCreatedRef.current = onThreadCreated
-  }, [onThreadCreated])
-  const announceThread = useCallback((id: string) => {
-    onThreadCreatedRef.current?.(id)
-  }, [])
-
-  const entries = useStreamPool((state) => state.entries)
-  // Resolve the handle from the route's own request, never from whatever was
-  // active last: a retained thread is served in the same render it is asked
-  // for, and a not-yet-bound one renders nothing until `activate` runs.
-  const active = useStreamPool((state) => {
-    const retained =
-      threadId !== null
-        ? state.entries.find(
-            (entry) =>
-              entry.transport === transport && entry.threadId === threadId
-          )
-        : undefined
-    const bound =
-      state.binding?.transport === transport &&
-      state.binding.threadId === threadId
-        ? state.entries.find((entry) => entry.id === state.activeId)
-        : undefined
-    const entry = retained ?? bound
-    return entry ? state.handles[entry.id] : undefined
-  })
+    if (!createdThreadId) return
+    consumeCreatedThread()
+    onThreadCreated?.(createdThreadId)
+  }, [consumeCreatedThread, createdThreadId, onThreadCreated])
 
   return (
     <>
       {entries.map((entry) => (
-        <PooledStream
-          key={entry.id}
-          entry={entry}
-          onThreadCreated={announceThread}
-        />
+        <PooledStream key={entry.id} entry={entry} />
       ))}
-      {active && (
-        <AgentStreamContext.Provider value={active}>
+      {stream && (
+        <AgentStreamContext.Provider value={stream}>
           {children}
         </AgentStreamContext.Provider>
       )}
