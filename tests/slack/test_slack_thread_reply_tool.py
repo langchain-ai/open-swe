@@ -2,6 +2,7 @@ import importlib
 import json
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -30,6 +31,42 @@ def _config() -> dict[str, Any]:
             }
         }
     }
+
+
+@pytest.mark.parametrize(
+    "should_ask_for_feedback,options,expected",
+    [
+        (True, None, True),
+        (False, None, False),
+        (True, ["Yes", "No"], False),
+    ],
+)
+async def test_reply_records_answer_completion_only_without_pending_choices(
+    monkeypatch: pytest.MonkeyPatch,
+    should_ask_for_feedback: bool,
+    options: list[str] | None,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(
+            return_value={
+                "channel_id": "C1",
+                "thread_ts": "1.0",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        slack_reply_tool, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("2.0", None))
+    )
+    mapping = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
+    assert await slack_reply_tool.slack_thread_reply(
+        "The answer", should_ask_for_feedback=should_ask_for_feedback, options=options
+    ) == {"success": True}
+    assert mapping.await_args.kwargs["should_ask_for_feedback"] is expected
 
 
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(

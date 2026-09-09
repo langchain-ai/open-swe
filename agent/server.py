@@ -486,7 +486,7 @@ ADMIN_TOOLS = (
 )
 
 
-def _environment_slug(cfg: RunConfig) -> str | None:
+def environment_slug(cfg: RunConfig) -> str | None:
     """The environment this thread selected, if any."""
     return (cfg.environment or "").strip() or None
 
@@ -841,7 +841,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.environment"):
-            environment = await resolve_environment(_environment_slug(cfg))
+            environment = await resolve_environment(environment_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):
             sender_instructions, participant_identities = await asyncio.gather(
                 _resolve_user_custom_instructions(self._profile_login),
@@ -943,7 +943,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         return await ensure_sandbox_for_thread(
             _thread_id,
-            environment_slug=_environment_slug(_cfg),
+            environment_slug=environment_slug(_cfg),
             langsmith_credentials=credentials,
         )
 

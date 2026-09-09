@@ -100,9 +100,9 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
 
 
 def test_environment_slug_reads_the_run_config() -> None:
-    assert server._environment_slug(RunConfig(environment="staging")) == "staging"
-    assert server._environment_slug(RunConfig(environment="  ")) is None
-    assert server._environment_slug(RunConfig()) is None
+    assert server.environment_slug(RunConfig(environment="staging")) == "staging"
+    assert server.environment_slug(RunConfig(environment="  ")) is None
+    assert server.environment_slug(RunConfig()) is None
 
 
 # --- admin thread gate ---

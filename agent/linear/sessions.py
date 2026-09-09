@@ -58,9 +58,9 @@ from agent.utils.thread_ops import (
 from agent.webhooks.common import (
     AGENT_VERSION_METADATA,
     DEFAULT_REPO_OWNER,
-    _extract_repo_config_from_thread,
-    _is_repo_allowed,
+    extract_repo_config_from_thread,
     get_repo_config_from_team_mapping,
+    is_repo_allowed,
     upsert_agent_thread_metadata,
 )
 
@@ -190,7 +190,7 @@ async def thread_repo_config(thread_id: str) -> dict[str, str] | None:
     except Exception:  # noqa: BLE001
         logger.debug("Could not read Linear thread metadata", extra={"linear_thread_id": thread_id})
         return None
-    return _extract_repo_config_from_thread(thread)
+    return extract_repo_config_from_thread(thread)
 
 
 def first_identified(*candidates: LinearUser | None) -> LinearUser | None:
@@ -532,7 +532,7 @@ async def start_session(event: AgentSessionEvent) -> None:
     if not repo_config:
         await emit_activity(session.id, ErrorContent(body=_NO_REPO_ERROR))
         return
-    if not _is_repo_allowed(repo_config):
+    if not is_repo_allowed(repo_config):
         logger.warning(
             "Rejecting a Linear agent session for a repository outside the allowlist",
             extra={"linear_repo": f"{repo_config['owner']}/{repo_config['name']}"},
@@ -622,7 +622,7 @@ async def continue_session(event: AgentSessionEvent) -> None:
         issue=issue,
         guidance=event.guidance,
     )
-    if not repo_config or not _is_repo_allowed(repo_config):
+    if not repo_config or not is_repo_allowed(repo_config):
         await emit_activity(session.id, ErrorContent(body=_NO_REPO_ERROR))
         return
 

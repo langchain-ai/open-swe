@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any, Literal
@@ -16,6 +17,7 @@ from agent.slack.client import (
     stop_slack_stream,
     store_slack_run_mapping,
 )
+from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.tool_steps import tool_event, tool_step
 
 logger = logging.getLogger(__name__)
@@ -112,8 +114,8 @@ class SlackThinkingStream:
         )
         return True
 
-    def consume(self, part: Any) -> None:
-        event = tool_event(part)
+    def consume(self, stream_event: Mapping[str, Any]) -> None:
+        event = tool_event(stream_event)
         if event is None:
             return
         key = (event.namespace, event.call_id)
@@ -211,12 +213,19 @@ async def stream_slack_thinking_steps(
         return
     status = "error"
     try:
-        async for part in client.runs.join_stream(thread_id, run_id):
-            stream.consume(part)
-            await stream.flush()
-        run = await client.runs.get(thread_id, run_id)
-        run_status = run.get("status") if isinstance(run, dict) else None
-        status = "success" if run_status == "success" else str(run_status or "error")
+        active = False
+        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+            async for event in thread_stream.subscribe(["lifecycle", "tools"]):
+                lifecycle = root_lifecycle(event)
+                if lifecycle is not None and lifecycle[0] == run_id:
+                    if lifecycle[1] == "running":
+                        active = True
+                    elif lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
+                        status = "success" if lifecycle[1] == "completed" else lifecycle[1]
+                        break
+                if active:
+                    stream.consume(event)
+                    await stream.flush()
     except asyncio.CancelledError:
         status = "interrupted"
         raise

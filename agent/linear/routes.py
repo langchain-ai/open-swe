@@ -15,8 +15,8 @@ from agent.linear.schema import (
 from agent.linear.webhook import process_linear_issue
 from agent.webhooks.common import (
     LINEAR_WEBHOOK_SECRET,
-    _is_repo_allowed,
     describe_open_swe_tags,
+    is_repo_allowed,
     mentions_open_swe,
     verify_linear_signature,
 )
@@ -69,7 +69,7 @@ async def _accept_comment_event(
     )
     if not repo_config:
         return _ignored("no default repository configured")
-    if not _is_repo_allowed(repo_config):
+    if not is_repo_allowed(repo_config):
         logger.warning(
             "Rejecting a Linear comment for a repository outside the allowlist",
             extra={"linear_repo": f"{repo_config['owner']}/{repo_config['name']}"},

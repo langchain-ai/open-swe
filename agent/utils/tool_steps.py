@@ -5,6 +5,7 @@ Shared by the observers that mirror a run's progress onto an external surface
 call the same way and neither leaks raw tool arguments.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any
@@ -59,24 +60,16 @@ class ToolEvent:
     tool_input: Any
 
 
-def _part_value(part: Any, key: str) -> Any:
-    return part.get(key) if isinstance(part, dict) else getattr(part, key, None)
-
-
-def tool_event(part: Any) -> ToolEvent | None:
-    """Narrow one ``runs.join_stream`` part to a tool lifecycle event, or None."""
-    event = _part_value(part, "event")
-    raw = _part_value(part, "data")
-    if not isinstance(event, str) or not event.startswith("tools") or not isinstance(raw, dict):
+def tool_event(stream_event: Mapping[str, Any]) -> ToolEvent | None:
+    """Narrow one LangGraph stream event to a tool lifecycle event, or None."""
+    if stream_event.get("method") != "tools":
         return None
-    namespace = tuple(segment for segment in event.split("|")[1:] if segment)
-    params = raw.get("params")
-    if isinstance(params, dict):
-        nested_namespace = params.get("namespace")
-        if isinstance(nested_namespace, list):
-            namespace = tuple(str(value) for value in nested_namespace)
-        raw = params.get("data")
-    if not isinstance(raw, dict):
+    params = stream_event.get("params")
+    if not isinstance(params, Mapping):
+        return None
+    namespace = params.get("namespace")
+    raw = params.get("data")
+    if not isinstance(namespace, list) or not isinstance(raw, dict):
         return None
     call_id = raw.get("tool_call_id")
     if not isinstance(call_id, str) or not call_id:
@@ -84,7 +77,7 @@ def tool_event(part: Any) -> ToolEvent | None:
     kind = raw.get("event")
     tool_name = raw.get("tool_name")
     return ToolEvent(
-        namespace=namespace,
+        namespace=tuple(str(segment) for segment in namespace),
         kind=kind if isinstance(kind, str) else "",
         call_id=call_id,
         tool_name=tool_name if isinstance(tool_name, str) else "",

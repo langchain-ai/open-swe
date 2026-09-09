@@ -71,6 +71,10 @@ packages = ["agent"]
 line-length = 100
 
 [tool.ruff.lint]
+# PLC2701 (private-name imports) is preview-only; explicit-preview-rules keeps every
+# other preview rule off.
+preview = true
+explicit-preview-rules = true
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -81,21 +85,18 @@ select = [
     "UP",  # pyupgrade
     "TID251",
     "SLF",  # flake8-self: no cross-module access to _private names
+    "PLC2701",  # no cross-module imports of _private names
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["SLF001"]
-# Pre-existing private-member access; clean up when these modules are next touched.
-"agent/github/routes.py" = ["SLF001"]
-"agent/github/webhook.py" = ["SLF001"]
-"agent/linear/routes.py" = ["SLF001"]
-"agent/linear/webhook.py" = ["SLF001"]
-"agent/reviewer.py" = ["SLF001"]
-"agent/sandboxes/providers/langsmith.py" = ["SLF001"]
-"agent/utils/langsmith.py" = ["SLF001"]
+"tests/**" = ["SLF001", "PLC2701"]
+# Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
+# an intra-package import from a cross-package one; names these modules expose
+# to the rest of the codebase are public.
+"agent/dashboard/threads/*" = ["PLC2701"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."

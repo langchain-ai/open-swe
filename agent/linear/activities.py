@@ -7,6 +7,7 @@ died with its worker. This stream only emits it when that webhook is not wired u
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from time import monotonic
 from typing import Any
 
@@ -16,6 +17,7 @@ from langgraph_sdk.client import LangGraphClient
 from agent.dispatch import COMPLETION_WEBHOOK_URL
 from agent.linear.client import LinearError, linear_client
 from agent.linear.schema import ActionContent, ErrorContent
+from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.tool_steps import tool_event, tool_step
 
 logger = logging.getLogger(__name__)
@@ -36,8 +38,8 @@ class LinearActivityStream:
         self.last_flush = 0.0
         self.disabled = False
 
-    def consume(self, part: Any) -> None:
-        event = tool_event(part)
+    def consume(self, stream_event: Mapping[str, Any]) -> None:
+        event = tool_event(stream_event)
         if event is None or event.kind != "tool-started" or not event.tool_name:
             return
         action, parameter = tool_step(event.tool_name, event.tool_input)
@@ -50,7 +52,7 @@ class LinearActivityStream:
             await linear_client().create_agent_activity(
                 self.session_id, content, ephemeral=ephemeral
             )
-        except LinearError, httpx2.HTTPError:
+        except (LinearError, httpx2.HTTPError):
             logger.warning(
                 "Disabling the Linear activity stream",
                 extra={"linear_session_id": self.session_id, "linear_run_id": self.run_id},
@@ -90,12 +92,19 @@ async def stream_linear_activities(
     stream = LinearActivityStream(session_id=session_id, run_id=run_id)
     status = "error"
     try:
-        async for part in client.runs.join_stream(thread_id, run_id):
-            stream.consume(part)
-            await stream.flush()
-        run = await client.runs.get(thread_id, run_id)
-        run_status = run.get("status") if isinstance(run, dict) else None
-        status = str(run_status or "error")
+        active = False
+        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+            async for event in thread_stream.subscribe(["lifecycle", "tools"]):
+                lifecycle = root_lifecycle(event)
+                if lifecycle is not None and lifecycle[0] == run_id:
+                    if lifecycle[1] == "running":
+                        active = True
+                    elif lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
+                        status = "success" if lifecycle[1] == "completed" else lifecycle[1]
+                        break
+                if active:
+                    stream.consume(event)
+                    await stream.flush()
     except asyncio.CancelledError:
         status = "interrupted"
         raise

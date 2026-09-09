@@ -19,7 +19,7 @@ from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import _is_repo_allowed
+from agent.webhooks.common import is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
@@ -195,7 +195,7 @@ async def slack_start_new_thread(
         }
 
     if default_repo and default_repo.strip() and repo is not None:
-        if not _is_repo_allowed(repo):
+        if not is_repo_allowed(repo):
             return {
                 "success": False,
                 "error": (

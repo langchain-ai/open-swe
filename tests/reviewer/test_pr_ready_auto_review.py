@@ -42,7 +42,7 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: MagicMock
         AsyncMock(return_value=("token", None)),
     )
     monkeypatch.setattr(
-        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+        webhook_common, "ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
     )
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", MagicMock())
     set_metadata = AsyncMock()
@@ -77,7 +77,7 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     get_token = AsyncMock(return_value=("scoped-token", "expires"))
     monkeypatch.setattr(webhook_common, "get_github_app_installation_token_with_expiry", get_token)
     monkeypatch.setattr(
-        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+        webhook_common, "ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
     )
     cache_token = MagicMock()
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", cache_token)
@@ -105,7 +105,7 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
     get_token = AsyncMock(return_value=("full-token", "expires"))
     monkeypatch.setattr(webhook_common, "get_github_app_installation_token_with_expiry", get_token)
     monkeypatch.setattr(
-        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+        webhook_common, "ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
     )
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", MagicMock())
     monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
@@ -128,7 +128,7 @@ async def test_pr_ready_for_review_triggers_run(monkeypatch: pytest.MonkeyPatch)
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", AsyncMock(return_value=None))
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(webhook_common, "get_team_settings", AsyncMock(return_value={}))
 
@@ -151,7 +151,7 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
     monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", set_metadata)
     monkeypatch.setattr(
         webhook_common,
-        "_get_thread_metadata_safe",
+        "get_thread_metadata_safe",
         AsyncMock(
             return_value={
                 "kind": "reviewer",
@@ -184,7 +184,7 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     set_metadata = _patch_dispatch_deps(monkeypatch, fake_client)
     monkeypatch.setattr(
         webhook_common,
-        "_get_thread_metadata_safe",
+        "get_thread_metadata_safe",
         AsyncMock(
             return_value={
                 "kind": "reviewer",
@@ -344,7 +344,7 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
 
     with (
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
@@ -371,7 +371,7 @@ async def test_converted_to_draft_keeps_watch_when_author_drafts_on(
     fake_set = AsyncMock()
     with (
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
@@ -398,7 +398,7 @@ async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
     fake_set = AsyncMock()
     with (
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),

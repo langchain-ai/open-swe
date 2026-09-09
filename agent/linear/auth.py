@@ -70,7 +70,10 @@ class LinearAppTokenProvider:
             except httpx2.HTTPError as exc:
                 raise LinearAuthError(f"failed to mint Linear app token: {exc}") from exc
         self._token = _TokenResponse.model_validate(response.json()).access_token
-        logger.info("Minted Linear app token", extra={"linear_scopes": self._scopes})
+        logger.info(
+            "Minted Linear app token",
+            extra={"linear_scope_count": len(self._scopes.split())},
+        )
 
 
 _provider: LinearAppTokenProvider | None = None

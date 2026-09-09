@@ -6,8 +6,8 @@ from uuid import uuid4
 from langchain_core.tools import tool
 
 from agent.tools.create_sandbox_file_download_url import (
-    _resolve_sandbox_file,
     create_sandbox_file_download_url,
+    resolve_sandbox_file,
 )
 from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
@@ -19,7 +19,7 @@ async def _output_iframe(
     title: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Display a sandbox HTML file in an isolated iframe in the dashboard."""
-    backend, source_path, work_dir = await _resolve_sandbox_file(path)
+    backend, source_path, work_dir = await resolve_sandbox_file(path)
     quoted_source = shlex.quote(source_path)
     stat = await backend.aexecute(f"test -f {quoted_source} && stat -c %s -- {quoted_source}")
     if stat.exit_code != 0:

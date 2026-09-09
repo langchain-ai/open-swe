@@ -1261,11 +1261,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 "skills_metadata": skill_update.get("skills_metadata", []),
                 "skills_load_errors": skill_update.get("skills_load_errors", []),
             }
-            skills_locations = skill_middleware._format_skills_locations()
-            skills_list = skill_middleware._format_skills_list(
+            # Deepagents exposes no public formatter for the skills prompt sections.
+            skills_locations = skill_middleware._format_skills_locations()  # noqa: SLF001
+            skills_list = skill_middleware._format_skills_list(  # noqa: SLF001
                 skill_request_state["skills_metadata"]
             )
-            skills_load_warnings = skill_middleware._format_skills_load_warnings(
+            skills_load_warnings = skill_middleware._format_skills_load_warnings(  # noqa: SLF001
                 skill_request_state["skills_load_errors"]
             )
             if skill_middleware.system_prompt_template:

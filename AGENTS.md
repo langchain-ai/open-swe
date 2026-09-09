@@ -54,6 +54,10 @@ The main agent and middleware stack are assembled in `agent/server.py`. Middlewa
 
 Add tests only when they meaningfully protect observable behavior. Do not add change-detector tests that merely restate constants, mappings, prompt text, source structure, or incidental interactions such as internal call order. Refactors that preserve behavior should not require mechanical test updates; rewrite or remove tests that do. Cover meaningful edge cases and keep tests deterministic.
 
+## Pull Requests
+
+Do not include test-running or validation sections in pull request descriptions.
+
 <!-- OPENWIKI:START -->
 
 ## OpenWiki

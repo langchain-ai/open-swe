@@ -10,7 +10,7 @@ from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
 from agent.sandboxes.providers.registry import create_sandbox
 from agent.source_context import SourceContext
-from agent.tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
+from agent.tools.background_execute import TASK_ROOT, control_script, encoded, execute
 from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -124,9 +124,9 @@ async def _mark_delivered(backend: Any, task_id: str) -> None:
 
 
 async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
-    script = _control_script("list", None)
-    result = await _execute(
-        backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
+    script = control_script("list", None)
+    result = await execute(
+        backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
     )
     tasks = result.get("tasks") if isinstance(result, dict) else []
     return tasks if isinstance(tasks, list) else []

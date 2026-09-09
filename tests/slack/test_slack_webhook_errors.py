@@ -121,7 +121,7 @@ async def test_non_owner_can_send_untagged_ready_plan_reply(
 ) -> None:
     monkeypatch.setattr(
         plan_api,
-        "_thread_metadata",
+        "fetch_thread_metadata",
         AsyncMock(return_value={"plan_mode": True, "plan_status": "ready"}),
     )
     lookup_thread = AsyncMock(return_value="t1")

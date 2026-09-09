@@ -223,7 +223,7 @@ async def slack_user_can_reply_to_ready_plan(
 ) -> bool:
     if not channel_id or not thread_ts or not slack_user_id:
         return False
-    from agent.dashboard.plan_api import _thread_metadata
+    from agent.dashboard.plan_api import fetch_thread_metadata
 
     try:
         thread_id = await common.lookup_slack_thread_id(
@@ -234,9 +234,9 @@ async def slack_user_can_reply_to_ready_plan(
     if not thread_id:
         return False
     try:
-        metadata = await _thread_metadata(thread_id)
+        metadata = await fetch_thread_metadata(thread_id)
     except Exception:  # noqa: BLE001
-        # A brand-new thread has no metadata (_thread_metadata raises 404); an
+        # A brand-new thread has no metadata (fetch_thread_metadata raises 404); an
         # untagged message there simply isn't a plan reply — don't abort the gate.
         return False
     return metadata.get("plan_mode") is True and metadata.get("plan_status") == "ready"

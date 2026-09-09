@@ -164,7 +164,7 @@ def _merge_sandbox_create_extra_fields(
     return {**_get_sandbox_create_extra_fields(), **(create_params or {})}
 
 
-def _get_sandbox_proxy_config(
+def get_sandbox_proxy_config(
     create_params: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     proxy_config = _merge_sandbox_create_extra_fields(create_params).get("proxy_config")
@@ -175,7 +175,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
     """Merge extra fields until the SDK exposes create-payload passthrough."""
     if not extra:
         return
-    original_post = client._http.post
+    original_post = client._http.post  # noqa: SLF001
 
     async def post_with_extra(url: Any, *args: Any, **kwargs: Any) -> Any:
         payload = kwargs.get("json")
@@ -184,7 +184,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
         return await original_post(url, *args, **kwargs)
 
     # RFC moving this into the SDK if it adds a public arbitrary create-fields API.
-    client._http.post = post_with_extra  # ty: ignore[invalid-assignment]
+    client._http.post = post_with_extra  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
 def _langsmith_proxy_rule(credentials: LangSmithCredentials) -> dict[str, Any]:
@@ -437,7 +437,7 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def _configure_github_proxy(
+async def configure_github_proxy(
     sandbox_name: str,
     github_token: str,
     *,
@@ -608,15 +608,15 @@ async def create_langsmith_sandbox(
     )
 
     if sandbox_id is None and github_token:
-        proxy_config = _get_sandbox_proxy_config(create_params)
+        proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
-            await _configure_github_proxy(
+            await configure_github_proxy(
                 backend.id,
                 github_token,
                 base_proxy_config=proxy_config,
             )
         else:
-            await _configure_github_proxy(backend.id, github_token)
+            await configure_github_proxy(backend.id, github_token)
 
     return backend
 

@@ -1145,8 +1145,8 @@ async def fake_linear_graphql(request: Request) -> JSONResponse:
     operation = match.group(1) if match else ("Teams" if "teams" in parsed.query else "")
     try:
         return JSONResponse({"data": _linear_operation(operation, parsed.variables)})
-    except _LinearGraphQLError as error:
-        return JSONResponse({"errors": [{"message": str(error)}]})
+    except _LinearGraphQLError:
+        return JSONResponse({"errors": [{"message": f"fake Linear rejected '{operation}'"}]})
 
 
 # --- Linear control endpoints (the test driver) ----------------------------

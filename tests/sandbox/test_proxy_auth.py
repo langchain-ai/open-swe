@@ -16,9 +16,9 @@ from agent.sandboxes.providers.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
     PROXY_LANGSMITH_KEY_PLACEHOLDER,
     PROXY_MODEL_KEY_PLACEHOLDER,
-    _configure_github_proxy,
     _langsmith_proxy_rule,
     _stagehand_proxy_rules,
+    configure_github_proxy,
 )
 from agent.sandboxes.state import SandboxBackendProxy
 
@@ -125,7 +125,7 @@ class TestLangSmithProxyRule:
 
 
 class TestConfigureGithubProxy:
-    """Tests for _configure_github_proxy payload shape and error handling."""
+    """Tests for configure_github_proxy payload shape and error handling."""
 
     async def test_sends_correct_payload_shape(self) -> None:
         """Verify the PATCH request uses opaque headers with correct structure."""
@@ -142,7 +142,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=mock_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            await _configure_github_proxy("sandbox-abc123", token)
+            await configure_github_proxy("sandbox-abc123", token)
 
             mock_client.patch.assert_called_once()
             call_kwargs = mock_client.patch.call_args
@@ -187,7 +187,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=mock_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            await _configure_github_proxy(
+            await configure_github_proxy(
                 "sandbox-abc123",
                 "token",
                 base_proxy_config={"rules": [custom_rule], "enabled": True},
@@ -210,7 +210,7 @@ class TestConfigureGithubProxy:
             response.raise_for_status = MagicMock()
             mock_client.patch = AsyncMock(return_value=response)
             _mock_async_client(mock_client_cls, mock_client)
-            await _configure_github_proxy(
+            await configure_github_proxy(
                 "sandbox-abc123",
                 "github-token",
                 base_proxy_config={"rules": [stale_rule]},
@@ -234,7 +234,7 @@ class TestConfigureGithubProxy:
             response.raise_for_status = MagicMock()
             mock_client.patch = AsyncMock(return_value=response)
             _mock_async_client(mock_client_cls, mock_client)
-            await _configure_github_proxy(
+            await configure_github_proxy(
                 "sandbox-abc123",
                 "github-token",
                 base_proxy_config={"rules": [stale_rule]},
@@ -263,7 +263,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=mock_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            await _configure_github_proxy("sandbox-xyz", "token")
+            await configure_github_proxy("sandbox-xyz", "token")
 
             url = mock_client.patch.call_args.args[0]
             assert url == "https://test.api.smith.langchain.com/v2/sandboxes/boxes/sandbox-xyz"
@@ -280,7 +280,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=mock_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            await _configure_github_proxy("sandbox-abc", "token")
+            await configure_github_proxy("sandbox-abc", "token")
 
             headers = mock_client.patch.call_args.kwargs["headers"]
             assert headers == {"X-API-Key": "my-api-key"}
@@ -305,7 +305,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=mock_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            await _configure_github_proxy("sandbox-abc", "token")
+            await configure_github_proxy("sandbox-abc", "token")
 
             assert (
                 mock_client.patch.call_args.args[0]
@@ -339,7 +339,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(side_effect=[failed_response, successful_response])
             _mock_async_client(mock_client_cls, mock_client)
 
-            await _configure_github_proxy("sandbox-abc", "token")
+            await configure_github_proxy("sandbox-abc", "token")
 
             assert mock_client.patch.call_count == 2
             mock_sleep.assert_called_once()
@@ -365,7 +365,7 @@ class TestConfigureGithubProxy:
             _mock_async_client(mock_client_cls, mock_client)
 
             with pytest.raises(httpx2.HTTPStatusError):
-                await _configure_github_proxy("sandbox-abc", "token")
+                await configure_github_proxy("sandbox-abc", "token")
 
             mock_client.patch.assert_called_once()
             mock_sleep.assert_not_called()
@@ -388,7 +388,7 @@ class TestConfigureGithubProxy:
             _mock_async_client(mock_client_cls, mock_client)
 
             with pytest.raises(httpx2.HTTPStatusError, match="another tenant"):
-                await _configure_github_proxy("sandbox-abc", "token")
+                await configure_github_proxy("sandbox-abc", "token")
 
 
 class TestConfigureGithubProxyStartsStoppedSandbox:
@@ -427,7 +427,7 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
             sandbox_client.aclose = AsyncMock()
             mock_sandbox_client_factory.return_value = sandbox_client
 
-            await _configure_github_proxy("sandbox-abc", "token")
+            await configure_github_proxy("sandbox-abc", "token")
 
             sandbox_client.start_sandbox.assert_awaited_once()
             assert sandbox_client.start_sandbox.await_args.args[0] == "sandbox-abc"
@@ -455,7 +455,7 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
             mock_sandbox_client_factory.return_value = sandbox_client
 
             with pytest.raises(httpx2.HTTPStatusError, match="stopped"):
-                await _configure_github_proxy("sandbox-abc", "token")
+                await configure_github_proxy("sandbox-abc", "token")
 
             sandbox_client.start_sandbox.assert_awaited_once()
             sandbox_client.aclose.assert_awaited_once()
@@ -482,7 +482,7 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
             mock_sandbox_client_factory.return_value = sandbox_client
 
             with pytest.raises(httpx2.HTTPStatusError):
-                await _configure_github_proxy("sandbox-abc", "token")
+                await configure_github_proxy("sandbox-abc", "token")
 
             sandbox_client.start_sandbox.assert_awaited_once()
 
@@ -503,7 +503,7 @@ class TestCreateSandboxWithProxy:
                 "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock
             ) as mock_create,
             patch(
-                "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
+                "agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
         ):
@@ -546,7 +546,7 @@ class TestCreateSandboxWithProxy:
                 return_value=("ghs_install", None),
             ),
             patch(
-                "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
+                "agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock
             ) as mock_configure_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
@@ -581,7 +581,7 @@ class TestCreateSandboxWithProxy:
             patch(
                 "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock
             ) as mock_create,
-            patch("agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock),
+            patch("agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
         ):
             mock_create.return_value = MagicMock(id="sandbox-123", aexecute=AsyncMock())
@@ -601,7 +601,7 @@ class TestCreateSandboxWithProxy:
                 "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock
             ) as mock_create,
             patch(
-                "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
+                "agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "daytona"}),
         ):
@@ -701,7 +701,7 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value=("ghs_fresh", None),
             ),
             patch(
-                "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
+                "agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch(
                 "agent.server.resolve_sandbox_work_dir",
@@ -772,7 +772,7 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value=("ghs_fresh", None),
             ),
             patch(
-                "agent.sandboxes.lifecycle._configure_github_proxy", new_callable=AsyncMock
+                "agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch(
                 "agent.server.resolve_sandbox_work_dir",
@@ -818,7 +818,7 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value=("ghs_fresh", None),
             ),
             patch(
-                "agent.sandboxes.lifecycle._configure_github_proxy",
+                "agent.sandboxes.lifecycle.configure_github_proxy",
                 new_callable=AsyncMock,
                 side_effect=httpx2.HTTPStatusError(
                     "Bad request",
