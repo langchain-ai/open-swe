@@ -599,10 +599,9 @@ export function useAgentThread(threadId: string) {
         ...(pendingMessages?.length ? { pendingMessages } : {}),
       }
     },
-    // Server truth heartbeat while a run is live. The SDK's SSE transport does
-    // not reconnect once a custom `fetch` is supplied (it needs the dashboard
-    // session cookie), so a dropped event stream must not leave the view — and
-    // its stop button — believing the run already ended.
+    // Server truth heartbeat while a run is live. A dropped event stream must
+    // not leave the view — or its stop button — believing the run already
+    // ended, and `useReconcileStream` compares this against the stream.
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
