@@ -8,7 +8,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import httpx
+import httpx2
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
@@ -756,7 +756,7 @@ async def _process_slack_mention_impl(
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
         common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, http_client)
                 if image_block:

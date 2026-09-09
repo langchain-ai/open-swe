@@ -7,8 +7,10 @@ below is retained for the dashboard's deliberate "inject a follow-up into a
 run that's already in flight" path (``thread_api.send_dashboard_message``).
 """
 
+import asyncio
 import logging
 from typing import Any
+from weakref import WeakValueDictionary
 
 from langgraph_sdk import get_client
 
@@ -17,6 +19,15 @@ from agent.config import ENV
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
+_queue_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
+
+def queue_lock(thread_id: str) -> asyncio.Lock:
+    lock = _queue_locks.get(thread_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _queue_locks[thread_id] = lock
+    return lock
 
 
 def langgraph_url() -> str:
@@ -53,23 +64,24 @@ async def queue_message_for_thread(
         key = "pending_messages"
         new_message = {"content": message_content}
 
-        existing_messages: list[dict[str, Any]] = []
-        try:
-            existing_item = await client.store.get_item(namespace, key)
-            if existing_item and existing_item.get("value"):
-                existing_messages = existing_item["value"].get("messages", [])
-        except Exception:  # noqa: BLE001
-            logger.debug("No existing queued messages for thread %s", thread_id)
+        async with queue_lock(thread_id):
+            existing_messages: list[dict[str, Any]] = []
+            try:
+                existing_item = await client.store.get_item(namespace, key)
+                if existing_item and existing_item.get("value"):
+                    existing_messages = existing_item["value"].get("messages", [])
+            except Exception:  # noqa: BLE001
+                logger.debug("No existing queued messages for thread %s", thread_id)
 
-        existing_messages.append(new_message)
-        if len(existing_messages) > MAX_QUEUED_MESSAGES:
-            existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]
-            logger.warning(
-                "Thread %s queue capped at %d messages (dropped oldest)",
-                thread_id,
-                MAX_QUEUED_MESSAGES,
-            )
-        await client.store.put_item(namespace, key, {"messages": existing_messages})
+            existing_messages.append(new_message)
+            if len(existing_messages) > MAX_QUEUED_MESSAGES:
+                existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]
+                logger.warning(
+                    "Thread %s queue capped at %d messages (dropped oldest)",
+                    thread_id,
+                    MAX_QUEUED_MESSAGES,
+                )
+            await client.store.put_item(namespace, key, {"messages": existing_messages})
         logger.info(
             "Queued message for thread %s (total queued: %d)",
             thread_id,

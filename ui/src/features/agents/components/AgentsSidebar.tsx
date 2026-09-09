@@ -109,6 +109,7 @@ interface AgentsSidebarProps {
 
 interface HydratedProjectGroup extends SidebarProjectGroup {
   repoFullName: string | null
+  localProjectPath?: string
   updatedAt: number
   activeThread?: AgentThread
 }
@@ -397,6 +398,9 @@ export function AgentsSidebar({
           .map((group) => ({
             ...group,
             repoFullName: null,
+            localProjectPath: group.threads.find(
+              (thread) => thread.location === "local"
+            )?.thread.cwd,
             updatedAt: group.threads[0]?.updatedAt ?? 0,
           })),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
@@ -568,6 +572,15 @@ export function AgentsSidebar({
       hydrate={hydrateProjectThreads}
       onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
       onExpand={() => expandProject(group.key)}
+      onCompose={() => {
+        layout.closeOnMobile()
+        void navigate({
+          to: "/agents",
+          search: group.repoFullName
+            ? { repo: group.repoFullName }
+            : { localProject: group.localProjectPath },
+        })
+      }}
       onTogglePin={() => toggleProjectPin(group.key)}
       renderRow={(item, live) => (
         <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
@@ -887,6 +900,7 @@ function ProjectGroup({
   hydrate,
   onToggleCollapsed,
   onExpand,
+  onCompose,
   onTogglePin,
   renderRow,
 }: {
@@ -903,6 +917,7 @@ function ProjectGroup({
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
+  onCompose: () => void
   onTogglePin: () => void
   renderRow: (
     item: SidebarThreadItem,
@@ -968,6 +983,15 @@ function ProjectGroup({
           ) : (
             <PushPinIcon className="size-3.5" />
           )}
+        </button>
+        <button
+          type="button"
+          aria-label={`Compose message in ${group.label}`}
+          title="Compose message"
+          onClick={onCompose}
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+        >
+          <NotePencilIcon className="size-3.5" />
         </button>
       </div>
       {!collapsed && (

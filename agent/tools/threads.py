@@ -529,6 +529,7 @@ async def _send_message(
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
     command = {
+        "id": 1,
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": message}]},

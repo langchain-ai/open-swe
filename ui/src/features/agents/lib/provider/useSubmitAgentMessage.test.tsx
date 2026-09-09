@@ -19,8 +19,8 @@ const stream = {
   submit: vi.fn(() => Promise.resolve(undefined)),
 }
 
-vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
-  useAgentThreadRuntime: () => stream,
+vi.mock("@/features/agents/lib/stream/AgentStreamProvider", () => ({
+  useAgentStream: () => stream,
 }))
 
 const queueMessage = vi.fn()

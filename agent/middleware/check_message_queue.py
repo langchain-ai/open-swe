@@ -8,7 +8,7 @@ human messages before the next model call.
 import logging
 from typing import Any, cast
 
-import httpx
+import httpx2
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
@@ -26,6 +26,7 @@ from agent.middleware.trace import scrub_middleware_inputs
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
+from agent.utils.thread_ops import queue_lock
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:
@@ -218,22 +219,21 @@ async def check_message_queue_before_model(  # noqa: PLR0911
 
         namespace = ("queue", thread_id)
 
-        try:
-            queued_item = await store.aget(namespace, "pending_messages")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to get queued item: %s", e)
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
+        async with queue_lock(thread_id):
+            try:
+                queued_item = await store.aget(namespace, "pending_messages")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to get queued item: %s", e)
+                _flush_blocks(queued_updates, content_blocks, injected)
+                return _message_update(queued_updates, thread_id)
 
-        if queued_item is None:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
+            if queued_item is None:
+                _flush_blocks(queued_updates, content_blocks, injected)
+                return _message_update(queued_updates, thread_id)
 
-        queued_value = queued_item.value
-        queued_messages = queued_value.get("messages", [])
-
-        # Delete early to prevent duplicate processing if middleware runs again
-        await store.adelete(namespace, "pending_messages")
+            queued_value = queued_item.value
+            queued_messages = queued_value.get("messages", [])
+            await store.adelete(namespace, "pending_messages")
 
         if not queued_messages:
             _flush_blocks(queued_updates, content_blocks, injected)

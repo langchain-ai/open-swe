@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
@@ -38,7 +38,7 @@ _CHAT_ASSISTANT_ID = "chat"
 _CHAT_SOURCE = "review_chat"
 # Sentinel: caller did not pre-fetch the thread metadata, so fetch it here.
 _UNFETCHED = object()
-_PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _MAX_DIFF_CHARS = 400_000
 
 
@@ -472,7 +472,7 @@ async def proxy_review_chat_commands(
     )
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=json.dumps(enriched).encode(), headers=headers)
     return response.status_code, response.content, response.headers.get("content-type")
 
@@ -497,7 +497,7 @@ async def _proxy_passthrough(
 ) -> tuple[int, bytes, str | None]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/{suffix}"
     headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         if method == "GET":
             response = await client.get(url, headers=headers)
         else:

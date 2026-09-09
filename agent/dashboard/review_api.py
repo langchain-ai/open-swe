@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
-import httpx
+import httpx2
 from fastapi import HTTPException, Response
 
 from agent.github.app import get_github_app_installation_token
@@ -36,7 +36,7 @@ from agent.webhooks.common import fetch_github_pr_metadata
 logger = logging.getLogger(__name__)
 
 _GITHUB_API = "https://api.github.com"
-_GITHUB_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+_GITHUB_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 
 
 async def _require_app_token() -> str:
@@ -52,7 +52,7 @@ async def _github_get(
     headers = github_headers(token)
     if accept:
         headers["Accept"] = accept
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
         response = await client.get(f"{_GITHUB_API}{path}", headers=headers, params=params)
     if response.status_code == 404:
         raise HTTPException(404, "not found on GitHub")
@@ -64,7 +64,7 @@ async def _github_get(
     return response.json()
 
 
-def _github_error_message(response: httpx.Response) -> str:
+def _github_error_message(response: httpx2.Response) -> str:
     """Best-effort extraction of GitHub's error message for surfacing to the UI."""
     fallback = f"GitHub request failed ({response.status_code})"
     try:
@@ -90,7 +90,7 @@ def _github_error_message(response: httpx.Response) -> str:
 async def _github_write(
     method: Literal["POST", "PATCH"], path: str, token: str, *, json: dict[str, Any]
 ) -> Any:
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
         response = await client.request(
             method, f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
         )
@@ -595,7 +595,7 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     is viewing the review. The client renders these with pierre's MultiFileDiff.
     """
     token = await _require_app_token()
-    async with httpx.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
+    async with httpx2.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
         diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number)
     files = diff["files"]
     return {
@@ -688,7 +688,7 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
     headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
 
     current_url = url
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
         for _ in range(_MAX_IMAGE_REDIRECTS + 1):
             async with client.stream("GET", current_url, headers=headers) as response:
                 if response.is_redirect:

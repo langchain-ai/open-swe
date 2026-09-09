@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-import httpx
+import httpx2
 import jwt
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
@@ -125,7 +125,7 @@ async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
 
     url = f"{LANGSMITH_API_URL}/api/v1/workspaces/current/members/active"
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.get(
                 url,
@@ -183,7 +183,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             "ls_user_id": ls_user_id,
         }
 
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
                 f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
                 json=payload,
@@ -205,7 +205,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
                 return {"auth_url": auth_url}
             return {"error": f"Unexpected auth result: {response_data}"}
 
-    except httpx.HTTPStatusError as e:
+    except httpx2.HTTPStatusError as e:
         logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
         return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
     except Exception as e:  # noqa: BLE001

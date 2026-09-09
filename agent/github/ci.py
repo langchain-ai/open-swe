@@ -12,7 +12,7 @@ webhook handling.
 import logging
 from typing import Any
 
-import httpx
+import httpx2
 
 from agent.github.checks import REVIEW_CHECK_RUN_NAME
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
@@ -60,7 +60,7 @@ async def list_check_runs(
                 if len(runs) < 100:
                     break
                 page += 1
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.warning(
             "Failed to list check runs for %s/%s@%s (Checks: Read missing?)", owner, repo, ref
         )
@@ -94,7 +94,7 @@ async def list_commit_statuses(
                 if len(statuses) < 100:
                     break
                 page += 1
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.warning("Failed to read combined status for %s/%s@%s", owner, repo, ref)
         return None
     latest: list[dict[str, Any]] = []
@@ -172,7 +172,7 @@ async def fetch_open_pr_for_branch(
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url, params=params)
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.warning("Failed to find open PR for %s/%s head=%s", owner, repo, branch)
         return None
     data = response.json()
@@ -188,7 +188,7 @@ async def fetch_pr(*, owner: str, repo: str, pr_number: int, token: str) -> dict
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url)
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.warning("Failed to fetch PR %s/%s#%s", owner, repo, pr_number)
         return None
     data = response.json()
@@ -202,7 +202,7 @@ async def head_commit_author_login(*, owner: str, repo: str, sha: str, token: st
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url)
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.debug("Failed to fetch commit %s/%s@%s for author check", owner, repo, sha)
         return None
     data = response.json()
@@ -224,7 +224,7 @@ async def has_repo_write_permission(*, owner: str, repo: str, username: str, tok
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url)
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.info("Could not verify %s's permission on %s/%s; denying", username, owner, repo)
         return False
     data = response.json()

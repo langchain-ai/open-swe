@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
@@ -96,9 +96,9 @@ _DASHBOARD_STREAM_MODES: tuple[str, ...] = (
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
-_PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _DISCOVERY_HISTORY_LIMIT = 5
-_PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
+_PROXY_STREAM_TIMEOUT = httpx2.Timeout(None)
 _THREAD_POST_COMMAND_METHODS = frozenset(
     {"run.start", "input.respond", "input.inject", "state.fork"}
 )
@@ -171,6 +171,12 @@ class ThreadMessageBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     plan_mode: bool = False
+
+
+class ThreadRenameBody(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=80)
 
 
 class ThreadResolveBody(BaseModel):
@@ -2006,6 +2012,24 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
     await client.threads.delete(thread_id)
 
 
+async def rename_dashboard_thread(
+    thread_id: str, login: str, *, title: str, email: str | None = None
+) -> dict[str, Any]:
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata_update = {"title": title, "title_seed": None}
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not rename thread", extra={"thread_id": thread_id}, exc_info=True)
+        raise HTTPException(502, "failed to update thread") from exc
+    thread = {
+        **as_thread_dict(thread),
+        "metadata": {**thread_metadata(thread), **metadata_update},
+    }
+    return await _thread_summary(thread)
+
+
 async def resolve_dashboard_thread(
     thread_id: str, login: str, *, resolved: bool, email: str | None = None
 ) -> dict[str, Any]:
@@ -2509,7 +2533,7 @@ async def get_dashboard_thread_branch_diff(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
         if pull_request is not None:
             diff = await build_pr_diff_files(client, full_name, pull_request)
         elif head_ref is not None:
@@ -2552,7 +2576,7 @@ async def _stream_thread_events(
     headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
-        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream("POST", url, content=body, headers=headers) as response:
                 if response.status_code >= 400:
                     error_body = await response.aread()
@@ -2578,7 +2602,7 @@ async def _observe_dashboard_run_ttft(
     headers["Last-Event-ID"] = "-1"
     detector = AssistantTextEventDetector(run_id)
     try:
-        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream(
                 "GET",
                 url,
@@ -2677,7 +2701,7 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
     try:
@@ -2753,7 +2777,7 @@ async def proxy_dashboard_thread_history(
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -2771,7 +2795,7 @@ async def proxy_dashboard_thread_run_cancel(
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = _langgraph_proxy_headers()
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(
             url,
             headers=headers,

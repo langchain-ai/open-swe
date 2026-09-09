@@ -6,7 +6,7 @@ import secrets
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-import httpx
+import httpx2
 
 from agent.config import ENV
 from agent.encryption import decrypt_token, encrypt_token
@@ -20,7 +20,7 @@ NOTION_OAUTH_FLOW_NAMESPACE: list[str] = ["notion_oauth_flows"]
 _NOTION_HOST = "mcp.notion.com"
 _PROTECTED_RESOURCE_METADATA_URL = "https://mcp.notion.com/.well-known/oauth-protected-resource"
 _AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server"
-_HTTP_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+_HTTP_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 
 
 class NotionOAuthError(Exception):
@@ -85,7 +85,7 @@ def build_notion_authorize_url(
 async def discover_notion_oauth_metadata() -> dict[str, Any]:
     """Discover Notion MCP OAuth endpoints."""
     try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             protected_resource = await client.get(_PROTECTED_RESOURCE_METADATA_URL)
             if not protected_resource.is_success:
                 raise _oauth_error_from_response(
@@ -112,7 +112,7 @@ async def discover_notion_oauth_metadata() -> dict[str, Any]:
                     "Notion OAuth authorization server discovery failed",
                 )
             metadata = metadata_response.json()
-    except httpx.RequestError as exc:
+    except httpx2.RequestError as exc:
         raise NotionOAuthError(503, "Notion OAuth discovery failed") from exc
 
     if not isinstance(metadata, dict):
@@ -147,13 +147,13 @@ async def register_notion_oauth_client(
         body["client_uri"] = client_uri
 
     try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             response = await client.post(
                 registration_endpoint,
                 headers={"Accept": "application/json", "Content-Type": "application/json"},
                 json=body,
             )
-    except httpx.RequestError as exc:
+    except httpx2.RequestError as exc:
         raise NotionOAuthError(503, "Notion OAuth client registration failed") from exc
     if not response.is_success:
         raise _oauth_error_from_response(response, "Notion OAuth client registration failed")
@@ -216,7 +216,7 @@ async def pop_notion_oauth_flow(login: str, nonce_hash: str) -> dict[str, Any] |
     return value
 
 
-def _oauth_error_from_response(response: httpx.Response, fallback: str) -> NotionOAuthError:
+def _oauth_error_from_response(response: httpx2.Response, fallback: str) -> NotionOAuthError:
     error_code = None
     detail = fallback
     try:
@@ -289,7 +289,7 @@ async def _request_token(
     token_endpoint: str, body: dict[str, str], *, fallback: str
 ) -> dict[str, Any]:
     try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             response = await client.post(
                 token_endpoint,
                 headers={
@@ -299,7 +299,7 @@ async def _request_token(
                 },
                 data=body,
             )
-    except httpx.RequestError as exc:
+    except httpx2.RequestError as exc:
         raise NotionOAuthError(503, f"{fallback}: network error") from exc
     if not response.is_success:
         raise _oauth_error_from_response(response, fallback)

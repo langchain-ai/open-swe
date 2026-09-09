@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
 
-import httpx
+import httpx2
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
@@ -413,7 +413,7 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
     }
     """
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.post(
                 url,
@@ -480,7 +480,7 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
     }
     """
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.post(
                 url,
@@ -497,7 +497,7 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
             result = response.json()
 
             return result.get("data", {}).get("issue")
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             return None
 
 
@@ -1136,14 +1136,14 @@ async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[s
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
                 headers=headers,
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception(
                 "Failed to fetch PR metadata for %s/%s#%s",
                 pr_ref.owner,
@@ -1274,7 +1274,7 @@ async def _fetch_open_pr_for_branch(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     params = {"state": "open", "head": f"{owner}:{head_ref}", "per_page": 1}
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls",
@@ -1282,7 +1282,7 @@ async def _fetch_open_pr_for_branch(
                 params=params,
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception("Failed to look up open PR for %s/%s head=%s", owner, repo, head_ref)
             return None
     data = response.json()
@@ -1314,14 +1314,14 @@ async def _fetch_compare_diff(
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",
                 headers=headers,
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception(
                 "Failed to fetch compare diff for %s/%s %s...%s", owner, repo, base_ref, head_ref
             )
