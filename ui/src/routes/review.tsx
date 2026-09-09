@@ -165,8 +165,8 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="Trace Links"
-            description="Include a LangSmith trace link in each review comment. Only members of your LangSmith workspace can open it."
+            label="Reviewer trace links"
+            description="Link each review comment to the reviewer's own LangSmith run. Only members of your LangSmith workspace can open it."
             control={
               <Switch
                 checked={current.review_trace_links}

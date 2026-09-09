@@ -224,13 +224,11 @@ export interface WorkspaceMCPUpdate {
   oauth?: WorkspaceMCPOAuthUpdate | null
 }
 
-export interface ApiKeyCredentialStatus {
+export interface CurrentsCredentialStatus {
   connected: boolean
   api_key_last4?: string
   updated_at?: string | null
 }
-
-export type CurrentsCredentialStatus = ApiKeyCredentialStatus
 
 export interface CurrentsConnectBody {
   api_key: string
