@@ -8,6 +8,7 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 """
 
 import asyncio
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -171,8 +172,12 @@ async def test_model_routing_is_deterministically_applied_to_half_of_threads() -
     unrouted["configurable"]["thread_id"] = "thread-0"
     unrouted_agent = await _capture_create_deep_agent_kwargs(unrouted)
 
-    routed_names = [type(middleware).__name__ for middleware in routed_agent["middleware"]]
-    unrouted_names = [type(middleware).__name__ for middleware in unrouted_agent["middleware"]]
+    routed_names = [
+        type(middleware).__name__ for middleware in cast(list[object], routed_agent["middleware"])
+    ]
+    unrouted_names = [
+        type(middleware).__name__ for middleware in cast(list[object], unrouted_agent["middleware"])
+    ]
     assert "ModelSelectionMiddleware" in routed_names
     assert "ModelSelectionMiddleware" not in unrouted_names
     assert routed["metadata"]["model_routing_applied"] is True

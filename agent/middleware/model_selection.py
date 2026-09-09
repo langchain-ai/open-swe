@@ -39,7 +39,7 @@ class ModelSelectionMiddleware(AgentMiddleware[ModelSelectionState]):
 
     def __init__(
         self,
-        models: Mapping[Route, BaseChatModel],
+        models: Mapping[str, BaseChatModel],
         classifier: BaseChatModel,
         *,
         initial_plan_mode: bool = False,
