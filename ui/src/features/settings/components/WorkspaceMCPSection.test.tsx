@@ -113,7 +113,7 @@ it("saves generic authentication, discovers tools, and enables only selected too
   })
   const secret = screen.getByLabelText("Header 1 value")
   expect(secret.getAttribute("type")).toBe("password")
-  fireEvent.change(secret, { target: { value: "Bearer test-secret" } })
+  fireEvent.change(secret, { target: { value: "  Bearer test-secret  " } })
   fireEvent.click(screen.getByRole("button", { name: "Show header 1 value" }))
   expect(secret.getAttribute("type")).toBe("text")
   fireEvent.click(screen.getByRole("button", { name: "Hide header 1 value" }))
@@ -127,10 +127,12 @@ it("saves generic authentication, discovers tools, and enables only selected too
   expect((search as HTMLInputElement).checked).toBe(false)
   expect(operations).toEqual(["discover", "save"])
   expect(discoveries[0]?.headers).toEqual({
-    Authorization: "Bearer test-secret",
+    Authorization: "  Bearer test-secret  ",
   })
   expect(writes[0]?.allowed_tools).toEqual([])
-  expect(writes[0]?.headers).toEqual({ Authorization: "Bearer test-secret" })
+  expect(writes[0]?.headers).toEqual({
+    Authorization: "  Bearer test-secret  ",
+  })
   expect(screen.queryByLabelText("Header 1 value")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Select all" }))
   expect((search as HTMLInputElement).checked).toBe(true)
@@ -182,6 +184,67 @@ it("saves generic authentication, discovers tools, and enables only selected too
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Edit incident" })).toBeNull()
   )
+  client.clear()
+})
+
+it("keeps a newly saved connection editable when refreshing the list fails", async () => {
+  let connection: WorkspaceMCP | null = null
+  const writes: WorkspaceMCPUpdate[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/discover")) {
+      return new Response(
+        JSON.stringify([{ name: "search", description: "Search incidents" }])
+      )
+    }
+    if (init?.method === "PUT") {
+      const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
+      writes.push(update)
+      connection = {
+        name: update.name,
+        url: update.url,
+        transport: update.transport,
+        enabled: update.enabled,
+        allowed_tools: update.allowed_tools,
+        header_names: [],
+        revision: "v1",
+        updated_at: "now",
+      }
+      return new Response(JSON.stringify(connection))
+    }
+    return connection
+      ? new Response(JSON.stringify({ detail: "Settings unavailable" }), {
+          status: 503,
+        })
+      : new Response(JSON.stringify([]))
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <WorkspaceMCPSection />
+    </QueryClientProvider>
+  )
+  const add = screen.getByRole("button", { name: "Add MCP server" })
+  await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(add)
+  fireEvent.change(screen.getByLabelText("Connection name"), {
+    target: { value: "incident" },
+  })
+  fireEvent.change(screen.getByLabelText("Server URL"), {
+    target: { value: "https://mcp.incident.io/mcp" },
+  })
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and discover tools" })
+  )
+  await screen.findByRole("alert")
+  const search = await screen.findByRole("checkbox", { name: "Allow search" })
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
+  fireEvent.click(search)
+  fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+  await screen.findByRole("button", { name: "Add MCP server" })
+  expect(writes.at(-1)?.allowed_tools).toEqual(["search"])
+  expect(screen.getByText("· Enabled · 1 tools")).toBeTruthy()
   client.clear()
 })
 

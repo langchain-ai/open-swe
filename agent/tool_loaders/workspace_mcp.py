@@ -35,6 +35,18 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
 
 
+class _WorkspaceMCPTool(StructuredTool):
+    """Forward remote properties without consuming LangChain's reserved keywords."""
+
+    def _run(self, /, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("Workspace MCP tools require async invocation")
+
+    async def _arun(self, /, *args: Any, **kwargs: Any) -> Any:
+        if self.coroutine is None:
+            raise ToolException("Workspace MCP tool has no async implementation")
+        return await self.coroutine(*args, **kwargs)
+
+
 def _connection(record: WorkspaceMCP) -> Connection:
     connection: SSEConnection | StreamableHttpConnection
     if record.transport == "sse":
@@ -60,6 +72,8 @@ async def _discover_tools(record: WorkspaceMCP) -> list[Tool]:
             cursors.add(page.nextCursor)
             page = await session.list_tools(params=PaginatedRequestParams(cursor=page.nextCursor))
             tools.extend(page.tools)
+        if len({tool.name for tool in tools}) != len(tools):
+            raise ValueError("MCP server returned duplicate tool names")
         return tools
 
 
@@ -83,6 +97,14 @@ def _discovery_error(error: Exception) -> str:
     return "Could not discover MCP tools; check the URL and authentication headers"
 
 
+async def _discover_catalog(record: WorkspaceMCP) -> list[Tool]:
+    try:
+        return await asyncio.wait_for(_discover_tools(record), timeout=_TIMEOUT_SECONDS)
+    except Exception as exc:
+        # The shared cache logs refresh failures, so redact before handing errors to it.
+        raise ValueError(_discovery_error(exc)) from None
+
+
 async def discover_workspace_mcp(
     name: str, update: WorkspaceMCPUpdate | None = None
 ) -> list[dict[str, str]]:
@@ -94,10 +116,7 @@ async def discover_workspace_mcp(
     )
     if record is None:
         raise ValueError("Workspace MCP connection does not exist")
-    try:
-        definitions = await asyncio.wait_for(_discover_tools(record), timeout=_TIMEOUT_SECONDS)
-    except Exception as exc:
-        raise ValueError(_discovery_error(exc)) from None
+    definitions = await _discover_catalog(record)
     return [{"name": tool.name, "description": tool.description or ""} for tool in definitions]
 
 
@@ -143,7 +162,7 @@ def _wrap_tool(name: str, url: str, transport: str, definition: Tool) -> BaseToo
                 "Workspace MCP call failed; check its connection and credentials"
             ) from None
 
-    return StructuredTool.from_function(
+    return _WorkspaceMCPTool.from_function(
         coroutine=invoke,
         name=_tool_name(name, definition.name),
         description=definition.description or definition.name,
@@ -154,12 +173,11 @@ def _wrap_tool(name: str, url: str, transport: str, definition: Tool) -> BaseToo
 
 
 async def _load_tools(record: WorkspaceMCP) -> list[BaseTool]:
-    async def discover() -> list[Tool]:
-        return await asyncio.wait_for(_discover_tools(record), timeout=_TIMEOUT_SECONDS)
-
     try:
         definitions = await ttl_cache.cached(
-            f"workspace-mcp:{record.name}:{record.revision}", 600, discover
+            f"workspace-mcp:{record.name}:{record.revision}",
+            600,
+            partial(_discover_catalog, record),
         )
         return [
             _wrap_tool(record.name, record.url, record.transport, definition)

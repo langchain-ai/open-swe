@@ -134,7 +134,7 @@ export function WorkspaceMCPSection() {
             )
           )
             throw new Error("Header names must be unique")
-          authentication[name] = header.value.trim()
+          authentication[name] = header.value
         }
       }
       if (
@@ -152,6 +152,12 @@ export function WorkspaceMCPSection() {
       }
       const discovered = discover ? await api.discoverWorkspaceMCP(update) : []
       const saved = await api.saveWorkspaceMCP(update)
+      qc.setQueryData<WorkspaceMCP[]>(queryKey, (current) => [
+        ...(current ?? []).filter(
+          (connection) => connection.name !== saved.name
+        ),
+        saved,
+      ])
       setDraft({ ...saved, existing: true })
       setHeaders([])
       setSavedHeaders(null)

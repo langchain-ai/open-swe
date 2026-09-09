@@ -24,16 +24,16 @@ _BLOCKED_HEADERS = {
     "connection",
     "proxy-authorization",
 }
-_SECRET_QUERY_KEYS = {
-    "key",
-    "token",
-    "api_key",
+_SECRET_QUERY_SUFFIXES = (
     "apikey",
-    "access_token",
+    "apitoken",
+    "authtoken",
+    "accesstoken",
+    "refreshtoken",
     "authorization",
     "password",
     "secret",
-}
+)
 _VALIDATION_MESSAGES = {
     "name": (
         "Connection name must start with a lowercase letter and contain only lowercase "
@@ -51,6 +51,11 @@ _VALIDATION_MESSAGES = {
     ),
     "allowed_tools": "Allowed tools must be a list of at most 200 non-empty names (1-128 characters)",
 }
+
+
+def _is_secret_query_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+    return normalized in {"key", "token"} or normalized.endswith(_SECRET_QUERY_SUFFIXES)
 
 
 class WorkspaceMCPRoute(APIRoute):
@@ -96,7 +101,7 @@ class WorkspaceMCPUpdate(BaseModel):
             or parsed.password is not None
             or parsed.fragment
             or any(ord(char) < 33 for char in value)
-            or any(key.lower() in _SECRET_QUERY_KEYS for key, _ in parse_qsl(parsed.query))
+            or any(_is_secret_query_key(key) for key, _ in parse_qsl(parsed.query))
         ):
             raise ValueError(
                 "Use an HTTPS URL without credentials or fragments; put authentication in headers"

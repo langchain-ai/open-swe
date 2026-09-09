@@ -182,6 +182,74 @@ async def test_validation_responses_never_echo_headers(monkeypatch, headers):
 
 
 @pytest.mark.parametrize(
+    "query_key",
+    [
+        "client_secret",
+        "auth_token",
+        "api-key",
+        "x-api-key",
+        "CLIENT_SECRET",
+        "clientSecret",
+        "AuthToken",
+        "X-API-Key",
+        "xApiKey",
+        "api.key",
+        "%63lient%5Fsecret",
+        "accessToken",
+        "refresh-token",
+        "apiToken",
+        "service_password",
+    ],
+)
+async def test_query_credentials_are_rejected_without_saving_or_echoing(
+    fake_store, monkeypatch, query_key
+):
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Origin": "http://test"},
+    ) as client:
+        response = await client.put(
+            "/dashboard/api/workspace-mcps/example",
+            json={
+                "name": "example",
+                "url": f"https://example.com/mcp?toolsets=core&{query_key}=test-secret",
+            },
+        )
+        assert response.status_code == 422
+        assert "test-secret" not in response.text
+        assert fake_store.values(["workspace_mcps"]) == {}
+        assert (await client.get("/dashboard/api/workspace-mcps")).json() == []
+
+
+async def test_ordinary_query_parameters_roundtrip_unchanged(fake_store, monkeypatch):
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
+    url = (
+        "https://mcp.us5.datadoghq.com/v1/mcp"
+        "?toolsets=core&region=us5&page_token=next&token_budget=1000&monkey=banana"
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Origin": "http://test"},
+    ) as client:
+        response = await client.put(
+            "/dashboard/api/workspace-mcps/example", json={"name": "example", "url": url}
+        )
+        assert response.status_code == 200
+        assert response.json()["url"] == url
+        assert fake_store.values(["workspace_mcps"])["example"]["url"] == url
+        assert (await client.get("/dashboard/api/workspace-mcps")).json()[0]["url"] == url
+
+
+@pytest.mark.parametrize(
     ("fields", "message"),
     [
         ({"name": "incident.io"}, "Connection name"),
