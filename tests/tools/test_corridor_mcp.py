@@ -84,15 +84,24 @@ async def test_load_corridor_tools_degrades_on_error(monkeypatch: pytest.MonkeyP
 @pytest.mark.asyncio
 async def test_load_corridor_tools_returns_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CORRIDOR_API_TOKEN", "tok")
-    analyze_plan = _FakeTool("analyzePlan")
+    allowed_tools = [
+        _FakeTool(name)
+        for name in (
+            "analyzePlan",
+            "listProjects",
+            "getFindings",
+            "getFinding",
+            "updateFindingState",
+        )
+    ]
     other_tool = _FakeTool("otherTool")
 
     with patch.object(
         corridor_mcp,
         "_build_mcp_tools",
-        AsyncMock(return_value=[other_tool, analyze_plan]),
+        AsyncMock(return_value=[other_tool, *allowed_tools]),
     ):
-        assert await corridor_mcp.load_corridor_tools() == [analyze_plan]
+        assert await corridor_mcp.load_corridor_tools() == allowed_tools
 
 
 @pytest.mark.asyncio

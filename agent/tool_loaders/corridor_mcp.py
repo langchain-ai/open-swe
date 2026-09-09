@@ -22,7 +22,9 @@ _CORRIDOR_HOST = "app.corridor.dev"
 _CORRIDOR_PATH = "/api/mcp"
 _MCP_TIMEOUT_SECONDS = 30.0
 _TOKEN_QUERY_PARAMS = frozenset({"token", "api_key"})
-_ALLOWED_TOOL_NAMES = frozenset({"analyzePlan"})
+_ALLOWED_TOOL_NAMES = frozenset(
+    {"analyzePlan", "listProjects", "getFindings", "getFinding", "updateFindingState"}
+)
 CORRIDOR_TOOL_NAMES = tuple(sorted(_ALLOWED_TOOL_NAMES))
 
 
