@@ -49,6 +49,7 @@ The main agent and middleware stack are assembled in `agent/server.py`. Middlewa
 - Add middleware to `agent/middleware/`, export it, and place it deliberately in the stack.
 - Add sandbox providers under `agent/sandboxes/providers/` and register them in `registry.py`.
 - Add dashboard endpoints through `agent/dashboard/routes.py` and graph entrypoints through `langgraph.json`.
+- Every new API write operation exposed through UI controls must also be available as an appropriately authorized agent tool. Prefer display-only UI with modifications performed through agent tools unless direct UI controls are explicitly required.
 
 ## Testing
 
