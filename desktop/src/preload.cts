@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   getVersion: () => ipcRenderer.invoke("desktop:version"),
+  getBackendUrl: () => ipcRenderer.invoke("desktop:backend-url"),
+  setBackendUrl: (url) => ipcRenderer.invoke("desktop:set-backend-url", url),
   getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
   onUpdateState: (callback) => {

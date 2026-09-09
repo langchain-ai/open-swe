@@ -35,8 +35,8 @@ key and never calls the raw LangGraph API directly. GitHub login creates the sam
 session used by the web UI.
 
 Packaged builds ask for the organization's backend URL on first launch and store it in the app's
-local user data. They have no maintainer-hosted default. Use **Open SWE → Backend URL…** to switch
-deployments; switching clears the previous deployment's local session data.
+local user data. They have no maintainer-hosted default. Use **Open SWE → Settings… → Desktop** to
+switch deployments; switching clears the previous deployment's local session data.
 
 The backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a callback URL.
 Set `ALLOWED_GITHUB_ORGS` on the backend to prevent GitHub users outside the organization from

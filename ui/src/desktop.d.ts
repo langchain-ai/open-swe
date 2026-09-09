@@ -176,6 +176,10 @@ declare global {
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       getVersion: () => Promise<string>
+      getBackendUrl: () => Promise<string>
+      setBackendUrl: (
+        url: string
+      ) => Promise<{ backendUrl: string; changed: boolean }>
       getUpdateState: () => Promise<DesktopUpdateState>
       installUpdate: () => Promise<boolean>
       onUpdateState: (

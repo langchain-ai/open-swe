@@ -147,6 +147,22 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       await maybeLater.click();
     }
 
+    await page.goto("open-swe://app/my-settings");
+    const backendUrl = page.getByLabel("Backend URL");
+    await expect(backendUrl).toHaveValue(`${baseURL}/`);
+    const settingsScreenshot = testInfo.outputPath(
+      "desktop-backend-settings.png",
+    );
+    await page.screenshot({ path: settingsScreenshot, fullPage: true });
+    await testInfo.attach("desktop-backend-settings", {
+      path: settingsScreenshot,
+      contentType: "image/png",
+    });
+    await page.getByRole("link", { name: "Back to app" }).click();
+    const maybeLater = page.getByRole("button", { name: "Maybe later" });
+    await expect(maybeLater).toBeVisible();
+    await maybeLater.click();
+
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),
     ).toHaveCount(0);
