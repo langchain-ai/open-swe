@@ -7,6 +7,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 from typing import Any, cast
 
 import httpx2
+from fastapi import HTTPException
 from langchain_core.messages.content import create_text_block
 
 from agent.input_messages import (
@@ -197,7 +198,12 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         image_urls = common.dedupe_urls(image_urls)
         resolved_model_id = await common.resolve_agent_model_id(mapped_login)
         if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
+            try:
+                fallback_model_id, fallback_effort = common.default_vision_model_pair(
+                    await common.get_team_allowed_models()
+                )
+            except ValueError as exc:
+                raise HTTPException(422, "no enabled model supports image input") from exc
             common.logger.info(
                 "Using vision fallback model %s for %d Linear image(s); configured model %s "
                 "does not support images",

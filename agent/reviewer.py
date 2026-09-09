@@ -41,8 +41,10 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
 from agent.dashboard.team_settings import (
+    gate_model_availability,
     get_effective_gateway_enabled,
     get_org_review_guidelines,
+    get_team_allowed_models,
     get_team_default_grouping_model,
     get_team_default_model_pair,
     get_team_fable_enabled,
@@ -880,6 +882,9 @@ async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseC
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
     )
+    model_id, effort = gate_model_availability(
+        model_id, effort, allowed_models=await get_team_allowed_models()
+    )
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,
@@ -1336,6 +1341,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     )
     subagent_model_id, subagent_effort = gate_fable_model(
         subagent_model_id, subagent_effort, fable_enabled=fable_enabled
+    )
+    allowed_models = await get_team_allowed_models()
+    model_id, reasoning_effort = gate_model_availability(
+        model_id, reasoning_effort, allowed_models=allowed_models
+    )
+    subagent_model_id, subagent_effort = gate_model_availability(
+        subagent_model_id, subagent_effort, allowed_models=allowed_models
     )
     model_kwargs = provider_model_kwargs(
         model_id,

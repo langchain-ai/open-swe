@@ -62,12 +62,15 @@ from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
+    model_is_allowed,
     model_supports_effort,
 )
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
+    gate_model_availability,
     get_effective_gateway_enabled,
     get_team_agent_routing_models,
+    get_team_allowed_models,
     get_team_default_model_pair,
     get_team_default_repo,
     get_team_default_thread_title_model,
@@ -972,6 +975,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
+        allowed_models = None
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
             (
@@ -981,6 +985,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 use_gateway,
                 profile,
                 fable_enabled,
+                allowed_models,
             ) = await asyncio.gather(
                 _cached_team_default_model_pair("agent"),
                 _cached_agent_routing_models(),
@@ -988,6 +993,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_gateway_enabled(),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
+                get_team_allowed_models(),
             )
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
@@ -1098,6 +1104,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     title_model_id, title_effort = gate_fable_model(
         title_model_id, title_effort, fable_enabled=fable_enabled
     )
+    model_id, profile_effort = gate_model_availability(
+        model_id, profile_effort, allowed_models=allowed_models
+    )
+    subagent_model_id, subagent_effort = gate_model_availability(
+        subagent_model_id, subagent_effort, allowed_models=allowed_models
+    )
+    title_model_id, title_effort = gate_model_availability(
+        title_model_id, title_effort, allowed_models=allowed_models
+    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -1117,7 +1132,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
-    if fallback_model_id and fallback_model_id != model_id:
+    if (
+        fallback_model_id
+        and fallback_model_id != model_id
+        and model_is_allowed(fallback_model_id, allowed_models)
+    ):
         fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
         if fallback_model_id.startswith("openai:"):
             fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
@@ -1284,8 +1303,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection_middleware: list[Any] = []
     if adaptive_model_routing:
-        routing_models = {
-            route: _make_model_or_defer(
+        routing_models = {}
+        for route, (routed_model_id, effort) in routing_defaults.items():
+            routed_model_id, effort = gate_model_availability(
+                routed_model_id, effort, allowed_models=allowed_models
+            )
+            routing_models[route] = _make_model_or_defer(
                 routed_model_id,
                 use_gateway=use_gateway,
                 **provider_model_kwargs(
@@ -1294,8 +1317,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 ),
             )
-            for route, (routed_model_id, effort) in routing_defaults.items()
-        }
         model_selection_middleware.append(
             ModelSelectionMiddleware(
                 routing_models,

@@ -13,6 +13,7 @@ from agent.dashboard.options import (
     fable_disabled_fallback,
     gate_fable_model,
     is_deprecated_model,
+    model_is_allowed,
     model_profile_context_window,
     models_with_profile_context_windows,
     normalize_model_choice,
@@ -21,6 +22,7 @@ from agent.dashboard.options import (
 from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
+    get_team_allowed_models,
     get_team_default_model,
     normalize_team_settings_for_response,
 )
@@ -51,6 +53,35 @@ def test_environment_default_model_pair(monkeypatch, model, effort, expected) ->
     monkeypatch.setenv("LLM_MODEL_ID", model)
     monkeypatch.setenv("LLM_REASONING_EFFORT", effort)
     assert default_model_pair() == expected
+
+
+def test_model_allowlist_supports_exact_models_and_provider_wildcards() -> None:
+    assert model_is_allowed(SUPPORTED_OPENAI, None)
+    assert model_is_allowed(SUPPORTED_OPENAI, [SUPPORTED_OPENAI])
+    assert model_is_allowed(SUPPORTED_OPENAI, ["openai:*"])
+    assert not model_is_allowed(SUPPORTED_OPENAI, ["anthropic:*"])
+
+
+def test_team_settings_update_validates_model_allowlist() -> None:
+    assert TeamSettingsUpdate(allowed_models=["openai:*", SUPPORTED_OPENAI]).allowed_models == [
+        "openai:*",
+        SUPPORTED_OPENAI,
+    ]
+    with pytest.raises(ValueError, match="unsupported allowed models"):
+        TeamSettingsUpdate(allowed_models=["unknown:*"])
+    with pytest.raises(ValueError, match="default-capable"):
+        TeamSettingsUpdate(allowed_models=[FABLE])
+
+
+@pytest.mark.asyncio
+async def test_stored_model_allowlist_fails_closed_when_malformed() -> None:
+    with patch(
+        "agent.dashboard.team_settings.get_value",
+        new_callable=AsyncMock,
+        return_value={"allowed_models": "openai:*"},
+    ):
+        with pytest.raises(ValueError, match="list of strings"):
+            await get_team_allowed_models()
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
@@ -156,6 +187,22 @@ async def test_team_default_unknown_provider_falls_back_to_global() -> None:
         return_value=settings,
     ):
         assert await get_team_default_model("reviewer") == default_model_pair()
+
+
+@pytest.mark.asyncio
+async def test_team_default_falls_back_inside_model_allowlist() -> None:
+    settings = {
+        "default_agent_model": SUPPORTED_OPENAI,
+        "default_agent_reasoning_effort": "medium",
+        "allowed_models": ["anthropic:*"],
+    }
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value=settings,
+    ):
+        model, _ = await get_team_default_model("agent")
+    assert model.startswith("anthropic:")
 
 
 def test_profile_stale_anthropic_upgrades_to_supported() -> None:

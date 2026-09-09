@@ -1,6 +1,6 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
 from typing import NotRequired, TypedDict, cast
@@ -16,7 +16,16 @@ class ModelOption(TypedDict):
     supports_images: bool
     can_be_default: NotRequired[bool]
     context_window: NotRequired[int | None]
+    family: NotRequired[str]
+    family_label: NotRequired[str]
 
+
+MODEL_FAMILIES: dict[str, str] = {
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "google_genai": "Google Gemini",
+    "fireworks": "Fireworks",
+}
 
 SUPPORTED_MODELS: list[ModelOption] = [
     {
@@ -117,6 +126,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
 ]
 
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
+SUPPORTED_MODEL_FAMILIES: frozenset[str] = frozenset(MODEL_FAMILIES)
 
 FABLE_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
@@ -207,15 +217,28 @@ def model_profile_context_window(model_id: str) -> int | None:
     return _PROFILE_CONTEXT_WINDOW_FALLBACKS.get(model_id)
 
 
+def model_family(model_id: str) -> str:
+    return model_id.partition(":")[0]
+
+
+def model_is_allowed(model_id: str, allowed_models: Collection[str] | None) -> bool:
+    if allowed_models is None:
+        return True
+    return model_id in allowed_models or f"{model_family(model_id)}:*" in allowed_models
+
+
 def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[ModelOption]:
     enriched: list[ModelOption] = []
     for model in models:
+        family = model_family(model["id"])
         option: ModelOption = {
             "id": model["id"],
             "label": model["label"],
             "efforts": model["efforts"],
             "default_effort": model["default_effort"],
             "supports_images": model["supports_images"],
+            "family": family,
+            "family_label": MODEL_FAMILIES.get(family, family),
         }
         if "can_be_default" in model:
             option["can_be_default"] = model["can_be_default"]
@@ -363,16 +386,18 @@ def default_model_pair() -> tuple[str, str]:
     raise ValueError(f"Unsupported default LLM_MODEL_ID: {model_id!r}")
 
 
-def default_vision_model_pair() -> tuple[str, str]:
-    """Default OpenAI/Anthropic model pair to use when image input is required."""
+def default_vision_model_pair(
+    allowed_models: list[str] | None = None,
+) -> tuple[str, str]:
+    """Default allowed model pair to use when image input is required."""
     if (
         DEFAULT_MODEL_ID in SUPPORTED_MODEL_IDS
         and model_supports_images(DEFAULT_MODEL_ID)
         and model_supports_effort(DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT)
-        and DEFAULT_MODEL_ID.startswith(("openai:", "anthropic:"))
+        and model_is_allowed(DEFAULT_MODEL_ID, allowed_models)
     ):
         return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
     for model in SUPPORTED_MODELS:
-        if model["id"].startswith(("openai:", "anthropic:")) and model["supports_images"]:
+        if model["supports_images"] and model_is_allowed(model["id"], allowed_models):
             return model["id"], model["default_effort"]
-    return default_model_pair()
+    raise ValueError("model allowlist has no image-capable model")

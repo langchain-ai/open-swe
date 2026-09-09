@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import httpx2
+from fastapi import HTTPException
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
@@ -724,7 +725,12 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if image_urls:
         resolved_model_id = await common.resolve_agent_model_id(mapped_login)
         if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
+            try:
+                fallback_model_id, fallback_effort = common.default_vision_model_pair(
+                    await common.get_team_allowed_models()
+                )
+            except ValueError as exc:
+                raise HTTPException(422, "no enabled model supports image input") from exc
             common.logger.info(
                 "Using vision fallback model %s for %d Slack image(s); configured model %s "
                 "does not support images",

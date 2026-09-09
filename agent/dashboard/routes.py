@@ -85,6 +85,7 @@ from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
     gate_fable_model,
+    model_is_allowed,
     models_with_profile_context_windows,
 )
 from agent.dashboard.profiles import (
@@ -162,6 +163,7 @@ from agent.dashboard.team_credentials import (
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
+    get_team_allowed_models,
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
@@ -638,25 +640,32 @@ async def api_delete_my_instructions(
 
 @router.get("/options")
 async def options() -> dict[str, Any]:
-    agent_model, agent_effort = await get_team_default_model("agent")
-    subagent_model, subagent_effort = await get_team_default_subagent_model("agent")
-    fable_enabled = await get_team_fable_enabled()
-    # Never advertise a default that isn't in the selectable list: when Fable is
-    # off, gate a stale Fable default down to its non-Fable fallback so the Cloud
-    # Agents page (and the PUT /profile it drives) don't choke on it.
+    (
+        (agent_model, agent_effort),
+        (subagent_model, subagent_effort),
+        fable_enabled,
+        allowed_models,
+    ) = await asyncio.gather(
+        get_team_default_model("agent"),
+        get_team_default_subagent_model("agent"),
+        get_team_fable_enabled(),
+        get_team_allowed_models(),
+    )
     agent_model, agent_effort = gate_fable_model(
         agent_model, agent_effort, fable_enabled=fable_enabled
     )
     subagent_model, subagent_effort = gate_fable_model(
         subagent_model, subagent_effort, fable_enabled=fable_enabled
     )
-    models = (
-        SUPPORTED_MODELS
-        if fable_enabled
-        else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
-    )
+    models = [
+        model
+        for model in SUPPORTED_MODELS
+        if (fable_enabled or model["id"] not in FABLE_MODEL_IDS)
+        and model_is_allowed(model["id"], allowed_models)
+    ]
     return {
         "models": models_with_profile_context_windows(models),
+        "model_catalog": models_with_profile_context_windows(SUPPORTED_MODELS),
         "default_agent_model": agent_model,
         "default_agent_reasoning_effort": agent_effort,
         "default_agent_subagent_model": subagent_model,
