@@ -18,6 +18,7 @@ from langgraph.runtime import Runtime
 
 from ..review.findings import get_thread_metadata
 from ..review.publish import settle_review_check_run
+from ..utils.auth import refresh_github_token
 from ..utils.github_checks import (
     CheckConclusion,
     fetch_review_check_run_status,
@@ -75,7 +76,7 @@ async def settle_review_check_on_exit(
         deferred = metadata.get("review_check_deferred_result") if owns_current_check else None
         if isinstance(deferred, dict) and deferred.get("review_check_run_id") == check_run_id:
             return None
-        token = get_github_token()
+        token = get_github_token() or await refresh_github_token(config, thread_id)
         if not token:
             logger.warning("No GitHub token to settle stale review check on thread %s", thread_id)
             return None

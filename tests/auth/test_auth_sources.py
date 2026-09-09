@@ -235,3 +235,38 @@ def test_resolve_github_token_requires_source() -> None:
 
 async def _coro(value: object) -> object:
     return value
+
+
+def test_refresh_github_token_mints_after_the_cached_token_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    github_token.cache_github_token_for_thread(
+        "thread-1", "expired-token", expires_at="2000-01-01T00:00:00Z", is_bot_token=True
+    )
+    config = {
+        "configurable": {
+            "source": "github",
+            "thread_id": "thread-1",
+            "repo": {"owner": "acme", "name": "widgets"},
+        }
+    }
+    assert github_token.get_github_token(config) is None
+
+    async def fake_app_token(**kwargs: object) -> tuple[str, str]:
+        assert kwargs == {"target_repo": "acme/widgets", "repositories": ["widgets"]}
+        return "fresh-token", "2099-01-01T00:00:00Z"
+
+    monkeypatch.setattr(auth, "get_github_app_installation_token_with_expiry", fake_app_token)
+
+    assert asyncio.run(auth.refresh_github_token(config, "thread-1")) == "fresh-token"
+    assert github_token.get_github_token(config) == "fresh-token"
+
+
+def test_refresh_github_token_returns_none_when_it_cannot_mint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth, "get_team_default_repo", lambda: _coro(None))
+
+    assert (
+        asyncio.run(auth.refresh_github_token({"configurable": {"source": "github"}}, "t")) is None
+    )
