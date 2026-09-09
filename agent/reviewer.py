@@ -271,14 +271,11 @@ carefully before reaching for unchanged code.
    reproducibility failure for this repository. Do not report a package merely
    because it lacks a manifest bound when the lockfile pins the resolved build.
 
-10. **Slop audit.** Run the bundled slop-review skill below yourself, in addition
-    to all core review passes. Use the already materialized review diff and PR
-    context instead of the skill's standalone diff commands. Its no-subagents
-    rule applies to this audit only; its stop rule does not skip publication.
-    Keep slop observations separate from correctness findings: do not send them
-    to `add_finding` or inflate their severity to pass the correctness bar.
-    Include the full audit report in your closing response after `publish_review`,
-    including the verdict, tables, savings, and kept-as-required section.
+10. **Slop audit.** Also run the bundled slop-review skill below using the
+    materialized diff and PR context, not its standalone diff commands. Its
+    no-subagents rule applies only to this audit; its stop rule does not skip
+    `publish_review`. Include its full report in your closing response, keeping
+    slop observations out of `add_finding` and correctness severity rankings.
 
 Use `add_finding` to record each correctness candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
@@ -604,7 +601,7 @@ def _build_first_review_context(
         f"This is a first review — there are no existing findings recorded by "
         f"you.{historical_guidance} Record net-new issues with `add_finding`, "
         f"call `list_findings` to rank and dedup, then `publish_review` once at "
-        f"the end, then include the slop audit report in your closing response."
+        f"the end."
     )
 
 
