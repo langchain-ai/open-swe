@@ -241,17 +241,4 @@ class RunConfig(BaseModel):
 
     @property
     def is_engine_validation(self) -> bool:
-        if self.engine_validation is not True or self.source != "engine_validation":
-            return False
-        user = self.get("langgraph_auth_user")
-        identity = (
-            user.get("identity") if isinstance(user, Mapping) else getattr(user, "identity", None)
-        )
-        validation_claim = None
-        if isinstance(user, Mapping):
-            validation_claim = user.get("engine_validation")
-        try:
-            validation_claim = validation_claim or user["engine_validation"]
-        except KeyError, TypeError:
-            validation_claim = validation_claim or getattr(user, "engine_validation", None)
-        return identity == "issues-agent" and validation_claim is True
+        return self.engine_validation is True

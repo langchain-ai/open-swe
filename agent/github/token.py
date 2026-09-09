@@ -30,6 +30,7 @@ from agent.utils.user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
 _legacy_auth_impact_tasks: set[asyncio.Task[None]] = set()
+_ENGINE_VALIDATION_REPOSITORY = "langchain-ai/open-swe"
 
 client = get_client()
 
@@ -473,9 +474,11 @@ async def _resolve_engine_validation_token(
     cfg: RunConfig, thread_id: str
 ) -> tuple[str, str | None]:
     if not cfg.is_engine_validation:
-        raise RuntimeError("Engine validation requires authenticated service context")
+        raise RuntimeError("Engine validation mode is not enabled")
     if not cfg.repo or not cfg.repo.owner or not cfg.repo.name:
         raise RuntimeError("Engine validation requires one repository")
+    if cfg.repo.full_name.lower() != _ENGINE_VALIDATION_REPOSITORY:
+        raise RuntimeError("Engine validation is limited to the public Open SWE repository")
     bot_token, expires_at = await get_github_app_installation_token_with_expiry(
         repositories=[cfg.repo.name],
         permissions={"contents": "read"},
@@ -510,7 +513,7 @@ async def resolve_github_token(
     """
     cfg = RunConfig.from_config(config)
     source = cfg.source
-    if cfg.engine_validation is True or source == "engine_validation":
+    if cfg.is_engine_validation:
         return await _resolve_engine_validation_token(cfg, thread_id)
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)

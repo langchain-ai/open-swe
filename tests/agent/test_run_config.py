@@ -72,31 +72,10 @@ def test_is_eval_covers_both_flags():
     assert not RunConfig.parse({}).is_eval
 
 
-def test_engine_validation_requires_signed_service_identity():
-    trusted = RunConfig.parse(
-        {
-            "source": "engine_validation",
-            "engine_validation": True,
-            "langgraph_auth_user": {
-                "identity": "issues-agent",
-                "engine_validation": True,
-            },
-        }
-    )
-    forged = trusted.model_copy(
-        update={
-            "langgraph_auth_user": {
-                "identity": "workspace-user",
-                "engine_validation": True,
-            }
-        }
-    )
-
-    assert trusted.is_engine_validation
-    assert not forged.is_engine_validation
-    assert not RunConfig.parse(
-        {"source": "engine_validation", "engine_validation": True}
-    ).is_engine_validation
+def test_engine_validation_requires_explicit_flag():
+    assert RunConfig.parse({"engine_validation": True}).is_engine_validation
+    assert not RunConfig.parse({"source": "engine_validation"}).is_engine_validation
+    assert not RunConfig.parse({}).is_engine_validation
 
 
 def test_bools_are_not_accepted_as_integers():

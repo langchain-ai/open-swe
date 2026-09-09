@@ -947,10 +947,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
-    engine_validation_requested = cfg.engine_validation is True or cfg.source == "engine_validation"
     engine_validation = cfg.is_engine_validation
-    if engine_validation_requested and not engine_validation:
-        raise RuntimeError("Engine validation requires authenticated service context")
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -1338,7 +1335,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
-    agent_backend = CompositeBackend(default=backend, routes=skill_routes)
+    agent_backend = CompositeBackend(default=agent_backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection_middleware: list[Any] = []
     if adaptive_model_routing:

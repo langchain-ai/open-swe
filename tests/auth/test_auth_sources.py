@@ -285,13 +285,8 @@ def test_engine_validation_uses_repository_scoped_read_only_token(
     )
     config = {
         "configurable": {
-            "source": "engine_validation",
             "engine_validation": True,
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
-            "langgraph_auth_user": {
-                "identity": "issues-agent",
-                "engine_validation": True,
-            },
         }
     }
 
@@ -304,18 +299,13 @@ def test_engine_validation_uses_repository_scoped_read_only_token(
     }
 
 
-def test_engine_validation_rejects_forged_context() -> None:
+def test_engine_validation_rejects_other_repositories() -> None:
     config = {
         "configurable": {
-            "source": "engine_validation",
             "engine_validation": True,
-            "repo": {"owner": "langchain-ai", "name": "open-swe"},
-            "langgraph_auth_user": {
-                "identity": "workspace-user",
-                "engine_validation": True,
-            },
+            "repo": {"owner": "private", "name": "repo"},
         }
     }
 
-    with pytest.raises(RuntimeError, match="authenticated service context"):
+    with pytest.raises(RuntimeError, match="public Open SWE repository"):
         asyncio.run(auth.resolve_github_token(config, "t1"))

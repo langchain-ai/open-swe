@@ -252,6 +252,25 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 
 
 @pytest.mark.asyncio
+async def test_engine_validation_wraps_default_backend_as_read_only() -> None:
+    config = _base_config()
+    config["configurable"].update(
+        {
+            "engine_validation": True,
+            "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    assert isinstance(backend.default, ReadOnlyBackend)
+    with pytest.raises(NotImplementedError):
+        backend.write("/workspace/open-swe/file.py", "malicious")
+
+
+@pytest.mark.asyncio
 async def test_agent_wires_user_organization_and_bundled_skills_into_agents() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     sources = ["/skills/", "/organization-skills/", "/bundled-skills/"]
