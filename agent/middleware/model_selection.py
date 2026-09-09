@@ -2,12 +2,13 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Literal, NotRequired
 
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
+
+from agent.middleware.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class ModelSelectionState(AgentState):
     model_route: NotRequired[Route]
 
 
-class ModelSelectionMiddleware(AgentMiddleware[ModelSelectionState]):
+class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     state_schema = ModelSelectionState
 
     def __init__(
