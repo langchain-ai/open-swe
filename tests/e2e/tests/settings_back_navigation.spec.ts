@@ -19,8 +19,4 @@ test("Back to app returns to the thread that opened settings", async ({
 
   await page.getByRole("link", { name: "Back to app" }).click();
   await expect(page).toHaveURL(threadUrl);
-  await page.screenshot({
-    path: ".open-swe/artifacts/settings-back-to-thread.png",
-    fullPage: true,
-  });
 });
