@@ -18,8 +18,6 @@ $repository_setup_section
 
 $task_execution_section
 
-$corridor_prompt_section
-
 $dependency_section
 
 $external_untrusted_comments_section

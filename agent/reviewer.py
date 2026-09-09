@@ -83,11 +83,6 @@ from agent.review.findings import (
 from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
-from agent.review.trace_context import (
-    PRTraceContext,
-    format_pr_trace_context_prompt,
-    prepare_pr_trace_context,
-)
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -853,17 +848,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
             return content
 
-        async def _prepare_pr_trace_context() -> PRTraceContext | None:
-            try:
-                return await prepare_pr_trace_context(
-                    cfg=cfg,
-                    sandbox_backend=sandbox_backend,
-                    work_dir=work_dir,
-                )
-            except Exception:
-                logger.exception("Failed to prepare PR trace context; continuing without it")
-                return None
-
         diff_context_task = asyncio.create_task(_fetch_diff_context())
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
@@ -871,7 +855,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_review_guidelines())
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
-        pr_trace_context_task = asyncio.create_task(_prepare_pr_trace_context())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
         scoped_agents_md_task = asyncio.create_task(
@@ -890,7 +873,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         scoped_agents_md = await scoped_agents_md_task
         org_guidelines = await org_guidelines_task
         api_standards_skill = await api_standards_task
-        pr_trace_context = await pr_trace_context_task
         pr_title, pr_body = pr_overview
 
         review_context = ""
@@ -952,9 +934,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             scoped_agents_md=scoped_agents_md,
             api_standards_skill=api_standards_skill,
         )
-        trace_context_prompt = format_pr_trace_context_prompt(pr_trace_context)
-        if trace_context_prompt:
-            system_prompt = f"{system_prompt}\n\n{trace_context_prompt}"
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
         if skill_sources:

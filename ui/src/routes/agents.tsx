@@ -12,6 +12,7 @@ import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamPro
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
+import { rememberAppLocation } from "@/lib/appLocation"
 
 export const Route = createFileRoute("/agents")({
   component: AgentsLayout,
@@ -45,14 +46,19 @@ function AgentsLayout() {
   })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
-  const pathname = useRouterState({
-    select: (state) => state.location.pathname,
+  const location = useRouterState({
+    select: (state) => state.location,
   })
+  const pathname = location.pathname
   const localOnly = !session.data && isDesktopLocalModeEnabled()
   const isLocalRoute =
     pathname === "/agents" ||
     pathname === "/agents/" ||
     Boolean(activeLocalSessionId)
+
+  useEffect(() => {
+    rememberAppLocation(location.href)
+  }, [location.href])
 
   if (session.isLoading) {
     return (

@@ -193,7 +193,6 @@ def construct_system_prompt(
     plan_mode: bool = False,
     plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
-    corridor_enabled: bool = False,
     environment_name: str | None = None,
     environment_instructions: str | None = None,
     admin_environments: bool = False,
@@ -250,7 +249,6 @@ def construct_system_prompt(
             "system/repository-setup.md", working_dir=working_dir
         ),
         task_execution_section=load_prompt("system/task-execution.md"),
-        corridor_prompt_section=load_prompt("system/corridor.md") if corridor_enabled else "",
         dependency_section=load_prompt("system/dependencies.md"),
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
         commit_pr_section=commit_pr_section,

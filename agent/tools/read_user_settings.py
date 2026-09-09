@@ -7,11 +7,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.dashboard.profiles import get_profile, normalize_profile_for_response
-from agent.dashboard.user_credentials import (
-    get_currents_status,
-    get_langsmith_status,
-    get_notion_status,
-)
+from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
 from agent.utils.thread_participants import resolve_thread_participant_logins
 
@@ -34,12 +30,10 @@ def _safe_profile_settings(profile: dict[str, Any] | None) -> dict[str, Any]:
 
 
 async def _settings_for_login(login: str) -> dict[str, Any]:
-    profile, instruction_record, notion, langsmith, currents = await asyncio.gather(
+    profile, instruction_record, notion = await asyncio.gather(
         get_profile(login),
         get_user_instructions(login),
         get_notion_status(login),
-        get_langsmith_status(login),
-        get_currents_status(login),
     )
     instructions = instruction_record.get("instructions") if instruction_record else ""
     return {
@@ -48,8 +42,6 @@ async def _settings_for_login(login: str) -> dict[str, Any]:
         "instructions": instructions if isinstance(instructions, str) else "",
         "connections": {
             "notion": notion.get("notion", {"connected": False}),
-            "langsmith": langsmith.get("langsmith", {"connected": False}),
-            "currents": currents.get("currents", {"connected": False}),
         },
     }
 
