@@ -25,6 +25,10 @@ const CACHE_FILE = path.join(
   "dev-session.json"
 )
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
+// The origin the backend allows a native client to redeem a handoff from; the
+// desktop app sends the same one. Node sends no Origin of its own, and the
+// exchange is a POST, so without this the CSRF check rejects it.
+const HANDOFF_ORIGIN = "open-swe://app"
 // Re-login rather than hand Vite a session that dies mid-afternoon.
 const MIN_REMAINING_MS = 60 * 60 * 1000
 
@@ -191,7 +195,10 @@ async function login(backendUrl) {
     new URL("/dashboard/api/auth/desktop/exchange", backendUrl),
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        origin: HANDOFF_ORIGIN,
+      },
       body: JSON.stringify({ code: handoffCode, verifier }),
     }
   )
