@@ -183,7 +183,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 @pytest.mark.asyncio
 async def test_model_routing_is_applied_when_enabled() -> None:
     config = _base_config()
-    agent = await _capture_create_deep_agent_kwargs(config)
+    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
@@ -199,11 +199,9 @@ async def test_model_routing_is_applied_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_routing_can_be_disabled_in_profile() -> None:
+async def test_model_routing_is_disabled_by_default() -> None:
     config = _base_config()
-    agent = await _capture_create_deep_agent_kwargs(
-        config, profile={"model_routing_enabled": False}
-    )
+    agent = await _capture_create_deep_agent_kwargs(config)
 
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
