@@ -131,8 +131,15 @@ export interface ModelOption {
   context_window?: number | null
 }
 
+export interface ModelProviderOption {
+  id: string
+  label: string
+  enabled: boolean
+}
+
 export interface OptionsPayload {
   models: Array<ModelOption>
+  model_providers: Array<ModelProviderOption>
   default_agent_model: string
   default_agent_reasoning_effort: string
   default_agent_subagent_model: string
@@ -176,6 +183,7 @@ export interface TeamSettings {
   gateway_enabled?: boolean | null
   transcription_model?: string
   fable_enabled?: boolean
+  disabled_model_providers?: Array<string>
   review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null

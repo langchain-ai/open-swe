@@ -26,6 +26,7 @@ from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
+    model_provider_enabled,
     model_supports_effort,
     provider_fallback_pair,
 )
@@ -68,7 +69,10 @@ class ProfileUpdate(BaseModel):
             )
         return self
 
-    def validate_pairing(self) -> None:
+    def validate_pairing(self, disabled_providers: list[str] | None = None) -> None:
+        disabled = disabled_providers or []
+        if not model_provider_enabled(self.default_model, disabled):
+            raise ValueError(f"model provider is disabled for {self.default_model!r}")
         if self.default_model in NON_DEFAULT_MODEL_IDS:
             raise ValueError(f"{self.default_model!r} cannot be a default model")
         if self.default_subagent_model in NON_DEFAULT_MODEL_IDS:
@@ -81,6 +85,8 @@ class ProfileUpdate(BaseModel):
             return
         if self.default_subagent_model is None:
             raise ValueError("subagent reasoning effort set without a model")
+        if not model_provider_enabled(self.default_subagent_model, disabled):
+            raise ValueError(f"model provider is disabled for {self.default_subagent_model!r}")
         if self.default_subagent_model not in SUPPORTED_MODEL_IDS:
             raise ValueError(f"unsupported subagent model: {self.default_subagent_model}")
         if self.subagent_reasoning_effort is None or not model_supports_effort(
@@ -102,8 +108,11 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
     return fallback
 
 
-def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
+def normalize_profile_for_response(
+    profile: dict[str, Any], disabled_providers: list[str] | None = None
+) -> dict[str, Any]:
     value = dict(profile)
+    disabled = disabled_providers or []
     value.pop("create_prs", None)
     for model_field, effort_field in (
         ("default_model", "reasoning_effort"),
@@ -111,7 +120,11 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     ):
         model = value.get(model_field)
         effort = value.get(effort_field)
-        if model in DEPRECATED_MODEL_IDS or model in NON_DEFAULT_MODEL_IDS:
+        if (
+            model in DEPRECATED_MODEL_IDS
+            or model in NON_DEFAULT_MODEL_IDS
+            or (isinstance(model, str) and not model_provider_enabled(model, disabled))
+        ):
             value.pop(model_field, None)
             value.pop(effort_field, None)
         elif isinstance(model, str):

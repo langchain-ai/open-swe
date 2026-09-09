@@ -10,10 +10,14 @@ from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.options import gate_fable_model, normalize_model_choice
+from agent.dashboard.options import gate_fable_model, gate_model_provider, normalize_model_choice
 from agent.dashboard.profiles import get_profile, get_valid_access_token
 from agent.dashboard.repo_access import repo_config_for_user, require_repo_access_for_user
-from agent.dashboard.team_settings import get_team_fable_enabled
+from agent.dashboard.team_settings import (
+    get_disabled_model_providers,
+    get_team_default_model,
+    get_team_fable_enabled,
+)
 from agent.dashboard.threads.access import agent_version_metadata, resolve_run_email
 from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
@@ -544,6 +548,12 @@ async def _agent_run_config(
     if model and effort:
         model, effort = gate_fable_model(
             model, effort, fable_enabled=await get_team_fable_enabled()
+        )
+        model, effort = gate_model_provider(
+            model,
+            effort,
+            disabled_providers=await get_disabled_model_providers(),
+            fallback=await get_team_default_model("agent"),
         )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort
