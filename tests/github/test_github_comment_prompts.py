@@ -180,8 +180,7 @@ def test_construct_system_prompt_shell_escapes_user_name() -> None:
     assert f"git config user.name {shlex.quote(hostile)}" in sender_context
     assert f"git config user.name {hostile}" not in sender_context
     assert (
-        "Made by [Open SWE](https://openswe.vercel.app)"
-        " · Model: `openai:gpt-5.6-luna` · Reasoning: `xhigh`"
+        "Made by [Open SWE](https://openswe.vercel.app) · openai:gpt-5.6-luna (xhigh)"
     ) in sender_context
 
 

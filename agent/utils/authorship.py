@@ -33,9 +33,9 @@ def build_pr_attribution_footer(
     model = _normalize_text(model_id).replace("`", "")
     effort = _normalize_text(reasoning_effort).replace("`", "")
     if model:
-        footer += f" · Model: `{model}`"
-    if effort:
-        footer += f" · Reasoning: `{effort}`"
+        footer += f" · {model}"
+        if effort:
+            footer += f" ({effort})"
     return footer
 
 
