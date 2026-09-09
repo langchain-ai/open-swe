@@ -318,18 +318,6 @@ Call `request_pr_review` only when the user explicitly asks to review a GitHub p
 **For information-only requests:** First identify any relevant git repositories, then clone them or safely update existing workspace checkouts before inspecting them so your response is grounded in current upstream state. Gather what you need and answer fully through the response path in Source Context. Never leave a question unanswered. Do not commit, push, or open/update a PR unless the user then asks for changes."""
 
 
-CORRIDOR_PROMPT = """---
-
-<corridor>
-
-# Corridor Security Analysis
-Use the `analyzePlan` tool from Corridor's MCP server before substantial code changes that touch security-sensitive areas, such as authentication, authorization, secrets, untrusted input, data access, or externally exposed APIs.
-
-Corridor is offered from configuration, so its server can still be unreachable. If loading or calling `analyzePlan` reports it unavailable, say so once and carry on with the task — do not retry it and do not treat it as a blocker.
-
-</corridor>"""
-
-
 DEPENDENCY_SECTION = """---
 
 ### Dependencies
@@ -561,7 +549,6 @@ SYSTEM_PROMPT_TEMPLATE = (
     + "{repository_scope_section}"
     + REPO_SETUP_SECTION
     + TASK_EXECUTION_SECTION
-    + "{corridor_prompt_section}"
     + DEPENDENCY_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + "{commit_pr_section}"
@@ -581,7 +568,6 @@ def construct_system_prompt(
     plan_mode: bool = False,
     plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
-    corridor_enabled: bool = False,
     environment_name: str | None = None,
     environment_instructions: str | None = None,
     admin_environments: bool = False,
@@ -616,7 +602,6 @@ def construct_system_prompt(
         repository_scope_section=(
             _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
         ),
-        corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
         commit_pr_section=COMMIT_PR_SECTION + (DESKTOP_PR_SECTION if source == "desktop" else ""),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),

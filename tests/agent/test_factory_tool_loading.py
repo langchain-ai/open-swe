@@ -1,9 +1,4 @@
-"""The graph factory's remaining tool loaders must overlap, not run back-to-back.
-
-Each is a cold-cache network round trip (an MCP handshake, credential store
-reads) sitting on the critical path before the run's first model call. Corridor
-no longer appears here: its catalog is static, so it loads on demand instead.
-"""
+"""The graph factory tool loaders must overlap, not run back-to-back."""
 
 import asyncio
 from typing import Any
