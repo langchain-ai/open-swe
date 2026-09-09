@@ -25,7 +25,7 @@ def _load_default_prompt() -> str:
     """
     try:
         if DEFAULT_PROMPT_PATH:
-            content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
+            content = Path(DEFAULT_PROMPT_PATH).read_text(encoding="utf-8").strip()
         else:
             content = (
                 resources.files("agent.resources")
@@ -40,9 +40,9 @@ def _load_default_prompt() -> str:
 ### Custom Instructions
 
 {escaped}"""
-    except Exception:
-        logger.warning(
-            "Failed to read default prompt from %s",
+    except (OSError, UnicodeDecodeError):
+        logger.exception(
+            "Failed to read default prompt from %s; continuing without custom instructions",
             DEFAULT_PROMPT_PATH or "agent.resources/default_prompt.md",
         )
     return ""
