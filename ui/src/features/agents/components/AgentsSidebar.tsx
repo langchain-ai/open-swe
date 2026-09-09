@@ -62,7 +62,6 @@ import type {
   ChatSort,
   OrganizeMode,
   PinnedSort,
-  RecentsPlacement,
 } from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
@@ -129,7 +128,7 @@ const NAV = [
 
 /** Threads shown per project before the group needs a "Show more". */
 const PROJECT_PREVIEW_COUNT = 5
-const PROMOTED_RECENTS_COUNT = 5
+const NO_PROJECT_GROUP_KEY = "project:no-project"
 
 function cloudProjectAliases(
   projects: ReadonlyArray<SidebarProject>
@@ -533,20 +532,6 @@ export function AgentsSidebar({
           <MenuRadioItem value="updated">Last updated</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
-      {projectMode && (
-        <MenuGroup>
-          <MenuGroupLabel>Unprojected chats</MenuGroupLabel>
-          <MenuRadioGroup
-            value={prefs.recentsPlacement}
-            onValueChange={(value) =>
-              setView({ recentsPlacement: value as RecentsPlacement })
-            }
-          >
-            <MenuRadioItem value="below-projects">Below projects</MenuRadioItem>
-            <MenuRadioItem value="above-projects">Above projects</MenuRadioItem>
-          </MenuRadioGroup>
-        </MenuGroup>
-      )}
       <MenuSeparator />
       <MenuGroup>
         <MenuCheckboxItem
@@ -572,51 +557,14 @@ export function AgentsSidebar({
     </>
   )
 
-  const promotedRecents =
-    projectMode && prefs.recentsPlacement === "above-projects"
-      ? recents.slice(0, PROMOTED_RECENTS_COUNT)
-      : recents
-  const canLoadMoreRecents =
-    prefs.recentsPlacement !== "above-projects" && recentsQuery.hasMore
-  const recentsSection = (promotedRecents.length > 0 || canLoadMoreRecents) && (
-    <section className="mb-3">
-      <SidebarSectionHeader
-        label="Recents"
-        collapsed={sectionCollapsed("recents")}
-        onToggleCollapsed={() => toggleSectionCollapsed("recents")}
-        menu={
-          <SidebarSectionMenu label="Recents options">
-            {viewMenuItems}
-          </SidebarSectionMenu>
-        }
-        action={
-          <SidebarSectionAction
-            label="New thread"
-            icon={<NotePencilIcon className="size-4" />}
-            onClick={() => {
-              layout.closeOnMobile()
-              void navigate({ to: "/agents" })
-            }}
-          />
-        }
-      />
-      {!sectionCollapsed("recents") && (
-        <>
-          {promotedRecents.map((item) => (
-            <SidebarThreadRow key={item.key} {...rowProps(item)} />
-          ))}
-          {canLoadMoreRecents && (
-            <LoadMoreThreadsOnScroll
-              label="Load more threads"
-              root={scrollViewport}
-              loading={recentsQuery.isFetchingNextPage}
-              onLoadMore={recentsQuery.fetchNextPage}
-            />
-          )}
-        </>
-      )}
-    </section>
-  )
+  const noProjectGroup: HydratedProjectGroup = {
+    key: NO_PROJECT_GROUP_KEY,
+    label: "No project",
+    repoFullName: null,
+    updatedAt: recents[0]?.updatedAt ?? 0,
+    threads: recents,
+  }
+  const noProjectPinned = pinnedProjectKeys.has(NO_PROJECT_GROUP_KEY)
 
   const renderProjectGroup = (group: HydratedProjectGroup) => (
     <ProjectGroup
@@ -644,6 +592,19 @@ export function AgentsSidebar({
         })
       }}
       onTogglePin={() => toggleProjectPin(group.key)}
+      onLoadMore={
+        group.key === NO_PROJECT_GROUP_KEY
+          ? recentsQuery.fetchNextPage
+          : undefined
+      }
+      hasMore={
+        group.key === NO_PROJECT_GROUP_KEY ? recentsQuery.hasMore : undefined
+      }
+      loadingMore={
+        group.key === NO_PROJECT_GROUP_KEY
+          ? recentsQuery.isFetchingNextPage
+          : undefined
+      }
       renderRow={(item, live) => (
         <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
       )}
@@ -790,7 +751,9 @@ export function AgentsSidebar({
               </div>
             )}
 
-            {(filteredPinnedItems.length > 0 || pinnedGroups.length > 0) && (
+            {(filteredPinnedItems.length > 0 ||
+              pinnedGroups.length > 0 ||
+              (projectMode && noProjectPinned && recents.length > 0)) && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Pinned"
@@ -823,44 +786,90 @@ export function AgentsSidebar({
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
                     {pinnedGroups.map(renderProjectGroup)}
+                    {projectMode &&
+                      noProjectPinned &&
+                      recents.length > 0 &&
+                      renderProjectGroup(noProjectGroup)}
                   </>
                 )}
               </section>
             )}
 
             {projectMode &&
-              prefs.recentsPlacement === "above-projects" &&
-              recentsSection}
+              (unpinnedGroups.length > 0 ||
+                recents.length > 0 ||
+                isDesktop) && (
+                <section className="mb-3">
+                  <SidebarSectionHeader
+                    label="Projects"
+                    collapsed={sectionCollapsed("projects")}
+                    onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                    menu={
+                      <SidebarSectionMenu label="Projects options">
+                        {viewMenuItems}
+                        {removeProjectItems}
+                      </SidebarSectionMenu>
+                    }
+                    action={
+                      isDesktop ? (
+                        <SidebarSectionAction
+                          label="Add project"
+                          icon={<PlusIcon className="size-4" />}
+                          onClick={() => void addLocalProject()}
+                        />
+                      ) : undefined
+                    }
+                  />
+                  {!sectionCollapsed("projects") && (
+                    <>
+                      {unpinnedGroups.map(renderProjectGroup)}
+                      {!noProjectPinned &&
+                        recents.length > 0 &&
+                        renderProjectGroup(noProjectGroup)}
+                    </>
+                  )}
+                </section>
+              )}
 
-            {projectMode && (unpinnedGroups.length > 0 || isDesktop) && (
+            {!projectMode && (
               <section className="mb-3">
                 <SidebarSectionHeader
-                  label="Projects"
-                  collapsed={sectionCollapsed("projects")}
-                  onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                  label="Recents"
+                  collapsed={sectionCollapsed("recents")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("recents")}
                   menu={
-                    <SidebarSectionMenu label="Projects options">
+                    <SidebarSectionMenu label="Recents options">
                       {viewMenuItems}
-                      {removeProjectItems}
                     </SidebarSectionMenu>
                   }
                   action={
-                    isDesktop ? (
-                      <SidebarSectionAction
-                        label="Add project"
-                        icon={<PlusIcon className="size-4" />}
-                        onClick={() => void addLocalProject()}
-                      />
-                    ) : undefined
+                    <SidebarSectionAction
+                      label="New thread"
+                      icon={<NotePencilIcon className="size-4" />}
+                      onClick={() => {
+                        layout.closeOnMobile()
+                        void navigate({ to: "/agents" })
+                      }}
+                    />
                   }
                 />
-                {!sectionCollapsed("projects") &&
-                  unpinnedGroups.map(renderProjectGroup)}
+                {!sectionCollapsed("recents") && (
+                  <>
+                    {recents.map((item) => (
+                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                    ))}
+                    {recentsQuery.hasMore && (
+                      <LoadMoreThreadsOnScroll
+                        label="Load more threads"
+                        root={scrollViewport}
+                        loading={recentsQuery.isFetchingNextPage}
+                        onLoadMore={recentsQuery.fetchNextPage}
+                      />
+                    )}
+                  </>
+                )}
               </section>
             )}
-
-            {(!projectMode || prefs.recentsPlacement === "below-projects") &&
-              recentsSection}
             {isEmpty && !cloudError && !localThreads.isError && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
                 {hasActiveFilters(prefs.filters)
@@ -931,6 +940,9 @@ function ProjectGroup({
   onExpand,
   onCompose,
   onTogglePin,
+  onLoadMore,
+  hasMore: externalHasMore,
+  loadingMore = false,
   renderRow,
 }: {
   group: HydratedProjectGroup
@@ -948,6 +960,9 @@ function ProjectGroup({
   onExpand: () => void
   onCompose: () => void
   onTogglePin: () => void
+  onLoadMore?: () => void
+  hasMore?: boolean
+  loadingMore?: boolean
   renderRow: (
     item: SidebarThreadItem,
     live: PullRequestSnapshot | undefined
@@ -983,10 +998,12 @@ function ProjectGroup({
       : preview
   const loading =
     project.isFetchingNextPage ||
+    loadingMore ||
     (Boolean(group.repoFullName) && !collapsed && project.isPending)
   const hasMore = expanded
-    ? project.hasMore
-    : threads.length > PROJECT_PREVIEW_COUNT || project.hasMore
+    ? (externalHasMore ?? project.hasMore)
+    : threads.length > PROJECT_PREVIEW_COUNT ||
+      (externalHasMore ?? project.hasMore)
 
   return (
     <div className="mb-1">
@@ -1051,6 +1068,7 @@ function ProjectGroup({
               type="button"
               onClick={() => {
                 if (!expanded) onExpand()
+                else if (onLoadMore) onLoadMore()
                 else project.fetchNextPage()
               }}
               disabled={loading}

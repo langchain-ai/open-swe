@@ -3,47 +3,38 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import {
-  DEFAULT_SIDEBAR_PREFS,
-  SIDEBAR_PREFS_STORAGE_KEY,
-  useSidebarPrefs,
-} from "./sidebarPrefs"
+import { SIDEBAR_PREFS_STORAGE_KEY, useSidebarPrefs } from "./sidebarPrefs"
+
+const NO_PROJECT_GROUP_KEY = "project:no-project"
 
 beforeEach(() => window.localStorage.clear())
 afterEach(() => cleanup())
 
-function PreferenceControl() {
-  const { prefs, setView } = useSidebarPrefs()
+function ProjectPinControl() {
+  const { prefs, toggleProjectPin } = useSidebarPrefs()
+  const pinned = prefs.pinnedProjectKeys.includes(NO_PROJECT_GROUP_KEY)
   return (
     <button
       type="button"
-      onClick={() => setView({ recentsPlacement: "above-projects" })}
+      onClick={() => toggleProjectPin(NO_PROJECT_GROUP_KEY)}
     >
-      {prefs.recentsPlacement}
+      {pinned ? "Unpin No project" : "Pin No project"}
     </button>
   )
 }
 
-describe("sidebar recents placement preference", () => {
-  it("defaults to the existing below-projects layout", () => {
-    render(<PreferenceControl />)
+describe("sidebar project pins", () => {
+  it("persists a project pin client-side", () => {
+    render(<ProjectPinControl />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin No project" }))
 
     expect(
-      screen.getByRole("button", {
-        name: DEFAULT_SIDEBAR_PREFS.recentsPlacement,
-      })
+      screen.getByRole("button", { name: "Unpin No project" })
     ).toBeTruthy()
-  })
-
-  it("persists the above-projects layout client-side", () => {
-    render(<PreferenceControl />)
-
-    fireEvent.click(screen.getByRole("button", { name: "below-projects" }))
-
-    expect(screen.getByRole("button", { name: "above-projects" })).toBeTruthy()
     expect(
       JSON.parse(window.localStorage.getItem(SIDEBAR_PREFS_STORAGE_KEY) ?? "{}")
-        .recentsPlacement
-    ).toBe("above-projects")
+        .pinnedProjectKeys
+    ).toContain(NO_PROJECT_GROUP_KEY)
   })
 })

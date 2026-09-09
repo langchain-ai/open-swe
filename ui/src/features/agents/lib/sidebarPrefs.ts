@@ -9,12 +9,10 @@ const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 const ORGANIZE_MODES = ["project", "list"] as const
 const CHAT_SORTS = ["updated"] as const
 const PINNED_SORTS = ["updated", "manual"] as const
-const RECENTS_PLACEMENTS = ["below-projects", "above-projects"] as const
 
 export type OrganizeMode = (typeof ORGANIZE_MODES)[number]
 export type ChatSort = (typeof CHAT_SORTS)[number]
 export type PinnedSort = (typeof PINNED_SORTS)[number]
-export type RecentsPlacement = (typeof RECENTS_PLACEMENTS)[number]
 
 export interface SidebarPrefs {
   compact: boolean
@@ -33,7 +31,6 @@ export interface SidebarPrefs {
   organize: OrganizeMode
   sortChats: ChatSort
   sortPinned: PinnedSort
-  recentsPlacement: RecentsPlacement
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
@@ -47,7 +44,6 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   organize: "project",
   sortChats: "updated",
   sortPinned: "manual",
-  recentsPlacement: "below-projects",
 }
 
 function asStringArray(value: unknown): Array<string> {
@@ -112,11 +108,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
       raw.sortPinned,
       PINNED_SORTS,
       DEFAULT_SIDEBAR_PREFS.sortPinned
-    ),
-    recentsPlacement: asEnum(
-      raw.recentsPlacement,
-      RECENTS_PLACEMENTS,
-      DEFAULT_SIDEBAR_PREFS.recentsPlacement
     ),
   }
 }
@@ -231,10 +222,7 @@ export function useSidebarPrefs() {
   const setView = useCallback(
     (
       patch: Partial<
-        Pick<
-          SidebarPrefs,
-          "organize" | "sortChats" | "sortPinned" | "recentsPlacement"
-        >
+        Pick<SidebarPrefs, "organize" | "sortChats" | "sortPinned">
       >
     ) => setPrefs((prev) => ({ ...prev, ...patch })),
     []
