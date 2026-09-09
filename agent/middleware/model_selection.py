@@ -9,31 +9,13 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.prompts import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
 
-_CLASSIFIER_PROMPT = """Choose one fixed model profile for this Open SWE turn. Use the least expensive profile likely to complete the whole turn safely.
-
-Profiles, from least to most capable and expensive:
-
-1. fast
-- Use for direct lookup, extraction, status checks, test or log collection, mechanical PR or release operations, and localized changes with explicit targets and strong verification.
-
-2. balanced
-- Use for ordinary bug fixes, bounded investigations, multi-file implementation, research synthesis, semantic PR maintenance, and partially specified localized work.
-
-3. performance
-- Use for architecture or design, requirements disambiguation, subtle semantic review, novel root-cause reasoning, conflicting evidence, cross-component or multi-repository judgment, and high-stakes decisions.
-
-Explicit targets, clear acceptance criteria, reversibility, and strong tests lower the required capability. Ambiguous requirements, weak verification, architectural tradeoffs, broad scope, consequential security or data work, and conflicting assumptions raise it. Prompt length and eventual runtime are not difficulty signals.
-
-Return one model_route for the whole turn.
-
-Current turn:
-{task}
-"""
+_CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 
 
 class RouteDecision(BaseModel):
@@ -77,7 +59,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             )
             try:
                 decision = await self._classifier.ainvoke(
-                    _CLASSIFIER_PROMPT.format(task=task[-8_000:])
+                    render_prompt("model-selection.md", task=task[-8_000:])
                 )
                 if isinstance(decision, RouteDecision):
                     route = decision.model_route

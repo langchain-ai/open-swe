@@ -19,13 +19,6 @@ _TOOL_MODULES = {
     "get_thread": ".threads",
     "http_request": ".http_request",
     "linear_comment": "agent.linear.tools.comment",
-    "linear_create_issue": "agent.linear.tools.create_issue",
-    "linear_delete_issue": "agent.linear.tools.delete_issue",
-    "linear_get_issue": "agent.linear.tools.get_issue",
-    "linear_get_issue_comments": "agent.linear.tools.get_issue_comments",
-    "linear_list_teams": "agent.linear.tools.list_teams",
-    "linear_search_issues": "agent.linear.tools.search_issues",
-    "linear_update_issue": "agent.linear.tools.update_issue",
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
@@ -84,13 +77,6 @@ __all__ = [
     "get_thread",
     "http_request",
     "linear_comment",
-    "linear_create_issue",
-    "linear_delete_issue",
-    "linear_get_issue",
-    "linear_get_issue_comments",
-    "linear_list_teams",
-    "linear_search_issues",
-    "linear_update_issue",
     "list_automations",
     "list_environments",
     "list_findings",
@@ -136,13 +122,6 @@ if TYPE_CHECKING:
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
     from agent.linear.tools.comment import linear_comment
-    from agent.linear.tools.create_issue import linear_create_issue
-    from agent.linear.tools.delete_issue import linear_delete_issue
-    from agent.linear.tools.get_issue import linear_get_issue
-    from agent.linear.tools.get_issue_comments import linear_get_issue_comments
-    from agent.linear.tools.list_teams import linear_list_teams
-    from agent.linear.tools.search_issues import linear_search_issues
-    from agent.linear.tools.update_issue import linear_update_issue
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
