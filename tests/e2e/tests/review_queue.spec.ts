@@ -96,6 +96,55 @@ test.describe("review queue", () => {
       .click();
     await expect(page.getByTestId("review-queue-empty")).toBeVisible();
   });
+
+  test("narrows a repository to the paths configured on its chip", async ({
+    page,
+  }) => {
+    await page.request.post("/control/reset");
+    await loginAs(page, SAME_USER);
+
+    const uiPull = await seedPull(page, {
+      owner: "fakeorg",
+      repo: "demo",
+      title: "Ready: restyle the button",
+      check_conclusion: "success",
+      mergeable: true,
+      file_paths: ["ui/src/a.tsx"],
+    });
+    const agentPull = await seedPull(page, {
+      owner: "fakeorg",
+      repo: "demo",
+      title: "Ready: rename a node",
+      check_conclusion: "success",
+      mergeable: true,
+      file_paths: ["agent/x.py"],
+    });
+
+    await page.goto("/agents/reviews");
+    await page.getByTestId("review-queue-tab").click();
+    await addRepo(page, "fakeorg/demo");
+
+    const uiRow = page.getByTestId(`review-queue-row-fakeorg/demo-${uiPull}`);
+    const agentRow = page.getByTestId(
+      `review-queue-row-fakeorg/demo-${agentPull}`,
+    );
+    await expect(uiRow).toBeVisible();
+    await expect(agentRow).toBeVisible();
+
+    await setPaths(page, "fakeorg/demo", "ui/");
+    await expect(
+      page.getByTestId("review-queue-chip-fakeorg/demo"),
+    ).toContainText(/ui\/?/);
+    await expect(uiRow).toBeVisible();
+    await expect(agentRow).toHaveCount(0);
+    await expect(uiRow.getByTestId("review-queue-matched-path")).toHaveText(
+      /^ui\/?$/,
+    );
+
+    await setPaths(page, "fakeorg/demo", "");
+    await expect(uiRow).toBeVisible();
+    await expect(agentRow).toBeVisible();
+  });
 });
 
 // The picker is a popover whose panel overlays the chips and rows, so close it
@@ -106,5 +155,15 @@ async function addRepo(page: Page, nameWithOwner: string) {
   await input.fill(nameWithOwner);
   await input.press("Enter");
   await page.keyboard.press("Escape");
+  await expect(input).toBeHidden();
+}
+
+// The chip body opens the path editor: one path per line, empty clears the filter.
+async function setPaths(page: Page, nameWithOwner: string, paths: string) {
+  await page.getByTestId(`review-queue-chip-${nameWithOwner}`).click();
+  const input = page.getByTestId("review-queue-paths-input");
+  await expect(input).toBeVisible();
+  await input.fill(paths);
+  await page.getByTestId("review-queue-paths-save").click();
   await expect(input).toBeHidden();
 }

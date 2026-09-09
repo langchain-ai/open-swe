@@ -5,7 +5,9 @@ user's data is one prefix search away while each feature still writes its own
 record and cannot clobber another's.
 """
 
-from pydantic import BaseModel, Field
+from typing import Annotated, Any
+
+from pydantic import BaseModel, BeforeValidator, Field
 
 from agent.store import delete_value, get_value, now_iso, put_value
 
@@ -33,10 +35,26 @@ class UserDocument[RecordT: BaseModel]:
         await delete_value(self.namespace(login), self.key)
 
 
+class ReviewQueueRepo(BaseModel):
+    """A followed repo, optionally narrowed to pull requests touching ``paths``."""
+
+    full_name: str
+    paths: list[str] = Field(default_factory=list)
+
+
+def _as_repos(value: Any) -> Any:
+    if not isinstance(value, list):
+        return value
+    return [{"full_name": entry} if isinstance(entry, str) else entry for entry in value]
+
+
+ReviewQueueRepoList = Annotated[list[ReviewQueueRepo], BeforeValidator(_as_repos)]
+
+
 class ReviewQueueRepos(BaseModel):
     """Repos whose ready-to-review pull requests the user wants listed."""
 
-    repos: list[str] = Field(default_factory=list)
+    repos: ReviewQueueRepoList = Field(default_factory=list)
     updated_at: str = Field(default_factory=now_iso)
 
 

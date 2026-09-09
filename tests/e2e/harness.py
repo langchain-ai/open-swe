@@ -169,6 +169,11 @@ async def control_seed_pull(request: Request) -> JSONResponse:
     check_conclusion = body.get("check_conclusion")
     if check_conclusion is not None and not isinstance(check_conclusion, str):
         raise HTTPException(400, "check_conclusion must be a string or null")
+    file_paths = body.get("file_paths")
+    if file_paths is not None and (
+        not isinstance(file_paths, list) or not all(isinstance(path, str) for path in file_paths)
+    ):
+        raise HTTPException(400, "file_paths must be a list of strings")
     pull = fakes.seed_pull(
         owner,
         repo,
@@ -179,6 +184,7 @@ async def control_seed_pull(request: Request) -> JSONResponse:
         additions=int(body.get("additions", 0)),
         deletions=int(body.get("deletions", 0)),
         files=int(body.get("files", 0)),
+        file_paths=file_paths,
         author=str(body.get("author") or "octocat"),
     )
     return JSONResponse(
@@ -730,6 +736,10 @@ def _search_node(pr: dict[str, Any]) -> dict[str, Any]:
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changedFiles": len(pr["files"]),
+        "files": {
+            "totalCount": len(pr["files"]),
+            "nodes": [{"path": file["filename"]} for file in pr["files"]],
+        },
         "author": {"login": pr["author"]},
         "repository": {"nameWithOwner": f"{pr['owner']}/{pr['repo']}"},
         "commits": {"nodes": [{"commit": {"statusCheckRollup": _status_check_rollup(pr)}}]},

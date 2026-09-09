@@ -549,15 +549,22 @@ export interface ReviewQueueItem {
   review_decision: ReviewQueueDecision | null
   updated_at: string
   ai_review: ReviewQueueAiReview | null
+  matched_paths: Array<string>
+  files_truncated: boolean
+}
+
+export interface ReviewQueueRepo {
+  full_name: string
+  paths: Array<string>
 }
 
 export interface ReviewQueueReposPayload {
-  repos: Array<string>
+  repos: Array<ReviewQueueRepo>
   updated_at: string
 }
 
 export interface ReviewQueuePayload {
-  repos: Array<string>
+  repos: Array<ReviewQueueRepo>
   items: Array<ReviewQueueItem>
   fetched_at: string
 }
@@ -909,7 +916,7 @@ export const api = {
     ),
   getReviewQueueRepos: () =>
     request<ReviewQueueReposPayload>("/review-queue/repos"),
-  setReviewQueueRepos: (repos: Array<string>) =>
+  setReviewQueueRepos: (repos: Array<ReviewQueueRepo>) =>
     request<ReviewQueueReposPayload>("/review-queue/repos", {
       method: "PUT",
       body: JSON.stringify({ repos }),

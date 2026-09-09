@@ -270,6 +270,7 @@ def seed_pull(
     additions: int = 0,
     deletions: int = 0,
     files: int = 0,
+    file_paths: list[str] | None = None,
     author: str = "octocat",
 ) -> dict[str, Any]:
     """Put a pull request in the store directly, with no agent run behind it."""
@@ -283,14 +284,19 @@ def seed_pull(
         body="",
         draft=draft,
     )
-    pull["files"] = [
-        {
-            "filename": f"file{index}.py",
-            "additions": additions if index == 0 else 0,
-            "deletions": deletions if index == 0 else 0,
-        }
-        for index in range(max(files, 0))
-    ]
+    if file_paths:
+        pull["files"] = [{"filename": path, "additions": 2, "deletions": 1} for path in file_paths]
+        additions = additions or 2 * len(file_paths)
+        deletions = deletions or len(file_paths)
+    else:
+        pull["files"] = [
+            {
+                "filename": f"file{index}.py",
+                "additions": additions if index == 0 else 0,
+                "deletions": deletions if index == 0 else 0,
+            }
+            for index in range(max(files, 0))
+        ]
     pull["additions"] = additions
     pull["deletions"] = deletions
     pull["mergeable"] = mergeable

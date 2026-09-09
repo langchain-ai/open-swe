@@ -11,12 +11,17 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 
-import type { ReviewQueueItem, ReviewQueueReposPayload } from "@/lib/api"
+import type {
+  ReviewQueueItem,
+  ReviewQueueRepo,
+  ReviewQueueReposPayload,
+} from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -84,9 +89,9 @@ function ReviewQueueRepoPicker({
   saving,
   onChange,
 }: {
-  repos: Array<string>
+  repos: Array<ReviewQueueRepo>
   saving: boolean
-  onChange: (next: Array<string>) => void
+  onChange: (next: Array<ReviewQueueRepo>) => void
 }) {
   const [text, setText] = useState("")
   const installed = useRepos()
@@ -101,14 +106,14 @@ function ReviewQueueRepoPicker({
   }, [installed.data?.repositories, query])
 
   const typed = text.trim()
-  const selected = new Set(repos)
+  const selected = new Set(repos.map((r) => r.full_name))
   const canAddTyped = FULL_NAME_RE.test(typed) && !selected.has(typed)
 
   const toggle = (full_name: string) => {
     onChange(
       selected.has(full_name)
-        ? repos.filter((r) => r !== full_name)
-        : [...repos, full_name]
+        ? repos.filter((r) => r.full_name !== full_name)
+        : [...repos, { full_name, paths: [] }]
     )
   }
 
@@ -181,6 +186,110 @@ function ReviewQueueRepoPicker({
   )
 }
 
+function chipLabel(repo: ReviewQueueRepo) {
+  if (repo.paths.length === 0) return repo.full_name
+  const summary =
+    repo.paths.length <= 2
+      ? repo.paths.join(", ")
+      : `${repo.paths.length} paths`
+  return `${repo.full_name} · ${summary}`
+}
+
+function ReviewQueueRepoChip({
+  repo,
+  repos,
+  saving,
+}: {
+  repo: ReviewQueueRepo
+  repos: Array<ReviewQueueRepo>
+  saving: boolean
+}) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState("")
+
+  const savePaths = useMutation({
+    mutationFn: (paths: Array<string>) =>
+      api.setReviewQueueRepos(
+        repos.map((r) => (r.full_name === repo.full_name ? { ...r, paths } : r))
+      ),
+    onSuccess: (payload: ReviewQueueReposPayload) => {
+      qc.setQueryData(REPOS_QUERY_KEY, payload)
+      void qc.invalidateQueries({ queryKey: QUEUE_QUERY_KEY })
+      setOpen(false)
+    },
+  })
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) {
+          setText(repo.paths.join("\n"))
+          savePaths.reset()
+        }
+      }}
+    >
+      <PopoverTrigger
+        className="max-w-72 truncate text-xs text-foreground"
+        data-testid={`review-queue-chip-${repo.full_name}`}
+        disabled={saving}
+        title={repo.paths.join("\n") || undefined}
+      >
+        {chipLabel(repo)}
+      </PopoverTrigger>
+      <PopoverPopup align="start" className="w-72 max-w-none" side="bottom">
+        <p className="text-xs font-medium text-foreground">
+          Only PRs touching these paths
+        </p>
+        <Textarea
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={"ui/\nagent/dashboard/"}
+          aria-label={`Paths for ${repo.full_name}`}
+          data-testid="review-queue-paths-input"
+          disabled={savePaths.isPending}
+          className="mt-2 font-mono"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          One path prefix per line. Leave empty to include every PR.
+        </p>
+        {savePaths.error && (
+          <p className="mt-1 text-xs text-destructive">
+            {savePaths.error.message}
+          </p>
+        )}
+        <div className="mt-2 flex items-center justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setOpen(false)}
+            disabled={savePaths.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            data-testid="review-queue-paths-save"
+            disabled={savePaths.isPending}
+            onClick={() =>
+              savePaths.mutate(
+                text
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter(Boolean)
+              )
+            }
+          >
+            Save
+          </Button>
+        </div>
+      </PopoverPopup>
+    </Popover>
+  )
+}
+
 export function ReviewQueue() {
   const session = useSession()
   const qc = useQueryClient()
@@ -193,7 +302,7 @@ export function ReviewQueue() {
   const repos = reposQuery.data?.repos ?? []
 
   const save = useMutation({
-    mutationFn: (next: Array<string>) => api.setReviewQueueRepos(next),
+    mutationFn: (next: Array<ReviewQueueRepo>) => api.setReviewQueueRepos(next),
     onSuccess: (payload: ReviewQueueReposPayload) => {
       qc.setQueryData(REPOS_QUERY_KEY, payload)
       void qc.invalidateQueries({ queryKey: QUEUE_QUERY_KEY })
@@ -217,18 +326,23 @@ export function ReviewQueue() {
           saving={save.isPending}
           onChange={(next) => save.mutate(next)}
         />
-        {repos.map((full_name) => (
+        {repos.map((repo) => (
           <span
-            key={full_name}
-            data-testid={`review-queue-chip-${full_name}`}
+            key={repo.full_name}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-card py-0.5 pr-1 pl-2 text-xs text-foreground"
           >
-            {full_name}
+            <ReviewQueueRepoChip
+              repo={repo}
+              repos={repos}
+              saving={save.isPending}
+            />
             <button
               type="button"
-              aria-label={`Remove ${full_name}`}
+              aria-label={`Remove ${repo.full_name}`}
               disabled={save.isPending}
-              onClick={() => save.mutate(repos.filter((r) => r !== full_name))}
+              onClick={() =>
+                save.mutate(repos.filter((r) => r.full_name !== repo.full_name))
+              }
               className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground disabled:opacity-50"
             >
               <XIcon className="size-3" />
@@ -322,6 +436,23 @@ export function ReviewQueue() {
                       {item.changed_files}{" "}
                       {item.changed_files === 1 ? "file" : "files"}
                     </span>
+                    {item.matched_paths.map((path) => (
+                      <span
+                        key={path}
+                        data-testid="review-queue-matched-path"
+                        className="rounded bg-muted px-1 font-mono text-[11px]"
+                      >
+                        {path}
+                      </span>
+                    ))}
+                    {item.files_truncated && (
+                      <span
+                        title="Too many files to confirm the path match"
+                        className="rounded bg-muted px-1 font-mono text-[11px] text-muted-foreground"
+                      >
+                        100+ files
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

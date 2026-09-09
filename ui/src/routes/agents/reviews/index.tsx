@@ -19,7 +19,18 @@ import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
+type ReviewsTab = "mine" | "all" | "queue"
+
+const TAB_VALUES: ReadonlyArray<ReviewsTab> = ["queue", "mine", "all"]
+
 export const Route = createFileRoute("/agents/reviews/")({
+  validateSearch: (search: Record<string, unknown>): { tab?: ReviewsTab } => ({
+    tab:
+      typeof search.tab === "string" &&
+      TAB_VALUES.includes(search.tab as ReviewsTab)
+        ? (search.tab as ReviewsTab)
+        : undefined,
+  }),
   component: ReviewsPage,
 })
 
@@ -38,8 +49,6 @@ function statusBadge(review: ReviewSummary) {
   return null
 }
 
-type ReviewsTab = "mine" | "all" | "queue"
-
 const TABS: Array<{ value: ReviewsTab; label: string; testId?: string }> = [
   { value: "queue", label: "Ready for Review", testId: "review-queue-tab" },
   { value: "mine", label: "My PRs" },
@@ -49,7 +58,9 @@ const TABS: Array<{ value: ReviewsTab; label: string; testId?: string }> = [
 function ReviewsPage() {
   const session = useSession()
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<ReviewsTab>("queue")
+  const { tab: tabParam } = Route.useSearch()
+  const tab = tabParam ?? "queue"
+  const navigate = Route.useNavigate()
   const [page, setPage] = useState(0)
   const mine = tab === "mine"
   const reviews = useQuery({
@@ -92,7 +103,7 @@ function ReviewsPage() {
               type="button"
               data-testid={testId}
               onClick={() => {
-                setTab(value)
+                void navigate({ search: { tab: value } })
                 setPage(0)
               }}
               onPointerEnter={() => {

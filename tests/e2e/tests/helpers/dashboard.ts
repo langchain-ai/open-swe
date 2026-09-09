@@ -86,6 +86,7 @@ export type SeedPullValues = {
   additions?: number;
   deletions?: number;
   files?: number;
+  file_paths?: string[];
   author?: string;
 };
 

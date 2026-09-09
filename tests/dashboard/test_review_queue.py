@@ -9,7 +9,12 @@ from agent.dashboard.review_queue import (
     get_review_queue_repos,
     set_review_queue_repos,
 )
+from agent.dashboard.user_data import REVIEW_QUEUE_REPOS, ReviewQueueRepo
 from tests.conftest import FakeStore
+
+
+def _repos(*names: str) -> list[ReviewQueueRepo]:
+    return [ReviewQueueRepo(full_name=name) for name in names]
 
 
 def _pull(
@@ -22,7 +27,10 @@ def _pull(
     is_draft: bool = False,
     review_decision: str | None = None,
     author: str | None = "someone",
+    file_paths: list[str] | None = None,
+    total_files: int | None = None,
 ) -> dict[str, Any]:
+    paths = file_paths if file_paths is not None else [f"file{number}.py"]
     return {
         "number": number,
         "title": f"{repo}#{number}",
@@ -35,6 +43,10 @@ def _pull(
         "deletions": number,
         "changedFiles": number + 1,
         "author": {"login": author} if author else None,
+        "files": {
+            "totalCount": total_files if total_files is not None else len(paths),
+            "nodes": [{"path": path} for path in paths],
+        },
         "repository": {"nameWithOwner": repo},
         "commits": {
             "nodes": [{"commit": {"statusCheckRollup": {"state": rollup} if has_rollup else None}}]
@@ -92,7 +104,7 @@ async def _token(_login: str) -> str:
 async def test_keeps_only_ready_pulls_and_maps_fields(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    await set_review_queue_repos("octocat", ["acme/alpha", "acme/beta"])
+    await set_review_queue_repos("octocat", _repos("acme/alpha", "acme/beta"))
     calls: list[dict[str, Any]] = []
     _patch_github(
         monkeypatch,
@@ -126,6 +138,7 @@ async def test_keeps_only_ready_pulls_and_maps_fields(
     assert (first.additions, first.deletions, first.changed_files) == (10, 1, 2)
     assert first.review_decision == "REVIEW_REQUIRED"
     assert first.ai_review is None
+    assert (first.matched_paths, first.files_truncated) == ([], False)
     # A PR with no checks configured still counts as ready, and a missing author is null.
     assert second.author is None
 
@@ -133,13 +146,13 @@ async def test_keeps_only_ready_pulls_and_maps_fields(
     assert "repo:acme/alpha" in search
     assert "repo:acme/beta" in search
     assert "-author:@me" in search
-    assert payload.repos == ["acme/alpha", "acme/beta"]
+    assert [repo.full_name for repo in payload.repos] == ["acme/alpha", "acme/beta"]
 
 
 async def test_ai_review_summary_is_attached(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    await set_review_queue_repos("octocat", ["acme/alpha"])
+    await set_review_queue_repos("octocat", _repos("acme/alpha"))
     _patch_github(
         monkeypatch,
         {"data": {"search": {"nodes": [_pull("acme/alpha", 1)]}}},
@@ -174,7 +187,7 @@ async def test_empty_repo_list_skips_github(
 async def test_github_errors_surface_as_bad_gateway(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    await set_review_queue_repos("octocat", ["acme/alpha"])
+    await set_review_queue_repos("octocat", _repos("acme/alpha"))
     _patch_github(monkeypatch, {"errors": [{"message": "nope"}]}, [])
 
     with pytest.raises(HTTPException) as exc:
@@ -188,34 +201,110 @@ async def test_repos_are_normalized_deduped_and_sorted(fake_store: FakeStore) ->
     record = await set_review_queue_repos(
         "octocat",
         [
-            "https://github.com/acme/zeta.git",
-            " acme/Alpha ",
-            "acme/alpha",
-            "github.com/acme/beta/",
+            ReviewQueueRepo(full_name="https://github.com/acme/zeta.git"),
+            ReviewQueueRepo(full_name=" acme/Alpha ", paths=["ui/"]),
+            ReviewQueueRepo(full_name="acme/alpha", paths=["agent/"]),
+            ReviewQueueRepo(full_name="github.com/acme/beta/"),
         ],
     )
 
-    assert record.repos == ["acme/Alpha", "acme/beta", "acme/zeta"]
+    assert [(repo.full_name, repo.paths) for repo in record.repos] == [
+        ("acme/Alpha", ["ui"]),
+        ("acme/beta", []),
+        ("acme/zeta", []),
+    ]
     assert (await get_review_queue_repos("octocat")).repos == record.repos
+
+
+async def test_paths_are_normalized_deduped_and_rejected(fake_store: FakeStore) -> None:
+    record = await set_review_queue_repos(
+        "octocat",
+        [
+            ReviewQueueRepo(
+                full_name="acme/alpha",
+                paths=["  ./ui/src/  ", "/agent/x.py", "ui/src", "", "   ", "/"],
+            )
+        ],
+    )
+    assert record.repos[0].paths == ["ui/src", "agent/x.py"]
+
+    for bad in [["../secrets"], ["ui/../../etc"], ["x" * 201], [f"p{i}" for i in range(21)]]:
+        with pytest.raises(HTTPException) as exc:
+            await set_review_queue_repos(
+                "octocat", [ReviewQueueRepo(full_name="acme/beta", paths=bad)]
+            )
+        assert exc.value.status_code == 400
+
+
+async def test_legacy_string_records_are_upgraded_on_read(fake_store: FakeStore) -> None:
+    fake_store.seed(
+        REVIEW_QUEUE_REPOS.namespace("octocat"),
+        REVIEW_QUEUE_REPOS.key,
+        {"repos": ["acme/alpha", "acme/beta"], "updated_at": "2026-01-01T00:00:00Z"},
+    )
+
+    record = await get_review_queue_repos("octocat")
+
+    assert [(repo.full_name, repo.paths) for repo in record.repos] == [
+        ("acme/alpha", []),
+        ("acme/beta", []),
+    ]
 
 
 async def test_invalid_and_oversized_repo_lists_are_rejected(fake_store: FakeStore) -> None:
     for bad in ["not-a-repo", "acme/..", "acme/alpha/extra", ""]:
         with pytest.raises(HTTPException) as exc:
-            await set_review_queue_repos("octocat", [bad])
+            await set_review_queue_repos("octocat", _repos(bad))
         assert exc.value.status_code == 400
 
     with pytest.raises(HTTPException) as exc:
-        await set_review_queue_repos("octocat", [f"acme/repo{i}" for i in range(51)])
+        await set_review_queue_repos("octocat", _repos(*[f"acme/repo{i}" for i in range(51)]))
     assert exc.value.status_code == 400
     assert (await get_review_queue_repos("octocat")).repos == []
+
+
+async def test_path_filter_keeps_only_matching_pulls(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos(
+        "octocat",
+        [
+            ReviewQueueRepo(full_name="acme/alpha", paths=["ui/", "docs/readme.md"]),
+            ReviewQueueRepo(full_name="acme/beta"),
+        ],
+    )
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        _pull("acme/alpha", 1, file_paths=["ui/src/a.tsx", "docs/readme.md"]),
+                        _pull("acme/alpha", 2, file_paths=["agent/x.py"]),
+                        _pull("acme/alpha", 3, file_paths=["uix/a.tsx"]),
+                        _pull("acme/alpha", 4, file_paths=["agent/x.py"], total_files=250),
+                        _pull("acme/beta", 5, file_paths=["agent/x.py"]),
+                    ]
+                }
+            }
+        },
+        [],
+    )
+
+    payload = await get_review_queue("octocat")
+
+    assert [(item.number, item.matched_paths, item.files_truncated) for item in payload.items] == [
+        (1, ["ui", "docs/readme.md"], False),
+        (4, [], True),
+        (5, [], False),
+    ]
 
 
 async def test_github_result_is_cached_per_login(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    await set_review_queue_repos("octocat", ["acme/alpha"])
-    await set_review_queue_repos("hubot", ["acme/alpha"])
+    await set_review_queue_repos("octocat", _repos("acme/alpha"))
+    await set_review_queue_repos("hubot", _repos("acme/alpha"))
     calls: list[dict[str, Any]] = []
     _patch_github(monkeypatch, {"data": {"search": {"nodes": [_pull("acme/alpha", 1)]}}}, calls)
 

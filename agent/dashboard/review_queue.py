@@ -18,7 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.review_api import review_summary_for_pull
-from agent.dashboard.user_data import REVIEW_QUEUE_REPOS, ReviewQueueRepos
+from agent.dashboard.user_data import (
+    REVIEW_QUEUE_REPOS,
+    ReviewQueueRepo,
+    ReviewQueueRepoList,
+    ReviewQueueRepos,
+)
 from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
 from agent.review.styles import normalize_repo_full_name
 from agent.store import now_iso
@@ -28,6 +33,9 @@ logger = logging.getLogger(__name__)
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _MAX_REPOS = 50
+_MAX_PATHS_PER_REPO = 20
+_MAX_PATH_LENGTH = 200
+_FILE_PAGE_SIZE = 100
 _CACHE_TTL_SECONDS = 60.0
 _CACHE_MAX_ENTRIES = 500
 _REVIEW_LOOKUP_CONCURRENCY = 10
@@ -40,6 +48,7 @@ query ReviewQueueSearch($q: String!) {
     nodes { ... on PullRequest {
       number title url isDraft mergeable reviewDecision updatedAt
       additions deletions changedFiles
+      files(first: 100) { totalCount nodes { path } }
       author { login }
       repository { nameWithOwner }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -74,17 +83,19 @@ class ReviewQueueItem(BaseModel):
     changed_files: int = 0
     review_decision: ReviewDecision | None = None
     updated_at: str
+    matched_paths: list[str] = Field(default_factory=list)
+    files_truncated: bool = False
     ai_review: ReviewQueueAiReview | None = None
 
 
 class ReviewQueuePayload(BaseModel):
-    repos: list[str] = Field(default_factory=list)
+    repos: list[ReviewQueueRepo] = Field(default_factory=list)
     items: list[ReviewQueueItem] = Field(default_factory=list)
     fetched_at: str = Field(default_factory=now_iso)
 
 
 class ReviewQueueReposBody(BaseModel):
-    repos: list[str] = Field(default_factory=list)
+    repos: ReviewQueueRepoList = Field(default_factory=list)
 
 
 class _SearchAuthor(BaseModel):
@@ -115,6 +126,17 @@ class _SearchCommits(BaseModel):
     nodes: list[_SearchCommitNode] = Field(default_factory=list)
 
 
+class _SearchFile(BaseModel):
+    path: str = ""
+
+
+class _SearchFiles(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_count: int = Field(default=0, alias="totalCount")
+    nodes: list[_SearchFile] = Field(default_factory=list)
+
+
 class _SearchPullRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -131,6 +153,7 @@ class _SearchPullRequest(BaseModel):
     author: _SearchAuthor | None = None
     repository: _SearchRepository
     commits: _SearchCommits = Field(default_factory=_SearchCommits)
+    files: _SearchFiles = Field(default_factory=_SearchFiles)
 
 
 class _SearchResult(BaseModel):
@@ -146,7 +169,9 @@ class _SearchResponse(BaseModel):
     errors: list[Any] | None = None
 
 
-_cache: dict[tuple[str, tuple[str, ...]], tuple[float, list[ReviewQueueItem]]] = {}
+_CacheKey = tuple[str, tuple[tuple[str, tuple[str, ...]], ...]]
+
+_cache: dict[_CacheKey, tuple[float, list[ReviewQueueItem]]] = {}
 
 
 def _evict_expired(now: float) -> None:
@@ -177,24 +202,47 @@ async def get_review_queue_repos(login: str) -> ReviewQueueRepos:
     return await REVIEW_QUEUE_REPOS.get(login) or ReviewQueueRepos()
 
 
-async def set_review_queue_repos(login: str, repos: list[str]) -> ReviewQueueRepos:
-    """Replace the followed repo list, normalized to ``owner/repo`` and deduped."""
+def _normalize_paths(full_name: str, paths: list[str]) -> list[str]:
     normalized: list[str] = []
+    for raw in paths:
+        path = raw.strip()
+        while path.startswith(("/", "./")):
+            path = path[1:] if path.startswith("/") else path[2:]
+        path = path.rstrip("/")
+        if not path:
+            continue
+        if ".." in path.split("/"):
+            raise HTTPException(400, f"invalid path for {full_name}: {raw}")
+        if len(path) > _MAX_PATH_LENGTH:
+            raise HTTPException(400, f"paths must be at most {_MAX_PATH_LENGTH} characters")
+        if path not in normalized:
+            normalized.append(path)
+    if len(normalized) > _MAX_PATHS_PER_REPO:
+        raise HTTPException(400, f"at most {_MAX_PATHS_PER_REPO} paths per repo")
+    return normalized
+
+
+async def set_review_queue_repos(login: str, repos: list[ReviewQueueRepo]) -> ReviewQueueRepos:
+    """Replace the followed repo list, normalized to ``owner/repo`` plus path filters."""
+    normalized: list[ReviewQueueRepo] = []
     seen: set[str] = set()
-    for raw in repos:
+    for entry in repos:
         try:
-            full_name = normalize_repo_full_name(raw)
+            full_name = normalize_repo_full_name(entry.full_name)
         except ValueError as exc:
-            raise HTTPException(400, f"invalid repo name: {raw}") from exc
+            raise HTTPException(400, f"invalid repo name: {entry.full_name}") from exc
         if not _valid_full_name(full_name):
-            raise HTTPException(400, f"invalid repo name: {raw}")
+            raise HTTPException(400, f"invalid repo name: {entry.full_name}")
         if full_name.lower() in seen:
             continue
         seen.add(full_name.lower())
-        normalized.append(full_name)
+        normalized.append(
+            ReviewQueueRepo(full_name=full_name, paths=_normalize_paths(full_name, entry.paths))
+        )
     if len(normalized) > _MAX_REPOS:
         raise HTTPException(400, f"at most {_MAX_REPOS} repos can be followed")
-    return await REVIEW_QUEUE_REPOS.put(login, ReviewQueueRepos(repos=sorted(normalized)))
+    normalized.sort(key=lambda repo: repo.full_name)
+    return await REVIEW_QUEUE_REPOS.put(login, ReviewQueueRepos(repos=normalized))
 
 
 def _checks_pass(pull: _SearchPullRequest) -> bool:
@@ -212,7 +260,26 @@ def _is_ready(pull: _SearchPullRequest) -> bool:
     return not pull.is_draft and pull.mergeable == "MERGEABLE" and _checks_pass(pull)
 
 
-def _to_item(pull: _SearchPullRequest) -> ReviewQueueItem | None:
+def _path_match(pull: _SearchPullRequest, paths: list[str]) -> tuple[list[str], bool] | None:
+    """The configured prefixes this PR touches, or ``None`` when it touches none."""
+    if not paths:
+        return [], False
+    changed = [node.path for node in pull.files.nodes]
+    matched = [
+        path
+        for path in paths
+        if any(file == path or file.startswith(f"{path}/") for file in changed)
+    ]
+    if matched:
+        return matched, False
+    if pull.files.total_count > _FILE_PAGE_SIZE:
+        return [], True
+    return None
+
+
+def _to_item(
+    pull: _SearchPullRequest, matched_paths: list[str], files_truncated: bool
+) -> ReviewQueueItem | None:
     full_name = pull.repository.name_with_owner
     if not _valid_full_name(full_name):
         return None
@@ -230,11 +297,16 @@ def _to_item(pull: _SearchPullRequest) -> ReviewQueueItem | None:
         changed_files=pull.changed_files,
         review_decision=pull.review_decision,
         updated_at=pull.updated_at,
+        matched_paths=matched_paths,
+        files_truncated=files_truncated,
     )
 
 
-async def _search_ready_items(login: str, repos: list[str], token: str) -> list[ReviewQueueItem]:
-    query = _SEARCH_PREFIX + " ".join(f"repo:{repo}" for repo in repos)
+async def _search_ready_items(
+    login: str, repos: list[ReviewQueueRepo], token: str
+) -> list[ReviewQueueItem]:
+    query = _SEARCH_PREFIX + " ".join(f"repo:{repo.full_name}" for repo in repos)
+    paths_by_repo = {repo.full_name.lower(): repo.paths for repo in repos}
     try:
         async with github_client(token=token) as client:
             response = await github_request(
@@ -267,16 +339,21 @@ async def _search_ready_items(login: str, repos: list[str], token: str) -> list[
             continue
         if not _is_ready(pull):
             continue
-        item = _to_item(pull)
+        match = _path_match(pull, paths_by_repo.get(pull.repository.name_with_owner.lower(), []))
+        if match is None:
+            continue
+        item = _to_item(pull, *match)
         if item is not None:
             items.append(item)
     return items
 
 
-async def _ready_items(login: str, repos: list[str], token: str) -> list[ReviewQueueItem]:
+async def _ready_items(
+    login: str, repos: list[ReviewQueueRepo], token: str
+) -> list[ReviewQueueItem]:
     now = time.monotonic()
     _evict_expired(now)
-    key = (login, tuple(repos))
+    key: _CacheKey = (login, tuple((repo.full_name, tuple(repo.paths)) for repo in repos))
     cached = _cache.get(key)
     if cached and cached[0] > now:
         return cached[1]
