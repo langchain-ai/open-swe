@@ -142,6 +142,70 @@ it.each(["form", "import"])(
   }
 )
 
+it.each([
+  ["Server URL", "https://other.example/mcp"],
+  ["Token URL", "https://other.example/token"],
+  ["Client ID", "other-app"],
+])("requires a replacement secret when %s changes", async (label, value) => {
+  const connection: WorkspaceMCP = {
+    name: "linear",
+    url: "https://mcp.linear.app/mcp",
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: ["search"],
+    header_names: [],
+    oauth: {
+      token_url: "https://api.linear.app/oauth/token",
+      client_id: "test-app",
+    },
+    revision: "v1",
+    updated_at: "now",
+  }
+  const requests: WorkspaceMCPUpdate[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (init?.body) requests.push(JSON.parse(String(init.body)))
+    if (String(input).endsWith("/discover"))
+      return new Response(JSON.stringify([]))
+    return new Response(
+      JSON.stringify(init?.method === "PUT" ? connection : [connection])
+    )
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <WorkspaceMCPSection />
+    </QueryClientProvider>
+  )
+  fireEvent.click(await screen.findByRole("button", { name: "Edit linear" }))
+  const identity = screen.getByLabelText(label) as HTMLInputElement
+  const original = identity.value
+  const secret = screen.getByLabelText("Client secret") as HTMLInputElement
+  expect(secret.checkValidity()).toBe(true)
+  fireEvent.change(identity, { target: { value } })
+  expect(secret.validity.valueMissing).toBe(true)
+  fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and discover tools" })
+  )
+  expect(requests).toEqual([])
+  fireEvent.change(identity, { target: { value: original } })
+  expect(secret.checkValidity()).toBe(true)
+  fireEvent.change(identity, { target: { value } })
+  fireEvent.change(secret, { target: { value: "test-replacement-secret" } })
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and discover tools" })
+  )
+  await waitFor(() => expect(requests).toHaveLength(2))
+  expect(requests.map((request) => request.oauth?.client_secret)).toEqual([
+    "test-replacement-secret",
+    "test-replacement-secret",
+  ])
+  await waitFor(() => expect(secret.value).toBe(""))
+  client.clear()
+})
+
 it("validates the connection name before saving and discovering tools", async () => {
   const fetchMock = vi
     .spyOn(globalThis, "fetch")

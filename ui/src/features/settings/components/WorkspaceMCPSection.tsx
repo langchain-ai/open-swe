@@ -35,6 +35,9 @@ export function WorkspaceMCPSection() {
   const [pendingImports, setPendingImports] = useState<ImportedMCP[]>([])
   const toolsId = useId()
   const editorId = useId()
+  const savedConnection = connections.data?.find(
+    (connection) => connection.name === draft?.name
+  )
   const toolDescriptions = new Map(
     catalog.map((tool) => [tool.name, tool.description])
   )
@@ -42,9 +45,7 @@ export function WorkspaceMCPSection() {
   const toolNames = [
     ...new Set([
       ...toolDescriptions.keys(),
-      ...(connections.data?.find(
-        (connection) => connection.name === draft?.name
-      )?.allowed_tools ?? []),
+      ...(savedConnection?.allowed_tools ?? []),
       ...selectedTools,
     ]),
   ].sort()
@@ -307,9 +308,11 @@ export function WorkspaceMCPSection() {
             value={draft.oauth}
             hasSavedSecret={Boolean(
               draft.existing &&
-              connections.data?.find(
-                (connection) => connection.name === draft.name
-              )?.oauth
+              savedConnection?.oauth &&
+              draft.url.trim() === savedConnection.url &&
+              draft.oauth.token_url.trim() ===
+                savedConnection.oauth.token_url &&
+              draft.oauth.client_id === savedConnection.oauth.client_id
             )}
             onChange={(oauth) => setDraft({ ...draft, oauth })}
           />
