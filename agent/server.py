@@ -978,7 +978,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         routing_defaults = {
             "fast": default_model_pair(),
             "balanced": default_model_pair(),
-            "powerful": default_model_pair(),
+            "performance": default_model_pair(),
         }
         title_defaults = team_defaults[0]
         use_gateway = gateway_env_default()

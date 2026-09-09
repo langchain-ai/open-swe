@@ -9,9 +9,9 @@ from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDeci
 
 
 def _middleware(
-    route: Literal["fast", "balanced", "powerful"] = "fast", *, initial_plan_mode: bool = False
+    route: Literal["fast", "balanced", "performance"] = "fast", *, initial_plan_mode: bool = False
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
-    models = {profile: MagicMock(name=profile) for profile in ("fast", "balanced", "powerful")}
+    models = {profile: MagicMock(name=profile) for profile in ("fast", "balanced", "performance")}
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
     classifier = MagicMock()
     classifier.with_structured_output.return_value.ainvoke = structured
@@ -55,14 +55,14 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_plan_mode_uses_powerful_route_without_classifier() -> None:
+async def test_plan_mode_uses_performance_route_without_classifier() -> None:
     middleware, models, classifier = _middleware(initial_plan_mode=True)
     state = {"messages": [HumanMessage(content="Update the docs")]}
 
     state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
 
-    assert state["model_route"] == "powerful"
-    assert (await _invoke(middleware, state)).model is models["powerful"]
+    assert state["model_route"] == "performance"
+    assert (await _invoke(middleware, state)).model is models["performance"]
     classifier.assert_not_awaited()
 
 

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-Route = Literal["fast", "balanced", "powerful"]
+Route = Literal["fast", "balanced", "performance"]
 
 _CLASSIFIER_PROMPT = """Choose one fixed model profile for this Open SWE turn. Use the least expensive profile likely to complete the whole turn safely.
 
@@ -23,7 +23,7 @@ Profiles, from least to most capable and expensive:
 2. balanced
 - Use for ordinary bug fixes, bounded investigations, multi-file implementation, research synthesis, semantic PR maintenance, and partially specified localized work.
 
-3. powerful
+3. performance
 - Use for architecture or design, requirements disambiguation, subtle semantic review, novel root-cause reasoning, conflicting evidence, cross-component or multi-repository judgment, and high-stakes decisions.
 
 Explicit targets, clear acceptance criteria, reversibility, and strong tests lower the required capability. Ambiguous requirements, weak verification, architectural tradeoffs, broad scope, consequential security or data work, and conflicting assumptions raise it. Prompt length and eventual runtime are not difficulty signals.
@@ -63,7 +63,7 @@ class ModelSelectionMiddleware(AgentMiddleware[ModelSelectionState]):
         runtime: Runtime,
     ) -> dict[str, Route]:
         del runtime
-        route: Route = "powerful" if self._initial_plan_mode else "balanced"
+        route: Route = "performance" if self._initial_plan_mode else "balanced"
         if not self._initial_plan_mode:
             messages = state.get("messages", [])
             task = next(

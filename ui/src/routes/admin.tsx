@@ -1067,20 +1067,20 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           disabled={!settings.data || save.isPending}
         />
         <RolePicker
-          label="Agent routing: powerful"
+          label="Agent routing: performance"
           description="Model used for complex reasoning and plan-mode turns."
           models={models}
-          model={settings.data?.default_agent_routing_powerful_model ?? null}
+          model={settings.data?.default_agent_routing_performance_model ?? null}
           effort={
-            settings.data?.default_agent_routing_powerful_reasoning_effort ??
+            settings.data?.default_agent_routing_performance_reasoning_effort ??
             null
           }
           onChange={(model, effort) =>
             settings.data &&
             save.mutate({
               ...settings.data,
-              default_agent_routing_powerful_model: model,
-              default_agent_routing_powerful_reasoning_effort: effort,
+              default_agent_routing_performance_model: model,
+              default_agent_routing_performance_reasoning_effort: effort,
             })
           }
           disabled={!settings.data || save.isPending}

@@ -186,8 +186,8 @@ export interface TeamSettings {
   default_agent_routing_fast_reasoning_effort?: string | null
   default_agent_routing_balanced_model?: string | null
   default_agent_routing_balanced_reasoning_effort?: string | null
-  default_agent_routing_powerful_model?: string | null
-  default_agent_routing_powerful_reasoning_effort?: string | null
+  default_agent_routing_performance_model?: string | null
+  default_agent_routing_performance_reasoning_effort?: string | null
   default_repo?: string | null
   default_reviewer_model?: string | null
   default_reviewer_reasoning_effort?: string | null

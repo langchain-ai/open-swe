@@ -14,7 +14,7 @@ _GROUPING_PAIR = ("google_genai:gemini-3.8-flash", "low")
 _ROUTING_PAIRS = {
     "fast": ("google_genai:gemini-3.8-flash", "low"),
     "balanced": ("openai:gpt-5.6-sol", "medium"),
-    "powerful": ("anthropic:claude-opus-5", "high"),
+    "performance": ("anthropic:claude-opus-5", "high"),
 }
 
 
@@ -89,7 +89,10 @@ def test_team_settings_update_accepts_routing_pairs() -> None:
         }
     )
     assert update.default_agent_routing_fast_model == _ROUTING_PAIRS["fast"][0]
-    assert update.default_agent_routing_powerful_reasoning_effort == _ROUTING_PAIRS["powerful"][1]
+    assert (
+        update.default_agent_routing_performance_reasoning_effort
+        == _ROUTING_PAIRS["performance"][1]
+    )
 
 
 def test_team_settings_update_accepts_grouping_pair() -> None:

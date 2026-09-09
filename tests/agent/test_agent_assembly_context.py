@@ -86,7 +86,7 @@ async def _capture_create_deep_agent_kwargs(
             return_value={
                 "fast": ("google_genai:gemini-3.8-flash", "low"),
                 "balanced": ("openai:gpt-5.6-sol", "medium"),
-                "powerful": ("anthropic:claude-opus-5", "high"),
+                "performance": ("anthropic:claude-opus-5", "high"),
             },
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
@@ -157,7 +157,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
             return_value={
                 "fast": ("openai:gpt-5.6-sol", "low"),
                 "balanced": ("openai:gpt-5.6-sol", "medium"),
-                "powerful": ("openai:gpt-5.6-sol", "high"),
+                "performance": ("openai:gpt-5.6-sol", "high"),
             },
         ),
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),

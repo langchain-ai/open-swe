@@ -75,8 +75,8 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     default_agent_routing_fast_reasoning_effort: str | None = None
     default_agent_routing_balanced_model: str | None = None
     default_agent_routing_balanced_reasoning_effort: str | None = None
-    default_agent_routing_powerful_model: str | None = None
-    default_agent_routing_powerful_reasoning_effort: str | None = None
+    default_agent_routing_performance_model: str | None = None
+    default_agent_routing_performance_reasoning_effort: str | None = None
     default_repo: str | None = None
     default_reviewer_model: str | None = None
     default_reviewer_reasoning_effort: str | None = None
@@ -134,7 +134,7 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
                 self.default_agent_subagent_reasoning_effort,
             )
         )
-        for tier in ("fast", "balanced", "powerful"):
+        for tier in ("fast", "balanced", "performance"):
             model_field = f"default_agent_routing_{tier}_model"
             effort_field = f"default_agent_routing_{tier}_reasoning_effort"
             model, effort = _normalize_stale_model_pair(
@@ -179,7 +179,7 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
             self.default_agent_subagent_reasoning_effort,
             "agent subagent",
         )
-        for tier in ("fast", "balanced", "powerful"):
+        for tier in ("fast", "balanced", "performance"):
             _validate_model_effort_pair(
                 getattr(self, f"default_agent_routing_{tier}_model"),
                 getattr(self, f"default_agent_routing_{tier}_reasoning_effort"),
@@ -228,8 +228,8 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
                     "default_agent_routing_balanced_reasoning_effort",
                 ),
                 (
-                    "default_agent_routing_powerful_model",
-                    "default_agent_routing_powerful_reasoning_effort",
+                    "default_agent_routing_performance_model",
+                    "default_agent_routing_performance_reasoning_effort",
                 ),
                 ("default_reviewer_model", "default_reviewer_reasoning_effort"),
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
@@ -278,8 +278,8 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
         "default_agent_routing_balanced_reasoning_effort",
     ),
     (
-        "default_agent_routing_powerful_model",
-        "default_agent_routing_powerful_reasoning_effort",
+        "default_agent_routing_performance_model",
+        "default_agent_routing_performance_reasoning_effort",
     ),
     ("default_reviewer_model", "default_reviewer_reasoning_effort"),
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
@@ -336,8 +336,8 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_routing_fast_reasoning_effort": "high",
         "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
-        "default_agent_routing_powerful_model": "openai:gpt-6-astra",
-        "default_agent_routing_powerful_reasoning_effort": "low",
+        "default_agent_routing_performance_model": "openai:gpt-6-astra",
+        "default_agent_routing_performance_reasoning_effort": "low",
         "default_repo": _env_default_repo(),
         "default_reviewer_model": fallback_model,
         "default_reviewer_reasoning_effort": fallback_effort,
@@ -404,8 +404,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_agent_routing_fast_reasoning_effort": update.default_agent_routing_fast_reasoning_effort,
         "default_agent_routing_balanced_model": update.default_agent_routing_balanced_model,
         "default_agent_routing_balanced_reasoning_effort": update.default_agent_routing_balanced_reasoning_effort,
-        "default_agent_routing_powerful_model": update.default_agent_routing_powerful_model,
-        "default_agent_routing_powerful_reasoning_effort": update.default_agent_routing_powerful_reasoning_effort,
+        "default_agent_routing_performance_model": update.default_agent_routing_performance_model,
+        "default_agent_routing_performance_reasoning_effort": update.default_agent_routing_performance_reasoning_effort,
         "default_repo": update.default_repo,
         "default_reviewer_model": update.default_reviewer_model,
         "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
@@ -498,7 +498,7 @@ async def get_team_agent_routing_models() -> dict[str, tuple[str, str]]:
             settings.get(f"default_agent_routing_{tier}_model"),
             settings.get(f"default_agent_routing_{tier}_reasoning_effort"),
         )
-        for tier in ("fast", "balanced", "powerful")
+        for tier in ("fast", "balanced", "performance")
     }
 
 
