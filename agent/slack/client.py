@@ -1004,7 +1004,7 @@ async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/views.open",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json={"trigger_id": trigger_id, "view": view},
             )
             error = _slack_response_error(response)
