@@ -21,6 +21,7 @@ import type {
   ImageChunk,
   Message,
 } from "./types"
+import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
@@ -536,17 +537,20 @@ export function useSidebarRecents({
   projectMode,
   includeAutomations = false,
   includeResolved = false,
+  sort = "created",
   enabled = true,
 }: {
   projectMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
       ...sidebarPageParams({ includeAutomations, includeResolved }),
       ...(projectMode ? { ownerless: true } : {}),
+      sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled
   )
@@ -556,17 +560,20 @@ export function useSidebarProjectThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
+  sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
+  sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
       ...sidebarPageParams({ includeAutomations, includeResolved }),
       ...(repoFullName ? { repo: repoFullName } : {}),
+      sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled && Boolean(repoFullName)
   )

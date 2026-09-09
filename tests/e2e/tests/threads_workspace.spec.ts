@@ -819,16 +819,22 @@ test.describe("threads workspace", () => {
       {
         id: THREAD_IDS.noProject,
         metadata: baseMetadata(now, TITLES.noProject, 1_000, {
+          participant_logins: { [ADMIN_USER.login]: true },
           repo_owner: "",
           repo_name: "",
         }),
       },
       {
         id: THREAD_IDS.pinnedProject,
-        metadata: baseMetadata(now, TITLES.pinnedProject, 2_000, {}),
+        metadata: baseMetadata(now, TITLES.pinnedProject, 2_000, {
+          participant_logins: { [ADMIN_USER.login]: true },
+        }),
       },
     ]);
-    await loginAs(page);
+    const loginResponse = await page.request.post("/control/login", {
+      data: ADMIN_USER,
+    });
+    expect(loginResponse.ok()).toBeTruthy();
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents/threads");
 
@@ -839,6 +845,18 @@ test.describe("threads workspace", () => {
     });
     await expect(noProject).toBeVisible();
     await expect(sidebar).toContainText(TITLES.noProject);
+
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Created", exact: true }),
+    ).toBeChecked();
+    const sortScreenshotPath = testInfo.outputPath("sort-by-created.png");
+    await page.screenshot({ path: sortScreenshotPath });
+    await testInfo.attach("sort-by-created", {
+      path: sortScreenshotPath,
+      contentType: "image/png",
+    });
+    await page.keyboard.press("Escape");
 
     await noProject.hover();
     await sidebar.getByRole("button", { name: "Pin No project" }).click();

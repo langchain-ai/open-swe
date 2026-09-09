@@ -242,6 +242,7 @@ export function AgentsSidebar({
     projectMode,
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
+    sort: prefs.sortChats,
     enabled: !localOnly,
   })
   const projectsQuery = useSidebarProjects({
@@ -529,6 +530,7 @@ export function AgentsSidebar({
           value={prefs.sortChats}
           onValueChange={(value) => setView({ sortChats: value as ChatSort })}
         >
+          <MenuRadioItem value="created">Created</MenuRadioItem>
           <MenuRadioItem value="updated">Last updated</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
@@ -973,6 +975,7 @@ function ProjectGroup({
     repoFullName: group.repoFullName,
     includeResolved,
     includeAutomations,
+    sort,
     enabled: !collapsed,
   })
   const cloudThreads = [
