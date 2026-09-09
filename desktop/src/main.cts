@@ -1030,7 +1030,7 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (mainWindow) void loadApp(mainWindow);
+            mainWindow?.reload();
           },
         },
         ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),

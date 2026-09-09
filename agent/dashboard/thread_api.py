@@ -67,7 +67,6 @@ from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
     langgraph_url,
-    queue_message_for_thread,
 )
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
@@ -1181,6 +1180,12 @@ async def get_dashboard_terminal_sandbox(
 
 
 async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[str, Any]]:
+    runs = await client.runs.list(thread_id, status="pending", limit=100)
+    queued = [
+        dict(message)
+        for run in runs
+        if isinstance((message := run.get("metadata", {}).get("dashboard_queued_message")), Mapping)
+    ]
     try:
         item = await client.store.get_item(("queue", thread_id), "pending_messages")
     except Exception:  # noqa: BLE001
@@ -1189,13 +1194,12 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
             extra={"thread_id": thread_id},
             exc_info=True,
         )
-        return []
+        return queued
     value = item.get("value") if isinstance(item, Mapping) else None
     messages = value.get("messages") if isinstance(value, Mapping) else None
     if not isinstance(messages, list):
-        return []
+        return queued
 
-    queued: list[dict[str, Any]] = []
     for entry in messages:
         content = entry.get("content") if isinstance(entry, Mapping) else None
         if not isinstance(content, Mapping) or content.get("source") != _DASHBOARD_SOURCE:
@@ -1555,12 +1559,13 @@ async def _enrich_run_start_command(
     metadata: dict[str, Any],
     thread_busy: bool = False,
     creating: bool = False,
+    allow_busy: bool = False,
     email: str | None = None,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
 
-    if thread_busy:
+    if thread_busy and not allow_busy:
         raise HTTPException(409, "thread is already running; queue message instead")
 
     client = langgraph_client()
@@ -1821,72 +1826,60 @@ async def send_dashboard_message(
     metadata = thread_metadata(thread)
     _assert_thread_postable(metadata, login, email)
 
-    prompt = body.content.strip()
-    now_ms = _now_ms()
-    chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
-    handoff_metadata = dict(metadata)
-    metadata_update: dict[str, Any] = {
-        "source": _DASHBOARD_SOURCE,
-        "updated_at_ms": now_ms,
-        "plan_mode": body.plan_mode,
-        PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
-        PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
-    }
-    if chosen_model and chosen_effort:
-        metadata_update["model"] = chosen_model
-        metadata_update["effort"] = chosen_effort
-    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
-
     active = await get_thread_active_status(thread_id)
     if active is None:
         raise HTTPException(502, "could not determine whether thread is active")
     if not active:
-        raise HTTPException(
-            409,
-            "thread is idle; start a run via the stream commands endpoint",
-        )
+        raise HTTPException(409, "thread is idle; start a run via the stream commands endpoint")
 
-    active_model = _metadata_model_id(metadata) if body.images else None
-    content = _user_message_content(prompt, body.images, model_id=active_model)
-    if pr_linked or metadata.get("auto_resolved_by_prs") is True:
-        async with agent_thread_pr_state_lock(client, thread_id):
-            current = await client.threads.get(thread_id)
-            metadata = thread_metadata(current)
-            if _is_thread_resolved(metadata):
-                metadata_update["resolved"] = False
-                metadata_update["resolved_at_ms"] = None
-            if metadata.get("auto_resolved_by_prs") is True:
-                metadata_update["auto_resolved_by_prs"] = False
-            if metadata.get("attention_reason"):
-                metadata_update["attention_reason"] = None
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    else:
-        if _is_thread_resolved(metadata):
-            metadata_update["resolved"] = False
-            metadata_update["resolved_at_ms"] = None
-        if metadata.get("attention_reason"):
-            metadata_update["attention_reason"] = None
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    queue_payload: dict[str, Any] = {
-        "text": prompt,
-        "source": _DASHBOARD_SOURCE,
-        "surface": "web",
-        "queue_id": f"queued-{uuid.uuid4()}",
-        "created_at_ms": now_ms,
-        "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
-            **({"email": email} if email else {}),
-        },
+    prompt = body.content.strip()
+    content = _user_message_content(
+        prompt, body.images, model_id=_metadata_model_id(metadata) if body.images else None
+    )
+    handoff_metadata = dict(metadata)
+    queued_message = {
+        "id": f"queued-{uuid.uuid4()}",
+        "content": prompt,
+        "images": [
+            {**image.model_dump(by_alias=True, exclude_none=True), "kind": "image"}
+            for image in body.images
+        ],
+        "createdAt": _now_ms(),
     }
-    if isinstance(content, list):
-        queue_payload["images"] = [
-            block for block in content if isinstance(block, dict) and block.get("type") != "text"
-        ]
-    queued = await queue_message_for_thread(thread_id, queue_payload)
-    if not queued:
-        raise HTTPException(502, "failed to queue follow-up message")
+    command = await _enrich_run_start_command(
+        thread_id,
+        login,
+        {
+            "method": "run.start",
+            "params": {
+                "input": {
+                    "messages": [{"type": "human", "id": queued_message["id"], "content": content}]
+                },
+                "config": {
+                    "configurable": {
+                        "agent_model_id": body.model_id,
+                        "agent_effort": body.effort,
+                        "plan_mode": body.plan_mode,
+                    }
+                },
+            },
+        },
+        metadata=metadata,
+        thread_busy=True,
+        allow_busy=True,
+        email=email,
+    )
+    params = command["params"]
+    await dispatch_agent_run(
+        thread_id,
+        None,
+        params["config"]["configurable"],
+        input=params["input"],
+        source=_DASHBOARD_SOURCE,
+        client=client,
+        multitask_strategy="enqueue",
+        metadata={**params["metadata"], "dashboard_queued_message": queued_message},
+    )
     try:
         await _notify_slack_web_handoff(thread_id, handoff_metadata, client)
     except Exception:
@@ -1947,26 +1940,8 @@ async def cancel_dashboard_thread(
     }
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     queued = await client.store.get_item(("queue", thread_id), "pending_messages")
-    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
-    if queued_messages:
-        try:
-            configurable = await _build_dashboard_configurable(thread_id, login, metadata)
-            run = await dispatch_agent_run(
-                thread_id,
-                None,
-                configurable,
-                source=_DASHBOARD_SOURCE,
-                input={"messages": []},
-                client=client,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
-            raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
-        run_id = run.get("run_id") if isinstance(run, dict) else None
-        metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
-
-    if queued_messages:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    if queued:
+        await client.store.delete_item(("queue", thread_id), "pending_messages")
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
 
@@ -2197,6 +2172,9 @@ async def get_dashboard_thread_state(
     # which the SDK reads as idle and never opens the stream. Drop `next`
     # while a run is pending/running so the SDK treats the thread as active.
     metadata_run_status = metadata.get("latest_run_status")
+    result["thread_status"] = _run_status_to_agent_status(
+        thread.get("status", "idle"), latest_run_status or metadata_run_status
+    )
     if (
         _thread_is_busy(thread)
         or latest_run_status in {"pending", "running"}
@@ -2589,7 +2567,10 @@ async def _stream_thread_events(
                 async for chunk in response.aiter_bytes():
                     yield chunk
     except Exception:
-        logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
+        logger.warning(
+            "LangGraph stream/events proxy closed", extra={"thread_id": thread_id}, exc_info=True
+        )
+        raise
 
 
 async def _observe_dashboard_run_ttft(

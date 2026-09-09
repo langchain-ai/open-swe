@@ -130,9 +130,9 @@ function getChunkRenderKey(chunk: Chunk, sourceIndex: number): string {
     case "tool-execution":
       return `tool-${chunk.toolCallId}`
     case "text":
-      return `text-${sourceIndex}`
+      return chunk.id ?? `text-${sourceIndex}`
     case "reasoning":
-      return `reasoning-${sourceIndex}`
+      return chunk.id ?? `reasoning-${sourceIndex}`
     case "code":
       return `code-${sourceIndex}`
     case "error":

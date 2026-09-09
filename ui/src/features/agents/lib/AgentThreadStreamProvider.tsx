@@ -11,7 +11,8 @@ import {
   filterOutHeadlessToolInterrupts,
   overrideFetchImplementation,
 } from "@langchain/langgraph-sdk"
-import { StreamController } from "@langchain/langgraph-sdk/stream"
+import type { StreamController } from "@langchain/langgraph-sdk/stream"
+import { AgentThreadRuntime } from "./AgentThreadRuntime"
 import { useQueryClient, type QueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "./api"
@@ -25,6 +26,7 @@ interface RuntimeEntry {
   transport: AgentThreadTransport
   client: Client<Record<string, unknown>>
   controller: StreamController
+  runtime: AgentThreadRuntime
   createdThreadCallbacks: Set<(threadId: string) => void>
   deactivate: () => void
   disposeTimer?: ReturnType<typeof setTimeout>
@@ -70,13 +72,12 @@ function disposeRuntime(entry: RuntimeEntry): void {
 }
 
 function scheduleRuntimeDisposal(entry: RuntimeEntry): void {
-  if (entry.disposeTimer) {
+  if (entry.mounts > 0) {
     clearTimeout(entry.disposeTimer)
     entry.disposeTimer = undefined
-  }
-  if (entry.mounts > 0 || entry.controller.rootStore.getSnapshot().isLoading) {
     return
   }
+  if (entry.disposeTimer) return
   entry.disposeTimer = setTimeout(
     () => disposeRuntime(entry),
     IDLE_RUNTIME_TTL_MS
@@ -86,12 +87,7 @@ function scheduleRuntimeDisposal(entry: RuntimeEntry): void {
 function trimRuntimeRegistry(protectedEntry?: RuntimeEntry): void {
   if (runtimeEntries.size <= MAX_RETAINED_RUNTIMES) return
   const idle = [...runtimeEntries.values()]
-    .filter(
-      (entry) =>
-        entry !== protectedEntry &&
-        entry.mounts === 0 &&
-        !entry.controller.rootStore.getSnapshot().isLoading
-    )
+    .filter((entry) => entry !== protectedEntry && entry.mounts === 0)
     .sort((left, right) => left.lastUsedAt - right.lastUsedAt)
   for (const entry of idle) {
     if (runtimeEntries.size <= MAX_RETAINED_RUNTIMES) break
@@ -120,11 +116,13 @@ function createRuntime(
   const client = new Client<Record<string, unknown>>({
     apiUrl,
     apiKey: null,
+    timeoutMs: 15_000,
     ...(transport === "cloud" ? { onRequest: dashboardRequest } : {}),
   })
   let entry: RuntimeEntry
-  const controller = new StreamController({
-    assistantId: AGENT_ASSISTANT_ID,
+  const runtime = new AgentThreadRuntime({
+    transport,
+    fetch: dashboardFetch,
     client,
     threadId,
     onThreadId: (id) => {
@@ -153,13 +151,14 @@ function createRuntime(
     key: runtimeKey(transport, threadId),
     transport,
     client,
-    controller,
+    controller: runtime.controller,
+    runtime,
     createdThreadCallbacks: new Set(),
-    deactivate: controller.activate(),
+    deactivate: () => runtime.dispose(),
     mounts: 0,
     lastUsedAt: Date.now(),
   }
-  controller.rootStore.subscribe(() => {
+  runtime.store.subscribe(() => {
     scheduleRuntimeDisposal(entry)
     trimRuntimeRegistry()
   })
@@ -180,12 +179,21 @@ function retainRuntime(entry: RuntimeEntry): () => void {
   }
 }
 
-function useRuntimeStream(entry: RuntimeEntry): UseStreamReturn {
+export type AgentThreadStream = UseStreamReturn & {
+  connection: "connecting" | "connected" | "recovering"
+  refresh: () => Promise<void>
+  enqueue: AgentThreadRuntime["enqueue"]
+  queuedMessages: ReturnType<
+    AgentThreadRuntime["store"]["getSnapshot"]
+  >["queuedMessages"]
+}
+
+function useRuntimeStream(entry: RuntimeEntry): AgentThreadStream {
   const { controller } = entry
   const root = useSyncExternalStore(
-    controller.rootStore.subscribe,
-    controller.rootStore.getSnapshot,
-    controller.rootStore.getSnapshot
+    entry.runtime.store.subscribe,
+    entry.runtime.store.getSnapshot,
+    entry.runtime.store.getSnapshot
   )
   const subagents = useSyncExternalStore(
     controller.subagentStore.subscribe,
@@ -219,23 +227,26 @@ function useRuntimeStream(entry: RuntimeEntry): UseStreamReturn {
       subagents,
       subgraphs,
       subgraphsByNode,
-      submit: (input, options) => controller.submit(input, options),
-      stop: (options) => controller.stop(options),
+      connection: root.connection,
+      refresh: entry.runtime.refresh,
+      queuedMessages: root.queuedMessages,
+      enqueue: entry.runtime.enqueue,
+      submit: entry.runtime.submit,
+      stop: entry.runtime.stop,
       disconnect: () => controller.disconnect(),
-      respond: (response, options) => controller.respond(response, options),
-      respondAll: (responses, options) =>
-        controller.respondAll(responses, options),
+      respond: entry.runtime.respond,
+      respondAll: entry.runtime.respondAll,
       getThread: () => controller.getThread(),
       client: entry.client,
       assistantId: AGENT_ASSISTANT_ID,
       [STREAM_CONTROLLER]: controller,
-    } as UseStreamReturn
-  }, [controller, entry.client, root, subagents, subgraphs, subgraphsByNode])
+    } as AgentThreadStream
+  }, [controller, entry, root, subagents, subgraphs, subgraphsByNode])
 }
 
-const AgentThreadRuntimeContext = createContext<UseStreamReturn | null>(null)
+const AgentThreadRuntimeContext = createContext<AgentThreadStream | null>(null)
 
-export function useAgentThreadRuntime(): UseStreamReturn {
+export function useAgentThreadRuntime(): AgentThreadStream {
   const stream = useContext(AgentThreadRuntimeContext)
   if (!stream) throw new Error("Agent thread runtime is not available")
   return stream

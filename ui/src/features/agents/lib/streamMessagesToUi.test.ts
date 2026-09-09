@@ -93,7 +93,10 @@ describe("streamMessagesToUi", () => {
     expect(messages[1]).toMatchObject({
       author: "agent",
       turnKey: "user-1",
-      chunks: [{ kind: "text", text: "Done" }],
+      chunks: [
+        { kind: "text", text: "Working" },
+        { kind: "text", text: "Done" },
+      ],
     })
   })
 

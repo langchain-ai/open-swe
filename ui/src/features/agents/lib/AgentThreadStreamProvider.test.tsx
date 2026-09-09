@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@langchain/langgraph-sdk", () => ({
   Client: class Client {
+    threads = { getState: vi.fn().mockResolvedValue({ values: {}, next: [] }) }
     constructor(options: { apiUrl: string }) {
       mocks.clients.push(options)
     }
@@ -53,7 +54,8 @@ vi.mock("@langchain/langgraph-sdk", () => ({
   overrideFetchImplementation: vi.fn(),
 }))
 
-vi.mock("@langchain/langgraph-sdk/stream", () => ({
+vi.mock("@langchain/langgraph-sdk/stream", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@langchain/langgraph-sdk/stream")>()),
   StreamController: class StreamController {
     rootStore: TestStore<{
       values: Record<string, unknown>
@@ -201,7 +203,7 @@ describe("AgentThreadStreamProvider", () => {
     expect(onThreadCreated).toHaveBeenCalledWith("created")
   })
 
-  it("cancels idle disposal when an inactive thread starts running", () => {
+  it("releases an unmounted runtime even if SDK loading is stale", () => {
     const view = render(
       wrapper(
         <AgentThreadStreamProvider threadId="background-run">
@@ -209,22 +211,17 @@ describe("AgentThreadStreamProvider", () => {
         </AgentThreadStreamProvider>
       )
     )
-    view.unmount()
-    const entry = __testing.entries.get("cloud:background-run")
-    if (!entry) throw new Error("runtime was not retained")
+    const entry = __testing.entries.get("cloud:background-run")!
     const store = entry.controller.rootStore as unknown as TestStore<
       ReturnType<typeof entry.controller.rootStore.getSnapshot>
     >
     store.setSnapshot({ ...store.getSnapshot(), isLoading: true })
-
     vi.advanceTimersByTime(60_000)
-
     expect(__testing.entries.has("cloud:background-run")).toBe(true)
-    expect(mocks.controllers[0]?.deactivate).not.toHaveBeenCalled()
-
-    store.setSnapshot({ ...store.getSnapshot(), isLoading: false })
+    view.unmount()
     vi.advanceTimersByTime(60_000)
     expect(__testing.entries.size).toBe(0)
+    expect(mocks.controllers[0]?.deactivate).toHaveBeenCalledOnce()
   })
 
   it("keeps at most eight inactive runtimes", () => {

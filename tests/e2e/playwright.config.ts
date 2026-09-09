@@ -44,7 +44,10 @@ export default defineConfig({
         : "retain-on-failure",
     screenshot: "only-on-failure",
     // SLOW_MO=700 pnpm exec playwright test --headed  → watch it run in human time.
-    launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
+    launchOptions: {
+      slowMo: Number(process.env.SLOW_MO ?? 0),
+      channel: process.env.E2E_BROWSER_CHANNEL,
+    },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {

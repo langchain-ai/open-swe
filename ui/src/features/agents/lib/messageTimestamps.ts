@@ -2,12 +2,24 @@ const STORAGE_KEY = "agent-message-timestamps-v1"
 const MAX_ENTRIES = 5000
 
 let cache: Map<string, string> | null = null
+let persistTimer: ReturnType<typeof setTimeout> | undefined
+
+function trim(map: Map<string, string>): void {
+  while (map.size > MAX_ENTRIES) map.delete(map.keys().next().value!)
+}
+
+function flush(): void {
+  clearTimeout(persistTimer)
+  persistTimer = undefined
+  if (cache) persist(cache)
+}
 
 function load(): Map<string, string> {
   if (cache) return cache
   cache = new Map()
   if (typeof window === "undefined") return cache
   try {
+    window.addEventListener("pagehide", flush)
     const raw = window.localStorage.getItem(STORAGE_KEY)
     const parsed = raw ? (JSON.parse(raw) as unknown) : null
     if (Array.isArray(parsed)) {
@@ -24,6 +36,7 @@ function load(): Map<string, string> {
   } catch {
     // Corrupt/unavailable storage — start empty.
   }
+  trim(cache)
   return cache
 }
 
@@ -52,7 +65,8 @@ export function messageArrivalTimestamp(messageId: string): string {
   if (existing) return existing
   const iso = new Date().toISOString()
   map.set(messageId, iso)
-  persist(map)
+  trim(map)
+  persistTimer ??= setTimeout(flush, 250)
   return iso
 }
 

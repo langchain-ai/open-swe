@@ -1550,79 +1550,35 @@ def test_assert_thread_postable_restricts_workspace_automation(monkeypatch) -> N
     assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
-async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    class FakeThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": "tid",
-                "metadata": {"source": "dashboard", "github_login": "owner"},
-            }
-
-        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            pass
-
-    class FakeClient:
-        threads = FakeThreads()
-
-    async def active(thread_id: str) -> bool:
-        return True
-
-    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
-        captured["payload"] = payload
-        return True
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_thread_active_status", active)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue)
-
-    await thread_api.send_dashboard_message(
-        "tid",
-        "teammate",
-        thread_api.ThreadMessageBody(content="ship it"),
+@pytest.mark.parametrize("sender", ["owner", "teammate"])
+async def test_queued_dashboard_run_preserves_sender_and_delivery(monkeypatch, sender) -> None:
+    create = AsyncMock(return_value={"run_id": "queued-run"})
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={
+                    "thread_id": "tid",
+                    "metadata": {"source": "dashboard", "github_login": "owner"},
+                }
+            ),
+            update=AsyncMock(),
+        ),
+        runs=SimpleNamespace(create=create),
     )
-
-    payload = cast(dict[str, object], captured["payload"])
-    assert payload["text"] == "ship it"
-    assert cast(dict[str, object], payload["sender"])["id"] == "github:teammate"
-
-
-async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    class FakeThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": "tid",
-                "metadata": {"source": "dashboard", "github_login": "owner"},
-            }
-
-        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            pass
-
-    class FakeClient:
-        threads = FakeThreads()
-
-    async def active(thread_id: str) -> bool:
-        return True
-
-    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
-        captured["payload"] = payload
-        return True
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_thread_active_status", active)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue)
-
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "get_thread_active_status", AsyncMock(return_value=True))
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", AsyncMock())
+    monkeypatch.setattr(thread_api, "get_profile", AsyncMock(return_value={}))
+    monkeypatch.setattr(thread_api, "_resolve_run_email", AsyncMock(return_value=None))
     await thread_api.send_dashboard_message(
-        "tid",
-        "owner",
-        thread_api.ThreadMessageBody(content="ship it"),
+        "tid", sender, thread_api.ThreadMessageBody(content="ship it")
     )
-
-    payload = cast(dict[str, object], captured["payload"])
-    assert payload["text"] == "ship it"
+    payload = create.call_args.kwargs
+    assert payload["multitask_strategy"] == "enqueue"
+    assert payload["durability"] == "sync"
+    assert "ship it" in json.dumps(payload["input"])
+    assert f"github:{sender}" in json.dumps(payload["input"])
+    assert payload["metadata"]["dashboard_queued_message"]["content"] == "ship it"
 
 
 async def test_thread_summary_exposes_resolved_state() -> None:

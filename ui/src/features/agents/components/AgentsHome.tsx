@@ -330,7 +330,7 @@ export function AgentsHome() {
     setSubmittedDraft(null)
   }
 
-  const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
+  const handleSubmit = async (prompt: string, images: Array<ImageChunk>) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
@@ -340,8 +340,11 @@ export function AgentsHome() {
         (candidate) => candidate.cwd === localProjectPath
       )
       if (!desktop || !project) {
-        setLocalError("Choose or add a project from This Mac before sending.")
-        return
+        const error = new Error(
+          "Choose or add a project from This Mac before sending."
+        )
+        setLocalError(error.message)
+        throw error
       }
       const cwd = project.cwd
       const draft = {
@@ -353,7 +356,7 @@ export function AgentsHome() {
       setSubmittedDraft(draft)
       setLocalError(null)
       window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
-      void (async () => {
+      await (async () => {
         try {
           await refreshLocalProjectBranch()
           const credentialError = await ensureDesktopModelCredential(
@@ -362,7 +365,7 @@ export function AgentsHome() {
           if (credentialError) {
             resetPendingSubmit()
             setLocalError(credentialError)
-            return
+            throw new Error(credentialError)
           }
           const managedSkills = cloudEnabled
             ? await skills.refetch()
@@ -405,6 +408,7 @@ export function AgentsHome() {
               ? error.message
               : "Could not start the local Open SWE agent"
           )
+          throw error
         }
       })()
       return
@@ -440,7 +444,7 @@ export function AgentsHome() {
           : "Could not start the cloud Open SWE agent"
       )
     }
-    void stream
+    await stream
       .submit(
         {
           messages: [{ type: "human", content: promptContent(prompt, images) }],
@@ -450,7 +454,10 @@ export function AgentsHome() {
           onError: handleCloudSubmitError,
         }
       )
-      .catch(handleCloudSubmitError)
+      .catch((error: unknown) => {
+        handleCloudSubmitError(error)
+        throw error
+      })
   }
 
   const handlePanelCollapsedChange = (next: boolean) => {

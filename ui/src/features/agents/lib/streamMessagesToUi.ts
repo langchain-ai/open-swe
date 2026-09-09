@@ -102,13 +102,6 @@ function maybeDiffFromArgs(args: Record<string, unknown>): DiffData | null {
   }
 }
 
-function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
-  const textIndices = chunks.flatMap((c, i) => (c.kind === "text" ? [i] : []))
-  if (textIndices.length <= 1) return chunks
-  const lastText = textIndices[textIndices.length - 1]
-  return chunks.filter((c, i) => c.kind !== "text" || i === lastText)
-}
-
 type AgentTurn = {
   id: string
   author: Message["author"]
@@ -346,7 +339,7 @@ export function streamMessagesToUi(
 
   const flushAgentTurn = () => {
     if (!agentTurn) return
-    uiMessages.push({ ...agentTurn, chunks: mergeTextChunks(agentTurn.chunks) })
+    uiMessages.push(agentTurn)
     agentTurn = null
   }
 
@@ -427,11 +420,17 @@ export function streamMessagesToUi(
     }
 
     if (AIMessage.isInstance(raw)) {
+      if (raw.additional_kwargs.lc_source === "summarization") return
       const chunks: Array<Chunk> = []
       const reasoning = reasoningText(raw)
-      if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
+      if (reasoning)
+        chunks.push({
+          kind: "reasoning",
+          text: reasoning,
+          id: `${msgId}:reasoning`,
+        })
       const text = raw.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      if (text) chunks.push({ kind: "text", text, id: `${msgId}:text` })
 
       for (const toolCall of raw.tool_calls ?? []) {
         const name = toolCall.name || "tool"

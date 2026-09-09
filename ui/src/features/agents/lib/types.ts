@@ -122,11 +122,13 @@ export interface ToolExecutionChunk {
 }
 
 export interface TextChunk {
+  id?: string
   kind: "text"
   text: string
 }
 
 export interface ReasoningChunk {
+  id?: string
   kind: "reasoning"
   text: string
 }

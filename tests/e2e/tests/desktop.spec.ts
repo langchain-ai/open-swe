@@ -215,6 +215,36 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
         },
       ]);
 
+    const threadUrl = page.url();
+    const reloadFromMenu = () =>
+      electronApp.evaluate(({ Menu }) => {
+        const view = Menu.getApplicationMenu()?.items.find(
+          (item) => item.label === "View",
+        );
+        const reload = view?.submenu?.items.find(
+          (item) => item.label === "Reload",
+        );
+        if (!reload) throw new Error("Reload menu item missing");
+        reload.click();
+      });
+    await reloadFromMenu();
+    await expect(page).toHaveURL(threadUrl);
+    await expect(page.getByText(/Done! I added/)).toBeVisible();
+
+    await typeIntoComposer(page, "E2E_BUSY_HOLD:10 first local followup");
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+    await typeIntoComposer(page, "second local followup");
+    await expect(page.getByTestId("queued-message")).toContainText(
+      "second local followup",
+    );
+    await reloadFromMenu();
+    await expect(page).toHaveURL(threadUrl);
+    await expect(
+      page.getByText("second local followup", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId("queued-message")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Stop run" })).toHaveCount(0);
+
     const screenshot = testInfo.outputPath("desktop-local-agent.png");
     await page.screenshot({ path: screenshot, fullPage: true });
     await testInfo.attach("desktop-local-agent", {

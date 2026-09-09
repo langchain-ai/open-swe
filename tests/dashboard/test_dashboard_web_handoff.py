@@ -1,4 +1,5 @@
-from typing import Any, cast
+import json
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -57,12 +58,21 @@ async def _active_thread(thread_id: str) -> bool:
     return True
 
 
-def _queued_message_without_metadata(queued_messages: list[object]) -> dict[str, object]:
-    assert len(queued_messages) == 1
-    queued_message = cast(dict[str, object], queued_messages[0])
-    assert cast(str, queued_message.pop("queue_id")).startswith("queued-")
-    assert isinstance(queued_message.pop("created_at_ms"), int)
-    return queued_message
+def _queued_run(client: _FakeClient) -> dict[str, Any]:
+    assert len(client.runs.created) == 1
+    run = client.runs.created[0]["kwargs"]
+    assert run["multitask_strategy"] == "enqueue"
+    assert run["durability"] == "sync"
+    assert "continue in web" in json.dumps(run["input"])
+    assert "github:octocat" in json.dumps(run["input"])
+    return run
+
+
+@pytest.fixture(autouse=True)
+def local_credentials(monkeypatch):
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
+    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
 
 
 async def _noop_token_check(login: str) -> None:
@@ -127,11 +137,6 @@ async def test_dashboard_followup_sends_image_content_blocks(
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
     monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
-    monkeypatch.setattr(
-        thread_api,
-        "create_image_block",
-        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
-    )
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -162,15 +167,9 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
         "triggering_user_email": "octocat@example.com",
     }
     client = _FakeClient(metadata)
-    queued_messages: list[object] = []
-
-    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
-        queued_messages.append(message_content)
-        return True
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
 
     await thread_api.send_dashboard_message(
         "thread-1",
@@ -180,17 +179,7 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     )
 
     assert client.threads.updates[0]["source"] == "dashboard"
-    assert _queued_message_without_metadata(queued_messages) == {
-        "text": "continue in web",
-        "source": "dashboard",
-        "surface": "web",
-        "sender": {
-            "id": "github:octocat",
-            "platform": "github",
-            "github_login": "octocat",
-            "email": "octocat@example.com",
-        },
-    }
+    _queued_run(client)
 
 
 @pytest.mark.asyncio
@@ -210,12 +199,7 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         },
     }
     client = _FakeClient(metadata)
-    queued_messages: list[object] = []
     handoff_updates: list[dict[str, str]] = []
-
-    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
-        queued_messages.append(message_content)
-        return True
 
     async def fake_update_trace_reply(channel_id: str, message_ts: str, thread_id: str) -> bool:
         handoff_updates.append(
@@ -225,7 +209,6 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
     monkeypatch.setattr(
         thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
@@ -237,17 +220,7 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         email="octocat@example.com",
     )
 
-    assert _queued_message_without_metadata(queued_messages) == {
-        "text": "continue in web",
-        "source": "dashboard",
-        "surface": "web",
-        "sender": {
-            "id": "github:octocat",
-            "platform": "github",
-            "github_login": "octocat",
-            "email": "octocat@example.com",
-        },
-    }
+    _queued_run(client)
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
     ]
@@ -273,9 +246,6 @@ async def test_dashboard_followup_uses_stored_trace_reply_timestamp(
     )
     handoff_updates: list[dict[str, str]] = []
 
-    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
-        return True
-
     async def fake_update_trace_reply(channel_id: str, message_ts: str, thread_id: str) -> bool:
         handoff_updates.append(
             {"channel_id": channel_id, "message_ts": message_ts, "thread_id": thread_id}
@@ -284,7 +254,6 @@ async def test_dashboard_followup_uses_stored_trace_reply_timestamp(
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
     monkeypatch.setattr(
         thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
@@ -311,20 +280,9 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         "resolved_model": "openai:gpt-5.6-sol",
     }
     client = _FakeClient(metadata)
-    queued_messages: list[object] = []
-
-    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
-        queued_messages.append(message_content)
-        return True
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
-    monkeypatch.setattr(
-        thread_api,
-        "create_image_block",
-        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
-    )
 
     await thread_api.send_dashboard_message(
         "thread-1",
@@ -335,17 +293,9 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         ),
     )
 
-    assert _queued_message_without_metadata(queued_messages) == {
-        "text": "continue in web",
-        "source": "dashboard",
-        "surface": "web",
-        "sender": {
-            "id": "github:octocat",
-            "platform": "github",
-            "github_login": "octocat",
-        },
-        "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
-    }
+    run = _queued_run(client)
+    assert "aW1hZ2U=" in json.dumps(run["input"])
+    assert run["metadata"]["dashboard_queued_message"]["images"][0]["mimeType"] == "image/png"
 
 
 @pytest.mark.asyncio
@@ -358,15 +308,9 @@ async def test_dashboard_followup_on_busy_text_only_thread_rejects_images(
         "resolved_model": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
     }
     client = _FakeClient(metadata)
-    queued_messages: list[object] = []
-
-    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
-        queued_messages.append(message_content)
-        return True
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -382,7 +326,7 @@ async def test_dashboard_followup_on_busy_text_only_thread_rejects_images(
 
     assert exc_info.value.status_code == 422
     assert "does not support image input" in exc_info.value.detail
-    assert queued_messages == []
+    assert client.runs.created == []
     assert client.threads.updates == []
 
 

@@ -1,3 +1,4 @@
+import { ThreadConnectionNotice } from "./ThreadConnectionNotice"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpRight,
@@ -26,7 +27,6 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
-import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -186,21 +186,18 @@ export function AgentThreadView({
   const snapshotMessages =
     thread.messages.length > 0 ? thread.messages : EMPTY_MESSAGES
   const baseMessages = useMemo<Array<Message>>(() => {
-    if (snapshotMessages.length > 0) return snapshotMessages
-    return streamMessagesToUi(
+    const live = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
+    return live.length > 0 ? live : snapshotMessages
   }, [snapshotMessages, stream.messages, stream.toolCalls])
 
-  const isStreaming =
-    thread.status === "running" ||
-    stream.isLoading ||
-    thread.messages.length > 0
+  const isStreaming = stream.isLoading
   const activeRun = useMemo(
-    () => ({ threadId: thread.id, running: thread.status === "running" }),
-    [thread.id, thread.status]
+    () => ({ threadId: thread.id, running: stream.isLoading }),
+    [thread.id, stream.isLoading]
   )
   const queuedMessages = useMemo(
     () => visibleQueuedMessages(thread.queuedMessages, baseMessages),
@@ -235,10 +232,6 @@ export function AgentThreadView({
 
   return (
     <div className="flex min-w-0 flex-1">
-      <OptimisticThreadHydrationRecovery
-        threadId={thread.id}
-        enabled={thread.messages.length > 0}
-      />
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
@@ -256,14 +249,18 @@ export function AgentThreadView({
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
-        {thread.status === "error" && (
+        <ThreadConnectionNotice />
+        {(thread.status === "error" || stream.error || sendMessage.error) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
               <CircleAlertIcon />
               <AlertDescription>
                 <span>
-                  The last run hit an error before it could finish. Send another
-                  message to retry.
+                  {sendMessage.error instanceof Error
+                    ? sendMessage.error.message
+                    : stream.error instanceof Error
+                      ? stream.error.message
+                      : "The last run hit an error before it could finish. Send another message to retry."}
                 </span>
               </AlertDescription>
               {thread.traceUrl && (

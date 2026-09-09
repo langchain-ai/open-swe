@@ -471,7 +471,10 @@ export const ChatComposer = memo(function ChatComposer({
     try {
       await onSubmit?.(trimmed, images)
     } catch {
-      // Caller surfaces send errors (e.g. via react-query mutation state).
+      const current = editorRef.current?.readSnapshot().value ?? ""
+      const restored = current ? `${trimmed}\n\n${current}` : trimmed
+      applyPrompt(restored, restored.length)
+      setPendingImages((currentImages) => [...images, ...currentImages])
     } finally {
       submittingRef.current = false
       setIsSubmitting(false)

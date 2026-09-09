@@ -130,9 +130,57 @@ test.describe("finished transcript (shared fixture thread)", () => {
     );
     expect(flashed).toBe(false);
   });
+
+  test("restores the draft when the server rejects a send", async () => {
+    await waitForThreadNotBusy(page, threadId);
+    const commands = new RegExp(`/threads/${threadId}/(commands|messages)$`);
+    await page.route(commands, (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Session expired" }),
+      }),
+    );
+    try {
+      await typeIntoComposer(page, "Keep this rejected draft");
+      await expect(page.getByTestId("composer-editor")).toHaveText(
+        "Keep this rejected draft",
+      );
+      await expect(
+        page.getByText("Keep this rejected draft", { exact: true }),
+      ).toHaveCount(1);
+    } finally {
+      await page.unroute(commands);
+    }
+  });
 });
 
 test.describe("transcript rendering", () => {
+  test("delivers a queued followup after reload", async ({ page }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = threadIdFromUrl(page);
+    await waitForThreadNotBusy(page, threadId);
+    await typeIntoComposer(page, "E2E_BUSY_HOLD:8 first queued-run test");
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+    await typeIntoComposer(page, "Durable followup after reload");
+    await expect(page.getByTestId("queued-message")).toContainText(
+      "Durable followup after reload",
+    );
+    await page.reload();
+    await waitForStateToContain(
+      page,
+      threadId,
+      "Durable followup after reload",
+    );
+    await waitForThreadNotBusy(page, threadId);
+    await expect(
+      page.getByText("Durable followup after reload", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId("queued-message")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Stop run" })).toHaveCount(0);
+  });
+
   test("renders Slack mrkdwn and identifies the Slack sender", async ({
     page,
   }) => {
