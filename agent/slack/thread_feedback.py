@@ -85,17 +85,22 @@ def rating_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
     ]
 
 
-async def post_slack_feedback_prompt(thread_id: str, run_id: str, channel_id: str) -> None:
+async def post_slack_feedback_prompt(
+    thread_id: str, run_id: str, channel_id: str, *, require_answer: bool = False
+) -> None:
     """Prompt the run's requester once, using its exact response mapping."""
     try:
         store = _store(channel_id)
         record = await store.get(run_id)
         if record is not None and record.prompted:
             return
-        if record is None:
+        if record is None or require_answer:
             mapping = await lookup_slack_run_message_mapping(langgraph_client(), channel_id, run_id)
             if not mapping or mapping.get("run_id") != run_id:
                 return
+            if require_answer and mapping.get("question_answered") is not True:
+                return
+        if record is None:
             user_id = mapping.get("triggering_user_id")
             thread_ts = mapping.get("thread_ts")
             message_ts = mapping.get("message_ts")
@@ -134,6 +139,25 @@ async def post_slack_feedback_prompt(thread_id: str, run_id: str, channel_id: st
         logger.warning(
             "Could not post Slack feedback prompt", extra={"feedback_run_id": run_id}, exc_info=True
         )
+
+
+async def post_slack_pr_feedback_prompt(
+    thread_id: str, metadata: dict[str, Any], pr_url: str
+) -> None:
+    """Use the merged PR's original Slack run, never the latest conversation."""
+    records = metadata.get("pull_requests")
+    if not isinstance(records, list):
+        return
+    for record in records:
+        if not isinstance(record, dict) or record.get("url") != pr_url:
+            continue
+        origin = record.get("slack_feedback")
+        if not isinstance(origin, dict):
+            return
+        run_id, channel_id = origin.get("run_id"), origin.get("channel_id")
+        if isinstance(run_id, str) and run_id and isinstance(channel_id, str) and channel_id:
+            await post_slack_feedback_prompt(thread_id, run_id, channel_id)
+        return
 
 
 def _object(value: Any) -> dict[str, Any]:

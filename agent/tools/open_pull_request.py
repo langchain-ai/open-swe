@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx2
+from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dashboard.agent_usage import record_agent_pr_usage
@@ -472,6 +473,17 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     repo = record.get("repo_full_name")
     number = record.get("number")
     url = record.get("url")
+    for item in existing:
+        if (
+            isinstance(item, dict)
+            and (
+                (item.get("repo_full_name") == repo and item.get("number") == number)
+                or item.get("url") == url
+            )
+            and isinstance(item.get("slack_feedback"), dict)
+        ):
+            record = {**record, "slack_feedback": item["slack_feedback"]}
+            break
     return [
         item
         for item in existing
@@ -544,7 +556,8 @@ async def _record_pr_telemetry(
         return
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
-        cfg = RunConfig.from_runtime()
+        config = get_config()
+        cfg = RunConfig.from_config(config)
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
@@ -616,6 +629,12 @@ async def _record_pr_telemetry(
                 "diff_stats": diff_stats,
                 "resolves_thread": resolves_thread,
             }
+            run_id = config.get("run_id") or cfg.run_id
+            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
+                record["slack_feedback"] = {
+                    "run_id": str(run_id),
+                    "channel_id": cfg.slack_thread.channel_id,
+                }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",

@@ -251,3 +251,24 @@ async def test_exact_run_mapping_survives_overlapping_thread_runs() -> None:
         "thread_ts": "1.0",
         "message_ts": "1.2",
     }
+
+
+@pytest.mark.asyncio
+async def test_question_answered_marker_tracks_latest_reply_in_exact_run() -> None:
+    client: Any = _Client()
+    await store_slack_run_mapping(client, "C1", "1.0", "run-one")
+    await store_slack_message_run_mapping(
+        client, "C1", "1.0", "1.1", run_id="run-one", question_answered=True
+    )
+    assert (await lookup_slack_run_message_mapping(client, "C1", "run-one"))[
+        "question_answered"
+    ] is True
+    await store_slack_run_mapping(client, "C1", "1.0", "run-two")
+    await store_slack_message_run_mapping(client, "C1", "1.0", "1.2", run_id="run-two")
+    assert not (await lookup_slack_run_message_mapping(client, "C1", "run-two")).get(
+        "question_answered"
+    )
+    await store_slack_message_run_mapping(client, "C1", "1.0", "1.3", run_id="run-one")
+    assert not (await lookup_slack_run_message_mapping(client, "C1", "run-one")).get(
+        "question_answered"
+    )

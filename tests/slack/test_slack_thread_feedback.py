@@ -232,9 +232,11 @@ async def test_prompt_uses_exact_run_mapping_and_deduplicates(
 
 
 @pytest.mark.asyncio
-async def test_success_completion_prompts_even_without_cost_metadata(
-    context: Any, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("question_answered", [False, True])
+async def test_success_completion_only_prompts_for_answered_question(
+    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, question_answered: bool
 ) -> None:
+    fake_store.values(("slack_thread_feedback", "C1")).clear()
     client = AsyncMock()
     client.threads.get.return_value = {
         "metadata": {
@@ -243,12 +245,23 @@ async def test_success_completion_prompts_even_without_cost_metadata(
         }
     }
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    prompt = AsyncMock()
-    monkeypatch.setattr(completion, "post_slack_feedback_prompt", prompt)
+    monkeypatch.setattr(
+        feedback,
+        "lookup_slack_run_message_mapping",
+        AsyncMock(
+            return_value={
+                "run_id": "run-1",
+                "triggering_user_id": "U1",
+                "message_ts": "2.0",
+                "thread_ts": "1.0",
+                "question_answered": question_answered,
+            }
+        ),
+    )
     await completion.handle_run_completion(
         {"thread_id": "thread-1", "run_id": "run-1", "status": "success"}
     )
-    prompt.assert_awaited_once_with("thread-1", "run-1", "C1")
+    assert feedback.post_slack_ephemeral_message.await_count == int(question_answered)
 
 
 @pytest.mark.asyncio

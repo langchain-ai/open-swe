@@ -2,8 +2,9 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
-Slack runs offer private feedback and enqueue deferred session-cost enrichment; failures (``error`` /
-``timeout``) post a short reply so a run that died never leaves the user silent.
+Slack runs enqueue deferred session-cost enrichment and offer private feedback
+when a question was answered. Failures (``error`` / ``timeout``) post a short reply
+so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -329,7 +330,9 @@ async def _handle_successful_run(
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
     )
     if slack_thread is not None and slack_thread.channel_id and not automated:
-        await post_slack_feedback_prompt(thread_id, run_id, slack_thread.channel_id)
+        await post_slack_feedback_prompt(
+            thread_id, run_id, slack_thread.channel_id, require_answer=True
+        )
     prepare_run_id = _prepare_run_id(payload)
     if prepare_run_id is None:
         return {"status": "ignored", "reason": "missing prepare_run_id"}

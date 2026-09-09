@@ -1964,6 +1964,7 @@ async def store_slack_message_run_mapping(
     *,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
+    question_answered: bool = False,
 ) -> None:
     """Persist an exact run-to-Slack-message mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -1993,6 +1994,10 @@ async def store_slack_message_run_mapping(
             "thread_ts": thread_ts,
             "message_ts": message_ts,
         }
+        if question_answered:
+            value["question_answered"] = True
+        else:
+            value.pop("question_answered", None)
         if triggering_user_id:
             value["triggering_user_id"] = triggering_user_id
         await langgraph_client.store.put_item(

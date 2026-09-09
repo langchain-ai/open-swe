@@ -48,6 +48,44 @@ def test_pr_state_from_payload_missing_pull_request() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state,merged,expected", [("open", False, 0), ("closed", False, 0), ("closed", True, 1)]
+)
+async def test_only_merged_pr_prompts_original_slack_requester(
+    state: str,
+    merged: bool,
+    expected: int,
+) -> None:
+    metadata = {
+        "kind": "agent",
+        "pr_url": "https://github.com/lc/repo/pull/7",
+        "pull_requests": [
+            {
+                "url": "https://github.com/lc/repo/pull/7",
+                "state": "open",
+                "slack_feedback": {"run_id": "original-run", "channel_id": "C-original"},
+            }
+        ],
+        "source_context": {"slack_thread": {"channel_id": "C-later", "thread_ts": "3.0"}},
+    }
+    client = AsyncMock()
+    client.threads.search.return_value = [{"thread_id": "t1", "metadata": metadata}]
+    client.threads.get.return_value = {"metadata": metadata}
+    with (
+        patch("agent.webhooks.common.get_client", return_value=client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("agent.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
+        patch(
+            "agent.slack.thread_feedback.post_slack_feedback_prompt", new_callable=AsyncMock
+        ) as prompt,
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state=state, merged=merged))
+    assert prompt.await_count == expected
+    if expected:
+        prompt.assert_awaited_once_with("t1", "original-run", "C-original")
+
+
+@pytest.mark.asyncio
 async def test_update_agent_thread_pr_state_updates_matching_thread() -> None:
     fake_client = MagicMock()
     fake_client.threads.search = AsyncMock(
