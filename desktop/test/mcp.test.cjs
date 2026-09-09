@@ -183,6 +183,12 @@ test("cloud proxy streams SSE, forwards MCP headers both ways and validates path
   let release;
   const gate = new Promise((resolve) => (release = resolve));
   const backend = await fakeBackend(t, async (request, response) => {
+    if (request.url === "/dashboard/api/mcp-connections") {
+      response
+        .writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify({ connections: [{ id }] }));
+      return;
+    }
     assert.equal(request.url, `/dashboard/api/mcp-connections/${id}/proxy`);
     let body = "";
     for await (const chunk of request) body += chunk;
@@ -198,6 +204,16 @@ test("cloud proxy streams SSE, forwards MCP headers both ways and validates path
   });
   const manager = await brokerFixture(t, backend);
   const auth = { Authorization: `Bearer ${manager.secret}` };
+  // Only connections the backend listed for this account can be proxied.
+  assert.equal(
+    (
+      await fetch(`${manager.url}/cloud/connections/${id}/proxy`, {
+        headers: auth,
+      })
+    ).status,
+    404,
+  );
+  await fetch(`${manager.url}/cloud/connections`, { headers: auth });
   const response = await fetch(`${manager.url}/cloud/connections/${id}/proxy`, {
     method: "POST",
     headers: {
@@ -225,7 +241,7 @@ test("cloud proxy streams SSE, forwards MCP headers both ways and validates path
     rest += Buffer.from(value).toString();
   }
   assert.equal(rest, "data: second\n\n");
-  const [headers] = backend.seen;
+  const [, headers] = backend.seen;
   assert.equal(headers.cookie, "osw_session=session-only");
   assert.equal(headers.origin, "open-swe://app");
   assert.equal(headers["mcp-session-id"], "client-session");
@@ -249,7 +265,7 @@ test("cloud proxy streams SSE, forwards MCP headers both ways and validates path
     ).status,
     404,
   );
-  assert.equal(backend.seen.length, 1);
+  assert.equal(backend.seen.length, 2);
 });
 
 test("cloud endpoints answer 503 without a backend session", async (t) => {

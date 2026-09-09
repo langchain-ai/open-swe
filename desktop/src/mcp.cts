@@ -177,6 +177,8 @@ class DesktopMcp {
   broker: any;
   url: string;
   secret: string;
+  // Connection ids the backend listed for this account; the proxy relays only to these.
+  cloudIds = new Map<string, string>();
   constructor(options) {
     this.options = options;
     this.secret = randomBytes(32).toString("base64url");
@@ -375,13 +377,27 @@ class DesktopMcp {
       },
     );
     const body = await upstream.text();
+    if (upstream.ok) {
+      const listed = JSON.parse(body).connections;
+      if (!Array.isArray(listed)) throw new Error("Invalid connection list");
+      this.cloudIds = new Map(
+        listed
+          .filter((entry) => /^[a-f0-9]{32}$/.test(entry?.id))
+          .map((entry) => [entry.id, entry.id]),
+      );
+    }
     response
       .writeHead(upstream.status, { "Content-Type": "application/json" })
       .end(body);
   }
-  async cloudProxy(request, response, id) {
+  async cloudProxy(request, response, requested) {
     const cloud = await this.requireCloud(response);
     if (!cloud) return;
+    const id = this.cloudIds.get(requested);
+    if (id === undefined) {
+      response.writeHead(404).end("Unknown cloud MCP connection");
+      return;
+    }
     const headers = { ...this.cloudHeaders(cloud) };
     for (const name of PROXY_REQUEST_HEADERS) {
       const value = request.headers[name];

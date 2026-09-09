@@ -83,8 +83,9 @@ The authenticated, loopback-only Electron broker exposes:
 - `GET /cloud/connections` proxies the selected backend's `/dashboard/api/mcp-connections` list
   (user scope) and returns its status and body verbatim; `503` with body `null` when no backend
   or dashboard session is available.
-- `GET|POST|DELETE /cloud/connections/{id}/proxy` (32 hex characters, no query string) streams
-  MCP traffic to `/dashboard/api/mcp-connections/{id}/proxy`. Only `Accept`, `Content-Type`,
+- `GET|POST|DELETE /cloud/connections/{id}/proxy` (no query string) streams MCP traffic to
+  `/dashboard/api/mcp-connections/{id}/proxy` for an id the most recent `/cloud/connections`
+  reply listed; anything else is `404`. Only `Accept`, `Content-Type`,
   `Mcp-Session-Id`, `Mcp-Protocol-Version` and `Last-Event-Id` are forwarded upstream (bodies are
   capped at 4 MiB); only `Content-Type` and `Mcp-Session-Id` come back, and SSE bodies are
   streamed without buffering.
