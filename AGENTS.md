@@ -41,6 +41,7 @@ The main agent and middleware stack are assembled in `agent/server.py`. Middlewa
 ## Conventions
 
 - Read relevant code and tests before editing. Fix root causes and keep diffs focused.
+- Do not include test-running or validation sections in pull request descriptions.
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep comments minimal and only explain non-obvious reasons.
