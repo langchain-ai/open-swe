@@ -16,6 +16,7 @@ from agent.slack.client import (
     lookup_slack_run_message_mapping,
     open_slack_modal,
     post_slack_ephemeral_message,
+    respond_to_slack_interaction,
     slack_channel_allows_operations,
     slack_thread_mutation_lock,
 )
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _RATE_PREFIX = "open_swe_feedback_rate_"
 _COMMENT_ACTION = "open_swe_feedback_comment"
+_DISMISS_ACTION = "open_swe_feedback_dismiss"
 _COMMENT_BLOCK = "feedback_comment"
 _RATINGS = ("😡 Very Bad", "🙁 Bad", "😐 Okay", "🙂 Good", "😍 Great")
 
@@ -42,6 +44,7 @@ class ThreadFeedback(BaseModel):
     message_ts: str
     user_id: str
     prompted: bool = False
+    dismissed: bool = False
     rating: int | None = Field(default=None, ge=1, le=5)
     comment: str = Field(default="", max_length=3000)
     last_rating_ts: Decimal = Decimal(0)
@@ -62,6 +65,15 @@ async def _locked_feedback(
         langgraph_client(), record.channel_id, record.thread_ts, purpose=lock_purpose
     ):
         yield await _store(record.channel_id).get(record.run_id)
+
+
+def _dismiss_button(run_id: str) -> dict[str, Any]:
+    return {
+        "type": "button",
+        "text": {"type": "plain_text", "text": "Dismiss"},
+        "action_id": _DISMISS_ACTION,
+        "value": run_id,
+    }
 
 
 def rating_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
@@ -91,7 +103,8 @@ def rating_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
                     "value": run_id,
                 }
                 for rating, label in enumerate(_RATINGS, start=1)
-            ],
+            ]
+            + [_dismiss_button(run_id)],
         },
     ]
 
@@ -201,7 +214,8 @@ def _action(payload: dict[str, Any]) -> dict[str, Any]:
             action = _object(value)
             action_id = action.get("action_id")
             if isinstance(action_id, str) and (
-                action_id.startswith(_RATE_PREFIX) or action_id == _COMMENT_ACTION
+                action_id.startswith(_RATE_PREFIX)
+                or action_id in {_COMMENT_ACTION, _DISMISS_ACTION}
             ):
                 return action
     return {}
@@ -224,7 +238,7 @@ async def _load_feedback(channel_id: str, run_id: str, user_id: str) -> ThreadFe
     return record if slack_channel_allows_operations(context) else None
 
 
-def comment_modal(record: ThreadFeedback) -> dict[str, Any]:
+def comment_modal(record: ThreadFeedback, response_url: str = "") -> dict[str, Any]:
     element: dict[str, Any] = {
         "type": "plain_text_input",
         "action_id": "comment",
@@ -237,7 +251,9 @@ def comment_modal(record: ThreadFeedback) -> dict[str, Any]:
     return {
         "type": "modal",
         "callback_id": _COMMENT_ACTION,
-        "private_metadata": json.dumps({"channel_id": record.channel_id, "run_id": record.run_id}),
+        "private_metadata": json.dumps(
+            {"channel_id": record.channel_id, "run_id": record.run_id, "response_url": response_url}
+        ),
         "title": {"type": "plain_text", "text": "Open SWE feedback"},
         "submit": {"type": "plain_text", "text": "Save"},
         "close": {"type": "plain_text", "text": "Cancel"},
@@ -302,7 +318,27 @@ async def _export_current_feedback(record: ThreadFeedback) -> None:
         )
 
 
-async def _acknowledge(record: ThreadFeedback, *, with_comment_button: bool) -> None:
+async def _acknowledge(
+    record: ThreadFeedback, *, with_comment_button: bool, response_url: str
+) -> None:
+    try:
+        async with _locked_feedback(record, purpose="feedback_response") as current:
+            record = current or record
+            if record.dismissed:
+                return
+            async with asyncio.timeout(8):
+                await _update_prompt(
+                    record,
+                    with_comment_button=with_comment_button and not record.comment,
+                    response_url=response_url,
+                )
+    except Exception:
+        logger.warning("Could not acknowledge saved Slack feedback")
+
+
+async def _update_prompt(
+    record: ThreadFeedback, *, with_comment_button: bool, response_url: str
+) -> None:
     text = "Thanks — your feedback was saved."
     block: dict[str, Any] = {"type": "section", "text": {"type": "plain_text", "text": text}}
     if with_comment_button:
@@ -312,12 +348,51 @@ async def _acknowledge(record: ThreadFeedback, *, with_comment_button: bool) -> 
             "action_id": _COMMENT_ACTION,
             "value": record.run_id,
         }
+    blocks = [block]
+    if with_comment_button:
+        blocks.append({"type": "actions", "elements": [_dismiss_button(record.run_id)]})
+    if response_url:
+        await respond_to_slack_interaction(
+            response_url,
+            {
+                "replace_original": True,
+                "response_type": "ephemeral",
+                "text": text,
+                "blocks": blocks,
+            },
+        )
+        return
     await post_slack_ephemeral_message(
         record.channel_id,
         record.user_id,
         text,
         thread_ts=record.thread_ts if record.thread_ts != "0" else None,
-        blocks=[block],
+        blocks=blocks,
+    )
+
+
+async def _dismiss_feedback(payload: dict[str, Any]) -> None:
+    channel_id = str(_object(payload.get("channel")).get("id") or "")
+    user_id = str(_object(payload.get("user")).get("id") or "")
+    try:
+        record = await _load_feedback(channel_id, str(_action(payload).get("value") or ""), user_id)
+        if record is None:
+            return
+        async with _locked_feedback(record, purpose="feedback_response") as current:
+            if current is None:
+                return
+            if await respond_to_slack_interaction(
+                str(payload.get("response_url") or ""), {"delete_original": True}
+            ):
+                async with _locked_feedback(current) as latest:
+                    if latest is not None:
+                        latest.dismissed = True
+                        await _store(channel_id).put(latest.run_id, latest)
+                return
+    except Exception:
+        logger.warning("Could not dismiss Slack feedback prompt")
+    await post_slack_ephemeral_message(
+        channel_id, user_id, "The prompt could not be dismissed. Please click Dismiss again."
     )
 
 
@@ -355,7 +430,9 @@ async def _process_rating(payload: dict[str, Any]) -> None:
                 channel_id, user_id, "Your rating could not be saved. Please try again."
             )
         return
-    await _acknowledge(record, with_comment_button=True)
+    await _acknowledge(
+        record, with_comment_button=True, response_url=str(payload.get("response_url") or "")
+    )
     await _export_feedback(record)
 
 
@@ -397,11 +474,19 @@ async def handle_slack_feedback_interaction(
         except Exception:
             logger.warning("Could not save Slack feedback comment", exc_info=True)
             return _comment_error("Your comment could not be saved. Please try again.")
-        background_tasks.add_task(_acknowledge, record, with_comment_button=False)
+        background_tasks.add_task(
+            _acknowledge,
+            record,
+            with_comment_button=False,
+            response_url=str(metadata.get("response_url") or ""),
+        )
         background_tasks.add_task(_export_feedback, record)
         return {}
 
     action = _action(payload)
+    if action.get("action_id") == _DISMISS_ACTION:
+        background_tasks.add_task(_dismiss_feedback, payload)
+        return {}
     if action.get("action_id") != _COMMENT_ACTION:
         background_tasks.add_task(_process_rating, payload)
         return {}
@@ -416,7 +501,9 @@ async def handle_slack_feedback_interaction(
             if (
                 isinstance(trigger_id, str)
                 and trigger_id
-                and await open_slack_modal(trigger_id, comment_modal(record))
+                and await open_slack_modal(
+                    trigger_id, comment_modal(record, str(payload.get("response_url") or ""))
+                )
             ):
                 return {}
     except Exception:
