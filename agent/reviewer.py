@@ -20,6 +20,7 @@ import logging
 import posixpath
 import re
 import warnings
+from pathlib import Path
 from typing import Any, NotRequired, cast
 
 logger = logging.getLogger(__name__)
@@ -75,10 +76,7 @@ from agent.review.diff import (
     materialize_review_diff,
     review_diff_range,
 )
-from agent.review.findings import (
-    REVIEW_FINDING_CAP,
-    Finding,
-)
+from agent.review.findings import Finding
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
@@ -273,7 +271,16 @@ carefully before reaching for unchanged code.
    reproducibility failure for this repository. Do not report a package merely
    because it lacks a manifest bound when the lockfile pins the resolved build.
 
-Use `add_finding` to record each candidate. Every finding must include a
+10. **Slop audit.** Run the bundled slop-review skill below yourself, in addition
+    to all core review passes. Use the already materialized review diff and PR
+    context instead of the skill's standalone diff commands. Its no-subagents
+    rule applies to this audit only; its stop rule does not skip publication.
+    Keep slop observations separate from correctness findings: do not send them
+    to `add_finding` or inflate their severity to pass the correctness bar.
+    Include the full audit report in your closing response after `publish_review`,
+    including the verdict, tables, savings, and kept-as-required section.
+
+Use `add_finding` to record each correctness candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
 do not copy or truncate the description. Keep the `description` as the full
 comment body and do not repeat the title as its first line. Don't over-investigate
@@ -289,11 +296,9 @@ publishing.
    the fan-out rule for the same defect across multiple sites.
 3. **Rank** open findings by severity and confidence. Prefer findings tied
    to a concrete failure mode over findings that merely describe a smell.
-4. Keep only the strongest small set. No two findings in the same file
-   unless they are independent failure modes with different user-visible
-   symptoms.
-5. Keep at most {review_finding_cap} findings.
-6. Cross-check PR title and top-changed directories: if a major changed
+4. Keep every defensible, independent finding. There is no findings cap; do
+   not discard valid findings to meet a quota or per-file limit.
+5. Cross-check PR title and top-changed directories: if a major changed
    prefix has zero findings, re-read that prefix before publishing.
 
 # Severity rubric (tied to runtime consequence)
@@ -435,7 +440,6 @@ def _reviewer_system_prompt(
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
-        review_finding_cap=REVIEW_FINDING_CAP,
         historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
@@ -445,6 +449,10 @@ def _reviewer_system_prompt(
             pr_number=pr_number,
             head_sha=head_sha,
         ),
+    )
+    prompt += (
+        "\n\n# Bundled slop-review skill\n\n"
+        + (Path(__file__).parent / "bundled_skills/slop-review/SKILL.md").read_text()
     )
     if reviewer_eval:
         prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
@@ -596,7 +604,7 @@ def _build_first_review_context(
         f"This is a first review — there are no existing findings recorded by "
         f"you.{historical_guidance} Record net-new issues with `add_finding`, "
         f"call `list_findings` to rank and dedup, then `publish_review` once at "
-        f"the end (cap {REVIEW_FINDING_CAP})."
+        f"the end, then include the slop audit report in your closing response."
     )
 
 
