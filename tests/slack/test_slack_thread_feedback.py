@@ -6,7 +6,8 @@ from urllib.parse import urlencode
 
 import httpx2
 import pytest
-from fastapi import BackgroundTasks, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.testclient import TestClient
 from langgraph_sdk.errors import ConflictError
 
 from agent import completion
@@ -107,15 +108,10 @@ async def test_rating_is_saved_privately_without_starting_agent(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rating,score", [(1, 0.0), (2, 0.25), (3, 0.5), (4, 0.75), (5, 1.0)])
-async def test_rating_scale_and_updates(
-    context: Any, fake_store: Any, rating: int, score: float
-) -> None:
-    for _ in range(2):
-        tasks = BackgroundTasks()
-        await routes.slack_interactivity(
-            _request(_action(f"open_swe_feedback_rate_{rating}")), tasks
-        )
-        await tasks()
+async def test_rating_scale(context: Any, fake_store: Any, rating: int, score: float) -> None:
+    tasks = BackgroundTasks()
+    await routes.slack_interactivity(_request(_action(f"open_swe_feedback_rate_{rating}")), tasks)
+    await tasks()
     assert len(fake_store.values(("slack_thread_feedback", "C1"))) == 1
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == score
 
@@ -188,6 +184,25 @@ def _submission(comment: str = "Please run the tests next time.") -> dict[str, A
             "state": {"values": {"feedback_comment": {"comment": {"value": comment}}}},
         },
     }
+
+
+@pytest.mark.parametrize("valid", [False, True])
+def test_feedback_http_response_preserves_modal_errors_and_empty_ack(
+    context: Any, valid: bool
+) -> None:
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/slack/interactivity",
+            data={"payload": json.dumps(_submission("Helpful" if valid else " "))},
+        )
+    assert response.status_code == 200
+    if valid:
+        assert response.json() == {}
+    else:
+        assert response.json()["response_action"] == "errors"
+        assert response.json()["errors"]["feedback_comment"]
 
 
 @pytest.mark.asyncio

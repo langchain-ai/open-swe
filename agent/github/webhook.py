@@ -344,7 +344,7 @@ async def trigger_pr_review_from_ref(
         source=source,
         input=review_input,
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
@@ -469,7 +469,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         source=source,
         input=run_input,
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
@@ -782,7 +782,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             },
         ),
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
@@ -1067,7 +1067,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
             },
         ),
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
@@ -1109,7 +1109,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         return
 
     thread_id = github_issue_thread_id(issue_id)
-    existing_thread = await common._thread_exists(thread_id)
+    existing_thread = await common.thread_exists(thread_id)
     github_token = await common._get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()
     reaction_token = github_token or app_token
@@ -1252,7 +1252,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         configurable,
         source="github_issue",
         input=run_input,
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
     )
     common.logger.info("LangGraph run dispatched for thread %s from GitHub issue", thread_id)

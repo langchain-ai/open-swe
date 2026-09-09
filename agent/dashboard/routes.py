@@ -230,6 +230,14 @@ from agent.dashboard.user_mappings import (
     upsert_mapping,
 )
 from agent.dashboard.voice import transcribe_audio
+from agent.dashboard.workspace_mcps import (
+    WorkspaceMCPRoute,
+    WorkspaceMCPUpdate,
+    delete_workspace_mcp,
+    get_workspace_mcp,
+    list_workspace_mcps,
+    save_workspace_mcp,
+)
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 from agent.review.analyzer_cron import remove_continual_cron
@@ -256,6 +264,7 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from agent.tool_loaders.workspace_mcp import discover_workspace_mcp
 from agent.utils.dashboard_links import (
     dashboard_api_base_url,
     dashboard_base_url,
@@ -977,6 +986,61 @@ async def api_get_team_credentials(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await get_team_credentials_status()
+
+
+workspace_mcp_router = APIRouter(route_class=WorkspaceMCPRoute)
+
+
+@workspace_mcp_router.get("/workspace-mcps")
+async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[dict[str, Any]]:
+    return await list_workspace_mcps()
+
+
+@workspace_mcp_router.put("/workspace-mcps/{name}")
+async def api_save_workspace_mcp(
+    name: str,
+    update: WorkspaceMCPUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    try:
+        return await save_workspace_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@workspace_mcp_router.delete("/workspace-mcps/{name}", status_code=204)
+async def api_delete_workspace_mcp(name: str, _admin: dict[str, Any] = _ADMIN_DEP) -> None:
+    await delete_workspace_mcp(name)
+
+
+@workspace_mcp_router.post("/workspace-mcps/{name}/headers/reveal")
+async def api_reveal_workspace_mcp_headers(
+    name: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> JSONResponse:
+    record = await get_workspace_mcp(name)
+    if record is None:
+        raise HTTPException(404, "MCP connection not found")
+    try:
+        headers = record.connection_headers()
+    except ValueError:
+        raise HTTPException(400, "MCP authentication headers could not be decrypted") from None
+    return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
+
+
+@workspace_mcp_router.post("/workspace-mcps/{name}/discover")
+async def api_discover_workspace_mcp(
+    name: str,
+    update: WorkspaceMCPUpdate | None = None,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[dict[str, str]]:
+    try:
+        return await discover_workspace_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+router.include_router(workspace_mcp_router)
 
 
 @router.put("/team-credentials/datadog")

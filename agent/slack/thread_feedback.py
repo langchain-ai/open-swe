@@ -19,6 +19,7 @@ from agent.slack.client import (
     slack_channel_allows_operations,
     slack_thread_mutation_lock,
 )
+from agent.slack.responses import FeedbackResponse
 from agent.store import TypedStore
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -335,13 +336,13 @@ async def _process_rating(payload: dict[str, Any]) -> None:
     await _export_feedback(record)
 
 
-def _comment_error(text: str) -> dict[str, Any]:
+def _comment_error(text: str) -> FeedbackResponse:
     return {"response_action": "errors", "errors": {_COMMENT_BLOCK: text}}
 
 
 async def handle_slack_feedback_interaction(
     payload: dict[str, Any], background_tasks: BackgroundTasks
-) -> dict[str, Any]:
+) -> FeedbackResponse:
     if payload.get("type") == "view_submission":
         try:
             async with asyncio.timeout(2.5):
