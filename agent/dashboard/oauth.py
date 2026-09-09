@@ -14,7 +14,8 @@ from urllib.parse import quote, urlparse
 
 import httpx2
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import APIKeyCookie
 from starlette.requests import HTTPConnection
 
 from agent.config import ENV
@@ -26,6 +27,7 @@ from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
+SESSION_COOKIE = APIKeyCookie(name=COOKIE_NAME, scheme_name="DashboardSession", auto_error=False)
 STATE_COOKIE_NAME = "osw_oauth_state"
 _DESKTOP_APP_ORIGIN = "open-swe://app"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -400,7 +402,9 @@ def build_settings_url() -> str | None:
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
-def require_session(request: HTTPConnection) -> dict[str, Any]:
+def require_session(
+    request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
+) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
