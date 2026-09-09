@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 
 import { AppShell } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,15 +12,20 @@ import { cn } from "@/lib/utils"
 export const Route = createFileRoute("/plugins")({
   validateSearch: (
     search: Record<string, unknown>
-  ): { tab: "mcps" | "skills" } => ({
+  ): { tab: "mcps" | "skills"; mcp?: string; mcp_error?: string } => ({
     tab: search.tab === "skills" ? "skills" : "mcps",
+    ...(typeof search.mcp === "string" ? { mcp: search.mcp } : {}),
+    ...(typeof search.mcp_error === "string"
+      ? { mcp_error: search.mcp_error }
+      : {}),
   }),
   component: PluginsPage,
 })
 
 function PluginsPage() {
   const session = useSession()
-  const { tab } = Route.useSearch()
+  const navigate = useNavigate()
+  const { tab, mcp, mcp_error } = Route.useSearch()
   if (session.isLoading)
     return (
       <main className="p-6">
@@ -64,6 +69,10 @@ function PluginsPage() {
           <McpConnectionsSection
             key={session.data.login}
             login={session.data.login}
+            notice={{ connected: mcp, error: mcp_error }}
+            onDismissNotice={() =>
+              void navigate({ to: "/plugins", search: { tab: "mcps" } })
+            }
           />
           <ConnectionsSection user={session.data} />
         </>

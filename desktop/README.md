@@ -34,8 +34,9 @@ standard `mcpServers` map; stdio entries accept `command`, `args`, `cwd`, `env`,
 `env_vars` or `env_passthrough`. HTTP entries accept `url` and `headers`, including localhost
 URLs. Commands are executables plus argument arrays, not shell command strings. The login-shell
 environment is resolved once when Electron starts; `${VAR}` and `${env:VAR}` substitute its values
-without shell evaluation. Only configure commands and servers you trust: stdio servers inherit
-that environment, including the user's local credentials.
+without shell evaluation. A stdio server receives only the login variables listed in `env_vars`
+or `env_passthrough`, its own `env` entries, and the MCP SDK's small default set (`HOME`, `PATH`,
+`USER`, ...). Only configure commands you trust: they run on the device with your permissions.
 
 ```json
 {
@@ -61,8 +62,8 @@ Discovery, dynamic client registration, PKCE authorization-code exchange, persis
 refresh are local. A loopback callback opens in the system browser through Electron. Public
 pre-registered clients may specify `oauth_client_id`; confidential pre-registered client secrets
 are not supported in the config file. A registered callback port must remain available; authorization
-fails rather than changing an existing client's registered redirect. OAuth runs for the same local
-server are serialized to avoid refresh-token rotation races.
+fails rather than changing an existing client's registered redirect. The interactive browser leg
+for one local server is serialized across concurrent runs; established sessions are not.
 
 ### Agent integration contract
 

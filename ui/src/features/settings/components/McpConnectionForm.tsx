@@ -38,24 +38,43 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 const selectClass =
   "h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
 
+function parseJson(text: string, fallback: string, message: string): unknown {
+  try {
+    return JSON.parse(text.trim() || fallback)
+  } catch {
+    throw new Error(message)
+  }
+}
+
 function stringMap(text: string, label: string): Record<string, string> {
-  const value: unknown = JSON.parse(text || "{}")
+  const message = `${label} must be a JSON object with string values.`
+  const value = parseJson(text, "{}", message)
   if (
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
     Object.values(value).some((item) => typeof item !== "string")
   ) {
-    throw new Error(`${label} must be a JSON object with string values.`)
+    throw new Error(message)
   }
   return value as Record<string, string>
 }
 
 function stringList(text: string): Array<string> {
-  const value: unknown = JSON.parse(text || "[]")
+  const message = "Arguments must be a JSON array of strings."
+  const value = parseJson(text, "[]", message)
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
-    throw new Error("Arguments must be a JSON array of strings.")
+    throw new Error(message)
   return value as Array<string>
+}
+
+const BEARER = /^Bearer\s+(\S+)$/i
+
+function localBearer(headers?: Record<string, string>): string | null {
+  const [entry, ...rest] = Object.entries(headers ?? {})
+  if (!entry || rest.length || entry[0].toLowerCase() !== "authorization")
+    return null
+  return BEARER.exec(entry[1])?.[1] ?? null
 }
 
 export function McpConnectionForm({
@@ -82,16 +101,23 @@ export function McpConnectionForm({
     local?.transport ?? "streamable_http"
   )
   const [url, setUrl] = useState(cloud?.url ?? local?.url ?? preset?.url ?? "")
+  const savedBearer = localBearer(local?.headers)
   const [auth, setAuth] = useState<McpAuthType>(
     cloud?.auth_type ??
-      local?.auth_type ??
+      (local?.auth_type === "oauth" || local?.auth_type === "none"
+        ? local.auth_type
+        : undefined) ??
       preset?.auth_type ??
-      (local?.headers && Object.keys(local.headers).length ? "headers" : "none")
+      (savedBearer
+        ? "bearer"
+        : local?.headers && Object.keys(local.headers).length
+          ? "headers"
+          : "none")
   )
   const [headers, setHeaders] = useState(
-    local?.headers ? JSON.stringify(local.headers, null, 2) : ""
+    local?.headers && !savedBearer ? JSON.stringify(local.headers, null, 2) : ""
   )
-  const [bearer, setBearer] = useState("")
+  const [bearer, setBearer] = useState(savedBearer ?? "")
   const [clientId, setClientId] = useState(
     cloud?.oauth_client_id ?? local?.oauth_client_id ?? ""
   )
@@ -312,8 +338,12 @@ export function McpConnectionForm({
                   <Input
                     value={passthrough}
                     onChange={(event) => setPassthrough(event.target.value)}
-                    placeholder="HOME, PATH, MY_API_KEY"
+                    placeholder="MY_API_KEY, GITHUB_TOKEN"
                   />
+                  <span className="font-normal text-muted-foreground">
+                    Only these login-shell variables reach the server, plus
+                    HOME, PATH, USER and a few other basics.
+                  </span>
                 </Field>
                 <Field label="Working directory (optional)">
                   <Input
@@ -365,7 +395,9 @@ export function McpConnectionForm({
                       }
                       placeholder={
                         cloud?.bearer_token_configured
-                          ? "Configured · leave blank to keep"
+                          ? cloud.url === url
+                            ? "Configured · leave blank to keep"
+                            : "New URL · enter the token again"
                           : "Enter token"
                       }
                     />
@@ -380,7 +412,9 @@ export function McpConnectionForm({
                       required={!cloud?.headers_configured || cloud.url !== url}
                       placeholder={
                         cloud?.headers_configured
-                          ? "Configured · leave blank to keep; {} to clear"
+                          ? cloud.url === url
+                            ? "Configured · leave blank to keep; {} to clear"
+                            : "New URL · enter the headers again"
                           : '{"X-API-Key": "…"}'
                       }
                     />

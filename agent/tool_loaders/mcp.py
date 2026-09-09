@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any, cast
 
 import httpx
@@ -22,20 +22,34 @@ logger = logging.getLogger(__name__)
 _auth_failures: dict[tuple[str, str], tuple[Any, ...]] = {}
 
 
-def prefixed_tool_name(server: str, tool: str) -> str:
-    digest = hashlib.sha256(f"{server}\0{tool}".encode()).hexdigest()[:20]
-    clean_server = re.sub(r"[^a-zA-Z0-9_-]", "_", server)[:18]
-    clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)[:20]
+_TOOL_NAME_LIMIT = 64
+
+
+def prefixed_tool_name(server: str, tool: str, *, scope: str = "") -> str:
+    """``mcp_<server>_<tool>_<digest>`` within provider name limits.
+
+    The tool keeps up to 32 characters so the model still recognises it; the
+    server label fills the rest. The digest covers ``scope`` (a connection id,
+    or the server label) so equal names from different connections never clash.
+    """
+    digest = hashlib.sha256(f"{scope or server}\0{tool}".encode()).hexdigest()[:10]
+    clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)[:32]
+    budget = _TOOL_NAME_LIMIT - len("mcp_") - len(clean_tool) - len(digest) - 2
+    clean_server = re.sub(r"[^a-zA-Z0-9_-]", "_", server).strip("_")[:budget]
     return f"mcp_{clean_server}_{clean_tool}_{digest}"
 
 
 def desktop_tool_groups(tools: Sequence[BaseTool]) -> dict[str, Sequence[BaseTool]]:
-    return {
-        "Device MCP": [
-            tool.model_copy(update={"name": prefixed_tool_name("desktop", tool.name)})
-            for tool in tools
-        ]
-    }
+    """Desktop tools arrive already named by ``agent.desktop_mcp``."""
+    return {"Device MCP": list(tools)}
+
+
+def group_name(name: str, connection_id: str, taken: Iterable[str]) -> str:
+    """The connection's own name, suffixed only when another group already uses it."""
+    candidate = name
+    if candidate in taken:
+        candidate = f"{name} ({connection_id[:8]})"
+    return candidate
 
 
 def _version(record: dict[str, Any]) -> tuple[Any, ...]:
@@ -58,7 +72,7 @@ class _Connection:
     def __init__(self, login: str, record: dict[str, Any]) -> None:
         self.login = login
         self.id = record["id"]
-        self.server = f"{record['name']}_{self.id}"
+        self.label = record["name"]
         self.version = _version(record)
         self.lock = asyncio.Lock()
 
@@ -112,7 +126,7 @@ class _Connection:
 
         return StructuredTool.from_function(
             coroutine=call,
-            name=prefixed_tool_name(self.server, tool.name),
+            name=prefixed_tool_name(self.label, tool.name, scope=self.id),
             description=tool.description,
             args_schema=schema,
             response_format="content_and_artifact",
@@ -130,7 +144,9 @@ class _Connection:
                 raise RuntimeError("MCP connection unavailable; retry later or reconnect") from None
 
 
-async def load_mcp_groups(login: str | None) -> dict[str, IntegrationGroup]:
+async def load_mcp_groups(
+    login: str | None, *, reserved_groups: Iterable[str] = ()
+) -> dict[str, IntegrationGroup]:
     """Use only the trusted triggering login supplied by the graph factory."""
     if not login:
         return {}
@@ -139,7 +155,8 @@ async def load_mcp_groups(login: str | None) -> dict[str, IntegrationGroup]:
     except Exception:
         logger.warning("Unable to read MCP connection catalog")
         return {}
-    groups = {}
+    groups: dict[str, IntegrationGroup] = {}
+    taken = set(reserved_groups)
     for record in records:
         if not record["enabled"]:
             continue
@@ -151,8 +168,12 @@ async def load_mcp_groups(login: str | None) -> dict[str, IntegrationGroup]:
                 extra={"connection_id": record["id"]},
             )
             continue
-        groups[f"MCP {record['id']}"] = IntegrationGroup(
-            tool_names=[prefixed_tool_name(connection.server, name) for name in names],
+        label = group_name(record["name"], record["id"], taken)
+        taken.add(label)
+        groups[label] = IntegrationGroup(
+            tool_names=[
+                prefixed_tool_name(connection.label, name, scope=connection.id) for name in names
+            ],
             load=connection.load,
         )
     return groups

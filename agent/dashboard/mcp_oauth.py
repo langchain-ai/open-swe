@@ -172,7 +172,13 @@ async def _client(
         raise MCPConnectionError(502, "Invalid OAuth client registration") from None
 
 
-async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
+_STATE_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+async def start_oauth(
+    login: str, id: str, redirect_uri: str, *, handoff: tuple[str, int] | None = None
+) -> str:
+    """Begin the authorization-code flow; ``handoff`` marks a desktop PKCE loopback flow."""
     validate_url(redirect_uri)
     async with connection_lock(login, id):
         record = await get_record(login, id)
@@ -192,6 +198,7 @@ async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
             "revision": record["revision"],
             "expires_at": time.time() + _FLOW_TTL,
             "redirect_uri": redirect_uri,
+            "handoff": list(handoff) if handoff else None,
             "verifier": pkce.code_verifier,
             "metadata": metadata,
             "resource": resource,
@@ -252,10 +259,25 @@ def _store_tokens(oauth: dict[str, Any], tokens: dict[str, Any]) -> None:
     oauth["expires_at"] = time.time() + tokens["expires_in"] if "expires_in" in tokens else None
 
 
-async def finish_oauth(state: str, code: str) -> dict[str, Any]:
+async def flow_handoff(state: str) -> tuple[str, int] | None:
+    """The desktop PKCE challenge and loopback port a pending flow was started with."""
+    if not isinstance(state, str) or not _STATE_PATTERN.fullmatch(state):
+        return None
+    stored = await get_value([_FLOW_NAMESPACE], state)
+    if stored is None:
+        return None
+    flow = unseal(stored)
+    handoff = flow.get("handoff")
+    if flow["expires_at"] < time.time() or not handoff:
+        return None
+    return handoff[0], handoff[1]
+
+
+async def finish_oauth(state: str, code: str, *, owner: str | None = None) -> dict[str, Any]:
+    """Exchange the code; ``owner`` pins the flow to the session finishing it."""
     if (
         not isinstance(state, str)
-        or not re.fullmatch(r"[A-Za-z0-9_-]{43}", state)
+        or not _STATE_PATTERN.fullmatch(state)
         or not isinstance(code, str)
         or not code
         or len(code) > 8192
@@ -268,7 +290,11 @@ async def finish_oauth(state: str, code: str) -> dict[str, Any]:
             raise MCPConnectionError(400, "OAuth state is invalid or expired")
         flow = unseal(stored)
         await delete_value(namespace, state)
-        if flow["state"] != state or flow["expires_at"] < time.time():
+        if (
+            flow["state"] != state
+            or flow["expires_at"] < time.time()
+            or (owner is not None and flow["owner"] != owner)
+        ):
             raise MCPConnectionError(400, "OAuth state is invalid or expired")
         login = flow["owner"]
         async with connection_lock(login, flow["id"]):
@@ -310,11 +336,19 @@ async def access_token_locked(login: str, record: dict[str, Any]) -> str:
     if expires_at is not None and expires_at <= time.time() + 60:
         if not tokens.get("refresh_token"):
             raise MCPConnectionError(409, "MCP OAuth authorization expired; reconnect")
+        # The pending flag makes a crash between the request and the store
+        # visible; a failure that reaches us here is handled, so clear it and
+        # let the next call retry rather than forcing a reconnect.
         oauth["refresh_pending"] = True
         await put_record(login, record)
-        refreshed = await _token(
-            oauth, {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}
-        )
+        try:
+            refreshed = await _token(
+                oauth, {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}
+            )
+        except MCPConnectionError:
+            oauth.pop("refresh_pending", None)
+            await put_record(login, record)
+            raise
         oauth.pop("refresh_pending")
         _store_tokens(oauth, refreshed)
         await put_record(login, record)

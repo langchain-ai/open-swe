@@ -27,8 +27,11 @@ from mcp.shared.auth import (
     ProtectedResourceMetadata,
 )
 
+from agent.tool_loaders.mcp import prefixed_tool_name
+
 logger = logging.getLogger(__name__)
 _ENV_LITERAL = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
+_RESERVED_ENV_PREFIXES = ("OPEN_SWE_MCP_", "OPEN_SWE_LOCAL_", "OPEN_SWE_OPENAI_OAUTH_")
 _oauth_locks: dict[str, asyncio.Lock] = {}
 _BROKER_URL = os.environ.pop("OPEN_SWE_MCP_BROKER_URL", "")
 _BROKER_TOKEN = os.environ.pop("OPEN_SWE_MCP_BROKER_TOKEN", "")
@@ -76,15 +79,6 @@ async def _post(broker: httpx.AsyncClient, path: str, data: dict[str, Any]) -> A
     return response.json()
 
 
-async def local_connections() -> list[dict[str, Any]]:
-    """Reread enabled connections for trusted loaders; never expose these credentials."""
-    async with _broker() as broker:
-        response = await broker.get("/runtime")
-        response.raise_for_status()
-        runtime = response.json()
-    return await _connections(runtime)
-
-
 async def _connections(runtime: dict[str, Any]) -> list[dict[str, Any]]:
     connections = []
     env = runtime["env"]
@@ -94,6 +88,7 @@ async def _connections(runtime: dict[str, Any]) -> list[dict[str, Any]]:
         connection = {
             **server,
             "name": f"local_{re.sub(r'[^a-zA-Z0-9_-]', '_', server['name'])[:20]}_{hashlib.sha256(server['name'].encode()).hexdigest()[:8]}",
+            "label": server["name"],
         }
         if server.get("url"):
             connection["url"] = _expand(server["url"], env)
@@ -101,16 +96,13 @@ async def _connections(runtime: dict[str, Any]) -> list[dict[str, Any]]:
                 key: _expand(value, env) for key, value in server.get("headers", {}).items()
             }
         else:
-            child_env = {
-                key: value
-                for key, value in env.items()
-                if not key.startswith(
-                    ("OPEN_SWE_MCP_", "OPEN_SWE_LOCAL_", "OPEN_SWE_OPENAI_OAUTH_")
-                )
-            }
+            # Only listed login variables reach the child; the MCP SDK adds its
+            # small safe default set (HOME, PATH, ...) on top.
+            child_env: dict[str, str] = {}
             for key in server.get("env_vars", []) + server.get("env_passthrough", []):
-                if key not in child_env:
+                if key not in env or key.startswith(_RESERVED_ENV_PREFIXES):
                     raise ValueError(f"MCP environment variable is not available: {key}")
+                child_env[key] = env[key]
             child_env.update(
                 {key: _expand(value, env) for key, value in server.get("env", {}).items()}
             )
@@ -133,11 +125,12 @@ async def _connections(runtime: dict[str, Any]) -> list[dict[str, Any]]:
             response.raise_for_status()
             for record in response.json()["connections"]:
                 if record["enabled"] and record["name"] not in {
-                    server["name"] for server in runtime["servers"]
+                    server["name"] for server in runtime["servers"] if server["enabled"]
                 }:
                     connections.append(
                         {
                             "name": f"cloud_{record['id']}",
+                            "label": record["name"],
                             "transport": "streamable_http",
                             "url": f"{base}/dashboard/api/mcp-connections/{quote(record['id'], safe='')}/proxy",
                             "headers": headers.copy(),
@@ -216,114 +209,130 @@ async def _oauth(
     broker: httpx.AsyncClient, connection: dict[str, Any]
 ) -> AsyncIterator[OAuthClientProvider]:
     name = connection["local_name"]
-    async with _oauth_locks.setdefault(name, asyncio.Lock()):
+    # Serialise only the credential read and the interactive browser leg so a
+    # second run of the same server is not blocked for this run's lifetime.
+    lock = _oauth_locks.setdefault(name, asyncio.Lock())
+    interactive = False
+    async with lock:
         record = await _post(
             broker, "/credentials", {"name": name, "key": connection["credential_key"]}
         )
-        callback: asyncio.Future[tuple[str, str | None]] = (
-            asyncio.get_running_loop().create_future()
-        )
-        expected_state: str | None = None
-        writers: set[asyncio.StreamWriter] = set()
+    callback: asyncio.Future[tuple[str, str | None]] = asyncio.get_running_loop().create_future()
+    expected_state: str | None = None
+    writers: set[asyncio.StreamWriter] = set()
 
-        async def receive(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            writers.add(writer)
-            try:
-                line = await asyncio.wait_for(reader.readline(), 10)
-                method, target, _ = line.decode("ascii").strip().split(" ", 2)
-                parsed = urlsplit(target)
-                fields = parse_qs(parsed.query)
-                state = fields.get("state", [""])[0]
-                valid = (
-                    method == "GET"
-                    and parsed.path == "/callback"
-                    and expected_state
-                    and secrets.compare_digest(state, expected_state)
-                )
-                if valid and not callback.done():
-                    if fields.get("error"):
-                        callback.set_exception(RuntimeError("MCP OAuth authorization was denied"))
-                    elif fields.get("code"):
-                        callback.set_result((fields["code"][0], state))
-                    else:
-                        valid = False
-                body = b"Return to Open SWE." if valid else b"Invalid OAuth callback."
-                status = b"200 OK" if valid else b"400 Bad Request"
-                writer.write(
-                    b"HTTP/1.1 "
-                    + status
-                    + b"\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: "
-                    + str(len(body)).encode()
-                    + b"\r\n\r\n"
-                    + body
-                )
-                await writer.drain()
-            except ValueError, UnicodeError, TimeoutError, ConnectionError:
-                pass
-            finally:
-                writer.close()
-                writers.discard(writer)
-
-        redirects = (
-            [connection["oauth_redirect_uri"]]
-            if connection.get("oauth_redirect_uri")
-            else record.get("client", {}).get("redirect_uris", [])
-        )
-        port = 0
-        if redirects:
-            parsed = urlsplit(redirects[0])
-            if parsed.hostname == "127.0.0.1" and parsed.scheme == "http":
-                port = parsed.port or 0
-        listener = await asyncio.start_server(receive, "127.0.0.1", port, limit=16384)
+    async def receive(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writers.add(writer)
         try:
-            redirect_uri = f"http://127.0.0.1:{listener.sockets[0].getsockname()[1]}/callback"
-            storage = _KeychainStorage(broker, name, connection["credential_key"], record)
-            metadata = OAuthClientMetadata(
-                client_name="Open SWE Desktop",
-                redirect_uris=[redirect_uri],
-                grant_types=["authorization_code", "refresh_token"],
-                response_types=["code"],
-                token_endpoint_auth_method=connection.get(
-                    "oauth_token_endpoint_auth_method", "none"
-                ),
-                scope=connection.get("oauth_scope"),
+            line = await asyncio.wait_for(reader.readline(), 10)
+            method, target, _ = line.decode("ascii").strip().split(" ", 2)
+            parsed = urlsplit(target)
+            fields = parse_qs(parsed.query)
+            state = fields.get("state", [""])[0]
+            valid = (
+                method == "GET"
+                and parsed.path == "/callback"
+                and expected_state
+                and secrets.compare_digest(state, expected_state)
             )
-            if connection.get("oauth_client_id") and not record.get("client"):
-                await storage.set_client_info(
-                    OAuthClientInformationFull(
-                        **metadata.model_dump(),
-                        client_id=connection["oauth_client_id"],
-                        client_secret=record.get("client_secret"),
-                    )
-                )
+            if valid and not callback.done():
+                if fields.get("error"):
+                    callback.set_exception(RuntimeError("MCP OAuth authorization was denied"))
+                elif fields.get("code"):
+                    callback.set_result((fields["code"][0], state))
+                else:
+                    valid = False
+            body = b"Return to Open SWE." if valid else b"Invalid OAuth callback."
+            status = b"200 OK" if valid else b"400 Bad Request"
+            writer.write(
+                b"HTTP/1.1 "
+                + status
+                + b"\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: "
+                + str(len(body)).encode()
+                + b"\r\n\r\n"
+                + body
+            )
+            await writer.drain()
+        except ValueError, UnicodeError, TimeoutError, ConnectionError:
+            pass
+        finally:
+            writer.close()
+            writers.discard(writer)
 
-            async def redirect(url: str) -> None:
-                nonlocal expected_state, callback
+    redirects = (
+        [connection["oauth_redirect_uri"]]
+        if connection.get("oauth_redirect_uri")
+        else record.get("client", {}).get("redirect_uris", [])
+    )
+    port = 0
+    if redirects:
+        parsed = urlsplit(redirects[0])
+        if parsed.hostname == "127.0.0.1" and parsed.scheme == "http":
+            port = parsed.port or 0
+    listener = await asyncio.start_server(receive, "127.0.0.1", port, limit=16384)
+    try:
+        redirect_uri = f"http://127.0.0.1:{listener.sockets[0].getsockname()[1]}/callback"
+        storage = _KeychainStorage(broker, name, connection["credential_key"], record)
+        metadata = OAuthClientMetadata(
+            client_name="Open SWE Desktop",
+            redirect_uris=[redirect_uri],
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            token_endpoint_auth_method=connection.get("oauth_token_endpoint_auth_method", "none"),
+            scope=connection.get("oauth_scope"),
+        )
+        if connection.get("oauth_client_id") and not record.get("client"):
+            await storage.set_client_info(
+                OAuthClientInformationFull(
+                    **metadata.model_dump(),
+                    client_id=connection["oauth_client_id"],
+                    client_secret=record.get("client_secret"),
+                )
+            )
+
+        async def redirect(url: str) -> None:
+            nonlocal expected_state, callback, interactive
+            await lock.acquire()
+            interactive = True
+            try:
                 expected_state = parse_qs(urlsplit(url).query)["state"][0]
                 callback = asyncio.get_running_loop().create_future()
                 await _post(broker, "/open", {"url": url})
+            except BaseException:
+                interactive = False
+                lock.release()
+                raise
 
-            async def wait_callback() -> tuple[str, str | None]:
+        async def wait_callback() -> tuple[str, str | None]:
+            nonlocal interactive
+            try:
                 return await asyncio.wait_for(callback, 300)
+            finally:
+                if interactive:
+                    interactive = False
+                    lock.release()
 
-            provider = _LocalOAuthProvider(
-                server_url=connection["url"],
-                client_metadata=metadata,
-                storage=storage,
-                redirect_handler=redirect,
-                callback_handler=wait_callback,
-            )
-            storage.provider = provider
-            yield provider
-        finally:
-            listener.close()
-            await listener.wait_closed()
-            for writer in writers.copy():
-                writer.close()
-            if not callback.done():
-                callback.cancel()
-            elif not callback.cancelled():
-                callback.exception()
+        provider = _LocalOAuthProvider(
+            server_url=connection["url"],
+            client_metadata=metadata,
+            storage=storage,
+            redirect_handler=redirect,
+            callback_handler=wait_callback,
+        )
+        storage.provider = provider
+        yield provider
+    finally:
+        if interactive:
+            interactive = False
+            lock.release()
+        listener.close()
+        await listener.wait_closed()
+        for writer in writers.copy():
+            writer.close()
+        if not callback.done():
+            callback.cancel()
+        elif not callback.cancelled():
+            callback.exception()
 
 
 @asynccontextmanager
@@ -387,4 +396,14 @@ async def _connection_tools(
         streams = await stack.enter_async_context(transport)
         session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
         await session.initialize()
-        yield await load_mcp_tools(session, server_name=connection["name"], tool_name_prefix=True)
+        tools = await load_mcp_tools(session)
+        yield [
+            tool.model_copy(
+                update={
+                    "name": prefixed_tool_name(
+                        connection["label"], tool.name, scope=connection["name"]
+                    )
+                }
+            )
+            for tool in tools
+        ]

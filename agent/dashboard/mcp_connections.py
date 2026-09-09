@@ -385,16 +385,24 @@ async def discover_connection(login: str, id: str) -> dict[str, Any]:
         return await _discover(login, await get_record(login, id))
 
 
-async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
+async def start_oauth(
+    login: str, id: str, redirect_uri: str, *, handoff: tuple[str, int] | None = None
+) -> str:
     from agent.dashboard.mcp_oauth import start_oauth as start
 
-    return await start(login, id, redirect_uri)
+    return await start(login, id, redirect_uri, handoff=handoff)
 
 
-async def finish_oauth(state: str, code: str) -> dict[str, Any]:
+async def oauth_handoff(state: str) -> tuple[str, int] | None:
+    from agent.dashboard.mcp_oauth import flow_handoff
+
+    return await flow_handoff(state)
+
+
+async def finish_oauth(state: str, code: str, *, owner: str | None = None) -> dict[str, Any]:
     from agent.dashboard.mcp_oauth import finish_oauth as finish
 
-    return await finish(state, code)
+    return await finish(state, code, owner=owner)
 
 
 def _session_token(login: str, record: dict[str, Any], upstream_id: str) -> str:

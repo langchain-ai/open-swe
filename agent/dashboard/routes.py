@@ -21,7 +21,13 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field
 
 from agent.config import ENV
@@ -718,11 +724,6 @@ async def get_mcp_connections(session: dict[str, Any] = _SESSION_DEP) -> dict[st
     }
 
 
-@router.get("/mcp-connections/presets")
-async def get_mcp_presets(_session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
-    return {"presets": mcp_connections.MCP_PRESETS}
-
-
 @router.post("/mcp-connections")
 async def save_mcp_connection(
     body: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
@@ -757,11 +758,27 @@ _MCP_STATE_MAX_LENGTH = 1024
 _MCP_STATE_COOKIE_MAX_LENGTH = 4096
 
 
+def _plugins_redirect(**params: str) -> RedirectResponse:
+    query = f"?{urlencode(params)}" if params else ""
+    return RedirectResponse(f"{_frontend_base_url()}/plugins{query}", status_code=302)
+
+
 @router.get("/mcp-connections/{id}/oauth/login")
-async def mcp_oauth_login(id: str, session: dict[str, Any] = _SESSION_DEP) -> RedirectResponse:
+async def mcp_oauth_login(
+    id: str,
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
+    session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    """Start provider consent; the desktop app passes a PKCE handoff like Slack connect."""
+    challenge = valid_handoff_challenge(desktop_handoff)
+    handoff = (challenge, desktop_port) if challenge and desktop_port else None
     url = await _mcp_result(
         mcp_connections.start_oauth(
-            session["sub"], id, f"{_api_base_url()}{_MCP_OAUTH_PATH}/oauth/callback"
+            session["sub"],
+            id,
+            f"{_api_base_url()}{_MCP_OAUTH_PATH}/oauth/callback",
+            handoff=handoff,
         )
     )
     states = parse_qs(urlsplit(url).query, keep_blank_values=True).get("state", [])
@@ -775,16 +792,17 @@ async def mcp_oauth_login(id: str, session: dict[str, Any] = _SESSION_DEP) -> Re
     if not 0 < len(cookie) <= _MCP_STATE_COOKIE_MAX_LENGTH:
         raise HTTPException(502, "MCP OAuth state cookie is invalid")
     response = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
-    secure, _ = _cookie_security()
-    response.set_cookie(
-        _MCP_STATE_COOKIE,
-        cookie,
-        max_age=600,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-        path=_MCP_OAUTH_PATH,
-    )
+    if handoff is None:
+        secure, _ = _cookie_security()
+        response.set_cookie(
+            _MCP_STATE_COOKIE,
+            cookie,
+            max_age=600,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path=_MCP_OAUTH_PATH,
+        )
     return response
 
 
@@ -794,8 +812,34 @@ async def mcp_oauth_callback(
     state: str,
     code: str | None = None,
     error: str | None = None,
-    session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
+    """Finish consent in the browser, or hand a desktop flow back over the loopback port.
+
+    A desktop flow's browser holds neither the session nor the state cookie, so
+    it gets a PKCE-bound code that only the app holding the verifier can redeem;
+    the code carries the flow state, never an account.
+    """
+    handoff = None
+    if 0 < len(state) <= _MCP_STATE_MAX_LENGTH and state.isascii():
+        handoff = await _mcp_result(mcp_connections.oauth_handoff(state))
+    if handoff is not None:
+        if error or not code:
+            return PlainTextResponse(
+                "MCP authorization was denied. Return to Open SWE and try again.",
+                status_code=400,
+                headers={"Cache-Control": "no-store"},
+            )
+        challenge, port = handoff
+        handoff_code = issue_connect_handoff(
+            provider="mcp", challenge=challenge, claims={"state": state, "code": code}
+        )
+        return RedirectResponse(
+            desktop_callback_url(port, handoff_code),
+            status_code=302,
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
+    session = require_session(request)
     supplied = request.cookies.get(_MCP_STATE_COOKIE, "")
     binding = None
     if (
@@ -819,10 +863,10 @@ async def mcp_oauth_callback(
             raise HTTPException(400, "OAuth state mismatch; restart the connection")
         if error or not code:
             raise HTTPException(400, "MCP OAuth authorization denied or code missing")
-        await _mcp_result(mcp_connections.finish_oauth(state, code))
-        response: Response = RedirectResponse(f"{_frontend_base_url()}/plugins", status_code=302)
+        result = await _mcp_result(mcp_connections.finish_oauth(state, code, owner=session["sub"]))
+        response: Response = _plugins_redirect(mcp=result["id"])
     except HTTPException as exc:
-        response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        response = _plugins_redirect(mcp_error=str(exc.detail))
     secure, _ = _cookie_security()
     response.delete_cookie(_MCP_STATE_COOKIE, path=_MCP_OAUTH_PATH, secure=secure, samesite="lax")
     response.headers["Cache-Control"] = "no-store"
@@ -842,6 +886,20 @@ class DesktopConnectExchange(BaseModel):
 
     code: str
     verifier: str
+
+
+@router.post("/mcp-connections/desktop/exchange")
+async def mcp_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop MCP authorization with the app's own session."""
+    claims = redeem_connect_handoff(provider="mcp", code=body.code, verifier=body.verifier)
+    state = claims.get("state")
+    code = claims.get("code")
+    if not isinstance(state, str) or not isinstance(code, str):
+        raise HTTPException(400, "malformed handoff code")
+    return await _mcp_result(mcp_connections.finish_oauth(state, code, owner=session["sub"]))
 
 
 @router.get("/slack/login")

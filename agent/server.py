@@ -595,7 +595,10 @@ async def _load_integration_tools(
             300,
             lambda: load_currents_tools(profile_login),
         ),
-        load_mcp_groups(profile_login),
+        load_mcp_groups(
+            profile_login,
+            reserved_groups=("Observability", "Workspace MCPs", "Currents", "Browser", "Corridor"),
+        ),
     )
     return currents_tools, mcp_groups
 

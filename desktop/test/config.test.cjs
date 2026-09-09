@@ -166,7 +166,16 @@ test("sends login to the user's browser instead of the app window", () => {
 
 test("only accepts Slack for the desktop service handoff", () => {
   assert.equal(isConnectProvider("slack"), true);
-  for (const provider of ["notion", "mcp", "", null, undefined]) {
+  assert.equal(isConnectProvider(`mcp-connections/${"a".repeat(32)}`), true);
+  for (const provider of [
+    "notion",
+    "mcp",
+    "mcp-connections/../admin",
+    "mcp-connections/short",
+    "",
+    null,
+    undefined,
+  ]) {
     assert.equal(isConnectProvider(provider), false);
   }
 });
@@ -193,6 +202,18 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
   assert.equal(
     connectExchangeUrl("https://backend.example", "slack"),
     "https://backend.example/dashboard/api/slack/desktop/exchange",
+  );
+  const mcp = `mcp-connections/${"a".repeat(32)}`;
+  assert.equal(
+    connectLoginUrl("https://backend.example", mcp, {
+      challenge: "abc",
+      port: 51234,
+    }),
+    `https://backend.example/dashboard/api/${mcp}/oauth/login?desktop_handoff=abc&desktop_port=51234`,
+  );
+  assert.equal(
+    connectExchangeUrl("https://backend.example", mcp),
+    "https://backend.example/dashboard/api/mcp-connections/desktop/exchange",
   );
 });
 

@@ -437,9 +437,10 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     failures = await asyncio.gather(
         mo.access_token("alice", record), mo.access_token("alice", record), return_exceptions=True
     )
-    assert attempts == 1
-    assert sorted(error.status_code for error in failures) == [409, 502]
-    assert (await mc.get_record("alice", public["id"]))["oauth"]["refresh_pending"]
+    # Each caller retries in turn; a handled failure must not strand the connection.
+    assert attempts == 2
+    assert sorted(error.status_code for error in failures) == [502, 502]
+    assert "refresh_pending" not in (await mc.get_record("alice", public["id"]))["oauth"]
     await mc.delete_connection("alice", public["id"])
     with pytest.raises(mh.MCPConnectionError, match="not found"):
         await anext(config["auth"].async_auth_flow(httpx.Request("POST", config["url"])))
@@ -698,3 +699,38 @@ async def test_metadata_error_redaction(environment, monkeypatch):
     with pytest.raises(mh.MCPConnectionError) as error:
         await mh.request_json("POST", "https://example.com/token")
     assert "secret" not in str(error.value)
+
+
+async def test_desktop_handoff_flow_is_pinned_to_its_owner(environment, monkeypatch):
+    public = await create("oauth")
+    metadata = {
+        "issuer": "https://auth.example/",
+        "authorization_endpoint": "https://auth.example/authorize",
+        "token_endpoint": "https://auth.example/token",
+        "registration_endpoint": "https://auth.example/register",
+        "token_endpoint_auth_methods_supported": ["none"],
+    }
+
+    async def discover(url, authorization_server=""):
+        return metadata, url, "read"
+
+    async def request_json(method, url, **kwargs):
+        if url.endswith("register"):
+            return {**kwargs["json"], "client_id": "client"}
+        return {"access_token": "access", "token_type": "Bearer", "expires_in": 3600}
+
+    monkeypatch.setattr(mo, "_discover", discover)
+    monkeypatch.setattr(mo, "request_json", request_json)
+    url = await mo.start_oauth(
+        "alice", public["id"], "https://dashboard.example/callback", handoff=("challenge", 51234)
+    )
+    state = parse_qs(urlsplit(url).query)["state"][0]
+    assert await mo.flow_handoff(state) == ("challenge", 51234)
+    assert await mo.flow_handoff("not-a-state") is None
+    with pytest.raises(mh.MCPConnectionError, match="state"):
+        await mo.finish_oauth(state, "code", owner="bob")
+    assert await mo.flow_handoff(state) is None, "a rejected exchange consumes the flow"
+    browser = await mo.start_oauth("alice", public["id"], "https://dashboard.example/callback")
+    browser_state = parse_qs(urlsplit(browser).query)["state"][0]
+    assert await mo.flow_handoff(browser_state) is None
+    assert (await mo.finish_oauth(browser_state, "code", owner="alice"))["oauth_configured"]

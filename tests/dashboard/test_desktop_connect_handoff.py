@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import jwt
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -133,3 +134,88 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
     payload = jwt.decode(handoff, "test-secret", algorithms=["HS256"])
     assert "alice" not in payload.values()
     assert set(payload) == {"slack_user_id", "email", "provider", "challenge", "iat", "exp"}
+
+
+def test_desktop_mcp_authorization_hands_off_and_finishes_under_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP OAuth follows the same loopback handoff; the code carries only the flow state."""
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    state = "s" * 43
+    flows: dict[str, tuple[str, int] | None] = {}
+    finished: list[tuple[str, str, str | None]] = []
+
+    async def start_oauth(login: str, id: str, redirect_uri: str, *, handoff=None) -> str:
+        flows[state] = handoff
+        return f"https://mcp.example/authorize?state={state}"
+
+    async def oauth_handoff(value: str):
+        return flows.get(value)
+
+    async def finish_oauth(value: str, code: str, *, owner: str | None = None):
+        finished.append((value, code, owner))
+        return {"id": "connection"}
+
+    monkeypatch.setattr(routes.mcp_connections, "start_oauth", start_oauth)
+    monkeypatch.setattr(routes.mcp_connections, "oauth_handoff", oauth_handoff)
+    monkeypatch.setattr(routes.mcp_connections, "finish_oauth", finish_oauth)
+
+    with _client() as client:
+        client.cookies.set(COOKIE_NAME, issue_session(login="alice", email=None, avatar_url=None))
+        login = client.get(
+            "/dashboard/api/mcp-connections/connection/oauth/login",
+            params={"desktop_handoff": _CHALLENGE, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        assert login.status_code == 302
+        assert routes._MCP_STATE_COOKIE not in login.headers.get("set-cookie", "")
+        assert flows[state] == (_CHALLENGE, 51234)
+
+        callback = _client().get(
+            "/dashboard/api/mcp-connections/oauth/callback",
+            params={"code": "provider-code", "state": state},
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302
+        location = urlparse(callback.headers["location"])
+        assert (location.scheme, location.netloc, location.path) == (
+            "http",
+            "127.0.0.1:51234",
+            "/callback",
+        )
+        handoff = parse_qs(location.query)["code"][0]
+        assert finished == [], "the callback alone must not exchange the code"
+
+        denied = _client().get(
+            "/dashboard/api/mcp-connections/oauth/callback",
+            params={"state": state, "error": "access_denied"},
+            follow_redirects=False,
+        )
+        assert denied.status_code == 400
+
+        wrong = client.post(
+            "/dashboard/api/mcp-connections/desktop/exchange",
+            json={"code": handoff, "verifier": "not-the-verifier"},
+            headers=_APP_ORIGIN,
+        )
+        assert wrong.status_code == 400
+        slack_slot = client.post(
+            "/dashboard/api/slack/desktop/exchange",
+            json={"code": handoff, "verifier": _VERIFIER},
+            headers=_APP_ORIGIN,
+        )
+        assert slack_slot.status_code == 400, "codes are pinned to the provider that minted them"
+        exchange = client.post(
+            "/dashboard/api/mcp-connections/desktop/exchange",
+            json={"code": handoff, "verifier": _VERIFIER},
+            headers=_APP_ORIGIN,
+        )
+        assert exchange.status_code == 200
+        assert finished == [(state, "provider-code", "alice")]
+
+    payload = jwt.decode(handoff, "test-secret", algorithms=["HS256"])
+    assert "alice" not in payload.values()
+    assert set(payload) == {"state", "code", "provider", "challenge", "iat", "exp"}

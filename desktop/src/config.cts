@@ -16,6 +16,7 @@ const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
 const CONNECT_PROVIDERS = new Set(["slack"]);
+const MCP_CONNECT_PROVIDER = /^mcp-connections\/[a-f0-9]{32}$/;
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");
@@ -87,22 +88,31 @@ function desktopLoginUrl(backendUrl, { challenge, port }) {
 }
 
 function isConnectProvider(value) {
-  return typeof value === "string" && CONNECT_PROVIDERS.has(value);
+  return (
+    typeof value === "string" &&
+    (CONNECT_PROVIDERS.has(value) || MCP_CONNECT_PROVIDER.test(value))
+  );
 }
 
 // The app requests this itself, with its own session cookie, and opens only
 // the provider URL it redirects to — the browser never sees an endpoint that
 // needs the session.
 function connectLoginUrl(backendUrl, provider, { challenge, port }) {
-  const target = new URL(`/dashboard/api/${provider}/login`, backendUrl);
+  const path = MCP_CONNECT_PROVIDER.test(provider)
+    ? `/dashboard/api/${provider}/oauth/login`
+    : `/dashboard/api/${provider}/login`;
+  const target = new URL(path, backendUrl);
   target.searchParams.set("desktop_handoff", challenge);
   target.searchParams.set("desktop_port", String(port));
   return target.toString();
 }
 
 function connectExchangeUrl(backendUrl, provider) {
+  const base = MCP_CONNECT_PROVIDER.test(provider)
+    ? "mcp-connections"
+    : provider;
   return new URL(
-    `/dashboard/api/${provider}/desktop/exchange`,
+    `/dashboard/api/${base}/desktop/exchange`,
     backendUrl,
   ).toString();
 }

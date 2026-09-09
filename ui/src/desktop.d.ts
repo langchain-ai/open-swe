@@ -154,6 +154,8 @@ export interface DesktopTerminalBridge {
   ) => () => void
 }
 
+type ConnectProvider = "slack" | `mcp-connections/${string}`
+
 declare global {
   interface Window {
     openSweDesktop?: {
@@ -189,7 +191,7 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      connectService: (provider: "slack") => Promise<boolean>
+      connectService: (provider: ConnectProvider) => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string

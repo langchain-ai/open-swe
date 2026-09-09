@@ -1,4 +1,4 @@
-"""Focused desktop MCP lifecycle and OAuth protocol checks."""
+"""Desktop MCP lifecycle, environment allowlist, naming and OAuth protocol checks."""
 
 import asyncio
 import base64
@@ -21,7 +21,7 @@ from agent import desktop_mcp as mcp
 class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
     async def test_stdio_sessions_are_held_and_closed(self):
         runtime = {
-            "env": {"PATH": os.environ["PATH"], "VALUE": "literal-value"},
+            "env": {"PATH": os.environ["PATH"], "VALUE": "literal-value", "SECRET": "shell"},
             "servers": [
                 {
                     "name": "counter",
@@ -32,12 +32,15 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                         "from mcp.server.fastmcp import FastMCP\nm=FastMCP('counter')\nn=0\n@m.tool()\ndef count() -> str:\n global n\n n+=1\n return str(n)\nm.run()",
                     ],
                     "env": {"LITERAL": "${env:VALUE}:${VALUE}"},
+                    "env_passthrough": ["VALUE"],
                 }
             ],
             "cloud": None,
         }
         connections = await mcp._connections(runtime)
         self.assertEqual(connections[0]["env"]["LITERAL"], "literal-value:literal-value")
+        # Only listed login variables cross into the child; the SDK adds PATH itself.
+        self.assertEqual(set(connections[0]["env"]), {"LITERAL", "VALUE"})
         self.assertEqual(connections[0]["args"], runtime["servers"][0]["args"])
         runtime["servers"].extend(
             [
@@ -62,6 +65,7 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(mcp, "_BROKER_URL", "configured"), patch.object(mcp, "_broker", broker):
             async with mcp.local_mcp_tools() as tools:
                 self.assertEqual(len(tools), 1)
+                self.assertTrue(tools[0].name.startswith("mcp_counter_count_"), tools[0].name)
                 first = await tools[0].ainvoke({})
                 second = await tools[0].ainvoke({})
                 self.assertIn("1", str(first))
@@ -69,7 +73,25 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(anyio.ClosedResourceError):
                 await tools[0].ainvoke({})
 
-    async def test_cloud_uses_only_backend_proxy_and_local_name_wins(self):
+    async def test_env_allowlist_rejects_missing_or_reserved_variables(self):
+        for key in ("MISSING", "OPEN_SWE_MCP_BROKER_TOKEN"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                await mcp._connections(
+                    {
+                        "env": {"OPEN_SWE_MCP_BROKER_TOKEN": "secret"},
+                        "servers": [
+                            {
+                                "name": "s",
+                                "enabled": True,
+                                "command": "x",
+                                "env_vars": [key],
+                            }
+                        ],
+                        "cloud": None,
+                    }
+                )
+
+    async def test_cloud_uses_only_backend_proxy_and_enabled_local_name_wins(self):
         requests = []
         real_client = httpx.AsyncClient
 
@@ -100,7 +122,10 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
             connections = await mcp._connections(
                 {
                     "env": {},
-                    "servers": [{"name": "override", "enabled": False, "command": "ignored"}],
+                    "servers": [
+                        {"name": "cloud", "enabled": True, "command": "wins"},
+                        {"name": "override", "enabled": False, "command": "ignored"},
+                    ],
                     "cloud": {
                         "backend_url": "https://backend.example",
                         "cookie_name": "osw_session",
@@ -108,12 +133,13 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                     },
                 }
             )
-        self.assertEqual(len(connections), 1)
+        cloud = [connection for connection in connections if connection.get("cloud")]
+        self.assertEqual([connection["label"] for connection in cloud], ["override"])
         self.assertEqual(
-            connections[0]["url"],
-            f"https://backend.example/dashboard/api/mcp-connections/{'a' * 32}/proxy",
+            cloud[0]["url"],
+            f"https://backend.example/dashboard/api/mcp-connections/{'b' * 32}/proxy",
         )
-        self.assertEqual(connections[0]["headers"], {"Cookie": "osw_session=session"})
+        self.assertEqual(cloud[0]["headers"], {"Cookie": "osw_session=session"})
         self.assertEqual(requests[0].headers["cookie"], "osw_session=session")
         self.assertNotIn("upstream.invalid", json.dumps(connections))
         self.assertNotIn("must-not-copy", json.dumps(connections))
@@ -232,6 +258,8 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                     auth=provider, transport=httpx.MockTransport(upstream)
                 ) as client:
                     self.assertEqual((await client.get(server + "/mcp")).status_code, 200)
+                # The lock guards only the browser leg, so another run can proceed.
+                self.assertFalse(mcp._oauth_locks["oauth"].locked())
             self.assertEqual(record["tokens"]["refresh_token"], "refresh")
             self.assertEqual(
                 record["client"]["client_id"], "manual-client" if method else "registered"

@@ -14,8 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { api } from "@/lib/api"
-import { dashboardApiUrl } from "@/lib/dashboard-fetch"
+import { api, connectService } from "@/lib/api"
 import { mcpDesktopBridge } from "@/lib/mcp"
 import type { LocalMcpServer, McpConnection } from "@/lib/mcp"
 import { McpConnectionForm } from "./McpConnectionForm"
@@ -28,7 +27,20 @@ type ServerRow =
   | { source: "cloud"; record: McpConnection }
   | { source: "local"; record: LocalMcpServer }
 
-export function McpConnectionsSection({ login }: { login: string }) {
+export interface McpNotice {
+  connected?: string
+  error?: string
+}
+
+export function McpConnectionsSection({
+  login,
+  notice,
+  onDismissNotice,
+}: {
+  login: string
+  notice?: McpNotice
+  onDismissNotice?: () => void
+}) {
   const qc = useQueryClient()
   const localAvailable = useSyncExternalStore(
     subscribe,
@@ -84,12 +96,20 @@ export function McpConnectionsSection({ login }: { login: string }) {
       kind,
     }: {
       row: ServerRow
-      kind: "toggle" | "delete" | "test"
+      kind: "toggle" | "delete" | "test" | "authorize"
     }) => {
       setError(null)
       if (row.source === "cloud") {
         if (kind === "delete") return api.deleteMcpConnection(row.record.id)
         if (kind === "test") return api.testMcpConnection(row.record.id)
+        if (kind === "authorize") {
+          // The desktop app runs consent itself; the web redirect never resolves here.
+          const pending = connectService(`mcp-connections/${row.record.id}`)
+          if (!pending) return new Promise<never>(() => {})
+          if (!(await pending))
+            throw new Error("Authorization was cancelled or failed.")
+          return api.testMcpConnection(row.record.id)
+        }
         return api.saveMcpConnection({
           id: row.record.id,
           enabled: !row.record.enabled,
@@ -160,6 +180,23 @@ export function McpConnectionsSection({ login }: { login: string }) {
         <p role="alert" className="text-xs text-destructive">
           {error}
         </p>
+      )}
+      {(notice?.connected || notice?.error) && (
+        <div
+          role="status"
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${notice.error ? "border-destructive/40 text-destructive" : "border-border text-muted-foreground"}`}
+        >
+          <span>
+            {notice.error
+              ? `Authorization failed: ${notice.error}`
+              : `Authorized ${cloud.data?.connections.find((connection) => connection.id === notice.connected)?.name ?? "the MCP server"}.`}
+          </span>
+          {onDismissNotice && (
+            <Button size="sm" variant="ghost" onClick={onDismissNotice}>
+              Dismiss
+            </Button>
+          )}
+        </div>
       )}
       {cloud.isError && (
         <div
@@ -259,16 +296,17 @@ export function McpConnectionsSection({ login }: { login: string }) {
                           size="sm"
                           disabled={busy || !record.enabled}
                           onClick={() =>
-                            window.location.assign(
-                              dashboardApiUrl(
-                                `/mcp-connections/${encodeURIComponent(row.record.id)}/oauth/login`
-                              )
-                            )
+                            action.mutate({ row, kind: "authorize" })
                           }
                         >
-                          {row.record.oauth_configured
-                            ? "Reauthorize"
-                            : "Authorize"}
+                          {action.isPending &&
+                          action.variables?.kind === "authorize" &&
+                          action.variables.row.source === "cloud" &&
+                          action.variables.row.record.id === row.record.id
+                            ? "Authorizing…"
+                            : row.record.oauth_configured
+                              ? "Reauthorize"
+                              : "Authorize"}
                         </Button>
                       )}
                       <Button
@@ -363,7 +401,7 @@ export function McpConnectionsSection({ login }: { login: string }) {
           <div className="grid gap-3 sm:grid-cols-3">
             {cloud.data.presets.map((preset) => (
               <button
-                key={preset.url}
+                key={`${preset.name}:${preset.url}`}
                 type="button"
                 disabled={busy}
                 onClick={() => setEditor({ source: "cloud", preset })}

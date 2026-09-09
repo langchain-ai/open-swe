@@ -393,13 +393,15 @@ def test_mcp_oauth_encrypted_browser_binding(monkeypatch) -> None:
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     state = "mcp-browser-state"
     start = AsyncMock(return_value=f"https://mcp.example/authorize?state={state}")
-    finish = AsyncMock()
+    finish = AsyncMock(return_value={"id": "connection"})
     monkeypatch.setattr(routes.mcp_connections, "start_oauth", start)
     monkeypatch.setattr(routes.mcp_connections, "finish_oauth", finish)
+    monkeypatch.setattr(routes.mcp_connections, "oauth_handoff", AsyncMock(return_value=None))
     session = {"sub": "alice"}
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[routes.require_session] = lambda: session
+    monkeypatch.setattr(routes, "require_session", lambda request: session)
     path = routes._MCP_OAUTH_PATH
     cookie_name = routes._MCP_STATE_COOKIE
 
@@ -441,8 +443,11 @@ def test_mcp_oauth_encrypted_browser_binding(monkeypatch) -> None:
                 headers={"cookie": f"{cookie_name}={supplied}"},
                 follow_redirects=False,
             )
-            assert response.status_code == 400
-            assert "state mismatch" in response.json()["detail"]
+            assert response.status_code == 302
+            assert response.headers["location"].startswith(
+                "https://dashboard.example/plugins?mcp_error="
+            )
+            assert "state+mismatch" in response.headers["location"]
             assert "Max-Age=0" in response.headers["set-cookie"]
             assert response.headers["Cache-Control"] == "no-store"
             assert response.headers["Referrer-Policy"] == "no-referrer"
@@ -456,13 +461,13 @@ def test_mcp_oauth_encrypted_browser_binding(monkeypatch) -> None:
                 headers={"cookie": f"{cookie_name}={cookie}"},
                 follow_redirects=False,
             )
-            assert response.status_code == (302 if "code" in params else 400)
+            assert response.status_code == 302
             assert "Max-Age=0" in response.headers["set-cookie"]
             if "code" not in params:
-                assert "authorization denied or code missing" in response.json()["detail"]
+                assert "denied+or+code+missing" in response.headers["location"]
                 finish.assert_not_awaited()
-        assert response.headers["location"] == "https://dashboard.example/plugins"
-        finish.assert_awaited_once_with(state, "oauth-code")
+        assert response.headers["location"] == "https://dashboard.example/plugins?mcp=connection"
+        finish.assert_awaited_once_with(state, "oauth-code", owner="alice")
 
         for query in ("", "state=", "state=a&state=b", "state=a&state=", "state=" + "x" * 1025):
             start.return_value = f"https://mcp.example/authorize?{query}"
