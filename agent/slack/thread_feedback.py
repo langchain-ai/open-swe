@@ -69,6 +69,12 @@ def rating_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
                 "type": "mrkdwn",
                 "text": f"How did Open SWE do on {thread_link}?",
             },
+            "accessory": {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Add comments"},
+                "action_id": _COMMENT_ACTION,
+                "value": run_id,
+            },
         },
         {
             "type": "actions",
@@ -127,7 +133,7 @@ async def post_slack_feedback_prompt(
             posted = await post_slack_ephemeral_message(
                 channel_id,
                 record.user_id,
-                "How did Open SWE do on this thread? Rate it from Very Bad to Great.",
+                "How did Open SWE do on this thread? Choose a rating or add comments.",
                 thread_ts=record.thread_ts if record.thread_ts != "0" else None,
                 blocks=rating_blocks(run_id, thread_id),
             )
@@ -216,13 +222,17 @@ def comment_modal(record: ThreadFeedback) -> dict[str, Any]:
                 "type": "section",
                 "text": {
                     "type": "plain_text",
-                    "text": f"Your rating: {_RATINGS[(record.rating or 3) - 1]}",
+                    "text": (
+                        f"Your rating: {_RATINGS[record.rating - 1]}"
+                        if record.rating is not None
+                        else "Share your feedback on this thread. A rating is optional."
+                    ),
                 },
             },
             {
                 "type": "input",
                 "block_id": _COMMENT_BLOCK,
-                "optional": True,
+                "optional": record.rating is not None,
                 "label": {"type": "plain_text", "text": "Comments"},
                 "element": element,
             },
@@ -246,12 +256,12 @@ async def _export_feedback(record: ThreadFeedback) -> None:
 
 
 async def _export_current_feedback(record: ThreadFeedback) -> None:
-    if record.rating is None:
+    if record.rating is None and not record.comment:
         return
     synced = await create_langsmith_thread_feedback(
         record.agent_thread_id,
         f"slack_rating:{record.channel_id}:{record.user_id}:{record.run_id}",
-        score=(record.rating - 1) / 4,
+        score=(record.rating - 1) / 4 if record.rating is not None else None,
         comment=record.comment or None,
         source_info={
             "source": "slack_thread_feedback",
@@ -342,9 +352,9 @@ async def handle_slack_feedback_interaction(
                     str(metadata.get("run_id") or ""),
                     str(_object(payload.get("user")).get("id") or ""),
                 )
-                if record is None or record.rating is None:
+                if record is None:
                     return _comment_error(
-                        "This feedback is unavailable. Please rate the thread again."
+                        "This feedback is unavailable. Please reopen the form from the prompt."
                     )
                 values = _object(_object(view.get("state")).get("values"))
                 comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
@@ -353,10 +363,12 @@ async def handle_slack_feedback_interaction(
                 async with _locked_feedback(record) as current:
                     if current is None:
                         return _comment_error(
-                            "This feedback is unavailable. Please rate the thread again."
+                            "This feedback is unavailable. Please reopen the form from the prompt."
                         )
                     record = current
                     record.comment = comment.strip() if isinstance(comment, str) else ""
+                    if record.rating is None and not record.comment:
+                        return _comment_error("Enter a comment or choose a rating in the prompt.")
                     await _store(record.channel_id).put(record.run_id, record)
         except Exception:
             logger.warning("Could not save Slack feedback comment", exc_info=True)
@@ -374,7 +386,7 @@ async def handle_slack_feedback_interaction(
     try:
         async with asyncio.timeout(2.5):
             record = await _load_feedback(channel_id, str(action.get("value") or ""), user_id)
-            if record is None or record.rating is None:
+            if record is None:
                 return {}
             trigger_id = payload.get("trigger_id")
             if (

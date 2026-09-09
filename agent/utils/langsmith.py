@@ -283,7 +283,7 @@ async def create_langsmith_thread_feedback(
     thread_id: str,
     key: str,
     *,
-    score: float,
+    score: float | None,
     comment: str | None = None,
     source_info: dict[str, Any] | None = None,
 ) -> bool:

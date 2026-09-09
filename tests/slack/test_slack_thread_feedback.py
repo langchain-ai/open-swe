@@ -164,6 +164,20 @@ async def test_comment_modal_opens_with_saved_rating_and_comment(
     assert view["blocks"][-1]["element"]["initial_value"] == "Useful"
 
 
+@pytest.mark.asyncio
+async def test_original_prompt_opens_text_form_without_a_rating(context: Any) -> None:
+    blocks = feedback.rating_blocks("run-1", "thread-1")
+    button = blocks[0]["accessory"]
+    tasks = BackgroundTasks()
+    await routes.slack_interactivity(_request(_action(button["action_id"], button["value"])), tasks)
+    feedback.open_slack_modal.assert_awaited_once()
+    view = feedback.open_slack_modal.await_args.args[1]
+    assert not view["blocks"][-1]["optional"]
+    assert all(
+        "Your rating:" not in block.get("text", {}).get("text", "") for block in view["blocks"]
+    )
+
+
 def _submission(comment: str = "Please run the tests next time.") -> dict[str, Any]:
     return {
         "type": "view_submission",
@@ -192,6 +206,43 @@ async def test_comment_submission_updates_same_feedback(context: Any, fake_store
         "slack_rating:C1:U1:run-1",
     )
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.25
+
+
+@pytest.mark.asyncio
+async def test_comment_only_feedback_exports_without_inventing_rating(
+    context: Any, fake_store: Any
+) -> None:
+    tasks = BackgroundTasks()
+    assert (
+        await routes.slack_interactivity(_request(_submission("  Helpful explanation  ")), tasks)
+        == {}
+    )
+    await tasks()
+    record = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
+    assert record["comment"] == "Helpful explanation"
+    assert record["rating"] is None
+    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] is None
+    assert (
+        feedback.create_langsmith_thread_feedback.await_args.kwargs["comment"]
+        == "Helpful explanation"
+    )
+
+    rating_tasks = BackgroundTasks()
+    await routes.slack_interactivity(_request(_action()), rating_tasks)
+    await rating_tasks()
+    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 1.0
+    assert (
+        feedback.create_langsmith_thread_feedback.await_args.kwargs["comment"]
+        == "Helpful explanation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_comment_without_rating_keeps_form_open(context: Any) -> None:
+    tasks = BackgroundTasks()
+    result = await routes.slack_interactivity(_request(_submission("  ")), tasks)
+    assert result["response_action"] == "errors"
+    assert tasks.tasks == []
 
 
 @pytest.mark.asyncio

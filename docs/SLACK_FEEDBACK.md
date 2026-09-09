@@ -8,10 +8,10 @@ ignored for replies with choice buttons. Progress updates, clarifying questions,
 plans, approvals, PR creation, and PR closure without merging do not prompt.
 
 The requester sees the prompt in the same Slack thread. They can choose
-**Very Bad**, **Bad**, **Okay**, **Good**, or **Great**, then use **Add comments** in the
-acknowledgment to open an optional comment form. Selecting another rating updates
-their feedback. Comments are limited to 3,000 characters. Feedback does not start
-another agent run.
+**Very Bad**, **Bad**, **Okay**, **Good**, or **Great**, or use **Add comments** directly
+in that prompt to open a text form. Text feedback does not require a rating.
+Selecting a rating later adds it to the same feedback and preserves the comment.
+Comments are limited to 3,000 characters. Feedback does not start another agent run.
 
 The prompt uses the completed run's response mapping, so feedback on an older
 response remains associated with that run and its requester. PR records preserve
@@ -26,7 +26,8 @@ Ratings and comments are saved in the LangGraph Store under
 `("slack_thread_feedback", channel_id)`, keyed by run ID. They are also exported as
 LangSmith **thread feedback**, with a deterministic key
 `slack_rating:{channel_id}:{user_id}:{run_id}`. Scores range from 0 (Very Bad) to 1
-(Great), in increments of 0.25. A failed LangSmith export is logged; the Store record
+(Great), in increments of 0.25; text-only feedback has no score. A failed LangSmith
+export is logged; the Store record
 remains saved, and another rating or comment submission attempts export again.
 
 This uses the existing authenticated run-completion and GitHub webhooks, plus the
