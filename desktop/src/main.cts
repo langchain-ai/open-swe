@@ -34,6 +34,7 @@ const {
   repositoryMetadata,
   restoreWorktree,
   validBranchName,
+  watchProjectHead,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -143,6 +144,31 @@ function configureAutoUpdater() {
     .catch((error) =>
       console.warn("Could not check for desktop updates", error),
     );
+}
+
+async function checkForDesktopUpdates() {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (result?.isUpdateAvailable) {
+      await dialog.showMessageBox({
+        type: "info",
+        message: `${appRuntime.name} ${result.updateInfo.version} is available`,
+        detail: "The update is downloading and will be ready to install soon.",
+      });
+      return;
+    }
+    await dialog.showMessageBox({
+      type: "info",
+      message: `${appRuntime.name} is up to date`,
+      detail: `Version ${app.getVersion()} is the latest available version.`,
+    });
+  } catch (error) {
+    console.warn("Could not check for desktop updates", error);
+    dialog.showErrorBox(
+      `Could not check for ${appRuntime.name} updates`,
+      error.message,
+    );
+  }
 }
 
 function sendDesktopCommand(commandId) {
@@ -417,6 +443,36 @@ function configureDesktopIpc() {
     return listProjects();
   });
 
+  const projectHeadWatches = new Map<number, () => void>();
+  ipcMain.handle("desktop:watch-project-head", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const sender = event.sender;
+    projectHeadWatches.get(sender.id)?.();
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    if (!project) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const close = () => {
+      disposed = true;
+      stop?.();
+      projectHeadWatches.delete(sender.id);
+      sender.removeListener("destroyed", close);
+      sender.removeListener("did-start-navigation", close);
+    };
+    projectHeadWatches.set(sender.id, close);
+    sender.once("destroyed", close);
+    sender.once("did-start-navigation", close);
+    try {
+      stop = await watchProjectHead(project, () => {
+        if (!disposed && !sender.isDestroyed())
+          sender.send("desktop:project-head-changed", cwd);
+      });
+      if (disposed) stop();
+    } catch {
+      if (!disposed) close();
+    }
+  });
+
   ipcMain.handle("desktop:project-branches", async (event, cwd) => {
     requireTrustedDesktopIpc(event);
     const project = typeof cwd === "string" ? registeredProject(cwd) : null;
@@ -578,6 +634,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     return localThreadStore.update(input?.threadId, {
+      ...(typeof input?.title === "string" ? { title: input.title } : {}),
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.archived === "boolean"
         ? { archived: input.archived }
@@ -930,6 +987,11 @@ function createMenu() {
     accelerator: "CmdOrCtrl+,",
     click: () => sendDesktopCommand("open-settings"),
   };
+  const checkForUpdatesItem = {
+    label: "Check for Updates…",
+    enabled: app.isPackaged,
+    click: () => void checkForDesktopUpdates(),
+  };
   const template = [
     ...(process.platform === "darwin"
       ? [
@@ -938,6 +1000,7 @@ function createMenu() {
             submenu: [
               { role: "about" },
               settingsItem,
+              checkForUpdatesItem,
               backendSettingsItem,
               { type: "separator" },
               { role: "services" },
@@ -1010,10 +1073,12 @@ function createMenu() {
         { role: "togglefullscreen" },
       ],
     },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
-    },
+    process.platform === "darwin"
+      ? { role: "windowMenu" }
+      : {
+          label: "Window",
+          submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+        },
     {
       role: "help",
       submenu: [

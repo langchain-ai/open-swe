@@ -27,14 +27,14 @@ async def recreate_sandbox() -> dict[str, Any]:
 
     try:
         from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
-        from agent.server import _environment_slug
+        from agent.server import environment_slug
 
         login = resolve_github_login({"configurable": as_json_object(cfg.dump())})
         credentials = await get_sandbox_langsmith_credentials(login) if login else None
         kwargs = {"langsmith_credentials": credentials} if credentials is not None else {}
         old_sandbox_id, new_sandbox_id = await recreate_sandbox_for_thread(
             thread_id,
-            environment_slug=_environment_slug(cfg),
+            environment_slug=environment_slug(cfg),
             **kwargs,
         )
     except Exception as exc:

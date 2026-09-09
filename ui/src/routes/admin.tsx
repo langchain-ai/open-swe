@@ -31,6 +31,7 @@ import {
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { slackAppManifestJson } from "@/lib/slack-manifest"
+import { WorkspaceMCPSection } from "@/features/settings/components/WorkspaceMCPSection"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -66,6 +67,7 @@ function AdminPage() {
       />
 
       <SlackIntegrationSection />
+      <WorkspaceMCPSection />
 
       <LLMGatewaySection />
 
@@ -1023,6 +1025,62 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
               ...settings.data,
               default_agent_subagent_model: model,
               default_agent_subagent_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Agent routing: fast"
+          description="Model used for straightforward agent turns."
+          models={models}
+          model={settings.data?.default_agent_routing_fast_model ?? null}
+          effort={
+            settings.data?.default_agent_routing_fast_reasoning_effort ?? null
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_agent_routing_fast_model: model,
+              default_agent_routing_fast_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Agent routing: balanced"
+          description="Model used for ordinary implementation and investigation turns."
+          models={models}
+          model={settings.data?.default_agent_routing_balanced_model ?? null}
+          effort={
+            settings.data?.default_agent_routing_balanced_reasoning_effort ??
+            null
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_agent_routing_balanced_model: model,
+              default_agent_routing_balanced_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Agent routing: performance"
+          description="Model used for complex reasoning and plan-mode turns."
+          models={models}
+          model={settings.data?.default_agent_routing_performance_model ?? null}
+          effort={
+            settings.data?.default_agent_routing_performance_reasoning_effort ??
+            null
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_agent_routing_performance_model: model,
+              default_agent_routing_performance_reasoning_effort: effort,
             })
           }
           disabled={!settings.data || save.isPending}

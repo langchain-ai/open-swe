@@ -6,7 +6,7 @@ import mimetypes
 import re
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from langchain_core.messages.content import (
     ImageContentBlock,
     TextContentBlock,
@@ -86,7 +86,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
 
 async def fetch_image_block(
     image_url: str,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
 ) -> ImageContentBlock | TextContentBlock | None:
     """Fetch image bytes and build a model content block."""
     try:

@@ -221,12 +221,20 @@ export function groupSidebarThreadsByProject(
   }
 }
 
-export type SidebarSort = "updated" | "manual"
+export type SidebarSort = "created" | "updated" | "manual"
 
 function byRecency(left: SidebarThreadItem, right: SidebarThreadItem): number {
   return (
     right.updatedAt - left.updatedAt ||
     right.createdAt - left.createdAt ||
+    left.key.localeCompare(right.key)
+  )
+}
+
+function byCreation(left: SidebarThreadItem, right: SidebarThreadItem): number {
+  return (
+    right.createdAt - left.createdAt ||
+    right.updatedAt - left.updatedAt ||
     left.key.localeCompare(right.key)
   )
 }
@@ -238,7 +246,7 @@ export function sortSidebarThreads(
   // "manual" keeps the order the caller supplied — for pins that is the stored
   // pin order, which is the only manual ordering the user can actually set.
   if (mode === "manual") return [...threads]
-  return [...threads].sort(byRecency)
+  return [...threads].sort(mode === "created" ? byCreation : byRecency)
 }
 
 function localProjectName(cwd: string): string | null {

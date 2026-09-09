@@ -8,6 +8,7 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 """
 
 import asyncio
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,7 +47,7 @@ async def _capture_create_deep_agent_kwargs(
     captured: dict[str, object] = {}
     make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
-    thread_id = "thread-ctx"
+    thread_id = str((config.get("configurable") or {}).get("thread_id"))
 
     def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
         captured.update(kwargs)
@@ -78,6 +79,15 @@ async def _capture_create_deep_agent_kwargs(
             "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
+        ),
+        patch(
+            "agent.server.get_team_agent_routing_models",
+            new_callable=AsyncMock,
+            return_value={
+                "fast": ("google_genai:gemini-3.8-flash", "low"),
+                "balanced": ("openai:gpt-5.6-sol", "medium"),
+                "performance": ("anthropic:claude-opus-5", "high"),
+            },
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
@@ -141,6 +151,15 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
             return_value=None,
         ),
         patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
+        patch(
+            "agent.server._cached_agent_routing_models",
+            new_callable=AsyncMock,
+            return_value={
+                "fast": ("openai:gpt-5.6-sol", "low"),
+                "balanced": ("openai:gpt-5.6-sol", "medium"),
+                "performance": ("openai:gpt-5.6-sol", "high"),
+            },
+        ),
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
@@ -159,6 +178,64 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         await agent_task
 
     SANDBOX_BACKENDS.pop("thread-ctx", None)
+
+
+@pytest.mark.asyncio
+async def test_model_routing_is_applied_when_enabled() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert config["metadata"]["model_routing_applied"] is True
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls[1:4]] == [
+        "google_genai:gemini-3.8-flash",
+        "openai:gpt-5.6-sol",
+        "anthropic:claude-opus-5",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_is_disabled_by_default() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(config)
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls] == [
+        "openai:gpt-5.6-sol",
+        "openai:gpt-5.6-sol",
+        "openai:gpt-5.6-luna",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(
+        config,
+        profile={"model_routing_enabled": True},
+        thread_settings={
+            "model_id": "openai:gpt-5.6-sol",
+            "effort": "medium",
+            "subagent_model_id": "openai:gpt-5.6-sol",
+            "subagent_effort": "low",
+            "model_routing_enabled": False,
+        },
+    )
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
 
 
 @pytest.mark.asyncio

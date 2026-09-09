@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from langgraph_sdk.errors import ConflictError
 
@@ -65,7 +65,7 @@ class _Threads:
         assert ttl == baby_sit.WATCH_LOCK_TTL_MINUTES
         async with self.create_lock:
             if thread_id in self.active:
-                response = httpx.Response(409, request=httpx.Request("POST", "http://test"))
+                response = httpx2.Response(409, request=httpx2.Request("POST", "http://test"))
                 raise ConflictError("already exists", response=response, body=None)
             self.active.add(thread_id)
 

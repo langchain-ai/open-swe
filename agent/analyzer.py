@@ -53,7 +53,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.providers.langsmith import _configure_github_proxy
+from agent.sandboxes.providers.langsmith import configure_github_proxy
 from agent.sandboxes.state import unwrap_sandbox_backend
 from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt
@@ -98,7 +98,7 @@ async def _configure_sandbox_github_proxy(
     if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(backend.id, github_token)
+    await configure_github_proxy(backend.id, github_token)
 
 
 async def _cached_gateway_enabled() -> bool:

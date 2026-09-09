@@ -4,7 +4,8 @@ import logging
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2
+from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dashboard.agent_usage import record_agent_pr_usage
@@ -84,7 +85,7 @@ def _auth_headers(token: str) -> dict[str, str]:
     }
 
 
-def _github_message(resp: httpx.Response) -> str:
+def _github_message(resp: httpx2.Response) -> str:
     try:
         data = resp.json()
     except Exception:
@@ -96,7 +97,7 @@ def _github_message(resp: httpx.Response) -> str:
     return resp.text.strip() or f"HTTP {resp.status_code}"
 
 
-def _github_response_summary(resp: httpx.Response | None) -> str:
+def _github_response_summary(resp: httpx2.Response | None) -> str:
     """Report what GitHub actually returned so the agent can diagnose it itself."""
     if resp is None:
         return ""
@@ -152,7 +153,7 @@ def _failure_payload(
     likely_cause: str,
     branch_pushed: bool | None,
     failed_step: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     pushed = "unknown" if branch_pushed is None else "yes" if branch_pushed else "no"
     _record_open_pr_failure_telemetry(
@@ -233,7 +234,7 @@ def _access_failure_payload(
     reason: str,
     branch_pushed: bool | None,
     failed_step: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     return _failure_payload(
         code=_ACCESS_FAILURE_CODE,
@@ -264,7 +265,7 @@ def _branch_failure_payload(
     http_status: int,
     branch: str,
     branch_role: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     branch_pushed = False if branch_role == "head" else None
     return _failure_payload(
@@ -286,13 +287,13 @@ def _branch_failure_payload(
     )
 
 
-async def _github_get(client: httpx.AsyncClient, token: str, path: str) -> httpx.Response:
+async def _github_get(client: httpx2.AsyncClient, token: str, path: str) -> httpx2.Response:
     return await client.get(f"{GITHUB_API}{path}", headers=_auth_headers(token))
 
 
 async def _preflight_pr_access(
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     token: str,
     token_kind: str,
     owner: str,
@@ -433,7 +434,7 @@ async def _preflight_pr_access(
 
 
 async def _find_existing_pr(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, head: str
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, head: str
 ) -> dict[str, Any] | None:
     resp = await client.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
@@ -447,7 +448,7 @@ async def _find_existing_pr(
 
 
 async def _fetch_pr_details(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, pr_number: int
 ) -> dict[str, Any]:
     resp = await client.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
@@ -472,6 +473,17 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     repo = record.get("repo_full_name")
     number = record.get("number")
     url = record.get("url")
+    for item in existing:
+        if (
+            isinstance(item, dict)
+            and (
+                (item.get("repo_full_name") == repo and item.get("number") == number)
+                or item.get("url") == url
+            )
+            and isinstance(item.get("slack_feedback"), dict)
+        ):
+            record = {**record, "slack_feedback": item["slack_feedback"]}
+            break
     return [
         item
         for item in existing
@@ -530,7 +542,7 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
 
 async def _record_pr_telemetry(
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     token: str,
     owner: str,
     repo: str,
@@ -544,7 +556,8 @@ async def _record_pr_telemetry(
         return
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
-        cfg = RunConfig.from_runtime()
+        config = get_config()
+        cfg = RunConfig.from_config(config)
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
@@ -616,6 +629,12 @@ async def _record_pr_telemetry(
                 "diff_stats": diff_stats,
                 "resolves_thread": resolves_thread,
             }
+            run_id = config.get("run_id") or cfg.run_id
+            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
+                record["slack_feedback"] = {
+                    "run_id": str(run_id),
+                    "channel_id": cfg.slack_thread.channel_id,
+                }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
@@ -738,7 +757,7 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
     return lines
 
 
-async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, repo: str) -> bool:
+async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, repo: str) -> bool:
     """Return True only when GitHub confirms the repo is private."""
     resp = await client.get(f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token))
     if resp.status_code != 200:  # noqa: PLR2004
@@ -748,7 +767,7 @@ async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, re
 
 
 async def _maybe_append_references(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, body: str
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
     """Append run references to the PR body."""
     try:
@@ -800,7 +819,7 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx2.AsyncClient(timeout=30.0) as client:
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,

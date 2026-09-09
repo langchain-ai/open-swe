@@ -150,6 +150,7 @@ export interface Profile {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -164,6 +165,7 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -182,6 +184,12 @@ export interface TeamSettings {
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
   default_agent_subagent_reasoning_effort?: string | null
+  default_agent_routing_fast_model?: string | null
+  default_agent_routing_fast_reasoning_effort?: string | null
+  default_agent_routing_balanced_model?: string | null
+  default_agent_routing_balanced_reasoning_effort?: string | null
+  default_agent_routing_performance_model?: string | null
+  default_agent_routing_performance_reasoning_effort?: string | null
   default_repo?: string | null
   default_reviewer_model?: string | null
   default_reviewer_reasoning_effort?: string | null
@@ -207,6 +215,40 @@ export interface ProviderCredentialStatus {
 export interface TeamCredentialsStatus {
   datadog: ProviderCredentialStatus
   langsmith: ProviderCredentialStatus
+}
+
+export interface WorkspaceMCPOAuth {
+  grant_type?: "client_credentials"
+  token_url: string
+  client_id: string
+  scope?: string
+  token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic"
+}
+
+export type WorkspaceMCPOAuthUpdate = WorkspaceMCPOAuth & {
+  client_secret?: string | null
+}
+
+export interface WorkspaceMCP {
+  name: string
+  url: string
+  transport: "streamable_http" | "sse"
+  enabled: boolean
+  allowed_tools: string[]
+  header_names: string[]
+  oauth?: WorkspaceMCPOAuth | null
+  revision: string
+  updated_at: string
+}
+
+export interface WorkspaceMCPUpdate {
+  name: string
+  url: string
+  transport: WorkspaceMCP["transport"]
+  enabled: boolean
+  allowed_tools: string[]
+  headers?: Record<string, string> | null
+  oauth?: WorkspaceMCPOAuthUpdate | null
 }
 
 export interface DatadogConnectBody {
@@ -763,6 +805,26 @@ export const api = {
       body: JSON.stringify({ transcription_model }),
     }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
+  getWorkspaceMCPs: () => request<WorkspaceMCP[]>("/workspace-mcps"),
+  revealWorkspaceMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+    request<WorkspaceMCP>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkspaceMCP: (name: string) =>
+    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  discoverWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   connectDatadog: (body: DatadogConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/datadog", {
       method: "PUT",

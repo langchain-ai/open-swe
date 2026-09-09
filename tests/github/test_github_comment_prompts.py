@@ -88,6 +88,15 @@ def test_construct_system_prompt_includes_operational_safeguards() -> None:
     assert "do not call `schedule_thread_wakeup` again" in prompt
 
 
+def test_construct_system_prompt_renders_working_environment_path() -> None:
+    for source in ("slack", "desktop"):
+        prompt = construct_system_prompt(working_dir="/workspace/project", source=source)
+
+        working_environment = prompt.split("---", 1)[0]
+        assert "`/workspace/project`" in working_environment
+        assert "{working_dir}" not in working_environment
+
+
 def test_slack_information_only_response_uses_single_output_path() -> None:
     from agent.slack.tools.thread_reply import slack_thread_reply
 
@@ -99,6 +108,16 @@ def test_slack_information_only_response_uses_single_output_path() -> None:
     assert "complete answer in `message`, not merely a summary" in tool_guidance
     assert "do not repeat it in the final assistant response" in prompt
     assert "do not repeat it in the final assistant response" in tool_guidance
+
+
+def test_background_task_prompt_continues_without_acknowledging() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/workspace", source="background_task", slack_context=True
+    )
+
+    assert "background sandbox command completed" in prompt
+    assert "Do not send an initial acknowledgement" in prompt
+    assert "Make `slack_thread_reply` your first tool call" not in prompt
 
 
 def test_dashboard_prompt_uses_normal_assistant_responses() -> None:
@@ -170,11 +189,18 @@ def test_construct_system_prompt_shell_escapes_user_name() -> None:
     )
 
     system_prompt = construct_system_prompt(working_dir="/workspace")
-    sender_context = construct_sender_context(identity)
+    sender_context = construct_sender_context(
+        identity,
+        model_id="openai:gpt-5.6-luna",
+        reasoning_effort="xhigh",
+    )
 
     assert hostile not in system_prompt
     assert f"git config user.name {shlex.quote(hostile)}" in sender_context
     assert f"git config user.name {hostile}" not in sender_context
+    assert (
+        "Made by [Open SWE](https://openswe.vercel.app) · openai:gpt-5.6-luna (xhigh)"
+    ) in sender_context
 
 
 def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:

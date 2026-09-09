@@ -9,7 +9,7 @@ import {
   useCancelAgentThread,
 } from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 
 export interface ActiveRun {
   threadId: string
@@ -147,7 +147,7 @@ function StopButton({
 }
 
 function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
   const queryClient = useQueryClient()
   const [stopping, setStopping] = useState(false)
   const threadId = props.activeRun?.threadId ?? stream.threadId ?? ""

@@ -137,6 +137,20 @@ DASHBOARD_API_BASE_URL="http://localhost:3000"   # what browsers use for /dashbo
 
 and the GitHub App needs `http://localhost:3000/dashboard/api/auth/callback` as an additional callback URL. Keep both URLs on `http://` locally so the cookie is `SameSite=Lax`. `DASHBOARD_ALLOWED_ORIGINS` lists **additional** origins that may call the API with credentials; credentialed CORS is only enabled when it is set, and `*` is rejected.
 
+## Dashboard against a deployed backend
+
+`pnpm run dev:prod` runs the Vite dev server, hot reload and all, against a deployment instead of a local backend — UI work against real threads, repositories, and settings without running the agent locally. Put the deployment in `.env` (step 5's file, gitignored):
+
+```bash
+DASHBOARD_API_URL=https://your-deployment.example.com   # a preview deploy, not production
+```
+
+then `pnpm run dev:prod`. There is no default, because a fallback would be someone else's production. `DASHBOARD_API_URL` in the environment overrides the file, and it is the only key read out of `.env`: the rest of it is the local backend's secrets, which have no business in the environment of a dev server the browser talks to.
+
+The first run opens your browser to sign in. That leg still runs against the deployment's own registered GitHub callback — nothing changes on the GitHub App, and nothing changes on the deployment. It is the PKCE loopback handoff the desktop app uses (`?desktop_handoff=…&desktop_port=…`): the deployment redirects your browser to `http://127.0.0.1:<port>/callback` with a code that lives 120 seconds, and the script exchanges it at `/dashboard/api/auth/desktop/exchange` for a session. That tab then waits for Vite and sends you on to the dev server, so signing in ends where you want to be. The session lasts a week and is cached in `~/.cache/open-swe/dev-session.json`; after that you sign in again.
+
+The dev server then attaches that session to everything it proxies, and presents the deployment's own origin so its CSRF check accepts mutations. **The session is real.** A task started from `http://localhost:3000` is a real run on that deployment, and the Admin pages edit its real settings.
+
 `pnpm run build`, `pnpm run typecheck`, and `pnpm run test` run across the workspace through Turborepo (`pnpm --filter open-swe-dashboard run <script>` scopes one); `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) run once from the root over every JS and TS file.
 
 **Voice dictation** in the composer uses your OpenAI configuration (`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`); admins choose the transcription model on the Admin page.

@@ -1,12 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { memo, useEffect, useMemo } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -14,13 +6,12 @@ import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
+import { useTranscriptScroll } from "./useTranscriptScroll"
 import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
-
-const BOTTOM_LOCK_THRESHOLD_PX = 24
 
 function QueuedMessages({
   queuedMessages,
@@ -67,6 +58,7 @@ function QueuedMessages({
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
+  scrollKey,
   showPlanArtifact = false,
   emptyState,
   pollWorkflowApprovalsWhileActive = false,
@@ -87,142 +79,8 @@ export const Messages = memo(function MessagesComponent({
   onAutoApprove,
   onOpenFile,
 }: MessagesProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  const autoScrollEnabledRef = useRef(true)
-  const lastManualScrollTopRef = useRef(0)
-  const previousScrollTopRef = useRef(0)
-  const pendingScrollFrameRef = useRef<number | null>(null)
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
-
-  const clearScheduledScroll = useCallback(() => {
-    if (pendingScrollFrameRef.current === null) return
-    window.cancelAnimationFrame(pendingScrollFrameRef.current)
-    pendingScrollFrameRef.current = null
-  }, [])
-
-  const isNearBottom = useCallback((el: HTMLDivElement) => {
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    return distanceFromBottom <= BOTTOM_LOCK_THRESHOLD_PX
-  }, [])
-
-  const syncScrollButtonVisibility = useCallback(
-    (el: HTMLDivElement) => {
-      setShowScrollToBottom(!isNearBottom(el))
-    },
-    [isNearBottom]
-  )
-
-  const scrollToBottomNow = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-
-    el.scrollTop = el.scrollHeight
-    const currentTop = el.scrollTop
-    lastManualScrollTopRef.current = currentTop
-    previousScrollTopRef.current = currentTop
-    syncScrollButtonVisibility(el)
-  }, [syncScrollButtonVisibility])
-
-  const scheduleScrollToBottom = useCallback(() => {
-    if (!autoScrollEnabledRef.current) return
-
-    clearScheduledScroll()
-    pendingScrollFrameRef.current = window.requestAnimationFrame(() => {
-      pendingScrollFrameRef.current = null
-      if (!autoScrollEnabledRef.current) return
-      scrollToBottomNow()
-    })
-  }, [clearScheduledScroll, scrollToBottomNow])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-
-    const handleScroll = () => {
-      const currentTop = el.scrollTop
-      const scrolledUp = currentTop < previousScrollTopRef.current - 1
-      const nearBottom = isNearBottom(el)
-
-      if (scrolledUp) {
-        autoScrollEnabledRef.current = false
-        clearScheduledScroll()
-      } else if (nearBottom) {
-        autoScrollEnabledRef.current = true
-      }
-
-      syncScrollButtonVisibility(el)
-      lastManualScrollTopRef.current = currentTop
-      previousScrollTopRef.current = currentTop
-    }
-
-    scrollToBottomNow()
-    autoScrollEnabledRef.current = true
-
-    el.addEventListener("scroll", handleScroll, { passive: true })
-    return () => {
-      el.removeEventListener("scroll", handleScroll)
-      clearScheduledScroll()
-    }
-  }, [
-    clearScheduledScroll,
-    isNearBottom,
-    scrollToBottomNow,
-    syncScrollButtonVisibility,
-  ])
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-
-    if (autoScrollEnabledRef.current) {
-      scheduleScrollToBottom()
-      return
-    }
-
-    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight)
-    const targetTop = Math.min(lastManualScrollTopRef.current, maxTop)
-    const jumpDistance = Math.abs(el.scrollTop - targetTop)
-
-    if (jumpDistance > el.clientHeight * 0.5) {
-      el.scrollTop = targetTop
-    }
-
-    previousScrollTopRef.current = el.scrollTop
-    syncScrollButtonVisibility(el)
-  }, [
-    messages,
-    isStreaming,
-    scheduleScrollToBottom,
-    syncScrollButtonVisibility,
-  ])
-
-  useEffect(() => {
-    const scroller = scrollRef.current
-    const content = contentRef.current
-    if (!scroller || !content || typeof ResizeObserver === "undefined") return
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (autoScrollEnabledRef.current) {
-        scheduleScrollToBottom()
-        return
-      }
-
-      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-      if (lastManualScrollTopRef.current > maxTop) {
-        scroller.scrollTop = maxTop
-        lastManualScrollTopRef.current = maxTop
-        previousScrollTopRef.current = maxTop
-      }
-
-      syncScrollButtonVisibility(scroller)
-    })
-
-    resizeObserver.observe(scroller)
-    resizeObserver.observe(content)
-
-    return () => resizeObserver.disconnect()
-  }, [scheduleScrollToBottom, syncScrollButtonVisibility])
+  const { scrollRef, contentRef, showScrollToBottom, scrollToBottom } =
+    useTranscriptScroll({ scrollKey, messages, isStreaming })
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
@@ -234,19 +92,13 @@ export const Messages = memo(function MessagesComponent({
     isStreaming
   )
 
-  const handleScrollToBottom = useCallback(() => {
-    autoScrollEnabledRef.current = true
-    clearScheduledScroll()
-    scrollToBottomNow()
-  }, [clearScheduledScroll, scrollToBottomNow])
-
   useEffect(() => {
     if (!scrollControlRef) return
-    scrollControlRef.current = { scrollToBottom: handleScrollToBottom }
+    scrollControlRef.current = { scrollToBottom }
     return () => {
       scrollControlRef.current = null
     }
-  }, [handleScrollToBottom, scrollControlRef])
+  }, [scrollToBottom, scrollControlRef])
 
   useEffect(() => {
     onShowScrollToBottomChange?.(showScrollToBottom)
@@ -333,7 +185,7 @@ export const Messages = memo(function MessagesComponent({
         {scrollButtonSlot === "internal" && showScrollToBottom && (
           <button
             type="button"
-            onClick={handleScrollToBottom}
+            onClick={scrollToBottom}
             aria-label="Scroll to bottom"
             className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}

@@ -8,7 +8,7 @@ from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
-async def _resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
+async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
     if not isinstance(file_path, str) or not file_path.strip() or "\x00" in file_path:
         raise ValueError("file_path must be a non-empty sandbox path")
 
@@ -55,7 +55,7 @@ async def create_sandbox_file_download_url(
         if not content_type or "\r" in content_type or "\n" in content_type:
             raise ValueError("content_type must be a valid non-empty media type")
 
-    backend_proxy, path, _ = await _resolve_sandbox_file(file_path)
+    backend_proxy, path, _ = await resolve_sandbox_file(file_path)
     backend = unwrap_sandbox_backend(backend_proxy)
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(
