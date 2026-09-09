@@ -10,14 +10,23 @@ from agent.linear.client import LinearError
 from agent.linear.schema import ActionContent
 
 
-class _Part:
-    def __init__(self, event: str, data: dict[str, Any]) -> None:
-        self.event = event
-        self.data = data
+def _event(method: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "event",
+        "event_id": "1-0",
+        "method": method,
+        "params": {"namespace": [], "timestamp": 1, "data": data},
+    }
 
 
-def _started(call_id: str, tool_name: str, tool_input: dict[str, Any]) -> _Part:
-    return _Part(
+def _lifecycle(phase: str) -> dict[str, Any]:
+    event = _event("lifecycle", {"event": phase})
+    event["event_id"] = f"synth:run-1:lc||{phase}"
+    return event
+
+
+def _started(call_id: str, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    return _event(
         "tools",
         {
             "event": "tool-started",
@@ -39,15 +48,31 @@ async def test_tool_starts_become_ephemeral_actions(
     linear: AsyncMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(activities, "COMPLETION_WEBHOOK_URL", "https://open-swe/complete")
-    parts = [_started("call-1", "read_file", {"file_path": "/workspace/agent/server.py"})]
+    events = [
+        _started("old-call", "read_file", {"file_path": "/workspace/agent/before.py"}),
+        _lifecycle("running"),
+        _started("call-1", "read_file", {"file_path": "/workspace/agent/server.py"}),
+        _lifecycle("completed"),
+    ]
 
-    async def join_stream(*_args: object, **_kwargs: object):
-        for part in parts:
-            yield part
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        def subscribe(self, channels):
+            assert channels == ["lifecycle", "tools"]
+
+            async def iterator():
+                for event in events:
+                    yield event
+
+            return iterator()
 
     client = AsyncMock()
-    client.runs.join_stream = join_stream
-    client.runs.get.return_value = {"status": "success"}
+    client.threads.stream = lambda *_args, **_kwargs: ThreadStream()
 
     await activities.stream_linear_activities(
         client=client, thread_id="thread-1", run_id="run-1", session_id="session-1"

@@ -52,7 +52,7 @@ class LinearActivityStream:
             await linear_client().create_agent_activity(
                 self.session_id, content, ephemeral=ephemeral
             )
-        except (LinearError, httpx2.HTTPError):
+        except LinearError, httpx2.HTTPError:
             logger.warning(
                 "Disabling the Linear activity stream",
                 extra={"linear_session_id": self.session_id, "linear_run_id": self.run_id},

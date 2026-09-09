@@ -186,7 +186,7 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
 async def _emit_linear_activity(session_id: str, content: ResponseContent | ErrorContent) -> bool:
     try:
         await linear_client().create_agent_activity(session_id, content)
-    except (LinearError, httpx2.HTTPError):
+    except LinearError, httpx2.HTTPError:
         logger.warning(
             "Linear terminal activity failed",
             extra={"linear_session_id": session_id, "linear_activity_type": content.type},
