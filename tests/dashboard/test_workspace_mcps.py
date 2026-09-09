@@ -5,6 +5,7 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
+from mcp.types import Tool
 from pydantic import ValidationError
 
 from agent.dashboard import routes
@@ -89,12 +90,46 @@ async def test_url_change_requires_explicit_header_replacement(fake_store):
         {"headers": {"Authorization": "a", "authorization": "b"}},
         {"name": "invalid name"},
         {"transport": "stdio"},
+        {"allowed_tools": [""]},
+        {"allowed_tools": ["x" * 129]},
     ],
 )
 def test_invalid_connection_is_rejected(fields):
     values = {"name": "example", "url": "https://example.com/mcp", **fields}
     with pytest.raises(ValidationError):
         mcps.WorkspaceMCPUpdate(**values)
+
+
+async def test_all_discovered_tools_can_be_saved_for_large_catalogs(fake_store, monkeypatch):
+    tool_names = [f"tool_{index}" for index in range(201)]
+    monkeypatch.setattr(
+        loader,
+        "_discover_tools",
+        AsyncMock(return_value=[Tool(name=name, inputSchema={}) for name in tool_names]),
+    )
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
+    body = {"name": "example", "url": "https://example.com/mcp"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Origin": "http://test"},
+    ) as client:
+        catalog = await client.post("/dashboard/api/workspace-mcps/example/discover", json=body)
+        assert catalog.status_code == 200
+        selected = [tool["name"] for tool in catalog.json()]
+        assert selected == tool_names
+        saved = await client.put(
+            "/dashboard/api/workspace-mcps/example",
+            json={**body, "allowed_tools": selected},
+        )
+        assert saved.status_code == 200
+        assert saved.json()["allowed_tools"] == tool_names
+        assert (await client.get("/dashboard/api/workspace-mcps")).json()[0][
+            "allowed_tools"
+        ] == tool_names
 
 
 async def test_workspace_mcp_routes_are_admin_only_and_same_origin(fake_store, monkeypatch):

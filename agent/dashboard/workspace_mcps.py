@@ -49,7 +49,7 @@ _VALIDATION_MESSAGES = {
         "Headers must have valid, unique names and plain-text values without line breaks; "
         "use at most 20 headers and 8192 characters per value"
     ),
-    "allowed_tools": "Allowed tools must be a list of at most 200 non-empty names (1-128 characters)",
+    "allowed_tools": "Allowed tools must be a list of non-empty names (1-128 characters)",
 }
 
 
@@ -87,7 +87,7 @@ class WorkspaceMCPUpdate(BaseModel):
     transport: Literal["streamable_http", "sse"] = "streamable_http"
     enabled: bool = True
     headers: dict[str, str] | None = Field(default=None, repr=False)
-    allowed_tools: list[str] = Field(default_factory=list, max_length=200)
+    allowed_tools: list[str] = Field(default_factory=list)
 
     @field_validator("url")
     @classmethod

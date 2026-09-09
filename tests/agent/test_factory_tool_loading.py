@@ -126,7 +126,7 @@ async def test_tool_loaders_run_concurrently_and_gate_workspace_mcps(
             messages=[],
             tools=[],
             runtime=MagicMock(),
-            state={**state, "loaded_integration_tools": [mcp_tool.name]},
+            state={**state, "messages": [], "loaded_integration_tools": [mcp_tool.name]},
         )
         await dynamic.awrap_model_call(request, apply_plan_mode)
         assert captured == expected
