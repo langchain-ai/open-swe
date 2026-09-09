@@ -128,7 +128,9 @@ function openBrowser(url) {
     process.platform === "darwin"
       ? ["open", [url]]
       : process.platform === "win32"
-        ? ["cmd", ["/c", "start", "", url]]
+        ? // Not `cmd /c start`: cmd would read the login URL's `&` as a command
+          // separator and drop everything from `desktop_port` onwards.
+          ["rundll32", ["url.dll,FileProtocolHandler", url]]
         : ["xdg-open", [url]]
   const child = spawn(command, args, { stdio: "ignore", detached: true })
   child.on("error", () => {})

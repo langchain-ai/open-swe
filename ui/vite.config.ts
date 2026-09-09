@@ -185,18 +185,30 @@ function deployedBackendSession(): Plugin | null {
     name: "deployed-backend-session",
     enforce: "pre",
     configureServer(server) {
-      server.middlewares.use((req, _res, next) => {
+      const ownOrigins = new Set([
+        `http://localhost:${DEV_PORT}`,
+        `http://127.0.0.1:${DEV_PORT}`,
+      ])
+      server.middlewares.use((req, res, next) => {
+        if (matchesBackendPrefix(req.url)) {
+          // Any page open in the browser can post here while this runs, and a
+          // blanket rewrite would launder its Origin past the backend's CSRF
+          // check on a session it never had. Only this server's pages get that.
+          const from = req.headers.origin
+          if (from && !ownOrigins.has(from)) {
+            res.writeHead(403).end()
+            return
+          }
+          if (from) setRequestHeader(req, "origin", origin)
+          if (req.headers.referer)
+            setRequestHeader(req, "referer", `${origin}/`)
+        }
         const jar = (req.headers.cookie ?? "")
           .split(";")
           .map((cookie) => cookie.trim())
           .filter((cookie) => cookie && !cookie.startsWith("osw_session="))
         jar.push(`osw_session=${session}`)
         setRequestHeader(req, "cookie", jar.join("; "))
-        if (matchesBackendPrefix(req.url)) {
-          if (req.headers.origin) setRequestHeader(req, "origin", origin)
-          if (req.headers.referer)
-            setRequestHeader(req, "referer", `${origin}/`)
-        }
         next()
       })
     },
