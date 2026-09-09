@@ -54,8 +54,11 @@ def _store(channel_id: str) -> TypedStore[ThreadFeedback]:
 async def _locked_feedback(
     record: ThreadFeedback, *, purpose: str = "feedback"
 ) -> AsyncIterator[ThreadFeedback | None]:
+    lock_purpose = f"{purpose}:{record.user_id}"
+    if record.thread_ts == "0":
+        lock_purpose += f":{record.agent_thread_id}"
     async with slack_thread_mutation_lock(
-        langgraph_client(), record.channel_id, record.message_ts, purpose=purpose
+        langgraph_client(), record.channel_id, record.thread_ts, purpose=lock_purpose
     ):
         yield await _store(record.channel_id).get(record.run_id)
 
@@ -95,7 +98,7 @@ def rating_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
 async def post_slack_feedback_prompt(
     thread_id: str, run_id: str, channel_id: str, *, require_answer: bool = False
 ) -> None:
-    """Prompt the run's requester once, using its exact response mapping."""
+    """Prompt each requester once per Slack thread, using the qualifying run's mapping."""
     try:
         store = _store(channel_id)
         record = await store.get(run_id)
@@ -129,6 +132,16 @@ async def post_slack_feedback_prompt(
         async with _locked_feedback(record) as current:
             record = current or record
             if record.prompted:
+                return
+            prompt_filter: dict[str, Any] = {
+                "thread_ts": record.thread_ts,
+                "user_id": record.user_id,
+                "prompted": True,
+            }
+            # Code channel sessions share the "0" timestamp across agent threads.
+            if record.thread_ts == "0":
+                prompt_filter["agent_thread_id"] = record.agent_thread_id
+            if await store.search(filter=prompt_filter, limit=1):
                 return
             await store.put(run_id, record)
             posted = await post_slack_ephemeral_message(

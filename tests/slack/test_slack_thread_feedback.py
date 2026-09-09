@@ -483,10 +483,23 @@ async def test_older_rating_retry_does_not_revert_newer_feedback(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("second_run", ["run-1", "run-2"])
+@pytest.mark.parametrize("thread_ts", ["1.0", "0"])
 async def test_concurrent_completion_callbacks_post_one_prompt(
-    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch
+    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, second_run: str, thread_ts: str
 ) -> None:
-    fake_store.seed(("slack_thread_feedback", "C1"), "run-1", {**context, "prompted": False})
+    for run_id, message_ts in [("run-1", "2.0"), ("run-2", "3.0")]:
+        fake_store.seed(
+            ("slack_thread_feedback", "C1"),
+            run_id,
+            {
+                **context,
+                "run_id": run_id,
+                "message_ts": message_ts,
+                "thread_ts": thread_ts,
+                "prompted": False,
+            },
+        )
 
     async def post(*args: Any, **kwargs: Any) -> bool:
         await asyncio.sleep(0.01)
@@ -495,9 +508,59 @@ async def test_concurrent_completion_callbacks_post_one_prompt(
     post_mock = AsyncMock(side_effect=post)
     monkeypatch.setattr(feedback, "post_slack_ephemeral_message", post_mock)
     await asyncio.gather(
-        *[feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1") for _ in range(2)]
+        feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1"),
+        feedback.post_slack_feedback_prompt("thread-1", second_run, "C1"),
     )
     post_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "previous_changes,current_changes,should_prompt",
+    [
+        ({}, {}, False),
+        ({}, {"agent_thread_id": "thread-2"}, False),
+        ({}, {"thread_ts": "4.0"}, True),
+        ({}, {"user_id": "U2"}, True),
+        ({}, {"channel_id": "C2"}, True),
+        ({"thread_ts": "0"}, {"thread_ts": "0"}, False),
+        ({"thread_ts": "0"}, {"thread_ts": "0", "agent_thread_id": "thread-2"}, True),
+        ({"prompted": False}, {}, True),
+    ],
+)
+async def test_prompt_deduplicates_existing_records_by_requester_and_slack_thread(
+    context: Any,
+    fake_store: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    previous_changes: dict[str, Any],
+    current_changes: dict[str, Any],
+    should_prompt: bool,
+) -> None:
+    previous = {**context, "rating": 4, "comment": "Useful", **previous_changes}
+    fake_store.seed(("slack_thread_feedback", "C1"), "run-1", previous)
+    current = {**context, "run_id": "run-2", "message_ts": "3.0", **current_changes}
+    monkeypatch.setattr(
+        feedback,
+        "lookup_slack_run_message_mapping",
+        AsyncMock(
+            return_value={
+                "run_id": current["run_id"],
+                "triggering_user_id": current["user_id"],
+                "thread_ts": current["thread_ts"],
+                "message_ts": current["message_ts"],
+            }
+        ),
+    )
+
+    await feedback.post_slack_feedback_prompt(
+        current["agent_thread_id"], current["run_id"], current["channel_id"]
+    )
+
+    assert feedback.post_slack_ephemeral_message.await_count == int(should_prompt)
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == previous
+    assert ("run-2" in fake_store.values(("slack_thread_feedback", current["channel_id"]))) == (
+        should_prompt
+    )
 
 
 @pytest.mark.asyncio
