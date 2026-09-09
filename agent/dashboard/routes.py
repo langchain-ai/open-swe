@@ -195,7 +195,6 @@ from agent.dashboard.thread_api import (
     rename_dashboard_thread,
     resolve_dashboard_thread,
     send_dashboard_message,
-    stream_dashboard_thread,
     unpin_dashboard_thread,
 )
 from agent.dashboard.user_credentials import (
@@ -2501,24 +2500,3 @@ async def api_thread_history(
         content_type=request.headers.get("content-type", "application/json"),
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
-
-
-@router.get("/threads/{thread_id}/stream")
-async def api_stream_thread(
-    thread_id: str,
-    request: Request,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> StreamingResponse:
-    last_event_id = request.headers.get("last-event-id")
-
-    async def event_generator():
-        async for chunk in stream_dashboard_thread(
-            thread_id, session["sub"], email=session.get("email"), last_event_id=last_event_id
-        ):
-            yield chunk
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )

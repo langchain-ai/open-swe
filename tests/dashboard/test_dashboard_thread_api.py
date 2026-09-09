@@ -1125,76 +1125,75 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
 async def test_run_ttft_observer_records_first_assistant_text(
     monkeypatch,
 ) -> None:
-    def event(
-        method: str,
-        data: dict[str, object],
-        *,
-        namespace: list[str],
-        event_id: str,
-    ) -> bytes:
-        payload = {
+    def event(method: str, data: dict[str, object], event_id: str) -> dict[str, object]:
+        return {
             "type": "event",
             "event_id": event_id,
             "method": method,
-            "params": {"namespace": namespace, "timestamp": 2_250, "data": data},
+            "params": {"namespace": ["agent"], "timestamp": 2_250, "data": data},
         }
-        return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
 
-    stream_bytes = event(
-        "messages",
-        {"event": "message-start", "role": "ai"},
-        namespace=["agent"],
-        event_id="1-0",
-    ) + event(
-        "messages",
+    events = [
         {
-            "event": "content-block-delta",
-            "delta": {"type": "text-delta", "text": "Hello"},
+            "type": "event",
+            "event_id": "synth:historical-run:lc||running",
+            "method": "lifecycle",
+            "params": {"namespace": [], "timestamp": 1_000, "data": {"event": "running"}},
         },
-        namespace=["agent"],
-        event_id="2-0",
-    )
-    chunks = [stream_bytes[:35], stream_bytes[35:]]
+        event("messages", {"event": "message-start", "role": "ai"}, "old-1"),
+        event(
+            "messages",
+            {
+                "event": "content-block-delta",
+                "delta": {"type": "text-delta", "text": "Historical"},
+            },
+            "old-2",
+        ),
+        {
+            "type": "event",
+            "event_id": "synth:run-1:lc||running",
+            "method": "lifecycle",
+            "params": {"namespace": [], "timestamp": 2_000, "data": {"event": "running"}},
+        },
+        event("messages", {"event": "message-start", "role": "ai"}, "1-0"),
+        event(
+            "messages",
+            {
+                "event": "content-block-delta",
+                "delta": {"type": "text-delta", "text": "Hello"},
+            },
+            "2-0",
+        ),
+    ]
 
-    class FakeResponse:
-        status_code = 200
-
-        def raise_for_status(self) -> None:
-            pass
-
-        async def aiter_bytes(self):
-            for chunk in chunks:
-                yield chunk
-
-    class FakeStreamContext:
-        async def __aenter__(self) -> FakeResponse:
-            return FakeResponse()
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
-    class FakeAsyncClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> FakeAsyncClient:
+    class FakeThreadStream:
+        async def __aenter__(self):
             return self
 
         async def __aexit__(self, *args: object) -> None:
             pass
 
-        def stream(self, method: str, url: str, **kwargs: object) -> FakeStreamContext:
-            assert method == "GET"
-            assert url.endswith("/threads/thread-1/runs/run-1/stream")
-            headers = kwargs["headers"]
-            assert headers["Content-Type"] == "application/json"
-            assert headers["Accept"] == "text/event-stream"
-            assert headers["Last-Event-ID"] == "-1"
-            assert kwargs["params"] == {"stream_mode": "messages"}
-            return FakeStreamContext()
+        def subscribe(self, channels, **kwargs):
+            assert channels == ["lifecycle", "messages"]
+            assert kwargs == {"namespaces": [[]], "depth": 10}
+
+            async def iterator():
+                for item in events:
+                    yield item
+
+            return iterator()
+
+    class FakeThreads:
+        def stream(self, thread_id: str, *, assistant_id: str) -> FakeThreadStream:
+            assert thread_id == "thread-1"
+            assert assistant_id == "agent"
+            return FakeThreadStream()
+
+    class FakeClient:
+        threads = FakeThreads()
 
     record = AsyncMock()
-    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
 
     await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
@@ -1204,6 +1203,63 @@ async def test_run_ttft_observer_records_first_assistant_text(
         thread_id="thread-1",
         started_at_ms=1_000,
     )
+
+
+@pytest.mark.parametrize("phase", ["completed", "failed", "interrupted"])
+async def test_run_ttft_observer_closes_when_target_run_ends_without_text(
+    monkeypatch, phase: str
+) -> None:
+    def lifecycle(run_id: str, phase: str, namespace: list[str]) -> dict[str, object]:
+        return {
+            "method": "lifecycle",
+            "event_id": f"synth:{run_id}:lc||{phase}",
+            "params": {"namespace": namespace, "data": {"event": phase}},
+        }
+
+    target_ended = False
+    closed = False
+    read_after_end = False
+
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            nonlocal closed
+            closed = True
+
+        async def subscribe(self, *args, **kwargs):
+            nonlocal target_ended, read_after_end
+            yield lifecycle("historical-run", phase, [])
+            yield lifecycle("run-1", "running", [])
+            yield lifecycle("run-1", phase, ["subagent"])
+            target_ended = True
+            yield lifecycle("run-1", phase, [])
+            read_after_end = True
+            yield lifecycle("run-2", "running", [])
+            for data in [
+                {"event": "message-start", "role": "ai"},
+                {
+                    "event": "content-block-delta",
+                    "delta": {"type": "text-delta", "text": "Later run's text"},
+                },
+            ]:
+                yield {
+                    "method": "messages",
+                    "params": {"namespace": ["agent"], "timestamp": 3_000, "data": data},
+                }
+
+    client = SimpleNamespace(threads=SimpleNamespace(stream=lambda *a, **kw: ThreadStream()))
+    record = AsyncMock()
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
+
+    await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
+
+    assert target_ended
+    assert closed
+    assert not read_after_end
+    record.assert_not_awaited()
 
 
 async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:

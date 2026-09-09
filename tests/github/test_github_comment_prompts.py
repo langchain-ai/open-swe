@@ -88,6 +88,15 @@ def test_construct_system_prompt_includes_operational_safeguards() -> None:
     assert "do not call `schedule_thread_wakeup` again" in prompt
 
 
+def test_construct_system_prompt_renders_working_environment_path() -> None:
+    for source in ("slack", "desktop"):
+        prompt = construct_system_prompt(working_dir="/workspace/project", source=source)
+
+        working_environment = prompt.split("---", 1)[0]
+        assert "`/workspace/project`" in working_environment
+        assert "{working_dir}" not in working_environment
+
+
 def test_slack_information_only_response_uses_single_output_path() -> None:
     from agent.slack.tools.thread_reply import slack_thread_reply
 
