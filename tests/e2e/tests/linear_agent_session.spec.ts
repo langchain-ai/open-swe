@@ -62,8 +62,6 @@ type CommentResult = WebhookAck & {
   thread_id: string;
 };
 
-// A ticket the scripted model implements: it clones, edits, pushes and opens a PR.
-const TASK = "E2E_LINEAR";
 // A ticket the scripted model only acknowledges — for the delivery-handling
 // specs, which care about the webhook's answer, not about a whole run.
 const ACK_TASK = "E2E_LINEAR_ACK";
@@ -76,7 +74,10 @@ async function linearData(request: APIRequestContext): Promise<LinearData> {
   return (await res.json()) as LinearData;
 }
 
-function findSession(data: LinearData, sessionId: string): LinearSession | undefined {
+function findSession(
+  data: LinearData,
+  sessionId: string,
+): LinearSession | undefined {
   return data.issues
     .flatMap((issue) => issue.sessions)
     .find((session) => session.id === sessionId);
@@ -87,14 +88,23 @@ async function sessionState(
   sessionId: string,
 ): Promise<LinearSession> {
   const session = findSession(await linearData(request), sessionId);
-  return session ?? { id: sessionId, status: "", external_link: null, activities: [] };
+  return (
+    session ?? {
+      id: sessionId,
+      status: "",
+      external_link: null,
+      activities: [],
+    }
+  );
 }
 
 async function issueState(
   request: APIRequestContext,
   issueId: string,
 ): Promise<LinearIssue | undefined> {
-  return (await linearData(request)).issues.find((issue) => issue.id === issueId);
+  return (await linearData(request)).issues.find(
+    (issue) => issue.id === issueId,
+  );
 }
 
 async function delegate(
@@ -107,7 +117,10 @@ async function delegate(
 
 // A delivery that never started a run leaves no thread behind, so the platform
 // answers 404 rather than an empty list.
-async function runCount(request: APIRequestContext, threadId: string): Promise<number> {
+async function runCount(
+  request: APIRequestContext,
+  threadId: string,
+): Promise<number> {
   const res = await request.get(`/threads/${threadId}/runs`);
   if (!res.ok()) return 0;
   return ((await res.json()) as unknown[]).length;
@@ -117,7 +130,9 @@ async function activityTypes(
   request: APIRequestContext,
   sessionId: string,
 ): Promise<string[]> {
-  return (await sessionState(request, sessionId)).activities.map((activity) => activity.type);
+  return (await sessionState(request, sessionId)).activities.map(
+    (activity) => activity.type,
+  );
 }
 
 test.describe("Linear agent sessions", () => {
@@ -128,14 +143,20 @@ test.describe("Linear agent sessions", () => {
   test("a delegated issue is acknowledged with a thought, using an app-actor token", async ({
     request,
   }) => {
-    const opened = await delegate(request, { issue_description: ackDescription });
+    const opened = await delegate(request, {
+      issue_description: ackDescription,
+    });
     expect(opened.status).toBe("accepted");
 
     // Linear expects an activity within ten seconds of delegating.
     await expect
-      .poll(() => activityTypes(request, opened.session_id), { timeout: 10_000 })
+      .poll(() => activityTypes(request, opened.session_id), {
+        timeout: 10_000,
+      })
       .not.toHaveLength(0);
-    expect((await activityTypes(request, opened.session_id))[0]).toBe("thought");
+    expect((await activityTypes(request, opened.session_id))[0]).toBe(
+      "thought",
+    );
 
     // The Linear calls behind that went out as the app, not as a person.
     const { token_requests: tokenRequests } = await linearData(request);
@@ -148,9 +169,12 @@ test.describe("Linear agent sessions", () => {
 
     // Let the run settle so it cannot overlap the next spec's sandbox.
     await expect
-      .poll(async () => (await sessionState(request, opened.session_id)).status, {
-        timeout: 90_000,
-      })
+      .poll(
+        async () => (await sessionState(request, opened.session_id)).status,
+        {
+          timeout: 90_000,
+        },
+      )
       .toBe("complete");
   });
 
@@ -163,23 +187,30 @@ test.describe("Linear agent sessions", () => {
     expect(opened.status).toBe("accepted");
 
     await expect
-      .poll(async () => (await sessionState(request, opened.session_id)).status, {
-        timeout: 120_000,
-      })
+      .poll(
+        async () => (await sessionState(request, opened.session_id)).status,
+        {
+          timeout: 120_000,
+        },
+      )
       .toBe("complete");
 
     const session = await sessionState(request, opened.session_id);
     expect(session.activities[0].type).toBe("thought");
 
     // Tool progress is mirrored as ephemeral action activities.
-    const actions = session.activities.filter((activity) => activity.type === "action");
+    const actions = session.activities.filter(
+      (activity) => activity.type === "action",
+    );
     expect(actions.length).toBeGreaterThan(0);
     expect(actions.every((activity) => activity.ephemeral)).toBe(true);
     expect(actions.every((activity) => activity.action.length > 0)).toBe(true);
 
     // The terminal response is the run-completion webhook's work: the agent's
     // last words, the PR it opened, and a link back into Open SWE Web.
-    const responses = session.activities.filter((activity) => activity.type === "response");
+    const responses = session.activities.filter(
+      (activity) => activity.type === "response",
+    );
     expect(responses).toHaveLength(1);
     const response = responses[0];
     expect(response.ephemeral).toBe(false);
@@ -194,19 +225,23 @@ test.describe("Linear agent sessions", () => {
 
     // What the fake Linear stored is what a person sees on the issue.
     await page.goto("/mock/linear");
-    const rendered = page
-      .getByTestId("linear-activity")
-      .filter({ has: page.getByTestId("linear-activity-type").getByText("response") });
+    const rendered = page.getByTestId("linear-activity").filter({
+      has: page.getByTestId("linear-activity-type").getByText("response"),
+    });
     await expect(rendered).toHaveCount(1);
     await expect(rendered).toContainText("greet()");
     // The body names the PR twice: the agent's own words, then the completion
     // webhook's "Pull request:" line.
     const prLink = rendered.locator('a[href*="/pull/"]').first();
     await expect(prLink).toBeVisible();
-    await expect(page.getByTestId("linear-session-status")).toHaveText("complete");
+    await expect(page.getByTestId("linear-session-status")).toHaveText(
+      "complete",
+    );
 
     // And the PR really exists on the fake GitHub.
-    const pulls = (await (await request.get("/mock/github/data")).json()) as Array<{
+    const pulls = (await (
+      await request.get("/mock/github/data")
+    ).json()) as Array<{
       title: string;
       head: string;
       url: string;
@@ -216,7 +251,9 @@ test.describe("Linear agent sessions", () => {
     expect(await prLink.getAttribute("href")).toBe(pulls[0].url);
   });
 
-  test("a redelivered agent session event starts no second run", async ({ request }) => {
+  test("a redelivered agent session event starts no second run", async ({
+    request,
+  }) => {
     const deliveryId = `e2e-linear-${Date.now()}`;
     const first = await delegate(request, {
       delivery_id: deliveryId,
@@ -228,7 +265,10 @@ test.describe("Linear agent sessions", () => {
       delivery_id: deliveryId,
       issue_description: ackDescription,
     });
-    expect(second).toMatchObject({ status: "ignored", reason: "duplicate delivery" });
+    expect(second).toMatchObject({
+      status: "ignored",
+      reason: "duplicate delivery",
+    });
 
     await expect
       .poll(() => activityTypes(request, first.session_id), { timeout: 10_000 })
@@ -237,9 +277,12 @@ test.describe("Linear agent sessions", () => {
     expect(await runCount(request, second.thread_id)).toBe(0);
 
     await expect
-      .poll(async () => (await sessionState(request, first.session_id)).status, {
-        timeout: 90_000,
-      })
+      .poll(
+        async () => (await sessionState(request, first.session_id)).status,
+        {
+          timeout: 90_000,
+        },
+      )
       .toBe("complete");
     expect(await runCount(request, first.thread_id)).toBe(1);
   });
@@ -265,30 +308,43 @@ test.describe("Linear agent sessions", () => {
         type: "AgentSessionEvent",
         action: "created",
         webhookTimestamp: Date.now(),
-        agentSession: { id: "forged-session", status: "pending", issue: { id: "forged-issue" } },
+        agentSession: {
+          id: "forged-session",
+          status: "pending",
+          issue: { id: "forged-issue" },
+        },
       },
     });
     expect(res.status()).toBe(401);
   });
 
-  test("a prompted follow-up runs again in the same session", async ({ request }) => {
+  test("a prompted follow-up runs again in the same session", async ({
+    request,
+  }) => {
     test.setTimeout(240_000);
     const opened = await delegate(request);
     expect(opened.status).toBe("accepted");
     await expect
-      .poll(async () => (await sessionState(request, opened.session_id)).status, {
-        timeout: 120_000,
-      })
+      .poll(
+        async () => (await sessionState(request, opened.session_id)).status,
+        {
+          timeout: 120_000,
+        },
+      )
       .toBe("complete");
-    const firstResponses = (await activityTypes(request, opened.session_id)).filter(
-      (type) => type === "response",
-    ).length;
+    const firstResponses = (
+      await activityTypes(request, opened.session_id)
+    ).filter((type) => type === "response").length;
     expect(firstResponses).toBe(1);
-    const activitiesBefore = (await sessionState(request, opened.session_id)).activities.length;
+    const activitiesBefore = (await sessionState(request, opened.session_id))
+      .activities.length;
 
     const prompted = (await (
       await request.post("/control/linear/prompt", {
-        data: { session_id: opened.session_id, body: "Thanks — please also add a farewell()." },
+        data: {
+          session_id: opened.session_id,
+          body: "Thanks — please also add a farewell().",
+        },
       })
     ).json()) as WebhookAck;
     expect(prompted.status).toBe("accepted");
@@ -307,16 +363,21 @@ test.describe("Linear agent sessions", () => {
     await expect
       .poll(
         async () =>
-          (await activityTypes(request, opened.session_id)).filter((type) => type === "response")
-            .length,
+          (await activityTypes(request, opened.session_id)).filter(
+            (type) => type === "response",
+          ).length,
         { timeout: 120_000 },
       )
       .toBe(2);
     expect(await runCount(request, opened.thread_id)).toBe(2);
-    expect((await sessionState(request, opened.session_id)).status).toBe("complete");
+    expect((await sessionState(request, opened.session_id)).status).toBe(
+      "complete",
+    );
   });
 
-  test("an @open-swe comment starts a run and answers on the issue", async ({ request }) => {
+  test("an @open-swe comment starts a run and answers on the issue", async ({
+    request,
+  }) => {
     test.setTimeout(180_000);
     const mentioned = (await (
       await request.post("/control/linear/comment", { data: {} })
@@ -328,7 +389,9 @@ test.describe("Linear agent sessions", () => {
       .poll(
         async () => {
           const issue = await issueState(request, mentioned.issue_id);
-          return (issue?.comments ?? []).map((comment) => comment.body).join("\n");
+          return (issue?.comments ?? [])
+            .map((comment) => comment.body)
+            .join("\n");
         },
         { timeout: 120_000 },
       )
@@ -341,7 +404,9 @@ test.describe("Linear agent sessions", () => {
     const trigger = issue.comments[0];
     expect(trigger.body).toContain("@open-swe");
     expect(trigger.reactions).toContain("👀");
-    const answer = issue.comments.find((comment) => comment.body.includes("/pull/"));
+    const answer = issue.comments.find((comment) =>
+      comment.body.includes("/pull/"),
+    );
     expect(answer?.bot).toBe(true);
     expect(await runCount(request, mentioned.thread_id)).toBe(1);
   });
