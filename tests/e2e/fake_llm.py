@@ -727,12 +727,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _tool_step(
             "Rendering the iframe preview.",
-            "output_iframe",
+            "show_file",
             {
                 "path": _IFRAME_HTML_PATH,
                 "title": "Iframe E2E Preview",
             },
-            "call-output-iframe",
+            "call-show-file-html",
         ),
         StepSpec(content="Rendered the iframe preview."),
     ),

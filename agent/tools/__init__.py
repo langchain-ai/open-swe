@@ -36,7 +36,6 @@ _TOOL_MODULES = {
     "manage_thread": ".threads",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
-    "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
@@ -102,7 +101,6 @@ __all__ = [
     "manage_thread",
     "notify_automation_channel",
     "open_pull_request",
-    "output_iframe",
     "publish_review",
     "read_repo_file",
     "read_user_settings",
@@ -181,7 +179,6 @@ if TYPE_CHECKING:
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
-    from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.recreate_sandbox import recreate_sandbox

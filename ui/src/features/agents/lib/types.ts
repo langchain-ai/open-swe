@@ -114,6 +114,11 @@ export type ShowFileDisplay =
   | (ShowFileDisplayBase & { kind: "diagram"; content: string })
   | (ShowFileDisplayBase & { kind: "markdown"; content: string })
   | (ShowFileDisplayBase & {
+      kind: "html"
+      previewUrl: string
+      downloadUrl: string
+    })
+  | (ShowFileDisplayBase & {
       kind: "image"
       mimeType: string
       contentBase64: string

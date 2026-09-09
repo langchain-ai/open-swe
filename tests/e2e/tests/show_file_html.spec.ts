@@ -8,7 +8,7 @@ async function login(page: Page) {
   expect(response.ok()).toBeTruthy();
 }
 
-test.describe("output_iframe", () => {
+test.describe("show_file html", () => {
   test.skip(
     process.env.SANDBOX_TYPE !== "langsmith",
     "requires LangSmith sandbox download URLs",

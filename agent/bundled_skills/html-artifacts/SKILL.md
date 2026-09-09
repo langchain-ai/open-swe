@@ -1,11 +1,11 @@
 ---
 name: html-artifacts
-description: Author the HTML for a plan artifact, dashboard iframe, or Slack attachment — structure, design plan, available runtime, theming, and craft. Read this before writing HTML for save_plan, output_iframe, or slack_attach_html.
+description: Author the HTML for a plan artifact, dashboard iframe, or Slack attachment — structure, design plan, available runtime, theming, and craft. Read this before writing HTML for save_plan, show_file, or slack_attach_html.
 ---
 
 # HTML artifacts
 
-`save_plan`, `output_iframe`, and `slack_attach_html` all publish a self-contained HTML artifact, and one contract covers all three.
+`save_plan`, `show_file` (for `.html` files), and `slack_attach_html` all publish a self-contained HTML artifact, and one contract covers all three.
 
 Write the page content directly. When you omit `<html>`, `<head>`, and `<body>`, the tool wraps your content in that skeleton with a minimal CSS reset. Write a `<title>` yourself — a specific 2–4 word name for this page, not a summary or a category label. A Slack attachment is opened as a standalone file, so include the full skeleton there.
 

@@ -183,7 +183,6 @@ from agent.tools import (
     manage_thread,
     notify_automation_channel,
     open_pull_request,
-    output_iframe,
     read_user_settings,
     recreate_sandbox,
     report_platform_issue,
@@ -1207,7 +1206,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         notify_automation_channel,
         open_pull_request,
         *(
-            (output_iframe, create_sandbox_file_download_url, create_sandbox_service_url)
+            (create_sandbox_file_download_url, create_sandbox_service_url)
             if sandbox_file_downloads
             else ()
         ),

@@ -313,6 +313,18 @@ function showFileDisplay(
     return { ...base, kind: "markdown", content: value.content }
   }
   if (
+    value.kind === "html" &&
+    isHttpUrl(value.preview_url) &&
+    isHttpUrl(value.download_url)
+  ) {
+    return {
+      ...base,
+      kind: "html",
+      previewUrl: value.preview_url,
+      downloadUrl: value.download_url,
+    }
+  }
+  if (
     value.kind === "image" &&
     typeof value.mime_type === "string" &&
     value.mime_type.startsWith("image/") &&

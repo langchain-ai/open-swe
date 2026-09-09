@@ -112,6 +112,29 @@ describe("ShowFileCard", () => {
     expect(screen.queryByRole("button", { name: /comment/i })).toBeNull()
   })
 
+  it("renders html previews in a sandboxed iframe with a download button", () => {
+    render(
+      <ShowFileCard
+        display={{
+          type: "show_file",
+          kind: "html",
+          path: ".open-swe/artifacts/chart.html",
+          filename: "chart.html",
+          title: "Chart",
+          previewUrl: "https://downloads.example/inline?token=secret",
+          downloadUrl: "https://downloads.example/attachment?token=secret",
+        }}
+      />
+    )
+    const iframe = screen.getByTitle("Chart")
+    expect(iframe.getAttribute("src")).toBe(
+      "https://downloads.example/inline?token=secret"
+    )
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-downloads")
+    expect(screen.getByRole("button", { name: "Download HTML" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /comment/i })).toBeNull()
+  })
+
   it("renders markdown files through the markdown renderer", () => {
     render(
       <ShowFileCard

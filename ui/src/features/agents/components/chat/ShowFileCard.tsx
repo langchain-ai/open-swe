@@ -1,9 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from "react"
-import { ChevronDown, MessageSquareQuote } from "lucide-react"
+import { ChevronDown, Download, MessageSquareQuote } from "lucide-react"
 import { File as PierreFile, PatchDiff } from "@pierre/diffs/react"
 import type { SelectedLineRange } from "@pierre/diffs/react"
 
+import { openDownload } from "./OutputIframe"
 import type { ShowFileDisplay } from "@/features/agents/lib/types"
+import {
+  ARTIFACT_ALLOW,
+  ARTIFACT_SANDBOX,
+} from "@/features/agents/lib/artifactShell"
+import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
 import {
   insertIntoComposer,
   quoteFileLines,
@@ -14,10 +20,11 @@ import {
 } from "@/features/agents/lib/patchSelection"
 import { Markdown } from "./Markdown"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
-import { Button } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const BODY_MAX_HEIGHT = 520
+const IFRAME_HEIGHT = 480
 
 interface Selection {
   file: number
@@ -130,6 +137,17 @@ export function ShowFileCard({ display }: { display: ShowFileDisplay }) {
             </span>
           )}
         </button>
+        {display.kind === "html" && (
+          <IconButton
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Download HTML"
+            onClick={() => openDownload(display.downloadUrl)}
+          >
+            <Download />
+          </IconButton>
+        )}
         {(display.kind === "text" || display.kind === "diff") && (
           <Button
             type="button"
@@ -159,6 +177,16 @@ export function ShowFileCard({ display }: { display: ShowFileDisplay }) {
               alt={display.title}
               className="mx-auto block max-w-full object-contain"
               style={{ maxHeight: BODY_MAX_HEIGHT }}
+            />
+          )}
+          {display.kind === "html" && (
+            <SandboxedHtmlFrame
+              title={display.title}
+              src={display.previewUrl}
+              sandbox={ARTIFACT_SANDBOX}
+              allow={ARTIFACT_ALLOW}
+              className="bg-background"
+              style={{ height: IFRAME_HEIGHT }}
             />
           )}
           {display.kind === "diagram" && (

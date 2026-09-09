@@ -4,13 +4,20 @@ import base64
 import posixpath
 import shlex
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.tools import tool
 
-from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
+from agent.config import ENV
+from agent.tools.create_sandbox_file_download_url import (
+    create_sandbox_file_download_url,
+    resolve_sandbox_file,
+)
+from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
 MAX_TEXT_BYTES = 200_000
 MAX_IMAGE_BYTES = 3_000_000
+MAX_HTML_BYTES = 1_000_000
 
 _IMAGE_TYPES = {
     ".png": "image/png",
@@ -20,9 +27,17 @@ _IMAGE_TYPES = {
     ".webp": "image/webp",
     ".svg": "image/svg+xml",
 }
-_DIFF_SUFFIXES = {".patch", ".diff"}
-_DIAGRAM_SUFFIXES = {".mmd", ".mermaid"}
-_MARKDOWN_SUFFIXES = {".md", ".markdown"}
+_KIND_BY_SUFFIX = {
+    ".patch": "diff",
+    ".diff": "diff",
+    ".mmd": "diagram",
+    ".mermaid": "diagram",
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".html": "html",
+    ".htm": "html",
+}
+_LIMITS = {"image": MAX_IMAGE_BYTES, "html": MAX_HTML_BYTES}
 
 
 async def _show_file(
@@ -43,19 +58,15 @@ async def _show_file(
     suffix = posixpath.splitext(filename)[1].lower()
     display_title = title.strip() if isinstance(title, str) and title.strip() else relative_path
     mime_type = _IMAGE_TYPES.get(suffix)
+    kind = "image" if mime_type else _KIND_BY_SUFFIX.get(suffix, "text")
 
     size = await _file_size(backend, source_path)
-    limit = MAX_IMAGE_BYTES if mime_type else MAX_TEXT_BYTES
+    limit = _LIMITS.get(kind, MAX_TEXT_BYTES)
     if size > limit:
         raise ValueError(
             f"{relative_path} is {size} bytes; the limit is {limit}. "
             "Write the relevant excerpt to a smaller file and show that instead."
         )
-
-    (download,) = await backend.adownload_files([source_path])
-    if download.error or download.content is None:
-        raise ValueError(f"failed to read {relative_path}: {download.error or 'no content'}")
-    data = download.content
 
     base = {
         "type": "show_file",
@@ -63,6 +74,18 @@ async def _show_file(
         "filename": filename,
         "title": display_title,
     }
+    if kind == "html":
+        urls = await _html_preview_urls(backend, source_path, work_dir, filename, title)
+        return (
+            f"Displayed the HTML preview {relative_path} in the dashboard.",
+            {**base, "kind": "html", **urls},
+        )
+
+    (download,) = await backend.adownload_files([source_path])
+    if download.error or download.content is None:
+        raise ValueError(f"failed to read {relative_path}: {download.error or 'no content'}")
+    data = download.content
+
     if mime_type:
         return (
             f"Displayed image {relative_path} in the dashboard.",
@@ -79,19 +102,17 @@ async def _show_file(
     except UnicodeDecodeError as exc:
         raise ValueError(f"{relative_path} is not UTF-8 text or a supported image") from exc
 
-    if suffix in _DIAGRAM_SUFFIXES:
+    if kind == "diagram":
         return (
             f"Displayed diagram {relative_path} in the dashboard.",
             {**base, "kind": "diagram", "content": text},
         )
-
-    if suffix in _MARKDOWN_SUFFIXES:
+    if kind == "markdown":
         return (
             f"Displayed rendered markdown {relative_path} in the dashboard.",
             {**base, "kind": "markdown", "content": text},
         )
-
-    if suffix in _DIFF_SUFFIXES or _looks_like_patch(text):
+    if kind == "diff" or _looks_like_patch(text):
         return (
             f"Displayed diff {relative_path} in the dashboard.",
             {**base, "kind": "diff", "content": text},
@@ -116,6 +137,52 @@ async def _show_file(
             "end_line": last,
         },
     )
+
+
+async def _html_preview_urls(
+    backend: Any, source_path: str, work_dir: str, filename: str, title: str | None
+) -> dict[str, str]:
+    """Snapshot an HTML file and mint signed inline/attachment URLs for it."""
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
+        raise ValueError("HTML previews are only available with the LangSmith sandbox")
+
+    snapshot_dir = posixpath.join(work_dir, ".open-swe", "iframe-artifacts", uuid4().hex)
+    snapshot_path = posixpath.join(snapshot_dir, filename)
+    cleanup_command = f"rm -f -- {shlex.quote(snapshot_path)}"
+    prefix, suffix = artifact_skeleton(title)
+    copied = await backend.aexecute(
+        f"mkdir -p -- {shlex.quote(snapshot_dir)} && "
+        + sandbox_wrap_command(
+            source_path,
+            snapshot_path,
+            limit=MAX_HTML_BYTES + 1,
+            title=title,
+        ),
+        timeout=10,
+    )
+    if copied.exit_code != 0:
+        await backend.aexecute(cleanup_command, timeout=10)
+        raise ValueError("failed to snapshot the HTML file")
+    try:
+        snapshot_size = int(copied.output.strip())
+    except (AttributeError, ValueError) as exc:
+        await backend.aexecute(cleanup_command, timeout=10)
+        raise ValueError("failed to determine the HTML snapshot size") from exc
+    if snapshot_size > MAX_HTML_BYTES + len(prefix.encode()) + len(suffix.encode()):
+        await backend.aexecute(cleanup_command, timeout=10)
+        raise ValueError("HTML file exceeds the 1 MB limit")
+
+    preview = await create_sandbox_file_download_url(
+        snapshot_path,
+        content_type="text/html; charset=utf-8",
+        content_disposition="inline",
+    )
+    download = await create_sandbox_file_download_url(
+        snapshot_path,
+        content_type="text/html; charset=utf-8",
+        content_disposition="attachment",
+    )
+    return {"preview_url": preview["url"], "download_url": download["url"]}
 
 
 async def _file_size(backend: Any, path: str) -> int:
@@ -143,16 +210,19 @@ show_file = tool(
     description="""Render a file from the working directory as a rich card in the dashboard:
 source code with syntax highlighting and line numbers, a unified diff (`.patch`/`.diff` or
 `git diff` output) with per-file highlighting, a Mermaid diagram (`.mmd`/`.mermaid`), rendered
-Markdown (`.md`), or an image. The user can select lines in code and diff cards and comment on
-them, so this is the way to point at specific code.
+Markdown (`.md`), a self-contained HTML page (`.html`) in an isolated iframe, or an image. The
+user can select lines in code and diff cards and comment on them, so this is the way to point
+at specific code.
 
 Never retype diffs, file contents, logs, or generated output into a chat message from memory.
 Write them to a file and show that instead, for example
 `git diff > .open-swe/artifacts/changes.patch` followed by
 `show_file(path=".open-swe/artifacts/changes.patch", title="Changes")`. To point at existing
 source, pass its path with `start_line`/`end_line`; the full file is rendered with that range
-highlighted. Keep temporary files under `.open-swe/artifacts/` and add that path to the
+highlighted. For HTML, read the `html-artifacts` skill first: inline scripts, styles, Canvas,
+WebGL, and data-URI assets run, and omitting `<html>`/`<head>`/`<body>` wraps the content in
+that skeleton. Keep temporary files under `.open-swe/artifacts/` and add that path to the
 checkout's `.git/info/exclude`. Relative paths resolve from the working directory. Text files
-are limited to 200 KB and images to 3 MB.""",
+are limited to 200 KB, HTML to 1 MB, and images to 3 MB.""",
     response_format="content_and_artifact",
 )(_show_file)

@@ -242,7 +242,7 @@ export function liveActivityLabel(
 
     if (chunk.status === "pending") return "Waiting for approval…"
     if (chunk.status === "error") return "Recovering from an error…"
-    if (chunk.display?.type === "output_iframe") return "Preparing preview…"
+    if (chunk.display) return "Preparing preview…"
 
     const entry = describeWorkEntry(chunk, projectPath)
     const verb = toolActivityVerb(chunk)

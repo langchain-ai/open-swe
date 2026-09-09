@@ -113,7 +113,7 @@ After showing a card, reference it ("the highlighted lines in the card above") r
 
 ## Dense or interactive visuals
 
-For a layout, a state comparison, an infographic, or a concept too dense for Mermaid, write one focused HTML file and publish it with `output_iframe` (dashboard) or `slack_attach_html` (Slack). Read the `html-artifacts` skill first for the authoring rules. Match the product's colors, type, and components; use real labels and data.
+For a layout, a state comparison, an infographic, or a concept too dense for Mermaid, write one focused `.html` file and publish it with `show_file` (dashboard) or `slack_attach_html` (Slack). Read the `html-artifacts` skill first for the authoring rules. Match the product's colors, type, and components; use real labels and data.
 
 ## Surface
 
