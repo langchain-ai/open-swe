@@ -66,6 +66,7 @@ from agent.dashboard.options import (
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
+    get_team_agent_routing_models,
     get_team_default_model_pair,
     get_team_default_repo,
     get_team_default_thread_title_model,
@@ -629,6 +630,14 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     )
 
 
+async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
+    return await ttl_cache.cached(
+        "team:agent-routing-models",
+        60,
+        get_team_agent_routing_models,
+    )
+
+
 async def _cached_thread_title_model() -> tuple[str, str]:
     return await ttl_cache.cached(
         "team:thread-title-model",
@@ -966,6 +975,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         from agent.dashboard.options import default_model_pair
 
         team_defaults = (default_model_pair(), default_model_pair())
+        routing_defaults = {
+            "fast": default_model_pair(),
+            "balanced": default_model_pair(),
+            "powerful": default_model_pair(),
+        }
         title_defaults = team_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
@@ -974,12 +988,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.settings_defaults"):
             (
                 team_defaults,
+                routing_defaults,
                 title_defaults,
                 use_gateway,
                 profile,
                 fable_enabled,
             ) = await asyncio.gather(
                 _cached_team_default_model_pair("agent"),
+                _cached_agent_routing_models(),
                 _cached_thread_title_model(),
                 _cached_gateway_enabled(),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
@@ -1295,16 +1311,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 ),
             )
-            for route, routed_model_id, effort in (
-                ("glm_flash", "fireworks:accounts/fireworks/models/glm-5p3-flash", "high"),
-                ("sol_medium", "openai:gpt-5.6-sol", "medium"),
-                ("astra_low", "openai:gpt-6-astra", "low"),
-            )
+            for route, (routed_model_id, effort) in routing_defaults.items()
         }
         model_selection_middleware.append(
             ModelSelectionMiddleware(
                 routing_models,
-                routing_models["glm_flash"],
+                routing_models["fast"],
                 initial_plan_mode=plan_mode,
             )
         )

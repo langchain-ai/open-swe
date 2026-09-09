@@ -11,22 +11,20 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-Route = Literal["glm_flash", "sol_medium", "astra_low"]
+Route = Literal["fast", "balanced", "powerful"]
 
 _CLASSIFIER_PROMPT = """Choose one fixed model profile for this Open SWE turn. Use the least expensive profile likely to complete the whole turn safely.
 
 Profiles, from least to most capable and expensive:
 
-1. glm_flash
+1. fast
 - Use for direct lookup, extraction, status checks, test or log collection, mechanical PR or release operations, and localized changes with explicit targets and strong verification.
-- High effort increases persistence, not the base model's capability ceiling.
 
-2. sol_medium
+2. balanced
 - Use for ordinary bug fixes, bounded investigations, multi-file implementation, research synthesis, semantic PR maintenance, and partially specified localized work.
 
-3. astra_low
+3. powerful
 - Use for architecture or design, requirements disambiguation, subtle semantic review, novel root-cause reasoning, conflicting evidence, cross-component or multi-repository judgment, and high-stakes decisions.
-- Low is its configured reasoning effort; it remains the highest-capability profile.
 
 Explicit targets, clear acceptance criteria, reversibility, and strong tests lower the required capability. Ambiguous requirements, weak verification, architectural tradeoffs, broad scope, consequential security or data work, and conflicting assumptions raise it. Prompt length and eventual runtime are not difficulty signals.
 
@@ -65,7 +63,7 @@ class ModelSelectionMiddleware(AgentMiddleware[ModelSelectionState]):
         runtime: Runtime,
     ) -> dict[str, Route]:
         del runtime
-        route: Route = "astra_low" if self._initial_plan_mode else "sol_medium"
+        route: Route = "powerful" if self._initial_plan_mode else "balanced"
         if not self._initial_plan_mode:
             messages = state.get("messages", [])
             task = next(
@@ -91,6 +89,6 @@ class ModelSelectionMiddleware(AgentMiddleware[ModelSelectionState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route = request.state.get("model_route", "sol_medium")
-        model = self._models.get(route, self._models["sol_medium"])
+        route = request.state.get("model_route", "balanced")
+        model = self._models.get(route, self._models["balanced"])
         return await handler(request.override(model=model))

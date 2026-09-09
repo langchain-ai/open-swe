@@ -80,6 +80,15 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
+        patch(
+            "agent.server.get_team_agent_routing_models",
+            new_callable=AsyncMock,
+            return_value={
+                "fast": ("google_genai:gemini-3.8-flash", "low"),
+                "balanced": ("openai:gpt-5.6-sol", "medium"),
+                "powerful": ("anthropic:claude-opus-5", "high"),
+            },
+        ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
             "agent.server.load_thread_settings",
@@ -142,6 +151,15 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
             return_value=None,
         ),
         patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
+        patch(
+            "agent.server._cached_agent_routing_models",
+            new_callable=AsyncMock,
+            return_value={
+                "fast": ("openai:gpt-5.6-sol", "low"),
+                "balanced": ("openai:gpt-5.6-sol", "medium"),
+                "powerful": ("openai:gpt-5.6-sol", "high"),
+            },
+        ),
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
@@ -172,6 +190,12 @@ async def test_model_routing_is_applied_to_all_threads() -> None:
     ]
     assert "ModelSelectionMiddleware" in middleware_names
     assert config["metadata"]["model_routing_applied"] is True
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls[1:4]] == [
+        "google_genai:gemini-3.8-flash",
+        "openai:gpt-5.6-sol",
+        "anthropic:claude-opus-5",
+    ]
 
 
 @pytest.mark.asyncio

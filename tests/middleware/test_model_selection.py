@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,11 +9,9 @@ from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDeci
 
 
 def _middleware(
-    route: str = "glm_flash", *, initial_plan_mode: bool = False
+    route: Literal["fast", "balanced", "powerful"] = "fast", *, initial_plan_mode: bool = False
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
-    models = {
-        profile: MagicMock(name=profile) for profile in ("glm_flash", "sol_medium", "astra_low")
-    }
+    models = {profile: MagicMock(name=profile) for profile in ("fast", "balanced", "powerful")}
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
     classifier = MagicMock()
     classifier.with_structured_output.return_value.ainvoke = structured
@@ -51,30 +49,30 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
     state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
 
-    assert state["model_route"] == "glm_flash"
-    assert (await _invoke(middleware, state)).model is models["glm_flash"]
+    assert state["model_route"] == "fast"
+    assert (await _invoke(middleware, state)).model is models["fast"]
     classifier.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_plan_mode_uses_astra_without_classifier() -> None:
+async def test_plan_mode_uses_powerful_route_without_classifier() -> None:
     middleware, models, classifier = _middleware(initial_plan_mode=True)
     state = {"messages": [HumanMessage(content="Update the docs")]}
 
     state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
 
-    assert state["model_route"] == "astra_low"
-    assert (await _invoke(middleware, state)).model is models["astra_low"]
+    assert state["model_route"] == "powerful"
+    assert (await _invoke(middleware, state)).model is models["powerful"]
     classifier.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_classifier_failure_falls_back_to_sol() -> None:
+async def test_classifier_failure_falls_back_to_balanced_route() -> None:
     middleware, models, classifier = _middleware()
     classifier.side_effect = RuntimeError("unavailable")
     state = {"messages": [HumanMessage(content="Do the task")]}
 
     state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
 
-    assert state["model_route"] == "sol_medium"
-    assert (await _invoke(middleware, state)).model is models["sol_medium"]
+    assert state["model_route"] == "balanced"
+    assert (await _invoke(middleware, state)).model is models["balanced"]
