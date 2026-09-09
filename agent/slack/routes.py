@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack import webhook as service
+from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
 
@@ -573,6 +574,11 @@ async def slack_interactivity(
     except common.json.JSONDecodeError:
         common.logger.exception("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
+
+    if not isinstance(payload, dict):
+        return {"status": "error", "message": "Invalid payload"}
+    if is_slack_feedback_payload(payload):
+        return await handle_slack_feedback_interaction(payload, background_tasks)
 
     container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
     if payload.get("type") == "block_suggestion" and container.get("type") == "code_channel_view":

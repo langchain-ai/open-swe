@@ -957,19 +957,26 @@ async def post_slack_thread_reply(
 
 
 async def post_slack_ephemeral_message(
-    channel_id: str, user_id: str, text: str, thread_ts: str | None = None
+    channel_id: str,
+    user_id: str,
+    text: str,
+    thread_ts: str | None = None,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Post an ephemeral message visible only to one user."""
     if not SLACK_BOT_TOKEN:
         return False
 
-    payload: dict[str, str] = {
+    payload: dict[str, Any] = {
         "channel": channel_id,
         "user": user_id,
         "text": text,
     }
     if thread_ts:
         payload["thread_ts"] = thread_ts
+    if blocks is not None:
+        payload["blocks"] = blocks
 
     async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
@@ -986,6 +993,27 @@ async def post_slack_ephemeral_message(
             return True
         except httpx2.HTTPError:
             logger.exception("Slack chat.postEphemeral request failed")
+            return False
+
+
+async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
+    """Open a modal before Slack's short-lived interaction trigger expires."""
+    if not SLACK_BOT_TOKEN:
+        return False
+    async with httpx2.AsyncClient(timeout=2.0) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/views.open",
+                headers=_slack_headers(),
+                json={"trigger_id": trigger_id, "view": view},
+            )
+            error = _slack_response_error(response)
+            if error:
+                logger.warning("Slack modal open failed", extra={"slack_error": error})
+                return False
+            return True
+        except httpx2.HTTPError:
+            logger.warning("Slack modal request failed", exc_info=True)
             return False
 
 
@@ -1314,12 +1342,14 @@ async def slack_thread_mutation_lock(
     thread_ts: str,
     *,
     thread_id: str | None = None,
+    purpose: str | None = None,
 ) -> AsyncIterator[dict[str, Any] | None]:
     """Lock a Slack thread and optionally return its current active location."""
     channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
-    lock_id = str(
-        uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-thread-lock:{channel}:{timestamp}")
-    )
+    lock_key = f"open-swe:slack-thread-lock:{channel}:{timestamp}"
+    if purpose:
+        lock_key += f":{purpose}"
+    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, lock_key))
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
     while True:
         try:

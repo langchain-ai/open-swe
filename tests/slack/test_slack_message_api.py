@@ -37,6 +37,49 @@ def _async_client_cm(post_response: MagicMock) -> AsyncMock:
 
 
 @pytest.mark.asyncio
+async def test_ephemeral_feedback_sends_blocks_and_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+    blocks = [{"type": "section", "text": {"type": "plain_text", "text": "Rate this thread"}}]
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert await slack_utils.post_slack_ephemeral_message(
+            "C1", "U1", "Rate this thread", "1.0", blocks=blocks
+        )
+    assert client_cm.post.await_args.args[0].endswith("/chat.postEphemeral")
+    assert client_cm.post.await_args.kwargs["json"] == {
+        "channel": "C1",
+        "user": "U1",
+        "text": "Rate this thread",
+        "thread_ts": "1.0",
+        "blocks": blocks,
+    }
+
+
+@pytest.mark.asyncio
+async def test_modal_sends_trigger_and_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+    view = {"type": "modal", "title": {"type": "plain_text", "text": "Feedback"}, "blocks": []}
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert await slack_utils.open_slack_modal("trigger-1", view)
+    assert client_cm.post.await_args.args[0].endswith("/views.open")
+    assert client_cm.post.await_args.kwargs["json"] == {"trigger_id": "trigger-1", "view": view}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["expired_trigger_id", "ratelimited", "http"])
+async def test_modal_returns_false_on_slack_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_err_response(failure))
+    if failure == "http":
+        client_cm.post.side_effect = httpx2.ConnectError("unavailable")
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert not await slack_utils.open_slack_modal("trigger-1", {})
+
+
+@pytest.mark.asyncio
 async def test_thinking_steps_stream_api_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
     client_cm = _async_client_cm(_ok_response())
