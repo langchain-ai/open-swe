@@ -16,8 +16,6 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Messages } from "@/features/agents/components/messages"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
-import { LocalProjectSelector } from "@/features/agents/components/composer/RunTargetSelector"
-import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { LocalProjectRightPanel } from "@/features/agents/components/LocalProjectRightPanel"
 import {
@@ -462,10 +460,6 @@ export function AgentsHome() {
     runTarget === "local"
       ? localProjects.find((project) => project.cwd === localProjectPath)
       : undefined
-  const hasProjects =
-    runTarget === "local"
-      ? localProjects.length > 0
-      : Boolean(repo || reposQuery.data?.repositories.length)
   const optimisticDraftThread = submittedDraft
     ? optimisticThread("pending", submittedDraft)
     : null
@@ -495,41 +489,8 @@ export function AgentsHome() {
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />
-              <h1 className="flex flex-wrap items-baseline justify-center gap-x-1 text-center text-2xl tracking-tight sm:text-3xl">
-                {hasProjects ? (
-                  <>
-                    <span>What should we build in</span>
-                    {runTarget === "local" ? (
-                      <LocalProjectSelector
-                        onAddProject={() => void handleAddLocalProject()}
-                        onRemoveProject={(cwd) =>
-                          void handleRemoveLocalProject(cwd)
-                        }
-                        onSelectProject={handleSelectLocalProject}
-                        placeholder="a project"
-                        projects={localProjects}
-                        selectedProjectPath={localProjectPath}
-                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                      />
-                    ) : (
-                      <RepoSelector
-                        className="inline-flex"
-                        emptySelectionLabel="Don't work in a project"
-                        noMatchesLabel="No matching projects"
-                        onRepoChange={setRepoOverride}
-                        placeholder="a project"
-                        repos={reposQuery.data?.repositories}
-                        searchPlaceholder="Search projects…"
-                        selectedLabel={repo?.split("/").at(-1)}
-                        selectedRepo={repo}
-                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                      />
-                    )}
-                    <span>?</span>
-                  </>
-                ) : (
-                  <span>What should we build?</span>
-                )}
+              <h1 className="text-center text-2xl tracking-tight sm:text-3xl">
+                What should we build?
               </h1>
             </div>
           </div>
