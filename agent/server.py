@@ -61,10 +61,13 @@ from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
+    gate_model_provider,
+    model_provider_enabled,
     model_supports_effort,
 )
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
+    get_disabled_model_providers,
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
@@ -652,6 +655,14 @@ async def _cached_fable_enabled() -> bool:
     )
 
 
+async def _cached_disabled_model_providers() -> list[str]:
+    return await ttl_cache.cached(
+        "team:disabled-model-providers",
+        60,
+        get_disabled_model_providers,
+    )
+
+
 async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
@@ -969,6 +980,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
+        disabled_providers: list[str] = []
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
             (
@@ -977,12 +989,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 use_gateway,
                 profile,
                 fable_enabled,
+                disabled_providers,
             ) = await asyncio.gather(
                 _cached_team_default_model_pair("agent"),
                 _cached_thread_title_model(),
                 _cached_gateway_enabled(),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
+                _cached_disabled_model_providers(),
             )
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
@@ -1086,6 +1100,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     title_model_id, title_effort = gate_fable_model(
         title_model_id, title_effort, fable_enabled=fable_enabled
     )
+    model_id, profile_effort = gate_model_provider(
+        model_id,
+        profile_effort,
+        disabled_providers=disabled_providers,
+        fallback=team_defaults[0],
+    )
+    subagent_model_id, subagent_effort = gate_model_provider(
+        subagent_model_id,
+        subagent_effort,
+        disabled_providers=disabled_providers,
+        fallback=team_defaults[1],
+    )
+    title_model_id, title_effort = gate_model_provider(
+        title_model_id,
+        title_effort,
+        disabled_providers=disabled_providers,
+        fallback=title_defaults,
+    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -1105,6 +1137,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
+    if fallback_model_id and not model_provider_enabled(fallback_model_id, disabled_providers):
+        fallback_model_id = None
     if fallback_model_id and fallback_model_id != model_id:
         fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
         if fallback_model_id.startswith("openai:"):

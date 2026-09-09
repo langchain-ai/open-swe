@@ -39,8 +39,9 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.dashboard.options import gate_fable_model
+from agent.dashboard.options import gate_fable_model, gate_model_provider
 from agent.dashboard.team_settings import (
+    get_disabled_model_providers,
     get_effective_gateway_enabled,
     get_org_review_guidelines,
     get_team_default_grouping_model,
@@ -886,6 +887,12 @@ async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseC
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
     )
+    model_id, effort = gate_model_provider(
+        model_id,
+        effort,
+        disabled_providers=await get_disabled_model_providers(),
+        fallback=await get_team_default_grouping_model(),
+    )
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,
@@ -1337,11 +1344,25 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = cfg.reviewer_subagent_model_id
         subagent_effort = cfg.reviewer_subagent_reasoning_effort
     fable_enabled = await get_team_fable_enabled()
+    disabled_providers = await get_disabled_model_providers()
     model_id, reasoning_effort = gate_fable_model(
         model_id, reasoning_effort, fable_enabled=fable_enabled
     )
     subagent_model_id, subagent_effort = gate_fable_model(
         subagent_model_id, subagent_effort, fable_enabled=fable_enabled
+    )
+    team_defaults = await get_team_default_model_pair("reviewer")
+    model_id, reasoning_effort = gate_model_provider(
+        model_id,
+        reasoning_effort,
+        disabled_providers=disabled_providers,
+        fallback=team_defaults[0],
+    )
+    subagent_model_id, subagent_effort = gate_model_provider(
+        subagent_model_id,
+        subagent_effort,
+        disabled_providers=disabled_providers,
+        fallback=team_defaults[1],
     )
     model_kwargs = provider_model_kwargs(
         model_id,

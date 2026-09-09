@@ -7,6 +7,7 @@ import type {
   DatadogConnectBody,
   LangSmithConnectBody,
   ModelOption,
+  ModelProviderOption,
   PRTraceResolutionResult,
   TeamSettings,
   UserMapping,
@@ -70,6 +71,8 @@ function AdminPage() {
       <WorkspaceMCPSection />
 
       <LLMGatewaySection />
+
+      <ModelProvidersSection providers={options.data?.model_providers ?? []} />
 
       <DictationSection />
 
@@ -919,6 +922,65 @@ function DictationSection() {
           }
         />
       )}
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+export function ModelProvidersSection({
+  providers,
+}: {
+  providers: Array<ModelProviderOption>
+}) {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      qc.invalidateQueries({ queryKey: ["options"] })
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const setEnabled = (providerId: string, enabled: boolean) => {
+    if (!settings.data) return
+    const disabled = new Set(settings.data.disabled_model_providers ?? [])
+    if (enabled) disabled.delete(providerId)
+    else disabled.add(providerId)
+    save.mutate({
+      ...settings.data,
+      disabled_model_providers: Array.from(disabled),
+    })
+  }
+
+  return (
+    <SettingsSection
+      title="Model providers"
+      description="Control which providers are available in model pickers and agent runs across this workspace."
+    >
+      <div className="divide-y divide-border">
+        {providers.map((provider) => (
+          <SettingsRow
+            key={provider.id}
+            label={provider.label}
+            description={`Allow models served by ${provider.label}.`}
+            control={
+              <Switch
+                aria-label={`${provider.label} models`}
+                checked={provider.enabled}
+                onCheckedChange={(enabled) => setEnabled(provider.id, enabled)}
+                disabled={!settings.data || save.isPending}
+              />
+            }
+          />
+        ))}
+      </div>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )

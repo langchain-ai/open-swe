@@ -36,9 +36,11 @@ from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
+    gate_model_provider,
     model_supports_effort,
 )
 from agent.dashboard.team_settings import (
+    get_disabled_model_providers,
     get_effective_gateway_enabled,
     get_team_default_model,
     get_team_fable_enabled,
@@ -218,6 +220,12 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     model_id, effort = await _resolve_chat_model(cfg)
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
+    )
+    model_id, effort = gate_model_provider(
+        model_id,
+        effort,
+        disabled_providers=await get_disabled_model_providers(),
+        fallback=await _cached_team_chat_model(),
     )
     use_gateway = await _cached_gateway_enabled()
     model_kwargs = provider_model_kwargs(

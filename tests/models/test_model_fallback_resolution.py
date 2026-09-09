@@ -10,8 +10,11 @@ from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     SUPPORTED_MODELS,
     default_model_pair,
+    enabled_default_model_pair,
     fable_disabled_fallback,
+    filter_models_by_provider,
     gate_fable_model,
+    gate_model_provider,
     is_deprecated_model,
     model_profile_context_window,
     models_with_profile_context_windows,
@@ -78,6 +81,35 @@ def test_supported_openai_models() -> None:
         ("openai:gpt-5.6-terra", "GPT-5.6 Terra"),
         ("openai:gpt-5.6-luna", "GPT-5.6 Luna"),
     ]
+
+
+def test_disabling_provider_filters_models_and_gates_existing_selection() -> None:
+    models = filter_models_by_provider(SUPPORTED_MODELS, ["anthropic"])
+    assert all(not model["id"].startswith("anthropic:") for model in models)
+    assert gate_model_provider(
+        SUPPORTED_ANTHROPIC,
+        "high",
+        disabled_providers=["anthropic"],
+    ) == (SUPPORTED_OPENAI, "medium")
+
+
+def test_disabled_deployment_default_uses_first_enabled_provider() -> None:
+    assert enabled_default_model_pair(["openai"]) == (SUPPORTED_ANTHROPIC, "high")
+
+
+def test_team_settings_rejects_unknown_or_all_disabled_providers() -> None:
+    with pytest.raises(ValueError, match="unsupported model providers"):
+        TeamSettingsUpdate(disabled_model_providers=["mystery"])
+    with pytest.raises(ValueError, match="at least one model provider"):
+        TeamSettingsUpdate(
+            disabled_model_providers=[
+                "anthropic",
+                "openai",
+                "google_genai",
+                "fireworks",
+                "baseten",
+            ]
+        )
 
 
 @pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM])
@@ -185,6 +217,22 @@ def test_profile_response_and_override_defer_deprecated_models() -> None:
     assert normalize_profile_overrides(
         {"default_model": DEPRECATED_GLM, "reasoning_effort": "high"}
     ) == (None, None)
+
+
+def test_disabling_provider_rewrites_team_defaults() -> None:
+    update = TeamSettingsUpdate(
+        disabled_model_providers=["anthropic"],
+        default_agent_model=SUPPORTED_ANTHROPIC,
+        default_agent_reasoning_effort="high",
+    )
+    assert update.default_agent_model == SUPPORTED_OPENAI
+    assert update.default_agent_reasoning_effort == "medium"
+
+
+def test_profile_update_rejects_disabled_provider() -> None:
+    update = ProfileUpdate(default_model=SUPPORTED_ANTHROPIC, reasoning_effort="high")
+    with pytest.raises(ValueError, match="provider is disabled"):
+        update.validate_pairing(["anthropic"])
 
 
 def test_team_settings_update_rejects_unknown_openai_model() -> None:

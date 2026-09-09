@@ -9,17 +9,22 @@ import logging
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.config import ENV
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
+    MODEL_PROVIDERS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
+    SUPPORTED_MODEL_PROVIDER_IDS,
     canonical_model_pair,
     default_model_pair,
+    enabled_default_model_pair,
     gate_fable_model,
+    gate_model_provider,
+    model_provider_enabled,
     model_supports_effort,
     provider_fallback_pair,
 )
@@ -65,6 +70,7 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     gateway_enabled: bool | None = None
     transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
     fable_enabled: bool = False
+    disabled_model_providers: list[str] = Field(default_factory=list)
     review_tracing_project: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -82,6 +88,16 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
+
+    @field_validator("disabled_model_providers")
+    @classmethod
+    def _validate_disabled_model_providers(cls, value: list[str]) -> list[str]:
+        unknown = set(value) - SUPPORTED_MODEL_PROVIDER_IDS
+        if unknown:
+            raise ValueError(f"unsupported model providers: {', '.join(sorted(unknown))}")
+        normalized = [provider["id"] for provider in MODEL_PROVIDERS if provider["id"] in value]
+        enabled_default_model_pair(normalized)
+        return normalized
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -157,6 +173,19 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
                 self.default_thread_title_reasoning_effort,
             )
         )
+        for model_field, effort_field in _MODEL_PAIR_FIELDS:
+            model = getattr(self, model_field)
+            effort = getattr(self, effort_field)
+            if isinstance(model, str) and not model_provider_enabled(
+                model, self.disabled_model_providers
+            ):
+                model, effort = gate_model_provider(
+                    model,
+                    effort,
+                    disabled_providers=self.disabled_model_providers,
+                )
+                setattr(self, model_field, model)
+                setattr(self, effort_field, effort)
         _validate_model_effort_pair(
             self.default_agent_model, self.default_agent_reasoning_effort, "agent"
         )
@@ -285,6 +314,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
+        "disabled_model_providers": [],
         "review_tracing_project": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -340,6 +370,17 @@ async def get_team_settings() -> dict[str, Any]:
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
+    disabled_providers = update.disabled_model_providers
+    if "disabled_model_providers" not in update.model_fields_set:
+        disabled_providers = await get_disabled_model_providers()
+        for model_field, effort_field in _MODEL_PAIR_FIELDS:
+            model, effort = gate_model_provider(
+                getattr(update, model_field),
+                getattr(update, effort_field),
+                disabled_providers=disabled_providers,
+            )
+            setattr(update, model_field, model)
+            setattr(update, effort_field, effort)
     value: dict[str, Any] = {
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
@@ -347,6 +388,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "gateway_enabled": update.gateway_enabled,
         "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,
+        "disabled_model_providers": disabled_providers,
         "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
@@ -390,6 +432,7 @@ async def get_team_default_model(
     admin setting is unset/invalid it inherits the team **agent** default.
     """
     settings = await get_team_settings()
+    disabled_providers = _disabled_providers(settings)
     if role == "chat":
         model = settings.get("default_chat_model")
         effort = settings.get("default_chat_reasoning_effort")
@@ -399,7 +442,7 @@ async def get_team_default_model(
             and model in SUPPORTED_MODEL_IDS
             and model_supports_effort(model, effort)
         ):
-            return _resolve_default_pair(model, effort)
+            return _resolve_default_pair(model, effort, disabled_providers=disabled_providers)
         # Inherit the Agent default when no chat-specific model is configured.
         model = settings.get("default_agent_model")
         effort = settings.get("default_agent_reasoning_effort")
@@ -409,7 +452,7 @@ async def get_team_default_model(
     else:
         model = settings.get("default_reviewer_model")
         effort = settings.get("default_reviewer_reasoning_effort")
-    return _resolve_default_pair(model, effort)
+    return _resolve_default_pair(model, effort, disabled_providers=disabled_providers)
 
 
 async def get_team_default_model_pair(
@@ -417,23 +460,28 @@ async def get_team_default_model_pair(
 ) -> tuple[tuple[str, str], tuple[str, str]]:
     """Return default ``(main, subagent)`` model pairs for ``role`` from one store read."""
     settings = await get_team_settings()
+    disabled_providers = _disabled_providers(settings)
     if role == "agent":
         main = _resolve_default_pair(
             settings.get("default_agent_model"),
             settings.get("default_agent_reasoning_effort"),
+            disabled_providers=disabled_providers,
         )
         subagent = _resolve_default_pair(
             settings.get("default_agent_subagent_model"),
             settings.get("default_agent_subagent_reasoning_effort"),
+            disabled_providers=disabled_providers,
         )
     else:
         main = _resolve_default_pair(
             settings.get("default_reviewer_model"),
             settings.get("default_reviewer_reasoning_effort"),
+            disabled_providers=disabled_providers,
         )
         subagent = _resolve_default_pair(
             settings.get("default_reviewer_subagent_model"),
             settings.get("default_reviewer_subagent_reasoning_effort"),
+            disabled_providers=disabled_providers,
         )
     return main, subagent
 
@@ -448,6 +496,7 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
     cheaper tier rather than the primary reviewer model.
     """
     settings = await get_team_settings()
+    disabled_providers = _disabled_providers(settings)
     model = settings.get("default_grouping_model")
     effort = settings.get("default_grouping_reasoning_effort")
     if (
@@ -457,10 +506,11 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
         and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
-        return _resolve_default_pair(model, effort)
+        return _resolve_default_pair(model, effort, disabled_providers=disabled_providers)
     return _resolve_default_pair(
         settings.get("default_reviewer_subagent_model"),
         settings.get("default_reviewer_subagent_reasoning_effort"),
+        disabled_providers=disabled_providers,
     )
 
 
@@ -488,6 +538,7 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
 
 async def get_team_default_thread_title_model() -> tuple[str, str]:
     settings = await get_team_settings()
+    disabled_providers = _disabled_providers(settings)
     model = settings.get("default_thread_title_model")
     effort = settings.get("default_thread_title_reasoning_effort")
     if (
@@ -497,12 +548,20 @@ async def get_team_default_thread_title_model() -> tuple[str, str]:
         and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
-        pair = _resolve_default_pair(model, effort)
-    else:
+        pair = _resolve_default_pair(model, effort, disabled_providers=disabled_providers)
+    elif model_provider_enabled(DEFAULT_THREAD_TITLE_MODEL, disabled_providers):
         pair = DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
-    return _gate_openai_title_model(
+    else:
+        pair = enabled_default_model_pair(disabled_providers, effort)
+    pair = _gate_openai_title_model(
         pair, gateway_enabled=resolve_gateway_enabled(settings.get("gateway_enabled"))
     )
+    model, resolved_effort = gate_model_provider(
+        pair[0],
+        pair[1],
+        disabled_providers=disabled_providers,
+    )
+    return model, resolved_effort or enabled_default_model_pair(disabled_providers)[1]
 
 
 async def get_team_review_trace_links_enabled() -> bool:
@@ -543,6 +602,14 @@ async def get_team_fable_enabled() -> bool:
     return bool(value) if isinstance(value, bool) else False
 
 
+async def get_disabled_model_providers() -> list[str]:
+    settings = await get_team_settings()
+    value = settings.get("disabled_model_providers")
+    if not isinstance(value, list):
+        return []
+    return [provider for provider in value if provider in SUPPORTED_MODEL_PROVIDER_IDS]
+
+
 async def get_effective_gateway_enabled() -> bool:
     """Resolve whether LLM Gateway routing is on: team setting, else env default."""
     return resolve_gateway_enabled(await get_team_gateway_enabled())
@@ -577,20 +644,31 @@ async def get_team_default_subagent_model(
     else:
         model = settings.get("default_reviewer_subagent_model")
         effort = settings.get("default_reviewer_subagent_reasoning_effort")
-    return _resolve_default_pair(model, effort)
+    return _resolve_default_pair(model, effort, disabled_providers=_disabled_providers(settings))
 
 
-def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
-    """Supported pair if valid, else same-provider fallback, else global default."""
+def _disabled_providers(settings: dict[str, Any]) -> list[str]:
+    value = settings.get("disabled_model_providers")
+    if not isinstance(value, list):
+        return []
+    return [provider for provider in value if provider in SUPPORTED_MODEL_PROVIDER_IDS]
+
+
+def _resolve_default_pair(
+    model: object, effort: object, *, disabled_providers: list[str] | None = None
+) -> tuple[str, str]:
+    """Supported pair if valid, else same-provider fallback, else enabled default."""
+    disabled = disabled_providers or []
     if (
         isinstance(model, str)
         and isinstance(effort, str)
         and model in SUPPORTED_MODEL_IDS
         and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
+        and model_provider_enabled(model, disabled)
     ):
         return model, effort
     provider_pair = provider_fallback_pair(model, effort)
-    if provider_pair is not None:
+    if provider_pair is not None and model_provider_enabled(provider_pair[0], disabled):
         return provider_pair
-    return default_model_pair()
+    return enabled_default_model_pair(disabled, effort)

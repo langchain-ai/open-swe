@@ -18,11 +18,16 @@ from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
     gate_fable_model,
+    gate_model_provider,
     model_supports_images,
     normalize_model_choice,
 )
 from agent.dashboard.profiles import get_profile
-from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
+from agent.dashboard.team_settings import (
+    get_disabled_model_providers,
+    get_team_default_model,
+    get_team_fable_enabled,
+)
 from agent.dashboard.threads.access import (
     _ensure_dashboard_github_token,
     agent_version_metadata,
@@ -120,15 +125,27 @@ async def _resolve_agent_model_choice(
     resolved_model, resolved_effort = gate_fable_model(
         resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
     )
+    resolved_model, resolved_effort = gate_model_provider(
+        resolved_model,
+        resolved_effort,
+        disabled_providers=await get_disabled_model_providers(),
+        fallback=await get_team_default_model("agent"),
+    )
     if not isinstance(resolved_effort, str):
         raise ValueError("team default model must include a reasoning effort")
     return resolved_model, resolved_effort
 
 
-def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tuple[str, str]:
+def _with_vision_fallback(
+    model_id: str,
+    effort: str,
+    *,
+    has_images: bool,
+    disabled_providers: list[str] | None = None,
+) -> tuple[str, str]:
     if not has_images or model_supports_images(model_id):
         return model_id, effort
-    fallback_model_id, fallback_effort = default_vision_model_pair()
+    fallback_model_id, fallback_effort = default_vision_model_pair(disabled_providers or [])
     logger.info(
         "Using vision fallback model %s for dashboard image input; configured model %s "
         "does not support images",
@@ -226,6 +243,7 @@ async def _create_dashboard_thread_record(
         resolved_model,
         resolved_effort,
         has_images=bool(images),
+        disabled_providers=await get_disabled_model_providers(),
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
