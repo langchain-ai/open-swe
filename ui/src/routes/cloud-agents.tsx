@@ -156,6 +156,7 @@ function CloudAgentsPage() {
               <Switch
                 checked={profile.data?.model_routing_enabled ?? true}
                 onCheckedChange={(v) => persist({ model_routing_enabled: v })}
+                disabled={profile.isLoading || save.isPending}
               />
             }
           />
