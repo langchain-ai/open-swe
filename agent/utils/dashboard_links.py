@@ -38,6 +38,18 @@ def dashboard_is_same_origin() -> bool:
     return bool(frontend) and _origin(frontend) == _origin(dashboard_api_base_url())
 
 
+def dashboard_proxies_requests() -> bool:
+    """True when a dashboard app fronts this backend and can proxy a request for it.
+
+    Either a deployed dashboard on its own origin or the dev server this backend
+    fronts. A bundled build is static files, and every Platform deployment carries
+    one, so its presence says nothing about what serves the dashboard's users.
+    """
+    if not dashboard_base_url():
+        return False
+    return not dashboard_is_same_origin() or bool(ENV.DASHBOARD_DEV_SERVER_URL.optional())
+
+
 def dashboard_thread_url(thread_id: str) -> str | None:
     """Build the dashboard thread URL for a given thread id."""
     base_url = dashboard_base_url()

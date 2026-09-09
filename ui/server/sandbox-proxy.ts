@@ -15,6 +15,18 @@ const SERVICE_TOKEN_HEADER = "x-langsmith-sandbox-service-token"
 // so it must not see the session that authorizes this proxy in the first place.
 const DASHBOARD_COOKIE_PREFIX = "osw_"
 
+// Mirrors devRouteRules' localhost default: in dev the backend is this machine's
+// `langgraph dev`. A deployed build takes backendOrigin's no-default rule.
+function mintOrigin(): string {
+  if (process.env.NODE_ENV === "production") {
+    return backendOrigin()
+  }
+  return (process.env.DASHBOARD_API_URL ?? "http://localhost:2024").replace(
+    /\/$/,
+    ""
+  )
+}
+
 const TOKEN_REFRESH_MARGIN_MS = 30_000
 const TOKEN_CACHE_LIMIT = 128
 
@@ -86,7 +98,7 @@ async function resolveService(
     }
   }
   const url =
-    `${backendOrigin()}/dashboard/api/threads/${encodeURIComponent(target.threadId)}` +
+    `${mintOrigin()}/dashboard/api/threads/${encodeURIComponent(target.threadId)}` +
     `/service-url?port=${target.port}`
   const response = await fetch(url, { headers: mint })
   if (!response.ok) {

@@ -32,6 +32,36 @@ def test_bundled_dashboard_lives_on_the_backend_origin(
     assert dashboard_links.dashboard_thread_url("t1") == "https://backend.example/agents/t1"
 
 
+def test_deployed_dashboard_app_proxies_even_with_a_bundled_build(
+    monkeypatch: pytest.MonkeyPatch, bundled: Path
+) -> None:
+    """Every Platform image bundles a build, so only the origins say who serves users."""
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+
+    assert dashboard_links.dashboard_proxies_requests() is True
+
+
+def test_bundled_dashboard_proxies_nothing(monkeypatch: pytest.MonkeyPatch, bundled: Path) -> None:
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+
+    assert dashboard_links.dashboard_proxies_requests() is False
+
+
+def test_dev_server_the_backend_fronts_can_proxy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "no-build"))
+    monkeypatch.setenv("DASHBOARD_DEV_SERVER_URL", "http://localhost:3000")
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+
+    assert dashboard_links.dashboard_proxies_requests() is True
+
+
 def test_dev_proxied_dashboard_lives_on_the_backend_origin(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

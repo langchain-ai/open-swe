@@ -4,8 +4,7 @@ from urllib.parse import quote
 from agent.run_config import RunConfig
 from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
-from agent.utils.dashboard_links import dashboard_base_url
-from agent.utils.dashboard_ui import serves_static_ui
+from agent.utils.dashboard_links import dashboard_base_url, dashboard_proxies_requests
 
 _DIRECT_EXPIRES_IN_SECONDS = 86400
 
@@ -30,7 +29,7 @@ async def create_sandbox_service_url(port: int) -> dict[str, Any]:
     if not isinstance(thread_id, str) or not thread_id:
         raise ValueError("no thread_id in run config")
 
-    base_url = "" if serves_static_ui() else dashboard_base_url()
+    base_url = dashboard_base_url() if dashboard_proxies_requests() else ""
     if base_url:
         base_path = f"/sandbox/{quote(thread_id, safe='')}/{port}/"
         return {"url": f"{base_url}{base_path}", "port": port, "base_path": base_path}
