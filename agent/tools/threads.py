@@ -585,7 +585,7 @@ def _compact_approvals(approvals: Mapping[str, Mapping[str, Any]]) -> list[dict[
 def _looks_uuid(value: str) -> bool:
     try:
         uuid.UUID(value)
-    except ValueError, AttributeError:
+    except ValueError:
         return False
     return True
 
