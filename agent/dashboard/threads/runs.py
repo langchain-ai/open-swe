@@ -22,7 +22,12 @@ from agent.dashboard.options import (
     normalize_model_choice,
 )
 from agent.dashboard.profiles import get_profile
-from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
+from agent.dashboard.team_settings import (
+    gate_model_availability,
+    get_team_allowed_models,
+    get_team_default_model,
+    get_team_fable_enabled,
+)
 from agent.dashboard.threads.access import (
     _ensure_dashboard_github_token,
     agent_version_metadata,
@@ -120,15 +125,23 @@ async def _resolve_agent_model_choice(
     resolved_model, resolved_effort = gate_fable_model(
         resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
     )
+    resolved_model, resolved_effort = gate_model_availability(
+        resolved_model, resolved_effort, allowed_models=await get_team_allowed_models()
+    )
     if not isinstance(resolved_effort, str):
         raise ValueError("team default model must include a reasoning effort")
     return resolved_model, resolved_effort
 
 
-def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tuple[str, str]:
+async def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tuple[str, str]:
     if not has_images or model_supports_images(model_id):
         return model_id, effort
-    fallback_model_id, fallback_effort = default_vision_model_pair()
+    try:
+        fallback_model_id, fallback_effort = default_vision_model_pair(
+            await get_team_allowed_models()
+        )
+    except ValueError as exc:
+        raise HTTPException(422, "no enabled model supports image input") from exc
     logger.info(
         "Using vision fallback model %s for dashboard image input; configured model %s "
         "does not support images",
@@ -222,7 +235,7 @@ async def _create_dashboard_thread_record(
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
-    resolved_model, resolved_effort = _with_vision_fallback(
+    resolved_model, resolved_effort = await _with_vision_fallback(
         resolved_model,
         resolved_effort,
         has_images=bool(images),
@@ -490,7 +503,9 @@ async def _enrich_run_start_command(
                     run_effort = value
                     break
         if command_images and run_model and run_effort:
-            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
+            run_model, run_effort = await _with_vision_fallback(
+                run_model, run_effort, has_images=True
+            )
         _validate_command_images(content, model_id=run_model)
 
     if content is None:

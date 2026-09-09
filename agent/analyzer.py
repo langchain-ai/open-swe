@@ -31,7 +31,11 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.dashboard.team_settings import get_effective_gateway_enabled
+from agent.dashboard.team_settings import (
+    gate_model_availability,
+    get_effective_gateway_enabled,
+    get_team_allowed_models,
+)
 from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,
@@ -172,11 +176,15 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     default_backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     backend = CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
-    model_id = DEFAULT_LLM_MODEL_ID
+    model_id, effort = gate_model_availability(
+        DEFAULT_LLM_MODEL_ID,
+        None,
+        allowed_models=await get_team_allowed_models(),
+    )
     use_gateway = await _cached_gateway_enabled()
     model_kwargs = provider_model_kwargs(
         model_id,
-        None,
+        effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )

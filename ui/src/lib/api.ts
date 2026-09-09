@@ -129,10 +129,13 @@ export interface ModelOption {
   supports_images: boolean
   can_be_default?: boolean
   context_window?: number | null
+  family?: string
+  family_label?: string
 }
 
 export interface OptionsPayload {
   models: Array<ModelOption>
+  model_catalog: Array<ModelOption>
   default_agent_model: string
   default_agent_reasoning_effort: string
   default_agent_subagent_model: string
@@ -178,6 +181,7 @@ export interface TeamSettings {
   gateway_enabled?: boolean | null
   transcription_model?: string
   fable_enabled?: boolean
+  allowed_models?: Array<string> | null
   review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null

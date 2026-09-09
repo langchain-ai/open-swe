@@ -30,6 +30,7 @@ from agent.dashboard.profiles import (  # noqa: F401
     has_access_token_record,
 )
 from agent.dashboard.team_settings import (
+    get_team_allowed_models,  # noqa: F401
     get_team_default_repo,
     get_team_settings,
 )
@@ -250,6 +251,7 @@ __all__ = [
     "get_slack_repo_config",
     "get_slack_user_info",
     "get_slack_user_names",
+    "get_team_allowed_models",
     "get_team_default_repo",
     "get_valid_access_token",
     "has_access_token_record",

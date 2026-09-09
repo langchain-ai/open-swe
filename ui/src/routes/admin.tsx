@@ -66,6 +66,8 @@ function AdminPage() {
         )}
       />
 
+      <ModelAvailabilitySection models={options.data?.model_catalog ?? []} />
+
       <SlackIntegrationSection />
       <WorkspaceMCPSection />
 
@@ -919,6 +921,172 @@ function DictationSection() {
           }
         />
       )}
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+const MODEL_FAMILY_ORDER = ["anthropic", "openai", "google_genai", "fireworks"]
+
+function modelFamilyOf(model: ModelOption) {
+  return model.family ?? model.id.split(":", 1)[0] ?? model.id
+}
+
+export function updateFamilyAllowlist(
+  models: Array<ModelOption>,
+  allowedModels: Array<string> | null,
+  family: string,
+  familyModels: Array<ModelOption>,
+  enabled: boolean
+) {
+  const wildcard = `${family}:*`
+  const current = allowedModels ?? models.map((model) => model.id)
+  if (enabled) {
+    return [
+      ...current.filter(
+        (entry) =>
+          entry !== wildcard &&
+          !familyModels.some((model) => model.id === entry)
+      ),
+      wildcard,
+    ]
+  }
+  return current.filter(
+    (entry) =>
+      entry !== wildcard && !familyModels.some((model) => model.id === entry)
+  )
+}
+
+export function updateModelAllowlist(
+  models: Array<ModelOption>,
+  allowedModels: Array<string> | null,
+  model: ModelOption,
+  enabled: boolean
+) {
+  const family = modelFamilyOf(model)
+  const wildcard = `${family}:*`
+  let current = allowedModels ?? models.map((option) => option.id)
+  if (current.includes(wildcard)) {
+    current = current.flatMap((entry) =>
+      entry === wildcard
+        ? models
+            .filter((option) => modelFamilyOf(option) === family)
+            .map((option) => option.id)
+        : [entry]
+    )
+  }
+  return enabled
+    ? [...new Set([...current, model.id])]
+    : current.filter((entry) => entry !== model.id)
+}
+
+export function ModelAvailabilitySection({
+  models,
+}: {
+  models: Array<ModelOption>
+}) {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      qc.invalidateQueries({ queryKey: ["options"] })
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+  const families = useMemo(() => {
+    const grouped = new Map<string, Array<ModelOption>>()
+    for (const model of models) {
+      const family = modelFamilyOf(model)
+      grouped.set(family, [...(grouped.get(family) ?? []), model])
+    }
+    return [...grouped.entries()].sort(
+      ([left], [right]) =>
+        MODEL_FAMILY_ORDER.indexOf(left) - MODEL_FAMILY_ORDER.indexOf(right)
+    )
+  }, [models])
+  const allowedModels = settings.data?.allowed_models
+  const isPolicyAllowed = (model: ModelOption) =>
+    allowedModels == null ||
+    allowedModels.includes(model.id) ||
+    allowedModels.includes(`${modelFamilyOf(model)}:*`)
+  const isAllowed = (model: ModelOption) =>
+    isPolicyAllowed(model) &&
+    (model.id !== "anthropic:claude-fable-5-1" ||
+      !!settings.data?.fable_enabled)
+  const persist = (next: Array<string> | null) => {
+    if (!settings.data) return
+    save.mutate({ ...settings.data, allowed_models: next })
+  }
+  const toggleFamily = (
+    family: string,
+    familyModels: Array<ModelOption>,
+    enabled: boolean
+  ) =>
+    persist(
+      updateFamilyAllowlist(
+        models,
+        allowedModels ?? null,
+        family,
+        familyModels,
+        enabled
+      )
+    )
+  const toggleModel = (model: ModelOption, enabled: boolean) =>
+    persist(updateModelAllowlist(models, allowedModels ?? null, model, enabled))
+
+  return (
+    <SettingsSection
+      title="Model availability"
+      description="Choose which models workspace members can select. Family controls map to dcode-style provider:* allowlist entries."
+    >
+      <div className="divide-y divide-border">
+        {families.map(([family, familyModels]) => {
+          const enabledCount = familyModels.filter(isAllowed).length
+          const familyEnabled = enabledCount === familyModels.length
+          return (
+            <div key={family} className="divide-y divide-border/60">
+              <SettingsRow
+                label={familyModels[0]?.family_label ?? family}
+                description={`${enabledCount} of ${familyModels.length} models enabled`}
+                control={
+                  <Switch
+                    aria-label={`${familyModels[0]?.family_label ?? family} family`}
+                    checked={familyEnabled}
+                    onCheckedChange={(next) =>
+                      toggleFamily(family, familyModels, next)
+                    }
+                    disabled={!settings.data || save.isPending}
+                  />
+                }
+              />
+              <div className="divide-y divide-border/60 bg-muted/20 pl-6">
+                {familyModels.map((model) => (
+                  <SettingsRow
+                    key={model.id}
+                    label={model.label}
+                    description={model.id}
+                    control={
+                      <Switch
+                        aria-label={model.label}
+                        checked={isPolicyAllowed(model)}
+                        onCheckedChange={(next) => toggleModel(model, next)}
+                        disabled={!settings.data || save.isPending}
+                      />
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )

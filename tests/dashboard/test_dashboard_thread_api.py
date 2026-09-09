@@ -2513,6 +2513,11 @@ async def test_options_omits_fable_when_disabled() -> None:
             return_value=False,
         ),
         patch(
+            "agent.dashboard.routes.get_team_allowed_models",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
             "agent.dashboard.routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
@@ -2528,12 +2533,48 @@ async def test_options_omits_fable_when_disabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_applies_model_allowlist_and_returns_unfiltered_catalog() -> None:
+    with (
+        patch(
+            "agent.dashboard.routes.get_team_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_allowed_models",
+            new_callable=AsyncMock,
+            return_value=["openai:*"],
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_subagent_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+    ):
+        payload = await routes.options()
+
+    assert payload["models"]
+    assert all(model["family"] == "openai" for model in payload["models"])
+    assert {model["family"] for model in payload["model_catalog"]} > {"openai"}
+
+
+@pytest.mark.asyncio
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
             "agent.dashboard.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_allowed_models",
+            new_callable=AsyncMock,
+            return_value=None,
         ),
         patch(
             "agent.dashboard.routes.get_team_default_model",
@@ -2563,6 +2604,11 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
             "agent.dashboard.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_allowed_models",
+            new_callable=AsyncMock,
+            return_value=None,
         ),
         patch(
             "agent.dashboard.routes.get_team_default_model",
