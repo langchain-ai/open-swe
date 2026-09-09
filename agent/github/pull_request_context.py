@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-import httpx
+import httpx2
 
 from agent.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
@@ -100,7 +100,7 @@ def _text(value: object) -> str:
 
 
 async def _graphql(
-    client: httpx.AsyncClient, query: str, variables: dict[str, object]
+    client: httpx2.AsyncClient, query: str, variables: dict[str, object]
 ) -> dict[str, Any] | None:
     try:
         response = await github_request(
@@ -111,7 +111,7 @@ async def _graphql(
         )
         response.raise_for_status()
         payload = response.json()
-    except httpx.HTTPError, ValueError:
+    except httpx2.HTTPError, ValueError:
         return None
     if not isinstance(payload, dict) or payload.get("errors"):
         return None
@@ -122,7 +122,7 @@ async def _graphql(
 
 
 async def _fetch_reviews(
-    client: httpx.AsyncClient, owner: str, repo: str, number: int
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> dict[str, Any] | None:
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -265,7 +265,7 @@ def _actionable_check(node: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 async def _fetch_checks(
-    client: httpx.AsyncClient, owner: str, repo: str, number: int
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> dict[str, Any] | None:
     cursor: str | None = None
     seen_cursors: set[str] = set()

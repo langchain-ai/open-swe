@@ -40,7 +40,7 @@ class LangSmithCostUnavailable(RuntimeError):
 def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
     """Return a pooled ``AsyncClient`` for these credentials.
 
-    Each client owns an ``httpx`` connection pool bound to the event loop that
+    Each client owns an ``httpx2`` connection pool bound to the event loop that
     built it, so this assumes one loop per process. Keyed on the credentials so
     a test that repoints the env gets a fresh client instead of a stale pool.
     """
@@ -181,6 +181,11 @@ def _langsmith_metadata_filter(key: str, value: str) -> str:
     return f'and(eq(metadata_key, "{escaped_key}"), eq(metadata_value, "{escaped_value}"))'
 
 
+def _langsmith_trace_filter(trace_ids: list[str]) -> str:
+    filters = [f'eq(trace_id, "{trace_id}")' for trace_id in trace_ids]
+    return filters[0] if len(filters) == 1 else f"or({', '.join(filters)})"
+
+
 async def get_langsmith_thread_cost(
     thread_id: str,
     prepare_run_id: str,
@@ -199,22 +204,24 @@ async def get_langsmith_thread_cost(
             project_id=project_id,
             is_root=True,
             filter=_langsmith_metadata_filter("prepare_run_id", prepare_run_id),
-            select=["end_time"],
-            limit=20,
+            select=["id", "end_time"],
         )
-        target_times = [
-            parsed
+        matched_roots = [
+            (str(root_id), parsed)
             async for run in roots
-            if (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
+            if (root_id := _langsmith_value(run, "id"))
+            and (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
         ]
-        if not target_times:
+        if not matched_roots:
             return None
         stats_kwargs: dict[str, Any] = {
             "session_id": project_id,
             "selects": ["TOTAL_COST", "LAST_END_TIME"],
         }
         if run_only:
-            stats_kwargs["filter"] = _langsmith_metadata_filter("prepare_run_id", prepare_run_id)
+            stats_kwargs["filter"] = _langsmith_trace_filter(
+                [trace_id for trace_id, _ in matched_roots]
+            )
         stats = await client.threads.stats(thread_id, **stats_kwargs)
     except LangSmithNotFoundError as exc:
         raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
@@ -233,7 +240,7 @@ async def get_langsmith_thread_cost(
     except TypeError, ValueError:
         return None
     last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
-    target_end_time = max(target_times)
+    target_end_time = max(end_time for _, end_time in matched_roots)
     if (
         not math.isfinite(total_cost)
         or total_cost < 0

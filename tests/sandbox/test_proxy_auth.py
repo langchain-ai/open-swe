@@ -4,7 +4,7 @@ import base64
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
@@ -24,7 +24,7 @@ from agent.sandboxes.state import SandboxBackendProxy
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
-    """Wire an ``httpx.AsyncClient`` mock class to yield ``inner`` from its
+    """Wire an ``httpx2.AsyncClient`` mock class to yield ``inner`` from its
     async context manager."""
     mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=inner)
     mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -133,7 +133,7 @@ class TestConfigureGithubProxy:
         expected_basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
 
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
         ):
             mock_client = MagicMock()
@@ -178,7 +178,7 @@ class TestConfigureGithubProxy:
     async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
         ):
             mock_client = MagicMock()
@@ -202,7 +202,7 @@ class TestConfigureGithubProxy:
         stale_rule = {"name": "open-swe-langsmith", "headers": [{"value": "old-secret"}]}
         credentials = LangSmithCredentials("new-secret", "https://api.smith.langchain.com")
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "control-key"}, clear=True),
         ):
             mock_client = MagicMock()
@@ -226,7 +226,7 @@ class TestConfigureGithubProxy:
     async def test_removes_managed_langsmith_rule_without_credentials(self) -> None:
         stale_rule = {"name": "open-swe-langsmith", "headers": [{"value": "old-secret"}]}
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "control-key"}, clear=True),
         ):
             mock_client = MagicMock()
@@ -248,7 +248,7 @@ class TestConfigureGithubProxy:
     async def test_sends_to_correct_url(self) -> None:
         """Verify the PATCH hits the right endpoint."""
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict(
                 "os.environ",
                 {
@@ -271,7 +271,7 @@ class TestConfigureGithubProxy:
     async def test_sends_api_key_header(self) -> None:
         """Verify the PATCH includes the LangSmith API key."""
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "my-api-key"}),
         ):
             mock_client = MagicMock()
@@ -288,7 +288,7 @@ class TestConfigureGithubProxy:
     async def test_sandbox_overrides_take_precedence(self) -> None:
         """SANDBOX_LANGSMITH_* override the shared key/endpoint for the proxy call."""
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict(
                 "os.environ",
                 {
@@ -315,17 +315,17 @@ class TestConfigureGithubProxy:
 
     async def test_retries_transient_http_error(self) -> None:
         """Transient proxy API errors should be retried on the same sandbox."""
-        request = httpx.Request(
+        request = httpx2.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
-        response = httpx.Response(503, request=request)
-        transient_error = httpx.HTTPStatusError(
+        response = httpx2.Response(503, request=request)
+        transient_error = httpx2.HTTPStatusError(
             "Server error",
             request=request,
             response=response,
         )
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
                 "agent.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
             ) as mock_sleep,
@@ -346,13 +346,13 @@ class TestConfigureGithubProxy:
 
     async def test_raises_on_non_retryable_http_error(self) -> None:
         """Non-retryable HTTP errors should propagate without retrying."""
-        request = httpx.Request(
+        request = httpx2.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
-        response = httpx.Response(403, request=request)
-        error = httpx.HTTPStatusError("Forbidden", request=request, response=response)
+        response = httpx2.Response(403, request=request)
+        error = httpx2.HTTPStatusError("Forbidden", request=request, response=response)
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
                 "agent.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
             ) as mock_sleep,
@@ -364,7 +364,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=failed_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            with pytest.raises(httpx.HTTPStatusError):
+            with pytest.raises(httpx2.HTTPStatusError):
                 await _configure_github_proxy("sandbox-abc", "token")
 
             mock_client.patch.assert_called_once()
@@ -372,13 +372,13 @@ class TestConfigureGithubProxy:
 
     async def test_error_message_carries_response_body(self) -> None:
         """The API's explanation must survive into the raised error."""
-        request = httpx.Request(
+        request = httpx2.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
-        response = httpx.Response(403, request=request, text="sandbox belongs to another tenant")
-        error = httpx.HTTPStatusError("Forbidden", request=request, response=response)
+        response = httpx2.Response(403, request=request, text="sandbox belongs to another tenant")
+        error = httpx2.HTTPStatusError("Forbidden", request=request, response=response)
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
             mock_client = MagicMock()
@@ -387,7 +387,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=failed_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            with pytest.raises(httpx.HTTPStatusError, match="another tenant"):
+            with pytest.raises(httpx2.HTTPStatusError, match="another tenant"):
                 await _configure_github_proxy("sandbox-abc", "token")
 
 
@@ -395,20 +395,20 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
     """A 400 means the sandbox is not ready; start it and retry the update."""
 
     @staticmethod
-    def _not_ready_error() -> httpx.HTTPStatusError:
-        request = httpx.Request(
+    def _not_ready_error() -> httpx2.HTTPStatusError:
+        request = httpx2.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
-        response = httpx.Response(
+        response = httpx2.Response(
             400,
             request=request,
             text='sandbox "sandbox-abc" is in "stopped" state, must be "ready"',
         )
-        return httpx.HTTPStatusError("Bad request", request=request, response=response)
+        return httpx2.HTTPStatusError("Bad request", request=request, response=response)
 
     async def test_starts_sandbox_then_retries(self) -> None:
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
                 "agent.sandboxes.providers.langsmith.get_async_sandbox_client"
             ) as mock_sandbox_client_factory,
@@ -437,7 +437,7 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
     async def test_retries_even_when_start_fails(self) -> None:
         """A failed start is logged, not fatal: the retry reports the real state."""
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
                 "agent.sandboxes.providers.langsmith.get_async_sandbox_client"
             ) as mock_sandbox_client_factory,
@@ -454,7 +454,7 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
             sandbox_client.aclose = AsyncMock()
             mock_sandbox_client_factory.return_value = sandbox_client
 
-            with pytest.raises(httpx.HTTPStatusError, match="stopped"):
+            with pytest.raises(httpx2.HTTPStatusError, match="stopped"):
                 await _configure_github_proxy("sandbox-abc", "token")
 
             sandbox_client.start_sandbox.assert_awaited_once()
@@ -464,7 +464,7 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
     async def test_does_not_start_twice(self) -> None:
         """Only one start attempt per configure call, even if the retry also 400s."""
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
                 "agent.sandboxes.providers.langsmith.get_async_sandbox_client"
             ) as mock_sandbox_client_factory,
@@ -481,7 +481,7 @@ class TestConfigureGithubProxyStartsStoppedSandbox:
             sandbox_client.aclose = AsyncMock()
             mock_sandbox_client_factory.return_value = sandbox_client
 
-            with pytest.raises(httpx.HTTPStatusError):
+            with pytest.raises(httpx2.HTTPStatusError):
                 await _configure_github_proxy("sandbox-abc", "token")
 
             sandbox_client.start_sandbox.assert_awaited_once()
@@ -806,10 +806,10 @@ class TestRefreshProxyOnSandboxReuse:
         work the old sandbox still held.
         """
         mock_sandbox = MagicMock(id="sandbox-stale", aexecute=AsyncMock())
-        request = httpx.Request(
+        request = httpx2.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-stale"
         )
-        response = httpx.Response(400, request=request)
+        response = httpx2.Response(400, request=request)
 
         with (
             patch(
@@ -820,7 +820,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch(
                 "agent.sandboxes.lifecycle._configure_github_proxy",
                 new_callable=AsyncMock,
-                side_effect=httpx.HTTPStatusError(
+                side_effect=httpx2.HTTPStatusError(
                     "Bad request",
                     request=request,
                     response=response,

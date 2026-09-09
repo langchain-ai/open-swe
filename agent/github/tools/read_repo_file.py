@@ -8,7 +8,7 @@ run config (seeded by the dashboard chat proxy).
 import base64
 from typing import Any
 
-import httpx
+import httpx2
 
 from agent.github.checks import github_headers
 from agent.run_config import RunConfig
@@ -60,9 +60,9 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{clean_path}"
     headers = github_headers(token)
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx2.AsyncClient(timeout=30) as client:
             response = await client.get(url, headers=headers, params=params)
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         return {"success": False, "error": f"GitHub request failed: {exc!s}"}
 
     if response.status_code == 404:

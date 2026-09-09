@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 from urllib.parse import quote
 
-import httpx
+import httpx2
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack.client import (
@@ -77,7 +77,7 @@ async def is_code_channel(channel_id: str) -> bool:
 async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/{method}",
@@ -88,7 +88,7 @@ async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | 
                 return None, "rate_limited"
             response.raise_for_status()
             data = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx2.HTTPError, ValueError) as exc:
             logger.exception("Slack %s request failed", method)
             return None, f"http_error: {type(exc).__name__}"
         if not isinstance(data, dict):

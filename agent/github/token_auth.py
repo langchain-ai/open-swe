@@ -13,7 +13,7 @@ remains the only credential for everything else.
 import logging
 from typing import Any
 
-import httpx
+import httpx2
 from fastapi import HTTPException, Request
 
 from agent.dashboard.admin import is_admin
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _GITHUB_USER_URL = "https://api.github.com/user"
 _GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
-_GITHUB_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_GITHUB_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 
 
 def bearer_github_token(request: Request) -> str | None:
@@ -49,13 +49,13 @@ async def _github_identity(token: str) -> tuple[str, str | None]:
     }
     email: str | None = None
     try:
-        async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
             response = await client.get(_GITHUB_USER_URL, headers=headers)
             if response.status_code == 200:
                 email = _email_of(response) or _primary_email(
                     await client.get(_GITHUB_EMAILS_URL, headers=headers)
                 )
-    except httpx.HTTPError as e:
+    except httpx2.HTTPError as e:
         raise HTTPException(502, f"could not verify GitHub token: {e}") from e
 
     if response.status_code == 403:
@@ -74,13 +74,13 @@ async def _github_identity(token: str) -> tuple[str, str | None]:
     return login.strip(), email
 
 
-def _email_of(response: httpx.Response) -> str | None:
+def _email_of(response: httpx2.Response) -> str | None:
     data = response.json() if response.content else {}
     email = data.get("email") if isinstance(data, dict) else None
     return email.strip() if isinstance(email, str) and email.strip() else None
 
 
-def _primary_email(response: httpx.Response) -> str | None:
+def _primary_email(response: httpx2.Response) -> str | None:
     if response.status_code != 200 or not response.content:
         return None
     entries = response.json()

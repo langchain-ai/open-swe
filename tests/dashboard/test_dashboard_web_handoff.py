@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import HTTPException
@@ -55,6 +55,14 @@ async def _inactive_thread(thread_id: str) -> bool:
 
 async def _active_thread(thread_id: str) -> bool:
     return True
+
+
+def _queued_message_without_metadata(queued_messages: list[object]) -> dict[str, object]:
+    assert len(queued_messages) == 1
+    queued_message = cast(dict[str, object], queued_messages[0])
+    assert cast(str, queued_message.pop("queue_id")).startswith("queued-")
+    assert isinstance(queued_message.pop("created_at_ms"), int)
+    return queued_message
 
 
 async def _noop_token_check(login: str) -> None:
@@ -172,19 +180,17 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     )
 
     assert client.threads.updates[0]["source"] == "dashboard"
-    assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-                "email": "octocat@example.com",
-            },
-        }
-    ]
+    assert _queued_message_without_metadata(queued_messages) == {
+        "text": "continue in web",
+        "source": "dashboard",
+        "surface": "web",
+        "sender": {
+            "id": "github:octocat",
+            "platform": "github",
+            "github_login": "octocat",
+            "email": "octocat@example.com",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -231,19 +237,17 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         email="octocat@example.com",
     )
 
-    assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-                "email": "octocat@example.com",
-            },
-        }
-    ]
+    assert _queued_message_without_metadata(queued_messages) == {
+        "text": "continue in web",
+        "source": "dashboard",
+        "surface": "web",
+        "sender": {
+            "id": "github:octocat",
+            "platform": "github",
+            "github_login": "octocat",
+            "email": "octocat@example.com",
+        },
+    }
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
     ]
@@ -331,19 +335,17 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         ),
     )
 
-    assert queued_messages == [
-        {
-            "text": "continue in web",
-            "source": "dashboard",
-            "surface": "web",
-            "sender": {
-                "id": "github:octocat",
-                "platform": "github",
-                "github_login": "octocat",
-            },
-            "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
-        }
-    ]
+    assert _queued_message_without_metadata(queued_messages) == {
+        "text": "continue in web",
+        "source": "dashboard",
+        "surface": "web",
+        "sender": {
+            "id": "github:octocat",
+            "platform": "github",
+            "github_login": "octocat",
+        },
+        "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
+    }
 
 
 @pytest.mark.asyncio
