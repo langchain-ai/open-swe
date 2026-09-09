@@ -13,6 +13,7 @@ import {
   PushPinIcon,
   PushPinSlashIcon,
   SparkleIcon,
+  GearIcon,
 } from "@phosphor-icons/react"
 import { Kanban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -124,6 +125,7 @@ const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
+  { to: "/my-settings", label: "Settings", icon: GearIcon },
 ] as const
 
 /** Threads shown per project before the group needs a "Show more". */
@@ -613,17 +615,14 @@ export function AgentsSidebar({
           isDesktop ? "pt-13" : "pt-5"
         )}
       >
-        <Link
-          to={localOnly ? "/agents" : "/my-settings"}
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
-        >
+        <div className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground">
           <img
             src={`${import.meta.env.BASE_URL}logo-mark.png`}
             alt=""
             className="size-5"
           />
           Open SWE
-        </Link>
+        </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
