@@ -21,6 +21,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from agent.config import ENV
@@ -54,6 +55,7 @@ from agent.dashboard.notion_oauth import (
 )
 from agent.dashboard.oauth import (
     COOKIE_NAME,
+    SESSION_COOKIE,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
@@ -294,9 +296,20 @@ def _admin_session(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
 
 
 _ADMIN_DEP = Depends(_admin_session)
+_ADMIN_BEARER_DEP = Depends(
+    HTTPBearer(
+        scheme_name="AdminBearer",
+        description="An admin's GitHub user token or an allowlisted GitHub Actions OIDC token.",
+        auto_error=False,
+    )
+)
 
 
-async def _admin_session_or_ci_token(request: Request) -> dict[str, Any]:
+async def _admin_session_or_ci_token(
+    request: Request,
+    _cookie: str | None = Depends(SESSION_COOKIE),
+    _bearer: HTTPAuthorizationCredentials | None = _ADMIN_BEARER_DEP,
+) -> dict[str, Any]:
     """Admin gate that also accepts CI credentials: an Actions OIDC token, or an
     admin's GitHub personal access token."""
     token = bearer_github_token(request)

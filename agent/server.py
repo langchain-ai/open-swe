@@ -51,6 +51,7 @@ from agent.dashboard.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_draft_prs,
+    profile_model_routing_enabled,
     resolve_github_login,
 )
 from agent.dashboard.agent_usage import record_agent_run_usage
@@ -66,6 +67,7 @@ from agent.dashboard.options import (
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
+    get_team_agent_routing_models,
     get_team_default_model_pair,
     get_team_default_repo,
     get_team_default_thread_title_model,
@@ -91,6 +93,7 @@ from agent.middleware import (
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
+    ModelSelectionMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -549,6 +552,14 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     )
 
 
+async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
+    return await ttl_cache.cached(
+        "team:agent-routing-models",
+        60,
+        get_team_agent_routing_models,
+    )
+
+
 async def _cached_thread_title_model() -> tuple[str, str]:
     return await ttl_cache.cached(
         "team:thread-title-model",
@@ -879,6 +890,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         from agent.dashboard.options import default_model_pair
 
         team_defaults = (default_model_pair(), default_model_pair())
+        routing_defaults = {
+            "fast": default_model_pair(),
+            "balanced": default_model_pair(),
+            "performance": default_model_pair(),
+        }
         title_defaults = team_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
@@ -887,12 +903,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.settings_defaults"):
             (
                 team_defaults,
+                routing_defaults,
                 title_defaults,
                 use_gateway,
                 profile,
                 fable_enabled,
             ) = await asyncio.gather(
                 _cached_team_default_model_pair("agent"),
+                _cached_agent_routing_models(),
                 _cached_thread_title_model(),
                 _cached_gateway_enabled(),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
@@ -933,12 +951,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
+    adaptive_model_routing = profile_model_routing_enabled(profile)
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
         subagent_effort = thread_settings.get("subagent_effort")
+        adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
     # An explicit per-run model choice is the one thing allowed to move a thread
@@ -983,6 +1003,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "effort": profile_effort,
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
+        "model_routing_enabled": adaptive_model_routing,
         "repo_instructions": repo_instructions,
     }
     if not local_run and (
@@ -991,6 +1012,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
+    config["metadata"] = {
+        **(config.get("metadata") or {}),
+        "model_routing_applied": adaptive_model_routing,
+    }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
     )
@@ -1176,6 +1201,27 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    model_selection_middleware: list[Any] = []
+    if adaptive_model_routing:
+        routing_models = {
+            route: _make_model_or_defer(
+                routed_model_id,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    routed_model_id,
+                    effort,
+                    max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                ),
+            )
+            for route, (routed_model_id, effort) in routing_defaults.items()
+        }
+        model_selection_middleware.append(
+            ModelSelectionMiddleware(
+                routing_models,
+                routing_models["fast"],
+                initial_plan_mode=plan_mode,
+            )
+        )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
@@ -1254,6 +1300,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
                 record_run_usage,
+                *model_selection_middleware,
                 *fallback_middleware,
                 PlanModeMiddleware(
                     excluded=PLAN_MODE_EXCLUDED_TOOLS

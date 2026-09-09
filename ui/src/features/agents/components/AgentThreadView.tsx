@@ -46,6 +46,7 @@ import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useReconcileStream } from "@/features/agents/lib/stream/useReconcileStream"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -88,6 +89,7 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentStream()
+  useReconcileStream(thread.id, thread.status === "running")
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()

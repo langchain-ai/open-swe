@@ -137,6 +137,7 @@ export interface Profile {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -151,6 +152,7 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -168,6 +170,12 @@ export interface TeamSettings {
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
   default_agent_subagent_reasoning_effort?: string | null
+  default_agent_routing_fast_model?: string | null
+  default_agent_routing_fast_reasoning_effort?: string | null
+  default_agent_routing_balanced_model?: string | null
+  default_agent_routing_balanced_reasoning_effort?: string | null
+  default_agent_routing_performance_model?: string | null
+  default_agent_routing_performance_reasoning_effort?: string | null
   default_repo?: string | null
   default_reviewer_model?: string | null
   default_reviewer_reasoning_effort?: string | null

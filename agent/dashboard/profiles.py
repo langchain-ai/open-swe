@@ -47,6 +47,7 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
+    model_routing_enabled: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
@@ -150,6 +151,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
+        "model_routing_enabled": (
+            update.model_routing_enabled
+            if update.model_routing_enabled is not None
+            else existing.get("model_routing_enabled", False)
+        ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
