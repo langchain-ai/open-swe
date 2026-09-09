@@ -236,9 +236,6 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
-ENGINE_VALIDATION_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
-    {"delete", "edit_file", "execute", "task", "write_file"}
-)
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -1155,7 +1152,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             dynamic_tool_middleware = candidate
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    agent_backend: BackendProtocol = ReadOnlyBackend(backend) if engine_validation else backend
+    agent_backend: BackendProtocol = backend
     skill_routes: dict[str, BackendProtocol] = {
         BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
@@ -1261,13 +1258,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
                     excluded=(
-                        ENGINE_VALIDATION_EXCLUDED_TOOLS
-                        if engine_validation
-                        else (
-                            STOP_SUMMARY_EXCLUDED_TOOLS
-                            if stop_summary_mode
-                            else DEEP_AGENT_EXCLUDED_TOOLS
-                        )
+                        STOP_SUMMARY_EXCLUDED_TOOLS
+                        if stop_summary_mode
+                        else DEEP_AGENT_EXCLUDED_TOOLS
                     )
                 ),
                 SubdirAgentsReadMiddleware(),
@@ -1281,7 +1274,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ),
                 *([] if local_run or engine_validation else [PullRequestCreationGuardMiddleware()]),
                 *([] if engine_validation else [WorkflowPushGuardMiddleware()]),
-                *([] if engine_validation else [refresh_github_proxy_before_model]),
+                refresh_github_proxy_before_model,
                 *(
                     []
                     if stop_summary_mode or engine_validation

@@ -245,7 +245,7 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 
 
 @pytest.mark.asyncio
-async def test_engine_validation_wraps_default_backend_as_read_only() -> None:
+async def test_engine_validation_keeps_disposable_sandbox_writable() -> None:
     config = _base_config()
     config["configurable"].update(
         {
@@ -258,9 +258,8 @@ async def test_engine_validation_wraps_default_backend_as_read_only() -> None:
 
     backend = captured["backend"]
     assert isinstance(backend, CompositeBackend)
-    assert isinstance(backend.default, ReadOnlyBackend)
-    with pytest.raises(NotImplementedError):
-        backend.write("/workspace/open-swe/file.py", "malicious")
+    assert isinstance(backend.default, SandboxBackendProxy)
+    assert isinstance(backend.routes["/bundled-skills/"], ReadOnlyBackend)
 
 
 @pytest.mark.asyncio
