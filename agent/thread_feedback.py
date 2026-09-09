@@ -15,7 +15,6 @@ from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 logger = logging.getLogger(__name__)
 DELAY_MS = 5 * 60 * 1000
 ACTIVITY_KEY = "feedback_last_activity_at_ms"
-Rating = Literal["bad", "good", "other"]
 
 
 class Feedback(BaseModel):
@@ -23,8 +22,6 @@ class Feedback(BaseModel):
     event_id: str = ""
     answer_run_id: str = ""
     activity_at_ms: int = 0
-    rating: Rating | None = None
-    comment: str = ""
 
 
 def feedback_store() -> TypedStore[Feedback]:
@@ -171,13 +168,6 @@ async def _schedule(
         logger.warning("Could not schedule feedback prompt", extra={"thread_id": thread_id})
 
 
-async def mark_answered_question(thread_id: str, run_id: str) -> None:
-    thread = await langgraph_client().threads.get(thread_id)
-    await _schedule(
-        thread_id, thread.get("metadata") or {}, event_id=f"answer:{run_id}", answer_run_id=run_id
-    )
-
-
 async def schedule_answer_feedback(thread_id: str, run_id: str, metadata: dict[str, Any]) -> None:
     from agent.slack.client import lookup_slack_run_message_mapping
 
@@ -205,6 +195,8 @@ async def schedule_pr_feedback(thread_id: str, metadata: dict[str, Any], pr_url:
         (pr for pr in (metadata.get("pull_requests") or []) if pr.get("url") == pr_url), {}
     )
     origin = record.get("slack_feedback") or {}
+    if not origin.get("channel_id") or not origin.get("run_id"):
+        return
     await _schedule(
         thread_id,
         metadata,

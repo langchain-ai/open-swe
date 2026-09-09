@@ -141,24 +141,12 @@ async def test_unsuccessful_answers_do_not_prompt(context: Any, status: str) -> 
     slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
 
 
-async def test_web_answer_only_becomes_ready_after_run_succeeds(context: Any) -> None:
-    await feedback.mark_answered_question("t1", "r1")
-    payload = context.runs.create.call_args.kwargs["input"]
-    context.runs.list.return_value = [{"run_id": "r1", "status": "running"}]
-    await _run(context, payload, 302000)
-    assert await feedback.feedback_prompt_status("t1") == "unavailable"
-    context.runs.list.return_value = [
-        {"run_id": "r1", "status": "success", "updated_at": "1970-01-01T00:06:00Z"}
-    ]
-    await _run(context, context.runs.create.call_args.kwargs["input"], 660000)
-    assert await feedback.feedback_prompt_status("t1") == "ready"
-    slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
-
-
 async def test_late_completion_cannot_replace_newer_answer(context: Any) -> None:
     context.runs.list.return_value = [{"run_id": "r2", "status": "success"}]
-    await feedback.mark_answered_question("t1", "r2")
-    await feedback.mark_answered_question("t1", "r1")
+    await _schedule(context)
+    await feedback._schedule(
+        "t1", context.threads.get.return_value["metadata"], answer_run_id="r1", event_id="answer:r1"
+    )
     prompt = await feedback.feedback_store().get("t1")
     assert prompt is not None and prompt.answer_run_id == "r2"
 
@@ -182,3 +170,8 @@ async def test_failed_enqueue_allows_later_completion_to_schedule(context: Any) 
     assert context.runs.create.await_count == 2
     await _run(context, payload, 302000)
     slack_feedback.post_slack_feedback_prompt.assert_awaited_once()
+
+
+async def test_web_pr_does_not_schedule_slack_feedback(context: Any) -> None:
+    await feedback.schedule_pr_feedback("t1", {"pull_requests": [{"url": "pr1"}]}, "pr1")
+    context.runs.create.assert_not_awaited()

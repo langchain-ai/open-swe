@@ -61,7 +61,6 @@ export const Messages = memo(function MessagesComponent({
   scrollKey,
   showPlanArtifact = false,
   emptyState,
-  footer,
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   isStreaming,
@@ -168,7 +167,6 @@ export const Messages = memo(function MessagesComponent({
               />
             )}
             <QueuedMessages queuedMessages={queuedMessages} />
-            {footer}
             <ThinkingSpinner
               isActive={
                 !!(isThinking || streamIsLoading || isStreaming) &&
