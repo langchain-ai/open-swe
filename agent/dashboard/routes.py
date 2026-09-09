@@ -167,35 +167,43 @@ from agent.dashboard.team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from agent.dashboard.thread_api import (
-    ThreadMessageBody,
-    ThreadRenameBody,
-    ThreadResolveBody,
+from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
-    get_dashboard_thread_branch_diff,
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
-    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
+    rename_dashboard_thread,
+    resolve_dashboard_thread,
+    send_dashboard_message,
+)
+from agent.dashboard.threads.diffs import (
+    get_dashboard_thread_branch_diff,
+    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
+)
+from agent.dashboard.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
+    unpin_dashboard_thread,
+)
+from agent.dashboard.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
-    rename_dashboard_thread,
-    resolve_dashboard_thread,
-    send_dashboard_message,
-    unpin_dashboard_thread,
+)
+from agent.dashboard.threads.runs import (
+    ThreadMessageBody,
+    ThreadRenameBody,
+    ThreadResolveBody,
 )
 from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,

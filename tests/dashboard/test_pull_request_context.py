@@ -3,8 +3,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import thread_api
+from agent.dashboard.threads import api as thread_api
 from agent.github import pull_request_context
+from tests.conftest import patch_thread_module
 
 
 def test_actionable_checks_preserve_requiredness() -> None:
@@ -166,8 +167,8 @@ async def test_thread_context_requires_tracked_pull_before_token_lookup(
         return {"pull_requests": [{"repo_full_name": "o/r", "number": 7}]}
 
     token = AsyncMock(return_value="oauth-token")
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", readable)
-    monkeypatch.setattr(thread_api, "_github_token_for_login", token)
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
+    patch_thread_module(monkeypatch, "_github_token_for_login", token)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.get_dashboard_thread_pull_request_context(
@@ -186,9 +187,9 @@ async def test_thread_context_fetches_tracked_pull(monkeypatch: pytest.MonkeyPat
 
     token = AsyncMock(return_value="oauth-token")
     scan = AsyncMock(return_value={"context": {"number": 7}, "prompt": "fix"})
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", readable)
-    monkeypatch.setattr(thread_api, "_github_token_for_login", token)
-    monkeypatch.setattr(thread_api, "get_pull_request_context", scan)
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
+    patch_thread_module(monkeypatch, "_github_token_for_login", token)
+    patch_thread_module(monkeypatch, "get_pull_request_context", scan)
 
     result = await thread_api.get_dashboard_thread_pull_request_context(
         "thread-1", "owner", repo_full_name="o/r", number=7

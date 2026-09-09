@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
 from agent.dashboard.plan_api import dispatch_followup, fetch_thread_metadata
-from agent.dashboard.thread_api import thread_is_readable
+from agent.dashboard.threads.summary import thread_is_readable
 from agent.dashboard.workflow_approval import (
     decide_workflow_push_approval,
     get_workflow_push_approvals,

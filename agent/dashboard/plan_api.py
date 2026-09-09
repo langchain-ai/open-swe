@@ -27,7 +27,7 @@ from agent.dashboard.plan_store import (
     set_plan_status,
     write_plan_to_sandbox,
 )
-from agent.dashboard.thread_api import (
+from agent.dashboard.threads.summary import (
     repo_config_from_metadata,
     thread_is_readable,
     thread_source,
