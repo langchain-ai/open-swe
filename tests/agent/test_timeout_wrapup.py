@@ -36,7 +36,7 @@ async def test_timeout_wrapup_starts_clock_lazily(monkeypatch: pytest.MonkeyPatc
     assert seen[1].system_message is not None
     assert seen[0].system_message.content == "base"
     assert isinstance(seen[1].system_message.content, str)
-    assert "time_limit_warning" in seen[1].system_message.content
+    assert seen[1].system_message.content.startswith("base\n\n<time_limit_warning>")
 
 
 @pytest.mark.asyncio

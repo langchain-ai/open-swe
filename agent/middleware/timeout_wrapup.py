@@ -6,7 +6,6 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from agent.config import ENV
-from agent.input_messages import wrap_system_prompt
 from agent.middleware.trace import OpenSWEMiddleware
 
 _DEFAULT_TIMEOUT_SECONDS = 45 * 60
@@ -57,14 +56,7 @@ class TimeoutWrapupMiddleware(OpenSWEMiddleware):
     def _apply(self, request: ModelRequest) -> ModelRequest:
         if not self._should_wrapup():
             return request
-        if request.system_message is None:
-            content = wrap_system_prompt("", additions=[_WRAPUP_INSTRUCTION.strip()])
-        elif isinstance(request.system_message.content, str):
-            content = wrap_system_prompt(
-                request.system_message.content, additions=[_WRAPUP_INSTRUCTION.strip()]
-            )
-        else:
-            content = _content_with_instruction(request.system_message, _WRAPUP_INSTRUCTION)
+        content = _content_with_instruction(request.system_message, _WRAPUP_INSTRUCTION.strip())
         return request.override(system_message=SystemMessage(content=content))
 
     async def awrap_model_call(
